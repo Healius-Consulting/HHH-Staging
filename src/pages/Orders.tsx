@@ -1,16 +1,22 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Package, Truck, FileText, Download, CheckCircle, Clock, Printer, X } from 'lucide-react';
 import {
   useApp,
   money,
-  orderRevenue,
   lineRevenue,
   RX_STATUS_LABELS,
-  type PatientOrder,
   type RxStatus,
 } from '../context/AppContext';
 
 const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Ready', 'Collected'] as const;
+
+const STATUS_TABS: { key: RxStatus; label: string; icon: React.ReactNode }[] = [
+  { key: 'awaiting-approval', label: '1. Awaiting Approval', icon: <Clock size={13} /> },
+  { key: 'approved',          label: '2. Approved',          icon: <CheckCircle size={13} /> },
+  { key: 'dispatched',        label: '3. In Transit',        icon: <Truck size={13} /> },
+  { key: 'ready',             label: '4. Ready for Collection', icon: <Package size={13} /> },
+  { key: 'collected',         label: '5. Collected',         icon: <CheckCircle size={13} /> },
+];
 
 function stepsCompleted(status: RxStatus): number {
   switch (status) {
@@ -31,21 +37,31 @@ const STATUS_PILL: Record<string, string> = {
   collected:           'pill-neutral',
 };
 
-type Filter = 'active' | 'past';
+interface FlatSubOrder {
+  orderId: number;
+  patientName: string;
+  date: Date;
+  rxIdx: number;
+  rx: {
+    id: number;
+    prescriber: string;
+    copyFileName: string | null;
+    items: any[];
+    placed: boolean;
+    poRef: string | null;
+    status: RxStatus;
+    invoiceRef: string | null;
+    trackingNumber: string | null;
+    carrier: string | null;
+  };
+}
 
 export default function Orders() {
   const { state, dispatch } = useApp();
-  const [filter, setFilter] = useState<Filter>('active');
+  const [activeTab, setActiveTab] = useState<RxStatus>('awaiting-approval');
   const [printingRx, setPrintingRx] = useState<{ rx: any; patientName: string } | null>(null);
 
   const paidOrders = state.orders.filter(o => o.payment.status === 'paid');
-
-  const filtered = paidOrders.filter(order => {
-    const allCollected =
-      order.prescriptions.length > 0 &&
-      order.prescriptions.every(rx => rx.status === 'collected');
-    return filter === 'active' ? !allCollected : allCollected;
-  });
 
   const patientName = (patientId: string | null) => {
     if (!patientId) return 'Unassigned';
@@ -58,6 +74,29 @@ export default function Orders() {
       month: 'short',
       year: 'numeric',
     });
+
+  /* ── Flatten all prescriptions from paid orders to track independently ── */
+  const allSubOrders = useMemo(() => {
+    const list: FlatSubOrder[] = [];
+    paidOrders.forEach(order => {
+      const pName = patientName(order.patientId);
+      order.prescriptions.forEach((rx, idx) => {
+        list.push({
+          orderId: order.id,
+          patientName: pName,
+          date: order.date,
+          rxIdx: idx + 1,
+          rx,
+        });
+      });
+    });
+    return list;
+  }, [paidOrders, state.crm]);
+
+  // Filter sub-orders matching active status tab
+  const filteredSubOrders = useMemo(() => {
+    return allSubOrders.filter(so => so.rx.status === activeTab);
+  }, [allSubOrders, activeTab]);
 
   const renderTrackBar = (status: RxStatus) => {
     const done = stepsCompleted(status);
@@ -88,161 +127,155 @@ export default function Orders() {
     );
   };
 
-  const renderOrder = (order: PatientOrder) => (
-    <div className="card" key={order.id} style={{ marginBottom: 16 }}>
-      {/* ── Card header ── */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-        <div>
-          <div className="font-semibold text-sm" style={{ fontSize: 15 }}>{patientName(order.patientId)}</div>
-          <div className="text-sm text-muted" style={{ marginTop: 2 }}>
-            {fmtDate(order.date)} &middot; Order session #{order.id}
+  const rxRevenue = (rx: any) => rx.items.reduce((t: number, i: any) => t + lineRevenue(i), 0);
+
+  const renderSubOrderCard = (so: FlatSubOrder) => {
+    const { rx, patientName: pName, orderId, date, rxIdx } = so;
+    return (
+      <div className="card" key={`${orderId}-${rx.id}`} style={{ marginBottom: 16 }}>
+        {/* Card Header */}
+        <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+          <div>
+            <div className="flex items-center gap-sm">
+              <span className="font-semibold text-sm" style={{ fontSize: 15 }}>{pName}</span>
+              <span className="text-muted text-xs">&middot; Rx #{rxIdx} inside Order #{orderId}</span>
+            </div>
+            <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+              Ordered: {fmtDate(date)} &middot; Prescriber: {rx.prescriber || 'Pending'}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-xs">
+            <span className="font-bold text-green">{money(rxRevenue(rx))}</span>
+            <span className={`pill ${STATUS_PILL[rx.status] ?? 'pill-neutral'}`}>
+              {RX_STATUS_LABELS[rx.status]}
+            </span>
           </div>
         </div>
-        <div className="font-bold text-green">{money(orderRevenue(order))}</div>
-      </div>
 
-      <div className="divider" />
+        <div className="divider" />
 
-      {/* ── Prescriptions ── */}
-      {order.prescriptions.map((rx, idx) => {
-        const pName = patientName(order.patientId);
-        return (
-          <div className="rx-card" key={rx.id} style={{ marginTop: 12, background: 'rgba(0,0,0,0.15)', border: '1px solid var(--border)' }}>
-            {/* rx header */}
-            <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-              <div className="flex items-center gap-sm">
-                <FileText size={14} className="text-secondary" />
-                <span className="font-semibold text-sm">Rx #{idx + 1}</span>
-                <span className="text-muted text-sm">&middot; {rx.prescriber}</span>
-              </div>
-              <div className="flex items-center gap-sm">
-                <span className="text-xs text-tertiary">
-                  PO: {rx.poRef || '—'}
-                </span>
-                <span className={`pill ${STATUS_PILL[rx.status] ?? 'pill-neutral'}`}>
-                  {RX_STATUS_LABELS[rx.status]}
-                </span>
-              </div>
+        {/* Stepper Timeline */}
+        {renderTrackBar(rx.status)}
+
+        {/* Courier details & invoice links */}
+        <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+          <div className="flex items-center gap-sm text-xs text-secondary">
+            <FileText size={14} className="text-muted" />
+            <span>Supplier Reference: <strong className="text-primary">{rx.poRef || 'Pending Approval'}</strong></span>
+          </div>
+          
+          {rx.trackingNumber && (
+            <div className="flex items-center gap-sm text-xs text-secondary">
+              <Truck size={14} className="text-muted" />
+              <span>
+                Courier tracking: <span className="font-semibold text-primary">{rx.trackingNumber}</span> ({rx.carrier})
+              </span>
             </div>
-
-            {/* tracking bar */}
-            {renderTrackBar(rx.status)}
-
-            {/* tracking & invoice info */}
-            <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-              {rx.trackingNumber && (
-                <div className="flex items-center gap-sm text-xs text-secondary">
-                  <Truck size={14} className="text-muted" />
-                  <span>
-                    Courier tracking: <span className="font-semibold text-primary">{rx.trackingNumber}</span> ({rx.carrier})
-                  </span>
-                </div>
-              )}
-              {rx.invoiceRef && (
-                <div className="flex items-center justify-between text-xs text-secondary">
-                  <div className="flex items-center gap-sm">
-                    <FileText size={14} className="text-muted" />
-                    <span>
-                      Invoice ref: <span className="font-semibold text-primary">{rx.invoiceRef}</span>
-                    </span>
-                  </div>
-                  <button className="btn btn-xs btn-sm" style={{ gap: 4, padding: '2px 8px', fontSize: 10 }}>
-                    <Download size={10} /> PDF Invoice
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* B2B Workflow actions for the pharmacist */}
-            {rx.placed && (rx.status === 'dispatched' || rx.status === 'ready') && (
-              <div style={{ marginTop: 12, padding: 10, background: 'var(--bg-elevated)', borderRadius: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span className="text-xs font-bold text-muted uppercase">Pharmacy Actions:</span>
-                
-                {rx.status === 'dispatched' && (
-                  <button
-                    className="btn btn-sm btn-primary"
-                    onClick={() => dispatch({ type: 'RECEIVE_SHIPMENT', orderId: order.id, rxId: rx.id })}
-                  >
-                    Confirm Arrived (Goods-In Check-In)
-                  </button>
-                )}
-
-                {rx.status === 'ready' && (
-                  <>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => setPrintingRx({ rx, patientName: pName })}
-                    >
-                      <Printer size={12} /> Print Dispensing Label
-                    </button>
-                    <button
-                      className="btn btn-sm btn-primary"
-                      onClick={() => dispatch({ type: 'HANDOVER_TO_PATIENT', orderId: order.id, rxId: rx.id })}
-                    >
-                      Handover to Patient
-                    </button>
-                  </>
-                )}
+          )}
+          
+          {rx.invoiceRef && (
+            <div className="flex items-center justify-between text-xs text-secondary">
+              <div className="flex items-center gap-sm">
+                <FileText size={14} className="text-muted" />
+                <span>
+                  Invoice ref: <span className="font-semibold text-primary">{rx.invoiceRef}</span>
+                </span>
               </div>
+              <button className="btn btn-xs btn-sm" style={{ gap: 4, padding: '2px 8px', fontSize: 10 }}>
+                <Download size={10} /> PDF Invoice
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Action Triggers */}
+        {(rx.status === 'dispatched' || rx.status === 'ready') && (
+          <div style={{ marginTop: 12, padding: 10, background: 'var(--bg-elevated)', borderRadius: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="text-xs font-bold text-muted uppercase">Pharmacy Check-in Actions:</span>
+            
+            {rx.status === 'dispatched' && (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => dispatch({ type: 'RECEIVE_SHIPMENT', orderId, rxId: rx.id })}
+              >
+                Confirm Arrived (Goods-In Check-In)
+              </button>
             )}
 
-            <div className="divider" style={{ borderStyle: 'dashed' }} />
-
-            {/* items list */}
-            {rx.items.length > 0 && (
-              <div className="item-list">
-                <span className="text-xs font-bold text-muted uppercase">Assigned products</span>
-                {rx.items.map(item => (
-                  <div key={item.productId} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
-                    <span className="text-secondary">{item.name} &times; {item.qty}</span>
-                    <span className="font-semibold text-primary">{money(lineRevenue(item))}</span>
-                  </div>
-                ))}
-              </div>
+            {rx.status === 'ready' && (
+              <>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => setPrintingRx({ rx, patientName: pName })}
+                >
+                  <Printer size={12} /> Print Dispensing Label
+                </button>
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={() => dispatch({ type: 'HANDOVER_TO_PATIENT', orderId, rxId: rx.id })}
+                >
+                  Handover to Patient
+                </button>
+              </>
             )}
           </div>
-        );
-      })}
-    </div>
-  );
+        )}
+
+        <div className="divider" style={{ borderStyle: 'dashed' }} />
+
+        {/* Prescription items list */}
+        {rx.items.length > 0 && (
+          <div className="item-list">
+            <span className="text-xs font-bold text-muted uppercase">Prescribed Products</span>
+            {rx.items.map(item => (
+              <div key={item.productId} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
+                <span className="text-secondary">{item.name} &times; {item.qty}</span>
+                <span className="font-semibold text-primary" style={{ marginLeft: 'auto' }}>{money(lineRevenue(item))}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="page-body">
-      {/* ── Filter chips ── */}
-      <div className="flex items-center gap-sm" style={{ marginBottom: 20 }}>
-        <button
-          className={`chip ${filter === 'active' ? 'chip-active' : ''}`}
-          onClick={() => setFilter('active')}
-        >
-          <Clock size={14} />
-          Active shipments / Handover ({paidOrders.filter(o => !o.prescriptions.every(rx => rx.status === 'collected')).length})
-        </button>
-        <button
-          className={`chip ${filter === 'past' ? 'chip-active' : ''}`}
-          onClick={() => setFilter('past')}
-        >
-          <CheckCircle size={14} />
-          Collected / Archived ({paidOrders.filter(o => o.prescriptions.every(rx => rx.status === 'collected')).length})
-        </button>
+      {/* ── Sub-tabs for the 5 stages of tracking ── */}
+      <div className="flex items-center gap-xs" style={{ marginBottom: 20, flexWrap: 'wrap' }}>
+        {STATUS_TABS.map(tab => {
+          const count = allSubOrders.filter(so => so.rx.status === tab.key).length;
+          return (
+            <button
+              key={tab.key}
+              className={`chip ${activeTab === tab.key ? 'chip-active' : ''}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+              <span className="tab-badge" style={{ minWidth: 16, height: 16, fontSize: 9, padding: '0 4px', background: activeTab === tab.key ? 'var(--green-600)' : 'var(--border)' }}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── Orders list ── */}
-      {filtered.length === 0 ? (
+      {/* ── Sub-orders list ── */}
+      {filteredSubOrders.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">
-            {filter === 'active' ? <Package size={28} /> : <CheckCircle size={28} />}
+            <Package size={28} />
           </div>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-            {filter === 'active'
-              ? 'No active shipments or packages awaiting check-in.'
-              : 'No collected or archived prescriptions in this session.'}
+            No prescription sub-orders currently in this stage.
           </p>
         </div>
       ) : (
-        filtered.map(order => renderOrder(order))
+        filteredSubOrders.map(so => renderSubOrderCard(so))
       )}
 
-      {/* ── Thermal Dispensing Label Print Preview Modal ── */}
+      {/* ── ZPL Thermal Dispensing Label Print Preview Modal ── */}
       {printingRx && (
         <>
           <div className="drawer-backdrop" onClick={() => setPrintingRx(null)} />
@@ -267,7 +300,7 @@ export default function Orders() {
               </button>
             </div>
             
-            {/* Label sticker layout */}
+            {/* Label Layout */}
             <div style={{
               background: '#F8FAFC',
               color: '#0F172A',
