@@ -588,7 +588,7 @@ export default function CreateOrder() {
               </div>
 
               {/* Product catalog list */}
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              <div className="catalog-list">
                 {filteredProducts.length === 0 ? (
                   <div className="text-center text-xs text-muted" style={{ padding: '20px 0' }}>
                     No products match filter.
