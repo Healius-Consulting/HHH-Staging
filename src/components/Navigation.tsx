@@ -1,14 +1,13 @@
 import { useApp, type Screen } from '../context/AppContext';
-import { Home, Users, FlaskConical, FilePlus, Clock, Package, UserSearch } from 'lucide-react';
+import { Home, Users, FilePlus, Clock, Package, UserSearch } from 'lucide-react';
 
-const TABS: { key: Screen; label: string; icon: React.ReactNode }[] = [
-  { key: 'home',      label: 'Home',             icon: <Home size={14} /> },
-  { key: 'referrals', label: 'Referrals',        icon: <Users size={14} /> },
-  { key: 'formulary', label: 'Formulary',        icon: <FlaskConical size={14} /> },
-  { key: 'create',    label: 'Create order',     icon: <FilePlus size={14} /> },
-  { key: 'review',    label: 'Payments',         icon: <Clock size={14} /> },
-  { key: 'orders',    label: 'Orders',           icon: <Package size={14} /> },
-  { key: 'patients',  label: 'Patients',         icon: <UserSearch size={14} /> },
+const MENU_ITEMS: { key: Screen; label: string; icon: React.ReactNode }[] = [
+  { key: 'home',      label: 'Dashboard',     icon: <Home size={16} /> },
+  { key: 'referrals', label: 'Clinic Intake',  icon: <Users size={16} /> },
+  { key: 'create',    label: 'Rx Builder',     icon: <FilePlus size={16} /> },
+  { key: 'review',    label: 'Payments',       icon: <Clock size={16} /> },
+  { key: 'orders',    label: 'Supplier Orders', icon: <Package size={16} /> },
+  { key: 'patients',  label: 'Patients CRM',   icon: <UserSearch size={16} /> },
 ];
 
 export default function Navigation() {
@@ -27,25 +26,49 @@ export default function Navigation() {
   if (activeOrders > 0) badges.orders = { count: activeOrders };
 
   return (
-    <nav className="nav-tabs">
-      {TABS.map(tab => (
-        <button
-          key={tab.key}
-          className={`nav-tab ${state.screen === tab.key ? 'active' : ''}`}
-          onClick={() => dispatch({ type: 'SET_SCREEN', screen: tab.key })}
-        >
-          {tab.icon}
-          {tab.label}
-          {badges[tab.key] && (
-            <span 
-              key={badges[tab.key]!.count} 
-              className={`tab-badge ${badges[tab.key]!.warn ? 'warn' : ''} badge-pop`}
-            >
-              {badges[tab.key]!.count}
-            </span>
-          )}
-        </button>
-      ))}
-    </nav>
+    <aside className="sidebar">
+      {/* Sidebar Top Header */}
+      <div className="sidebar-header">
+        <div className="sidebar-brand">
+          <div className="sidebar-logo">HH</div>
+          <span>HHH × Curaleaf</span>
+        </div>
+      </div>
+
+      {/* Navigation Menu */}
+      <nav className="sidebar-menu">
+        {MENU_ITEMS.map(item => (
+          <button
+            key={item.key}
+            className={`sidebar-item ${state.screen === item.key ? 'active' : ''}`}
+            onClick={() => dispatch({ type: 'SET_SCREEN', screen: item.key })}
+          >
+            <div className="sidebar-item-content">
+              {item.icon}
+              <span>{item.label}</span>
+            </div>
+            {badges[item.key] && (
+              <span 
+                key={badges[item.key]!.count} 
+                className={`tab-badge ${badges[item.key]!.warn ? 'warn' : ''} badge-pop`}
+              >
+                {badges[item.key]!.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </nav>
+
+      {/* Sidebar Footer User Profile */}
+      <div className="sidebar-footer">
+        <div className="user-profile-card">
+          <div className="user-profile-avatar">SP</div>
+          <div className="user-profile-info">
+            <span className="user-profile-name">S. Patel</span>
+            <span className="user-profile-role">Pharmacist Admin</span>
+          </div>
+        </div>
+      </div>
+    </aside>
   );
 }

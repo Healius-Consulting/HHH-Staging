@@ -47,31 +47,31 @@ export default function AwaitingPayment() {
         {/* ── Card Header ── */}
         <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
           <div className="flex items-center gap-sm">
-            <CreditCard size={18} className="text-muted" />
-            <span className="font-semibold">{patientName(order.patientId)}</span>
-            <span className="text-muted text-sm">— Order #{order.id}</span>
+            <CreditCard size={16} className="text-secondary" />
+            <span className="font-semibold" style={{ fontSize: 15 }}>{patientName(order.patientId)}</span>
+            <span className="text-muted text-sm">&mdash; Order Session #{order.id}</span>
           </div>
-          {isSent && <span className="pill pill-amber">Link sent</span>}
-          {isPaid && <span className="pill pill-green">✓ Paid</span>}
+          {isSent && <span className="pill pill-amber">Link Active</span>}
+          {isPaid && <span className="pill pill-green"><CheckCircle size={12} /> Paid</span>}
         </div>
 
         <div className="divider" />
 
         {/* ── Payment Details ── */}
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
           <div className="kv-line">
-            <span className="text-muted text-sm">Amount</span>
-            <span className="font-semibold">{money(payment.amount)}</span>
+            <span className="text-muted text-sm">Requested Amount:</span>
+            <span className="font-bold text-primary">{money(payment.amount)}</span>
           </div>
           {payment.ref && (
             <div className="kv-line">
-              <span className="text-muted text-sm">Reference</span>
-              <span className="text-sm">{payment.ref}</span>
+              <span className="text-muted text-sm">Worldpay Reference:</span>
+              <span className="text-sm font-semibold">{payment.ref}</span>
             </div>
           )}
           {payment.sentAt && (
             <div className="kv-line">
-              <span className="text-muted text-sm">Sent at</span>
+              <span className="text-muted text-sm">Dispatched Date:</span>
               <span className="text-sm">
                 {new Date(payment.sentAt).toLocaleString('en-GB', {
                   day: 'numeric',
@@ -89,16 +89,17 @@ export default function AwaitingPayment() {
 
         {/* ── Prescriptions List ── */}
         <div style={{ marginBottom: 12 }}>
-          {prescriptions.map(rx => (
-            <div key={rx.id} className="flex items-center justify-between" style={{ padding: '6px 0' }}>
+          <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 6 }}>Prescription sub-orders in this session</span>
+          {prescriptions.map((rx, idx) => (
+            <div key={rx.id} className="flex items-center justify-between" style={{ padding: '6px 0', background: 'rgba(0,0,0,0.15)', paddingLeft: 12, paddingRight: 12, borderRadius: 6, marginBottom: 6 }}>
               <div className="flex items-center gap-sm">
-                <ExternalLink size={14} className="text-muted" />
-                <span className="text-sm font-semibold">{rx.prescriber || 'No prescriber'}</span>
+                <ExternalLink size={14} className="text-secondary" />
+                <span className="text-sm font-semibold">Rx #{idx + 1} &mdash; {rx.prescriber || 'Pending prescriber'}</span>
                 <span className="text-muted text-xs">
-                  · {rx.items.length} item{rx.items.length !== 1 ? 's' : ''}
+                  &middot; {rx.items.length} item{rx.items.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              <span className="text-sm font-semibold">{money(rxRevenue(rx))}</span>
+              <span className="text-sm font-bold text-green">{money(rxRevenue(rx))}</span>
             </div>
           ))}
         </div>
@@ -108,10 +109,10 @@ export default function AwaitingPayment() {
         {/* ── Status / Actions ── */}
         {isSent && (
           <div className="flex flex-col gap-sm" style={{ marginTop: 8 }}>
-            <div className="banner-amber flex items-center gap-sm">
+            <div className="banner-amber flex items-center gap-sm" style={{ margin: 0 }}>
               <Clock size={16} />
-              <span className="text-sm">
-                Waiting for patient to complete payment via Worldpay link. Clears automatically in 7 seconds.
+              <span className="text-xs font-semibold">
+                Waiting for patient Worldpay transaction. Callback simulator completes automatically in 7 seconds.
               </span>
             </div>
             <button
@@ -119,7 +120,7 @@ export default function AwaitingPayment() {
               onClick={() => handleSimulatePaymentClear(order.id)}
               style={{ alignSelf: 'flex-start' }}
             >
-              ⚡ Simulate Webhook Clearance (Instant)
+              ⚡ Simulate Immediate Worldpay Webhook Payment
             </button>
           </div>
         )}
@@ -127,9 +128,9 @@ export default function AwaitingPayment() {
         {isPaid && (
           <div style={{ marginTop: 8 }}>
             {allPlaced ? (
-              <div className="banner-green flex items-center gap-sm">
+              <div className="banner-green flex items-center gap-sm" style={{ margin: 0, padding: 8 }}>
                 <CheckCircle size={16} />
-                <span className="text-sm font-semibold">Submitted to Curaleaf</span>
+                <span className="text-xs font-semibold">All sub-orders placed with Curaleaf supplier.</span>
               </div>
             ) : (
               <button
@@ -148,13 +149,8 @@ export default function AwaitingPayment() {
 
   return (
     <div className="page-body">
-      <h2 className="page-title">Payments</h2>
-      <p className="page-subtitle">
-        Manage outstanding payment links and completed transactions.
-      </p>
-
       {/* Sub-tabs selection */}
-      <div className="flex items-center gap-sm" style={{ marginBottom: 16 }}>
+      <div className="flex items-center gap-sm" style={{ marginBottom: 20 }}>
         <button
           className={`chip ${activeSubTab === 'awaiting' ? 'chip-active' : ''}`}
           onClick={() => setActiveSubTab('awaiting')}
@@ -167,18 +163,20 @@ export default function AwaitingPayment() {
           onClick={() => setActiveSubTab('paid')}
         >
           <CheckCircle size={14} />
-          Paid / Completed ({paidOrders.length})
+          Paid / Cleared Transactions ({paidOrders.length})
         </button>
       </div>
 
       {matchingOrders.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">
-            <CreditCard size={28} />
+            {activeSubTab === 'awaiting' ? <Clock size={28} /> : <CheckCircle size={28} />}
           </div>
-          {activeSubTab === 'awaiting' 
-            ? 'No pending payment links outstanding.' 
-            : 'No paid payments in this session yet.'}
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            {activeSubTab === 'awaiting' 
+              ? 'No pending patient billing requests active.' 
+              : 'No completed transactions recorded in this session.'}
+          </p>
         </div>
       ) : (
         matchingOrders.map(order => renderCard(order))

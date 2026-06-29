@@ -4,7 +4,6 @@ import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
 import Referrals from './pages/Referrals';
-import Formulary from './pages/Formulary';
 import CreateOrder from './pages/CreateOrder';
 import AwaitingPayment from './pages/AwaitingPayment';
 import Orders from './pages/Orders';
@@ -66,7 +65,6 @@ function AppContent() {
     switch (state.screen) {
       case 'home':      return <Dashboard />;
       case 'referrals': return <Referrals />;
-      case 'formulary': return <Formulary />;
       case 'create':    return <CreateOrder />;
       case 'review':    return <AwaitingPayment />;
       case 'orders':    return <Orders />;
@@ -77,9 +75,13 @@ function AppContent() {
 
   return (
     <div className="app-shell">
-      <Header />
       <Navigation />
-      {renderScreen()}
+      <div className="app-main">
+        <Header />
+        <div className="page-container">
+          {renderScreen()}
+        </div>
+      </div>
       <ToastContainer />
     </div>
   );

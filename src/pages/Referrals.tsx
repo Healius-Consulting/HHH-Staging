@@ -10,7 +10,7 @@ const STATUS_PRIORITY: Record<SubmissionStatus, number> = {
 };
 
 const STAGES: SubmissionStatus[] = ['New', 'Records uploaded', 'Referred to clinic', 'Completed'];
-const STAGE_LABELS = ['New', 'Records', 'Referred', 'Completed'];
+const STAGE_LABELS = ['New Enquiry', 'Records Uploaded', 'Referred to Clinic', 'CRM Confirmed'];
 
 function statusPill(status: SubmissionStatus) {
   switch (status) {
@@ -21,7 +21,7 @@ function statusPill(status: SubmissionStatus) {
     case 'Records uploaded':
       return <span className="pill pill-amber">Records uploaded</span>;
     case 'New':
-      return <span className="pill pill-red">New</span>;
+      return <span className="pill pill-red">New Enquiry</span>;
   }
 }
 
@@ -44,7 +44,7 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
   const handleUpload = () => {
     setIsScanning(true);
     setScanProgress(0);
-    dispatch({ type: 'ADD_TOAST', message: `Initializing health records scan for ${sub.name}...`, toastType: 'info' });
+    dispatch({ type: 'ADD_TOAST', message: `Initializing health records OCR scan for ${sub.name}...`, toastType: 'info' });
   };
 
   useEffect(() => {
@@ -81,49 +81,48 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
   };
 
   return (
-    <div className="card" style={{ transition: 'all 0.3s ease' }}>
+    <div className="card" style={{ transition: 'all 0.3s ease', marginBottom: 16 }}>
       {/* Header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
-        <span className="font-semibold">{sub.name}</span>
+      <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+        <span className="font-semibold text-sm" style={{ fontSize: 15 }}>{sub.name}</span>
         {statusPill(sub.status)}
       </div>
 
-      {/* Patient details */}
-      <div className="text-xs text-faint" style={{ marginBottom: 8, lineHeight: 1.7 }}>
-        <strong>Condition:</strong> {sub.condition} &nbsp;·&nbsp;
-        <strong>DOB:</strong> {sub.dob} &nbsp;·&nbsp;
-        <strong>Postcode:</strong> {sub.postcode}<br />
-        <strong>Email:</strong> {sub.email} &nbsp;·&nbsp;
-        <strong>Mobile:</strong> {sub.mobile}
+      {/* Patient details grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
+        <div className="text-xs text-secondary" style={{ lineHeight: 1.6 }}>
+          <strong className="text-primary">Medical Condition:</strong> {sub.condition}<br />
+          <strong className="text-primary">DOB:</strong> {sub.dob} &middot; <strong className="text-primary">Postcode:</strong> {sub.postcode}
+        </div>
+        <div className="text-xs text-secondary" style={{ lineHeight: 1.6 }}>
+          <strong className="text-primary">Email:</strong> {sub.email}<br />
+          <strong className="text-primary">Mobile:</strong> {sub.mobile}
+        </div>
+        <div className="text-xs text-secondary" style={{ lineHeight: 1.6 }}>
+          <strong className="text-primary">Tried ≥2 treatments:</strong>{' '}
+          <span className={sub.tried2 ? 'text-green font-semibold' : 'text-red font-semibold'}>{sub.tried2 ? 'Yes (Pass)' : 'No'}</span><br />
+          <strong className="text-primary">Psychosis exclusion:</strong>{' '}
+          <span className={sub.psychExclusion ? 'text-red font-semibold' : 'text-green font-semibold'}>{sub.psychExclusion ? 'Yes (Excluded)' : 'No (Passed)'}</span>
+        </div>
       </div>
 
-      {/* Eligibility */}
-      <div className="text-xs text-muted" style={{ marginBottom: 6 }}>
-        <strong>Tried ≥2 treatments:</strong>{' '}
-        <span className={sub.tried2 ? 'text-green' : 'text-red'}>{sub.tried2 ? 'Yes' : 'No'}</span>
-        &nbsp;&nbsp;·&nbsp;&nbsp;
-        <strong>Psychosis exclusion:</strong>{' '}
-        <span className={sub.psychExclusion ? 'text-red' : 'text-green'}>{sub.psychExclusion ? 'Yes' : 'No'}</span>
-      </div>
-
-      {/* Consent */}
-      <div className="text-xs text-faint" style={{ marginBottom: 6 }}>
-        <strong>Consent:</strong>{' '}
-        Costs & referral: {sub.consentReferral ? '✓' : '✗'} &nbsp;·&nbsp;
-        Share info: {sub.consentShare ? '✓' : '✗'} &nbsp;·&nbsp;
+      {/* Consent metadata */}
+      <div className="text-xs text-tertiary" style={{ marginBottom: 12, background: 'rgba(0,0,0,0.15)', padding: '6px 12px', borderRadius: 6 }}>
+        <strong>Consent Logs:</strong> &nbsp;
+        Costs &amp; referral: {sub.consentReferral ? '✓' : '✗'} &nbsp;·&nbsp;
+        Share records: {sub.consentShare ? '✓' : '✗'} &nbsp;·&nbsp;
         Marketing: {sub.marketing ? '✓' : '✗'} &nbsp;·&nbsp;
         Source: {sub.source}
       </div>
 
       {/* Track bar */}
-      <div className="track-bar">
+      <div className="track-bar" style={{ marginBottom: 16 }}>
         {STAGE_LABELS.map((label, i) => {
           let cls = 'track-step';
           if (i < currentIdx) cls += ' done';
           else if (i === currentIdx) cls += ' done active';
           return (
             <div key={label} className={cls}>
-              <div className="bar" />
               {label}
             </div>
           );
@@ -132,10 +131,10 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
 
       {/* Interactive scanning container */}
       {isScanning && (
-        <div className="scanner-container scanning" style={{ marginTop: 12, marginBottom: 12 }}>
+        <div className="scanner-container scanning" style={{ marginBottom: 12 }}>
           <div className="scanner-laser" />
           <div className="text-xs font-semibold text-green" style={{ marginBottom: 6 }}>
-            OCR scanning records & extracting medical data...
+            OCR scanning records &amp; extracting clinical history...
           </div>
           <div className="scan-progress-wrapper">
             <div className="scan-progress-track">
@@ -146,14 +145,14 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
       )}
 
       {/* Action buttons */}
-      <div className="flex gap-sm flex-wrap" style={{ marginTop: 10 }}>
+      <div className="flex gap-sm flex-wrap" style={{ marginTop: 12 }}>
         {!sub.recordsUploaded && (
           <button
             className="btn btn-primary btn-sm"
             disabled={isScanning}
             onClick={handleUpload}
           >
-            <Upload size={13} /> {isScanning ? `Scanning ${scanProgress}%...` : 'Upload health records'}
+            <Upload size={13} /> {isScanning ? `Scanning ${scanProgress}%...` : 'Upload clinical files'}
           </button>
         )}
 
@@ -162,7 +161,7 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
             className="btn btn-primary btn-sm"
             onClick={handleReferClinic}
           >
-            <Send size={13} /> Refer to Curaleaf Clinic
+            <Send size={13} /> Submit Clinic Referral
           </button>
         )}
 
@@ -171,7 +170,7 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
             className="btn btn-primary btn-sm"
             onClick={handleEmailConfirm}
           >
-            <Send size={13} /> Email patient (confirm referral)
+            <Send size={13} /> Email Referral Approval
           </button>
         )}
 
@@ -179,44 +178,44 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
           className="btn btn-sm"
           onClick={handleLogCall}
         >
-          <Phone size={13} /> Log call
+          <Phone size={13} /> Log call activity
         </button>
       </div>
 
-      {/* Completed message */}
+      {/* Completed notification */}
       {sub.status === 'Completed' && (
-        <div className="banner banner-green" style={{ marginTop: 10 }}>
+        <div className="banner banner-green" style={{ marginTop: 12 }}>
           <CheckCircle size={16} />
-          <span className="text-sm">Referral complete — patient has been added to the CRM.</span>
+          <span className="text-sm">Clinic Intake Complete — Patient profile added to CRM database.</span>
         </div>
       )}
 
-      {/* Processing log */}
+      {/* Processing audit logs */}
       {(sub.recordsUploaded || sub.calls.length > 0 || sub.clinicRef || sub.emailedAt) && (
         <>
           <div className="divider" />
-          <div className="text-xs text-faint font-semibold" style={{ marginBottom: 6 }}>
-            Processing log
+          <div className="text-xs font-bold text-muted uppercase" style={{ marginBottom: 6 }}>
+            Audit log history
           </div>
-          <div className="text-xs text-muted" style={{ lineHeight: 1.8 }}>
+          <div className="text-xs text-secondary" style={{ lineHeight: 1.8 }}>
             {sub.recordsUploaded && (
               <div className="flex items-center gap-sm">
-                <FileText size={12} /> Health records uploaded
+                <FileText size={12} /> OCR scans verified and saved.
               </div>
             )}
             {sub.calls.map((c, i) => (
               <div key={i} className="flex items-center gap-sm">
-                <Phone size={12} /> Call logged — {fmtDate(new Date(c.ts))} at {fmtTime(new Date(c.ts))}
+                <Phone size={12} /> Callback logged &mdash; {fmtDate(new Date(c.ts))} at {fmtTime(new Date(c.ts))}
               </div>
             ))}
             {sub.clinicRef && (
               <div className="flex items-center gap-sm">
-                <Send size={12} /> Referred to clinic — Ref: <strong>{sub.clinicRef}</strong>
+                <Send size={12} /> B2B Clinic Reference assigned: <strong className="text-primary">{sub.clinicRef}</strong>
               </div>
             )}
             {sub.emailedAt && (
               <div className="flex items-center gap-sm">
-                <CheckCircle size={12} /> Confirmation email sent — {fmtDate(new Date(sub.emailedAt))} at {fmtTime(new Date(sub.emailedAt))}
+                <CheckCircle size={12} /> Confirmation email dispatched &mdash; {fmtDate(new Date(sub.emailedAt))} at {fmtTime(new Date(sub.emailedAt))}
               </div>
             )}
           </div>
@@ -235,55 +234,71 @@ export default function Referrals() {
 
   return (
     <div className="page-body">
-      <h2 className="page-title">Referrals</h2>
-      <p className="page-subtitle">{PHARMACY.name}</p>
-
-      {/* Eligibility form URL */}
+      {/* Eligibility form URL co-branding card */}
       <div className="card card-surface" style={{ marginBottom: 16 }}>
-        <div className="flex items-center gap-sm text-sm">
-          <LinkIcon size={14} className="text-green" />
-          <span className="text-muted">Eligibility form:</span>
-          <a
-            href={`https://${PHARMACY.formUrl}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-green font-semibold"
-            style={{ textDecoration: 'none' }}
-          >
-            {PHARMACY.formUrl}
-          </a>
+        <div className="flex items-center gap-sm text-sm justify-between flex-wrap">
+          <div className="flex items-center gap-sm">
+            <LinkIcon size={14} className="text-green" />
+            <span className="text-muted">Eligibility Intake Form Widget:</span>
+            <a
+              href={`https://${PHARMACY.formUrl}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-green font-semibold"
+              style={{ textDecoration: 'none' }}
+            >
+              {PHARMACY.formUrl}
+            </a>
+          </div>
+          <span className="text-xs text-tertiary">Embed this link into clinic websites to capture enquiries.</span>
         </div>
       </div>
 
-      {/* Stats summary */}
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-icon red"><Clock size={18} /></div>
-          <div className="stat-value">{state.submissions.filter(s => s.status === 'New').length}</div>
-          <div className="stat-label">New submissions</div>
+      {/* Stats summary grid */}
+      <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 20 }}>
+        <div className="card card-surface" style={{ margin: 0, padding: 12 }}>
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span>Enquiries</span>
+            <Clock size={14} className="text-red" />
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4 }}>
+            {state.submissions.filter(s => s.status === 'New').length}
+          </span>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon amber"><FileText size={18} /></div>
-          <div className="stat-value">{state.submissions.filter(s => s.status === 'Records uploaded').length}</div>
-          <div className="stat-label">Records uploaded</div>
+        <div className="card card-surface" style={{ margin: 0, padding: 12 }}>
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span>Clinical Files</span>
+            <FileText size={14} className="text-amber" />
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4 }}>
+            {state.submissions.filter(s => s.status === 'Records uploaded').length}
+          </span>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon info"><Send size={18} /></div>
-          <div className="stat-value">{state.submissions.filter(s => s.status === 'Referred to clinic').length}</div>
-          <div className="stat-label">Referred to clinic</div>
+        <div className="card card-surface" style={{ margin: 0, padding: 12 }}>
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span>Referred</span>
+            <Send size={14} className="text-info" />
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4 }}>
+            {state.submissions.filter(s => s.status === 'Referred to clinic').length}
+          </span>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon green"><CheckCircle size={18} /></div>
-          <div className="stat-value">{state.submissions.filter(s => s.status === 'Completed').length}</div>
-          <div className="stat-label">Completed</div>
+        <div className="card card-surface" style={{ margin: 0, padding: 12 }}>
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span>Active in CRM</span>
+            <CheckCircle size={14} className="text-green" />
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4 }}>
+            {state.submissions.filter(s => s.status === 'Completed').length}
+          </span>
         </div>
       </div>
 
       {/* Submissions list */}
       {sorted.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon"><FileText size={22} /></div>
-          No eligibility submissions yet.
+          <div className="empty-icon"><FileText size={28} /></div>
+          No intake submissions recorded.
         </div>
       ) : (
         sorted.map(sub => <SubmissionCard key={sub.id} sub={sub} />)

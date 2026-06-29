@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Search, ChevronRight, User, ArrowLeft, Plus, CreditCard } from 'lucide-react';
-import { useApp, money, orderRevenue } from '../context/AppContext';
+import { Search, ChevronRight, Plus, X } from 'lucide-react';
+import { useApp, money, orderRevenue, RX_STATUS_LABELS } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
 
 /* ── Unified patient row model ── */
@@ -150,13 +150,10 @@ export default function Patients() {
   const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
 
   const handleCreateOrder = (patient: UnifiedPatient) => {
-    // If patient is a CRM patient, create order directly. Otherwise, add to CRM first
     let finalPatientId = patient.crmPatient?.id || null;
     
     if (!finalPatientId && patient.submission) {
-      // Simulate adding to CRM if they are not there yet
       dispatch({ type: 'EMAIL_REFERRAL', subId: patient.submission.id });
-      // Use next expected ID
       finalPatientId = 'P-' + state.nextIds.patient;
     }
 
@@ -167,277 +164,270 @@ export default function Patients() {
 
   const renderTrackBar = (status: string) => {
     const done = stepsCompleted(status);
-    const progressWidth = done >= 0 ? done * 25 : 0;
+    const progressWidth = done >= 0 ? done * 33.33 : 0;
     return (
-      <div className="orders-timeline" style={{ margin: '12px 0 6px' }}>
-        <div 
-          className="orders-timeline-progress" 
-          style={{ width: `${progressWidth}%` }} 
-        />
-        {TRACK_STEPS.map((label, i) => {
-          let cls = 'timeline-step';
-          if (i < done || (status === 'ready' && i <= done)) cls += ' done';
-          else if (i === done && status !== 'ready') cls += ' active';
-          return (
-            <div key={label} className={cls}>
-              <div className="timeline-dot" style={{ width: 18, height: 18, fontSize: 8 }}>
-                {i + 1}
+      <div className="orders-timeline-container" style={{ margin: '8px 0' }}>
+        <div className="orders-timeline" style={{ height: 16 }}>
+          <div 
+            className="orders-timeline-progress" 
+            style={{ width: `${progressWidth}%` }} 
+          />
+          {TRACK_STEPS.map((label, i) => {
+            let cls = 'timeline-step';
+            if (i < done || (status === 'ready' && i <= done)) cls += ' done';
+            else if (i === done && status !== 'ready') cls += ' active';
+            return (
+              <div key={label} className={cls}>
+                <div className="timeline-dot" style={{ width: 14, height: 14, fontSize: 8 }}>
+                  {i + 1}
+                </div>
               </div>
-              <span className="timeline-label" style={{ fontSize: 9 }}>{label}</span>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     );
   };
 
-  // ── DETAILED VIEW ──
-  if (selectedPatient) {
-    const status = deriveStatus(selectedPatient);
-    return (
-      <div className="page-body">
-        {/* Back navigation */}
-        <button 
-          className="btn" 
-          onClick={() => setSelectedPatientId(null)}
-          style={{ marginBottom: 16, gap: 6 }}
-        >
-          <ArrowLeft size={14} /> Back to Patients
-        </button>
-
-        {/* Profile Header Card */}
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div className="flex items-center gap-md flex-wrap" style={{ justifyContent: 'space-between' }}>
-            <div className="flex items-center gap-md">
-              <div className="avatar" style={{ width: 50, height: 50, fontSize: 18 }}>{initials(selectedPatient.name)}</div>
-              <div>
-                <h3 className="font-bold" style={{ fontSize: 18, margin: 0 }}>{selectedPatient.name}</h3>
-                <p className="text-xs text-muted" style={{ margin: '2px 0 0' }}>
-                  {selectedPatient.email} &middot; {selectedPatient.mobile}
-                </p>
-                {selectedPatient.crmPatient?.address && (
-                  <p className="text-xs text-faint" style={{ margin: '2px 0 0' }}>
-                    {selectedPatient.crmPatient.address}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-md">
-              <span className={`pill ${status.pill}`} style={{ fontSize: 11, padding: '6px 12px' }}>
-                {status.label}
-              </span>
-              <button 
-                className="btn btn-primary btn-sm"
-                onClick={() => handleCreateOrder(selectedPatient)}
-              >
-                <Plus size={14} /> Create Order
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Split Grid */}
-        <div className="flex gap-lg flex-wrap" style={{ alignItems: 'flex-start' }}>
-          
-          {/* LEFT COLUMN: Order History */}
-          <div style={{ flex: 1, minWidth: 320 }}>
-            <h3 className="card-title" style={{ marginBottom: 12 }}>Order & Prescription History</h3>
-            
-            {selectedPatient.orders.length === 0 ? (
-              <div className="empty-state card">
-                <div className="empty-icon"><CreditCard size={20} /></div>
-                No orders placed yet. Click "Create Order" to build a prescription.
-              </div>
-            ) : (
-              [...selectedPatient.orders]
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                .map(order => (
-                  <div className="card" key={order.id} style={{ marginBottom: 16 }}>
-                    <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
-                      <span className="font-semibold text-sm">Order #{order.id}</span>
-                      <span className="text-xs text-muted">{fmtDate(order.date)}</span>
-                    </div>
-
-                    <div className="kv-line" style={{ padding: '4px 0' }}>
-                      <span className="text-xs text-muted">Worldpay Status</span>
-                      <span className={`pill ${
-                        order.payment.status === 'paid' ? 'pill-green' : 
-                        order.payment.status === 'sent' ? 'pill-amber' : 'pill-neutral'
-                      }`} style={{ fontSize: 9 }}>
-                        {order.payment.status === 'paid' ? 'Paid' : 
-                         order.payment.status === 'sent' ? 'Awaiting Payment' : 'Draft'}
-                      </span>
-                    </div>
-
-                    <div className="kv-line" style={{ padding: '4px 0', borderBottom: '1px solid var(--border)', marginBottom: 8 }}>
-                      <span className="text-xs text-muted">Total Charged</span>
-                      <span className="font-semibold text-sm">{money(orderRevenue(order))}</span>
-                    </div>
-
-                    {/* Prescriptions inside this order */}
-                    {order.prescriptions.map(rx => (
-                      <div key={rx.id} style={{ background: 'var(--bg-surface)', padding: 10, borderRadius: 8, marginTop: 8 }}>
-                        <div className="flex justify-between text-xs" style={{ marginBottom: 6 }}>
-                          <span className="font-semibold text-green">Rx #{rx.id} ({rx.prescriber || 'No prescriber'})</span>
-                          {rx.poRef && <span className="text-faint">{rx.poRef}</span>}
-                        </div>
-
-                        {/* Items list */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
-                          {rx.items.map((item, i) => (
-                            <div key={i} className="flex justify-between text-xs text-muted">
-                              <span>{item.name} &times; {item.qty}</span>
-                              <span>{money(item.retail * item.qty + (item.fee || 0))}</span>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Stepper tracking */}
-                        {rx.placed && renderTrackBar(rx.status)}
-                      </div>
-                    ))}
-                  </div>
-                ))
-            )}
-          </div>
-
-          {/* RIGHT COLUMN: Referral Details / Intake logs */}
-          <div style={{ width: 340, minWidth: 300 }}>
-            <h3 className="card-title" style={{ marginBottom: 12 }}>CRM Referral Records</h3>
-            
-            {selectedPatient.submission ? (
-              <div className="card">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  
-                  <div>
-                    <span className="text-xs text-faint" style={{ display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Medical Condition</span>
-                    <span className="text-sm font-semibold text-primary">{selectedPatient.submission.condition}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-xs text-faint" style={{ display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Clinic Referral Ref</span>
-                    <span className="text-sm font-semibold text-primary">{selectedPatient.submission.clinicRef || 'Pending assignment'}</span>
-                  </div>
-
-                  <div className="divider" style={{ margin: '4px 0' }} />
-
-                  <div className="kv-line">
-                    <span className="text-xs text-muted">Tried ≥2 treatments</span>
-                    <span className={`text-xs font-semibold ${selectedPatient.submission.tried2 ? 'text-green' : 'text-red'}`}>
-                      {selectedPatient.submission.tried2 ? 'Yes' : 'No'}
-                    </span>
-                  </div>
-
-                  <div className="kv-line">
-                    <span className="text-xs text-muted">Psychosis exclusion</span>
-                    <span className={`text-xs font-semibold ${selectedPatient.submission.psychExclusion ? 'text-red' : 'text-green'}`}>
-                      {selectedPatient.submission.psychExclusion ? 'Yes (Excluded)' : 'No (Passed)'}
-                    </span>
-                  </div>
-
-                  <div className="divider" style={{ margin: '4px 0' }} />
-
-                  <div className="kv-line">
-                    <span className="text-xs text-muted">Intake consent</span>
-                    <span className="text-xs font-semibold">
-                      {selectedPatient.submission.consentReferral ? '✓ Referral' : ''} {selectedPatient.submission.consentShare ? '✓ Share' : ''}
-                    </span>
-                  </div>
-
-                  <div className="kv-line">
-                    <span className="text-xs text-muted">Submitted date</span>
-                    <span className="text-xs">{fmtDate(selectedPatient.submission.submittedAt)}</span>
-                  </div>
-
-                  {/* Processing log */}
-                  {selectedPatient.submission.calls.length > 0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <span className="text-xs font-bold text-muted" style={{ display: 'block', marginBottom: 4 }}>Call History Logs</span>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg-surface)', padding: 8, borderRadius: 6 }}>
-                        {selectedPatient.submission.calls.map((call, i) => (
-                          <div key={i} className="text-xs text-muted">
-                            📞 Call logged &middot; {fmtDate(call.ts)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                </div>
-              </div>
-            ) : (
-              <div className="card text-muted text-sm text-center" style={{ padding: '24px 12px' }}>
-                💡 Patient added directly to CRM. No eligibility submission history available.
-              </div>
-            )}
-          </div>
-
-        </div>
-      </div>
-    );
-  }
-
-  // ── LIST VIEW ──
   return (
-    <div className="page-body">
-      <h2 className="page-title">Patients</h2>
-      <p className="page-subtitle">
-        Everyone who has interacted with the service — from eligibility enquiry
-        through to collection.
-      </p>
-
-      {/* ══ Search ══ */}
-      <div className="search-row">
+    <div className="page-body" style={{ position: 'relative' }}>
+      {/* ══ Search Row ══ */}
+      <div className="search-row" style={{ marginBottom: 16 }}>
         <Search size={16} />
         <input
           className="input"
-          placeholder="Search by name or email…"
+          placeholder="Search patient database by name or email address..."
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
       </div>
 
-      {/* ══ Count ══ */}
-      <p className="text-sm text-muted" style={{ margin: '12px 0 8px' }}>
-        {filtered.length} patient{filtered.length !== 1 ? 's' : ''}
-      </p>
+      {/* ══ Patients directory list ══ */}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Email</th>
+              <th>Mobile</th>
+              <th>Intake status</th>
+              <th className="text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={5}>
+                  <div className="empty-state">No matching patient records found.</div>
+                </td>
+              </tr>
+            ) : (
+              filtered.map(p => {
+                const status = deriveStatus(p);
+                return (
+                  <tr
+                    key={p.id}
+                    onClick={() => setSelectedPatientId(p.id)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <td className="font-semibold">
+                      <div className="flex items-center gap-sm">
+                        <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{initials(p.name)}</div>
+                        <span>{p.name}</span>
+                      </div>
+                    </td>
+                    <td>{p.email}</td>
+                    <td>{p.mobile}</td>
+                    <td>
+                      <span className={`pill ${status.pill}`}>{status.label}</span>
+                    </td>
+                    <td className="text-right">
+                      <button 
+                        className="btn btn-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedPatientId(p.id);
+                        }}
+                      >
+                        Details <ChevronRight size={12} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
 
-      {/* ══ Patient rows ══ */}
-      {filtered.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-icon">
-            <User size={22} />
-          </div>
-          No patients match.
-        </div>
-      ) : (
-        filtered.map(p => {
-          const status = deriveStatus(p);
-          return (
-            <div
-              key={p.id}
-              className="patient-row"
-              onClick={() => setSelectedPatientId(p.id)}
-              style={{ cursor: 'pointer', transition: 'background var(--transition-fast)' }}
-            >
-              <div className="flex items-center gap-md" style={{ flex: 1 }}>
-                <div className="avatar">{initials(p.name)}</div>
+      {/* ══ Right Slide-over Detail Drawer ══ */}
+      {selectedPatient && (
+        <>
+          <div className="drawer-backdrop" onClick={() => setSelectedPatientId(null)} />
+          <div className="drawer">
+            <div className="drawer-header">
+              <div className="flex items-center gap-md">
+                <div className="avatar" style={{ width: 44, height: 44, fontSize: 16 }}>{initials(selectedPatient.name)}</div>
                 <div>
-                  <div className="font-semibold">{p.name}</div>
-                  <div className="text-xs text-faint">
-                    {p.email} · {p.mobile}
-                  </div>
+                  <h3 className="font-bold" style={{ fontSize: 16, color: 'var(--text-primary)' }}>{selectedPatient.name}</h3>
+                  <span className={`pill ${deriveStatus(selectedPatient).pill}`} style={{ fontSize: 10, marginTop: 4 }}>
+                    {deriveStatus(selectedPatient).label}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-sm">
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleCreateOrder(selectedPatient)}
+                >
+                  <Plus size={12} /> Create Order
+                </button>
+                <button
+                  className="toast-close"
+                  onClick={() => setSelectedPatientId(null)}
+                  style={{ background: 'rgba(255,255,255,0.06)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div className="drawer-body">
+              {/* Contact info card */}
+              <div className="card card-surface" style={{ margin: 0, padding: 14 }}>
+                <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 8 }}>Contact &amp; Address</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+                  <div><strong className="text-secondary">Email:</strong> {selectedPatient.email}</div>
+                  <div><strong className="text-secondary">Mobile:</strong> {selectedPatient.mobile}</div>
+                  {selectedPatient.crmPatient?.address && (
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+                      <strong className="text-secondary" style={{ whiteSpace: 'nowrap' }}>Address:</strong>
+                      <span>{selectedPatient.crmPatient.address}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-sm">
-                <span className={`pill ${status.pill}`}>{status.label}</span>
-                <ChevronRight size={16} className="text-faint" />
+              {/* Referral records details */}
+              {selectedPatient.submission ? (
+                <div className="card" style={{ margin: 0, padding: 14 }}>
+                  <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 10 }}>Eligibility Intake File</span>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                    <div className="kv-line">
+                      <span className="text-secondary">Target Condition:</span>
+                      <span className="font-semibold text-primary">{selectedPatient.submission.condition}</span>
+                    </div>
+                    <div className="kv-line">
+                      <span className="text-secondary">Clinic Referral Code:</span>
+                      <span className="font-semibold text-info">{selectedPatient.submission.clinicRef || 'Awaiting issuance'}</span>
+                    </div>
+                    
+                    <div className="divider" style={{ margin: '4px 0' }} />
+
+                    <div className="kv-line">
+                      <span className="text-secondary">Tried ≥2 treatments:</span>
+                      <span className={selectedPatient.submission.tried2 ? 'text-green' : 'text-red'}>
+                        {selectedPatient.submission.tried2 ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                    <div className="kv-line">
+                      <span className="text-secondary">Psychosis exclusion check:</span>
+                      <span className={selectedPatient.submission.psychExclusion ? 'text-red' : 'text-green'}>
+                        {selectedPatient.submission.psychExclusion ? 'Excluded' : 'Passed'}
+                      </span>
+                    </div>
+
+                    {selectedPatient.submission.calls.length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 4 }}>Call Log logs</span>
+                        <div style={{ background: 'var(--bg-root)', padding: 8, borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {selectedPatient.submission.calls.map((call, idx) => (
+                            <div key={idx} className="text-xs text-muted">
+                              📞 Call logged &middot; {fmtDate(call.ts)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="card text-muted text-xs text-center" style={{ margin: 0, padding: '16px 10px' }}>
+                  💡 Added directly via CRM. No eligibility submission history exists.
+                </div>
+              )}
+
+              {/* Order history */}
+              <div>
+                <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 8 }}>Prescription Orders History ({selectedPatient.orders.length})</span>
+                {selectedPatient.orders.length === 0 ? (
+                  <div className="card text-muted text-xs text-center" style={{ padding: '24px 12px', margin: 0 }}>
+                    No sessions or orders placed yet.
+                  </div>
+                ) : (
+                  [...selectedPatient.orders]
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map(order => (
+                      <div className="card" key={order.id} style={{ marginBottom: 12, padding: 12 }}>
+                        <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
+                          <span className="font-semibold text-sm">Order Session #{order.id}</span>
+                          <span className="text-xs text-muted">{fmtDate(order.date)}</span>
+                        </div>
+
+                        <div className="kv-line text-xs">
+                          <span className="text-secondary">Worldpay Payment:</span>
+                          <span className={`pill ${
+                            order.payment.status === 'paid' ? 'pill-green' : 
+                            order.payment.status === 'sent' ? 'pill-amber' : 'pill-neutral'
+                          }`} style={{ fontSize: 9, padding: '2px 6px' }}>
+                            {order.payment.status === 'paid' ? 'Paid' : 
+                             order.payment.status === 'sent' ? 'Sent' : 'Draft'}
+                          </span>
+                        </div>
+
+                        <div className="kv-line text-xs" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 6, marginBottom: 6 }}>
+                          <span className="text-secondary">Amount Cleared:</span>
+                          <span className="font-semibold text-primary">{money(orderRevenue(order))}</span>
+                        </div>
+
+                        {/* Rxs list inside this order */}
+                        {order.prescriptions.map((rx, idx) => (
+                          <div key={rx.id} style={{ background: 'var(--bg-root)', padding: 10, borderRadius: 8, marginTop: 6 }}>
+                            <div className="flex justify-between text-xs" style={{ marginBottom: 4 }}>
+                              <span className="font-semibold text-green">Rx #{idx + 1} &mdash; {rx.prescriber || 'No prescriber'}</span>
+                              {rx.poRef && <span className="text-tertiary">{rx.poRef}</span>}
+                            </div>
+
+                            {/* Products inside this Rx */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 6 }}>
+                              {rx.items.map((item, itemIdx) => (
+                                <div key={itemIdx} className="flex justify-between text-xs text-muted" style={{ fontSize: 11 }}>
+                                  <span>{item.name} &times; {item.qty}</span>
+                                  <span>{money(item.retail * item.qty + (item.fee || 0))}</span>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* DPD progress bar inside the drawer */}
+                            {rx.placed && (
+                              <div style={{ marginTop: 8 }}>
+                                <div className="flex justify-between text-xs" style={{ marginBottom: 4 }}>
+                                  <span className="text-muted" style={{ fontSize: 10 }}>DPD Status:</span>
+                                  <span className="font-semibold text-primary" style={{ fontSize: 10 }}>{RX_STATUS_LABELS[rx.status]}</span>
+                                </div>
+                                {renderTrackBar(rx.status)}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ))
+                )}
               </div>
             </div>
-          );
-        })
+          </div>
+        </>
       )}
     </div>
   );
