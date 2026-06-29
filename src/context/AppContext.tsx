@@ -31,7 +31,7 @@ export interface LineItem {
   fee: number;       // dispensing fee
 }
 
-export type RxStatus = 'draft' | 'awaiting-approval' | 'approved' | 'dispatched' | 'ready';
+export type RxStatus = 'draft' | 'awaiting-approval' | 'approved' | 'dispatched' | 'ready' | 'collected';
 
 export interface Prescription {
   id: number;
@@ -171,6 +171,7 @@ export const RX_STATUS_LABELS: Record<RxStatus, string> = {
   approved: 'Approved',
   dispatched: 'Dispatched to pharmacy',
   ready: 'Ready for collection',
+  collected: 'Collected by patient',
 };
 
 export const PHARMACY = { name: 'Holistic Health Hub Pharmacy — Leeds', formUrl: 'hhh.health/eligibility/leeds-ls1' };
@@ -205,6 +206,8 @@ export type Action =
   // Submission to Curaleaf (simulated)
   | { type: 'PLACE_ORDER'; orderId: number }
   | { type: 'ADVANCE_RX_STATUS'; orderId: number; rxId: number }
+  | { type: 'RECEIVE_SHIPMENT'; orderId: number; rxId: number }
+  | { type: 'HANDOVER_TO_PATIENT'; orderId: number; rxId: number }
   // Toasts
   | { type: 'ADD_TOAST'; message: string; toastType?: 'success' | 'info' | 'warning' | 'error' }
   | { type: 'REMOVE_TOAST'; id: string }
@@ -465,7 +468,7 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
     case 'ADVANCE_RX_STATUS': {
-      const statusOrder: RxStatus[] = ['draft', 'awaiting-approval', 'approved', 'dispatched', 'ready'];
+      const statusOrder: RxStatus[] = ['draft', 'awaiting-approval', 'approved', 'dispatched'];
       const order = state.orders.find(o => o.id === action.orderId);
       const rx = order?.prescriptions.find(r => r.id === action.rxId);
       if (!rx) return state;
@@ -484,8 +487,6 @@ function reducer(state: AppState, action: Action): AppState {
           msg = `Curaleaf approved prescription ${poRefStr}`;
         } else if (nextStatus === 'dispatched') {
           msg = `Curaleaf order ${poRefStr} dispatched via DPD`;
-        } else if (nextStatus === 'ready') {
-          msg = `Curaleaf order ${poRefStr} is ready for collection`;
         }
 
         if (msg) {
@@ -495,6 +496,34 @@ function reducer(state: AppState, action: Action): AppState {
         return nextState;
       }
       return state;
+    }
+    case 'RECEIVE_SHIPMENT': {
+      const nextState = mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+        ...r,
+        status: 'ready',
+      })));
+      const order = state.orders.find(o => o.id === action.orderId);
+      const patientObj = order?.patientId ? state.crm.find(p => p.id === order.patientId) : null;
+      const patientNameStr = patientObj?.name ?? 'Patient';
+      
+      const msg = `Goods-In: Confirmed arrival of Rx #${action.rxId}. SMS notification sent to ${patientNameStr}: "Your prescription has arrived and is ready for collection at HHH Leeds."`;
+      const newToast = { id: Date.now().toString() + Math.random(), message: msg, type: 'success' as const };
+      nextState.toasts = [...nextState.toasts, newToast];
+      return nextState;
+    }
+    case 'HANDOVER_TO_PATIENT': {
+      const nextState = mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+        ...r,
+        status: 'collected',
+      })));
+      const order = state.orders.find(o => o.id === action.orderId);
+      const patientObj = order?.patientId ? state.crm.find(p => p.id === order.patientId) : null;
+      const patientNameStr = patientObj?.name ?? 'Patient';
+      
+      const msg = `Handover Completed: Meds collected by ${patientNameStr}. Prescription cleared from active queue.`;
+      const newToast = { id: Date.now().toString() + Math.random(), message: msg, type: 'success' as const };
+      nextState.toasts = [...nextState.toasts, newToast];
+      return nextState;
     }
 
     case 'ADD_TOAST': {
@@ -556,7 +585,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state.orders.forEach(order => {
         if (order.payment.status === 'paid') {
           order.prescriptions.forEach(rx => {
-            if (rx.placed && rx.status !== 'ready') {
+            if (rx.placed && rx.status !== 'dispatched' && rx.status !== 'ready' && rx.status !== 'collected') {
               dispatch({ type: 'ADVANCE_RX_STATUS', orderId: order.id, rxId: rx.id });
             }
           });

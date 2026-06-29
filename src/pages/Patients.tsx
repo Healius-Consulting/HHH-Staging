@@ -14,7 +14,7 @@ interface UnifiedPatient {
   orders: PatientOrder[];
 }
 
-const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Ready'] as const;
+const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Ready', 'Collected'] as const;
 
 function stepsCompleted(status: string): number {
   switch (status) {
@@ -22,6 +22,7 @@ function stepsCompleted(status: string): number {
     case 'approved':          return 1;
     case 'dispatched':        return 2;
     case 'ready':             return 3;
+    case 'collected':         return 4;
     default:                  return -1;
   }
 }
@@ -42,10 +43,19 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
       p.orders.some(
         o =>
           o.payment.status === 'paid' &&
-          o.prescriptions.some(rx => rx.status !== 'ready'),
+          o.prescriptions.some(rx => rx.status !== 'ready' && rx.status !== 'collected'),
       )
     )
       return { label: 'In fulfilment', pill: 'pill-info' };
+
+    if (
+      p.orders.some(
+        o =>
+          o.payment.status === 'paid' &&
+          o.prescriptions.every(rx => rx.status === 'collected')
+      )
+    )
+      return { label: 'Collected by patient', pill: 'pill-neutral' };
 
     if (p.orders.some(o => o.payment.status === 'sent'))
       return { label: 'Awaiting payment', pill: 'pill-amber' };
@@ -164,7 +174,7 @@ export default function Patients() {
 
   const renderTrackBar = (status: string) => {
     const done = stepsCompleted(status);
-    const progressWidth = done >= 0 ? done * 33.33 : 0;
+    const progressWidth = done >= 0 ? done * 25 : 0;
     return (
       <div className="orders-timeline-container" style={{ margin: '8px 0' }}>
         <div className="orders-timeline" style={{ height: 16 }}>
@@ -174,8 +184,8 @@ export default function Patients() {
           />
           {TRACK_STEPS.map((label, i) => {
             let cls = 'timeline-step';
-            if (i < done || (status === 'ready' && i <= done)) cls += ' done';
-            else if (i === done && status !== 'ready') cls += ' active';
+            if (i < done || (status === 'collected' && i <= done)) cls += ' done';
+            else if (i === done && status !== 'collected') cls += ' active';
             return (
               <div key={label} className={cls}>
                 <div className="timeline-dot" style={{ width: 14, height: 14, fontSize: 8 }}>
