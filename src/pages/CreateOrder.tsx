@@ -16,9 +16,9 @@ import {
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
 
-  /* ── Active order chips (unpaid only) ── */
-  const unpaidOrders = state.orders.filter(o => o.payment.status !== 'paid');
-  const activeOrder = state.orders.find(o => o.id === state.activeOrderId);
+  /* ── Active order chips (unsent drafts only) ── */
+  const draftOrders = state.orders.filter(o => o.payment.status === 'none');
+  const activeOrder = state.orders.find(o => o.id === state.activeOrderId && o.payment.status === 'none');
   const patient = activeOrder?.patientId
     ? state.crm.find(c => c.id === activeOrder.patientId) ?? null
     : null;
@@ -72,7 +72,7 @@ export default function CreateOrder() {
 
       {/* ── Order chips bar ── */}
       <div className="flex items-center gap-sm" style={{ flexWrap: 'wrap', marginBottom: 16 }}>
-        {unpaidOrders.map(o => {
+        {draftOrders.map(o => {
           const p = o.patientId ? state.crm.find(c => c.id === o.patientId) : null;
           return (
             <span

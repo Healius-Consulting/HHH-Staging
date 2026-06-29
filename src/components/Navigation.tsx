@@ -6,7 +6,7 @@ const TABS: { key: Screen; label: string; icon: React.ReactNode }[] = [
   { key: 'referrals', label: 'Referrals',        icon: <Users size={14} /> },
   { key: 'formulary', label: 'Formulary',        icon: <FlaskConical size={14} /> },
   { key: 'create',    label: 'Create order',     icon: <FilePlus size={14} /> },
-  { key: 'review',    label: 'Awaiting payment', icon: <Clock size={14} /> },
+  { key: 'review',    label: 'Payments',         icon: <Clock size={14} /> },
   { key: 'orders',    label: 'Orders',           icon: <Package size={14} /> },
   { key: 'patients',  label: 'Patients',         icon: <UserSearch size={14} /> },
 ];

@@ -426,10 +426,14 @@ function reducer(state: AppState, action: Action): AppState {
       const order = findOrder(state, action.orderId);
       if (!order) return state;
       const amount = orderRevenue(order);
-      return mapOrder(state, action.orderId, o => ({
+      const nextState = mapOrder(state, action.orderId, o => ({
         ...o,
         payment: { ...o.payment, status: 'sent', amount, ref: 'WP-' + Date.now().toString(36).toUpperCase(), sentAt: new Date() },
       }));
+      // Find another draft order (payment status 'none') to make active
+      const nextDraft = nextState.orders.find(o => o.payment.status === 'none' && o.id !== action.orderId);
+      nextState.activeOrderId = nextDraft ? nextDraft.id : null;
+      return nextState;
     }
     case 'CONFIRM_PAYMENT':
       return mapOrder(state, action.orderId, o => ({

@@ -1,13 +1,18 @@
+import { useState } from 'react';
 import { Clock, CheckCircle, CreditCard, ExternalLink, Send } from 'lucide-react';
 import { useApp, money, rxRevenue, type PatientOrder } from '../context/AppContext';
 
 export default function AwaitingPayment() {
   const { state, dispatch } = useApp();
+  const [activeSubTab, setActiveSubTab] = useState<'awaiting' | 'paid'>('awaiting');
 
-  /* ── Filter orders with sent or paid payment status (that haven't been submitted to Curaleaf yet) ── */
-  const matchingOrders = state.orders.filter(
-    o => o.payment.status === 'sent' || (o.payment.status === 'paid' && o.prescriptions.some(rx => !rx.placed))
-  );
+  // Awaiting payments: status === 'sent'
+  const awaitingOrders = state.orders.filter(o => o.payment.status === 'sent');
+
+  // Paid payments: status === 'paid'
+  const paidOrders = state.orders.filter(o => o.payment.status === 'paid');
+
+  const matchingOrders = activeSubTab === 'awaiting' ? awaitingOrders : paidOrders;
 
   const patientName = (patientId: string | null) => {
     if (!patientId) return 'Unassigned';
@@ -143,17 +148,37 @@ export default function AwaitingPayment() {
 
   return (
     <div className="page-body">
-      <h2 className="page-title">Awaiting payment</h2>
+      <h2 className="page-title">Payments</h2>
       <p className="page-subtitle">
-        Orders with payment links sent to patients. Payment clearing automatically redirects orders directly to Curaleaf fulfillment.
+        Manage outstanding payment links and completed transactions.
       </p>
+
+      {/* Sub-tabs selection */}
+      <div className="flex items-center gap-sm" style={{ marginBottom: 16 }}>
+        <button
+          className={`chip ${activeSubTab === 'awaiting' ? 'chip-active' : ''}`}
+          onClick={() => setActiveSubTab('awaiting')}
+        >
+          <Clock size={14} />
+          Awaiting Payment ({awaitingOrders.length})
+        </button>
+        <button
+          className={`chip ${activeSubTab === 'paid' ? 'chip-active' : ''}`}
+          onClick={() => setActiveSubTab('paid')}
+        >
+          <CheckCircle size={14} />
+          Paid / Completed ({paidOrders.length})
+        </button>
+      </div>
 
       {matchingOrders.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">
             <CreditCard size={28} />
           </div>
-          No payment links outstanding.
+          {activeSubTab === 'awaiting' 
+            ? 'No pending payment links outstanding.' 
+            : 'No paid payments in this session yet.'}
         </div>
       ) : (
         matchingOrders.map(order => renderCard(order))
