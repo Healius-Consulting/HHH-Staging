@@ -148,10 +148,41 @@ function submitForm(){
   const r=document.getElementById('result');
   const name=val('first');
   if(eligible){
+    const subId = Date.now();
+    const newSubmission = {
+      id: subId,
+      name: val('first') + ' ' + val('last'),
+      dob: val('dob'),
+      mobile: val('phone'),
+      email: val('email'),
+      postcode: val('postcode'),
+      condition: val('condition'),
+      tried2: tried === 'yes',
+      psychExclusion: false,
+      consentReferral: c1,
+      consentShare: c2,
+      marketing: document.getElementById('c3').checked,
+      source: val('source') || 'Direct',
+      status: 'New',
+      recordsUploaded: false,
+      calls: [],
+      clinicRef: null,
+      emailedAt: null,
+      submittedAt: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem('hhh_new_submission', JSON.stringify(newSubmission));
+    } catch(e) {
+      console.error(e);
+    }
+
     r.innerHTML=`<div class="ic ok">✓</div>
-      <h2>Good news, ${name} — you’re eligible</h2>
-      <p class="lead">Your enquiry has been sent to <strong>${window.PHARMACY_NAME}</strong>. A member of the team will be in touch to arrange your specialist consultation (£30) and explain the next steps.</p>
-      <p class="tiny" style="margin-top:12px">Reference: HHH-${Math.floor(100000+Math.random()*899999)} · ${new Date().toLocaleDateString('en-GB')}</p>`;
+      <h2>We have received your request</h2>
+      <p class="lead">Thank you, ${name}. Your eligibility pre-screening application is complete. Please await a direct email or SMS notification from the team at <strong>${window.PHARMACY_NAME}</strong> regarding your referral status and consultation bookings.</p>
+      <p class="tiny" style="margin-top:12px">Application Reference: HHH-${subId.toString().slice(-6)} · Submitted: ${new Date().toLocaleDateString('en-GB')}</p>
+      <div style="margin-top: 20px;">
+        <a href="/specs/HHH-Portal-Gateway.html" style="display: block; width: 100%; background: var(--greenSolid); color: #white; border: none; font-family: inherit; font-weight: 600; font-size: 15px; padding: 12px; border-radius: 10px; cursor: pointer; text-decoration: none; color: #fff; text-align: center; transition: all 0.2s ease;">Go to Portal Gateway</a>
+      </div>`;
   } else {
     r.innerHTML=`<div class="ic no">!</div>
       <h2>You’re not eligible right now</h2>

@@ -19,6 +19,75 @@ export default function Dashboard() {
     o.prescriptions.every(rx => rx.status === 'ready')
   ).length;
 
+  // 1. Uncollected warnings (10+ days)
+  const uncollectedAlerts = state.orders.flatMap(o => {
+    const pName = state.crm.find(p => p.id === o.patientId)?.name ?? 'Unknown';
+    const pMobile = state.crm.find(p => p.id === o.patientId)?.mobile ?? '';
+    return o.prescriptions
+      .filter(rx => rx.status === 'ready' && rx.readyAt && (Date.now() - new Date(rx.readyAt).getTime()) >= 10 * 24 * 60 * 60 * 1000)
+      .map(rx => ({
+        type: 'uncollected' as const,
+        id: `uncollected-${o.id}-${rx.id}`,
+        patientName: pName,
+        patientMobile: pMobile,
+        patientId: o.patientId ?? '',
+        orderId: o.id,
+        rxId: rx.id,
+        days: Math.floor((Date.now() - new Date(rx.readyAt!).getTime()) / (1000 * 60 * 60 * 24)),
+      }));
+  });
+
+  // 2. Overdue payments (3+ days)
+  const overduePaymentAlerts = state.orders
+    .filter(o => o.payment.status === 'sent' && o.payment.sentAt && (Date.now() - new Date(o.payment.sentAt).getTime()) >= 3 * 24 * 60 * 60 * 1000)
+    .map(o => {
+      const pName = state.crm.find(p => p.id === o.patientId)?.name ?? 'Unknown';
+      const pEmail = state.crm.find(p => p.id === o.patientId)?.email ?? '';
+      const amount = o.prescriptions.reduce((sum, rx) => sum + rx.items.reduce((s, item) => s + (item.retail * item.qty + (item.fee || 0)), 0), 0);
+      return {
+        type: 'payment' as const,
+        id: `payment-${o.id}`,
+        patientName: pName,
+        patientEmail: pEmail,
+        patientId: o.patientId ?? '',
+        orderId: o.id,
+        amount,
+        days: Math.floor((Date.now() - new Date(o.payment.sentAt!).getTime()) / (1000 * 60 * 60 * 24)),
+      };
+    });
+
+  // 3. Repeat overdue (30+ days)
+  const repeatAlerts = state.crm.map(p => {
+    const pOrders = state.orders.filter(o => o.patientId === p.id);
+    if (pOrders.length === 0) return null;
+    const latestOrder = [...pOrders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+    const daysSince = Math.floor((Date.now() - new Date(latestOrder.date).getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSince >= 30) {
+      return {
+        type: 'repeat' as const,
+        id: `repeat-${p.id}`,
+        patientName: p.name,
+        patientId: p.id,
+        days: daysSince,
+      };
+    }
+    return null;
+  }).filter((x): x is NonNullable<typeof x> => x !== null);
+
+  // 4. Intake Pending Bottleneck (> 48h)
+  const intakeAlerts = state.submissions
+    .filter(s => s.status !== 'Completed' && (Date.now() - new Date(s.submittedAt).getTime()) >= 48 * 60 * 60 * 1000)
+    .map(s => ({
+      type: 'intake' as const,
+      id: `intake-${s.id}`,
+      patientName: s.name,
+      condition: s.condition,
+      subId: s.id,
+      days: Math.floor((Date.now() - new Date(s.submittedAt).getTime()) / (1000 * 60 * 60 * 24)),
+    }));
+
+  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length;
+
   /* ── Recent orders (last 5) ── */
   const recentOrders = [...state.orders]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
@@ -104,50 +173,186 @@ export default function Dashboard() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, alignItems: 'flex-start' }}>
         
-        {/* LEFT COLUMN: Recent Activity table */}
-        <div className="card" style={{ margin: 0 }}>
-          <h3 className="card-title" style={{ marginBottom: 16 }}>
-            <History size={16} /> Recent Pharmacy Sessions
-          </h3>
-          {recentOrders.length === 0 ? (
-            <div className="empty-state">No active sessions or order history.</div>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Patient name</th>
-                    <th>Session Date</th>
-                    <th>Payment Status</th>
-                    <th className="text-right">Sub-orders (Rxs)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentOrders.map(order => (
-                    <tr
-                      key={order.id}
-                      style={{ cursor: 'pointer' }}
+        {/* LEFT COLUMN: Urgent Alerts & Recent Activity */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          
+          {/* Urgent Actions Section */}
+          {totalUrgent > 0 && (
+            <div className="card" style={{ margin: 0, border: '1px solid rgba(239, 68, 68, 0.25)', background: 'rgba(239, 68, 68, 0.03)' }}>
+              <h3 className="card-title" style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <Activity size={18} /> Urgent Action Items ({totalUrgent})
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Intake Pending bottlenecks */}
+                {intakeAlerts.map(alert => (
+                  <div key={alert.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'rgba(239, 68, 68, 0.08)', borderRadius: 8, borderLeft: '3px solid #ef4444' }}>
+                    <div style={{ fontSize: 14 }}>
+                      <span className="font-semibold text-primary" style={{ display: 'block', fontSize: 15 }}>Pending Eligibility Intake &middot; {alert.patientName}</span>
+                      <span className="text-secondary text-xs">Submitted <strong style={{ color: '#f87171' }}>{alert.days} days ago</strong> for <strong style={{ color: 'var(--text-primary)' }}>{alert.condition}</strong>. Review is currently pending.</span>
+                    </div>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      style={{ background: '#ef4444', borderColor: '#ef4444', color: '#fff', fontSize: 12, padding: '6px 12px' }}
                       onClick={() => {
-                        dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id });
-                        dispatch({ type: 'SET_SCREEN', screen: 'create' });
+                        dispatch({ type: 'SET_SCREEN', screen: 'referrals' });
                       }}
                     >
-                      <td className="font-semibold">{patientName(order.patientId)}</td>
-                      <td className="text-muted text-sm">
-                        {new Date(order.date).toLocaleDateString('en-GB', {
-                          day: 'numeric', month: 'short', year: 'numeric',
-                        })} at {new Date(order.date).toLocaleTimeString('en-GB', {
-                          hour: '2-digit', minute: '2-digit'
-                        })}
-                      </td>
-                      <td>{paymentPill(order.payment.status)}</td>
-                      <td className="text-right font-semibold">{order.prescriptions.length}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      Review Records
+                    </button>
+                  </div>
+                ))}
+
+                {uncollectedAlerts.map(alert => (
+                  <div key={alert.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'rgba(239, 68, 68, 0.08)', borderRadius: 8, borderLeft: '3px solid #ef4444' }}>
+                    <div style={{ fontSize: 14 }}>
+                      <span className="font-semibold text-primary" style={{ display: 'block', fontSize: 15 }}>Uncollected Medication &middot; {alert.patientName}</span>
+                      <span className="text-secondary text-xs">Prescription ready for collection for <strong style={{ color: '#f87171' }}>{alert.days} days</strong>. Contact: {alert.patientMobile}</span>
+                    </div>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      style={{ background: '#ef4444', borderColor: '#ef4444', color: '#fff', fontSize: 12, padding: '6px 12px' }}
+                      onClick={() => {
+                        dispatch({
+                          type: 'ADD_TOAST',
+                          message: `SMS reminder resent to ${alert.patientName} (${alert.patientMobile}).`,
+                          toastType: 'success'
+                        });
+                        dispatch({
+                          type: 'LOG_INTERACTION',
+                          patientId: alert.patientId,
+                          interactionType: 'SMS Reminder',
+                          detail: `Resent counter pickup notification SMS to ${alert.patientMobile}.`
+                        });
+                      }}
+                    >
+                      Resend SMS Reminder
+                    </button>
+                  </div>
+                ))}
+
+                {overduePaymentAlerts.map(alert => (
+                  <div key={alert.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'rgba(245, 158, 11, 0.08)', borderRadius: 8, borderLeft: '3px solid #f59e0b' }}>
+                    <div style={{ fontSize: 14 }}>
+                      <span className="font-semibold text-primary" style={{ display: 'block', fontSize: 15 }}>Overdue Payment &middot; {alert.patientName}</span>
+                      <span className="text-secondary text-xs">Payment link for <strong style={{ color: 'var(--text-primary)' }}>£{alert.amount.toFixed(2)}</strong> has been outstanding for <strong style={{ color: '#fbbf24' }}>{alert.days} days</strong>. Email: {alert.patientEmail}</span>
+                    </div>
+                    <button
+                      className="btn btn-sm"
+                      style={{ borderColor: '#f59e0b', color: '#fbbf24', fontSize: 12, padding: '6px 12px', background: 'transparent' }}
+                      onClick={() => {
+                        dispatch({
+                          type: 'ADD_TOAST',
+                          message: `Worldpay billing link resent to ${alert.patientName} at ${alert.patientEmail}.`,
+                          toastType: 'info'
+                        });
+                        dispatch({
+                          type: 'LOG_INTERACTION',
+                          patientId: alert.patientId,
+                          interactionType: 'Payment Link Resent',
+                          detail: `Resent Worldpay invoice link for £${alert.amount.toFixed(2)} to ${alert.patientEmail}.`
+                        });
+                      }}
+                    >
+                      Resend Payment Link
+                    </button>
+                  </div>
+                ))}
+
+                {repeatAlerts.map(alert => (
+                  <div key={alert.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'rgba(59, 130, 246, 0.08)', borderRadius: 8, borderLeft: '3px solid #3b82f6' }}>
+                    <div style={{ fontSize: 14 }}>
+                      <span className="font-semibold text-primary" style={{ display: 'block', fontSize: 15 }}>Repeat Rx Overdue &middot; {alert.patientName}</span>
+                      <span className="text-secondary text-xs">Last repeat order was <strong style={{ color: '#60a5fa' }}>{alert.days} days ago</strong>. Treatment gap exceeds clinical guidelines.</span>
+                    </div>
+                    <div className="flex gap-xs">
+                      <button
+                        className="btn btn-sm"
+                        style={{ fontSize: 12, padding: '6px 12px' }}
+                        onClick={() => {
+                          dispatch({
+                            type: 'ADD_TOAST',
+                            message: `Follow-up logged: Scheduled repeat check-up call with ${alert.patientName}.`,
+                            toastType: 'success'
+                          });
+                          dispatch({
+                            type: 'LOG_INTERACTION',
+                            patientId: alert.patientId,
+                            interactionType: 'Callback Scheduled',
+                            detail: `Scheduled medical cannabis repeat prescription assessment call.`
+                          });
+                        }}
+                      >
+                        Log Callback
+                      </button>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        style={{ fontSize: 12, padding: '6px 12px' }}
+                        onClick={() => {
+                          dispatch({
+                            type: 'LOG_INTERACTION',
+                            patientId: alert.patientId,
+                            interactionType: 'Repeat Rx Initiated',
+                            detail: 'Created new repeat prescription order session from dashboard.'
+                          });
+                          dispatch({ type: 'NEW_ORDER', patientId: alert.patientId });
+                          dispatch({ type: 'SET_SCREEN', screen: 'create' });
+                        }}
+                      >
+                        Create Repeat Rx
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
+
+          {/* Recent Pharmacy Sessions */}
+          <div className="card" style={{ margin: 0 }}>
+            <h3 className="card-title" style={{ marginBottom: 16 }}>
+              <History size={16} /> Recent Pharmacy Sessions
+            </h3>
+            {recentOrders.length === 0 ? (
+              <div className="empty-state">No active sessions or order history.</div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Patient name</th>
+                      <th>Session Date</th>
+                      <th>Payment Status</th>
+                      <th className="text-right">Sub-orders (Rxs)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentOrders.map(order => (
+                      <tr
+                        key={order.id}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => {
+                          dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id });
+                          dispatch({ type: 'SET_SCREEN', screen: 'create' });
+                        }}
+                      >
+                        <td className="font-semibold">{patientName(order.patientId)}</td>
+                        <td className="text-muted text-sm">
+                          {new Date(order.date).toLocaleDateString('en-GB', {
+                            day: 'numeric', month: 'short', year: 'numeric',
+                          })} at {new Date(order.date).toLocaleTimeString('en-GB', {
+                            hour: '2-digit', minute: '2-digit'
+                          })}
+                        </td>
+                        <td>{paymentPill(order.payment.status)}</td>
+                        <td className="text-right font-semibold">{order.prescriptions.length}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
         </div>
 
         {/* RIGHT COLUMN: Operational Checklist */}

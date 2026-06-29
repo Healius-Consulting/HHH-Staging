@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Package, Truck, FileText, Download, CheckCircle, Clock, Printer, X } from 'lucide-react';
 import {
   useApp,
@@ -6,6 +6,8 @@ import {
   lineRevenue,
   RX_STATUS_LABELS,
   type RxStatus,
+  type Prescription,
+  PHARMACY
 } from '../context/AppContext';
 
 const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Ready', 'Collected'] as const;
@@ -42,24 +44,22 @@ interface FlatSubOrder {
   patientName: string;
   date: Date;
   rxIdx: number;
-  rx: {
-    id: number;
-    prescriber: string;
-    copyFileName: string | null;
-    items: any[];
-    placed: boolean;
-    poRef: string | null;
-    status: RxStatus;
-    invoiceRef: string | null;
-    trackingNumber: string | null;
-    carrier: string | null;
-  };
+  rx: Prescription;
 }
 
 export default function Orders() {
   const { state, dispatch } = useApp();
-  const [activeTab, setActiveTab] = useState<RxStatus>('awaiting-approval');
+  const [activeTab, setActiveTab] = useState<RxStatus | 'all'>('awaiting-approval');
   const [printingRx, setPrintingRx] = useState<{ rx: any; patientName: string } | null>(null);
+  const [exitingRxId, setExitingRxId] = useState<number | null>(null);
+
+  const handleActionWithAnimation = (orderId: number, rxId: number, actionType: 'RECEIVE_SHIPMENT' | 'HANDOVER_TO_PATIENT') => {
+    setExitingRxId(rxId);
+    setTimeout(() => {
+      dispatch({ type: actionType, orderId, rxId });
+      setExitingRxId(null);
+    }, 400);
+  };
 
   const paidOrders = state.orders.filter(o => o.payment.status === 'paid');
 
@@ -95,7 +95,9 @@ export default function Orders() {
 
   // Filter sub-orders matching active status tab
   const filteredSubOrders = useMemo(() => {
-    return allSubOrders.filter(so => so.rx.status === activeTab);
+    return activeTab === 'all'
+      ? allSubOrders
+      : allSubOrders.filter(so => so.rx.status === activeTab);
   }, [allSubOrders, activeTab]);
 
   const renderTrackBar = (status: RxStatus) => {
@@ -131,8 +133,13 @@ export default function Orders() {
 
   const renderSubOrderCard = (so: FlatSubOrder) => {
     const { rx, patientName: pName, orderId, date, rxIdx } = so;
+    const isExiting = exitingRxId === rx.id;
+    const readyDays = rx.status === 'ready' && rx.readyAt
+      ? Math.floor((Date.now() - new Date(rx.readyAt).getTime()) / (1000 * 60 * 60 * 24))
+      : 0;
+
     return (
-      <div className="card" key={`${orderId}-${rx.id}`} style={{ marginBottom: 16 }}>
+      <div className={`card ${isExiting ? 'card-exit' : ''}`} key={`${orderId}-${rx.id}`} style={{ marginBottom: 16 }}>
         {/* Card Header */}
         <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
           <div>
@@ -151,6 +158,24 @@ export default function Orders() {
             </span>
           </div>
         </div>
+
+        {readyDays >= 10 && (
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.25)',
+            color: '#f87171',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            marginBottom: 12,
+            fontSize: '12px',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span>⚠️ CRITICAL: Prescription has been uncollected for {readyDays} days. Follow-up required.</span>
+          </div>
+        )}
 
         <div className="divider" />
 
@@ -196,7 +221,7 @@ export default function Orders() {
             {rx.status === 'dispatched' && (
               <button
                 className="btn btn-sm btn-primary"
-                onClick={() => dispatch({ type: 'RECEIVE_SHIPMENT', orderId, rxId: rx.id })}
+                onClick={() => handleActionWithAnimation(orderId, rx.id, 'RECEIVE_SHIPMENT')}
               >
                 Confirm Arrived (Goods-In Check-In)
               </button>
@@ -212,7 +237,7 @@ export default function Orders() {
                 </button>
                 <button
                   className="btn btn-sm btn-primary"
-                  onClick={() => dispatch({ type: 'HANDOVER_TO_PATIENT', orderId, rxId: rx.id })}
+                  onClick={() => handleActionWithAnimation(orderId, rx.id, 'HANDOVER_TO_PATIENT')}
                 >
                   Handover to Patient
                 </button>
@@ -241,22 +266,66 @@ export default function Orders() {
 
   return (
     <div className="page-body">
-      {/* ── Sub-tabs for the 5 stages of tracking ── */}
-      <div className="flex items-center gap-xs" style={{ marginBottom: 20, flexWrap: 'wrap' }}>
+      {/* ══ Fulfillment Stage stats switchers ══ */}
+      <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 20 }}>
+        {/* Card 0: All Orders */}
+        <div
+          className="card card-surface"
+          style={{
+            margin: 0,
+            padding: '10px 12px',
+            cursor: 'pointer',
+            border: activeTab === 'all' ? '1px solid var(--green-500)' : '1px solid var(--border)',
+            background: activeTab === 'all' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4
+          }}
+          onClick={() => setActiveTab('all')}
+        >
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span style={{ fontSize: 10 }}>All Orders</span>
+            <Package size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} />
+          </div>
+          <span style={{ fontSize: 20, fontWeight: 700, display: 'block', color: activeTab === 'all' ? 'var(--green-100)' : 'inherit' }}>
+            {allSubOrders.length}
+          </span>
+        </div>
+
         {STATUS_TABS.map(tab => {
           const count = allSubOrders.filter(so => so.rx.status === tab.key).length;
+          let iconColor = 'text-muted';
+          if (activeTab === tab.key) {
+            if (tab.key === 'ready') iconColor = 'text-green';
+            else if (tab.key === 'dispatched') iconColor = 'text-amber';
+            else iconColor = 'text-info';
+          }
           return (
-            <button
+            <div
               key={tab.key}
-              className={`chip ${activeTab === tab.key ? 'chip-active' : ''}`}
+              className="card card-surface"
+              style={{
+                margin: 0,
+                padding: '10px 12px',
+                cursor: 'pointer',
+                border: activeTab === tab.key ? '1px solid var(--green-500)' : '1px solid var(--border)',
+                background: activeTab === tab.key ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
+                transition: 'all 0.2s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4
+              }}
               onClick={() => setActiveTab(tab.key)}
             >
-              {tab.icon}
-              <span>{tab.label}</span>
-              <span className="tab-badge" style={{ minWidth: 16, height: 16, fontSize: 9, padding: '0 4px', background: activeTab === tab.key ? 'var(--green-600)' : 'var(--border)' }}>
+              <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+                <span style={{ fontSize: 10 }}>{tab.label.split('. ')[1]}</span>
+                {React.cloneElement(tab.icon as React.ReactElement<any>, { className: iconColor, size: 14 })}
+              </div>
+              <span style={{ fontSize: 20, fontWeight: 700, display: 'block', color: activeTab === tab.key ? 'var(--green-100)' : 'inherit' }}>
                 {count}
               </span>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -313,7 +382,7 @@ export default function Orders() {
               boxShadow: 'inset 0 0 10px rgba(0,0,0,0.1)'
             }}>
               <div style={{ textAlign: 'center', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: 6, marginBottom: 8, fontSize: '12px' }}>
-                HHH PHARMACY LEEDS
+                {PHARMACY.name.toUpperCase()}
               </div>
               <div><strong>Patient:</strong> {printingRx.patientName}</div>
               <div><strong>Date:</strong> {new Date().toLocaleDateString('en-GB')}</div>

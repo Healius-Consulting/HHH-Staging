@@ -18,8 +18,9 @@ export interface CRMPatient {
   name: string;
   email: string;
   mobile: string;
-  address: string;
-  status: 'Referred';
+  address?: string;
+  status: string;
+  interactions?: { ts: Date | string; type: string; detail: string }[];
 }
 
 export interface LineItem {
@@ -44,6 +45,7 @@ export interface Prescription {
   invoiceRef: string | null;
   trackingNumber: string | null;
   carrier: string | null;
+  readyAt?: Date | string | null;
 }
 
 export type PaymentStatus = 'none' | 'sent' | 'paid';
@@ -88,6 +90,8 @@ export interface EligibilitySubmission {
 
 export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'orders' | 'patients';
 
+export type PortalMode = 'gateway' | 'clinician' | 'patient';
+
 export interface Toast {
   id: string;
   message: string;
@@ -110,6 +114,8 @@ export interface AppState {
     clinic: number;
     invoice: number;
   };
+  portalMode: PortalMode;
+  patientEmail: string | null;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -129,9 +135,18 @@ export const CATALOGUE: CatalogueItem[] = [
 
 const SEED_CRM: CRMPatient[] = [
   { id: 'P-1001', name: 'James Doe',        email: 'j.doe@email.com',      mobile: '07700 900111', address: '12 High St, Leeds LS1 4AB',     status: 'Referred' },
-  { id: 'P-1002', name: 'Aisha Smith',      email: 'a.smith@email.com',    mobile: '07700 900222', address: '4 Oak Rd, Leeds LS2 8PQ',       status: 'Referred' },
+  { id: 'P-1002', name: 'Aisha Smith',      email: 'a.smith@email.com',    mobile: '07700 900222', address: '4 Oak Rd, Leeds LS2 8PQ',       status: 'Referred',
+    interactions: [
+      { ts: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), type: 'Invoice Dispatched', detail: 'Sent Worldpay invoice link for £48.00.' },
+      { ts: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), type: 'Prescription Ready', detail: 'Meds received from wholesaler. Sent counter collection alert SMS.' }
+    ]
+  },
   { id: 'P-1003', name: 'Mohammed Khan',    email: 'm.khan@email.com',     mobile: '07700 900333', address: '9 Park Ave, Leeds LS6 1RT',     status: 'Referred' },
-  { id: 'P-1004', name: 'Sophie Bennett',   email: 's.bennett@email.com',  mobile: '07700 900444', address: '27 Cardigan Rd, Leeds LS6 3AA', status: 'Referred' },
+  { id: 'P-1004', name: 'Sophie Bennett',   email: 's.bennett@email.com',  mobile: '07700 900444', address: '27 Cardigan Rd, Leeds LS6 3AA', status: 'Referred',
+    interactions: [
+      { ts: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), type: 'Meds Collected', detail: 'Dispensed 10g Noidecs CD to patient at counter.' }
+    ]
+  },
   { id: 'P-1005', name: "Daniel O'Connor",  email: 'd.oconnor@email.com',  mobile: '07700 900555', address: '8 Burley St, Leeds LS3 1JX',    status: 'Referred' },
   { id: 'P-1006', name: 'Priya Patel',      email: 'p.patel@email.com',    mobile: '07700 900666', address: '15 Roundhay Rd, Leeds LS8 5AQ', status: 'Referred' },
   { id: 'P-1007', name: 'Liam Murphy',      email: 'l.murphy@email.com',   mobile: '07700 900777', address: '3 Kirkstall Ln, Leeds LS5 3BW', status: 'Referred' },
@@ -174,15 +189,38 @@ export const RX_STATUS_LABELS: Record<RxStatus, string> = {
   collected: 'Collected by patient',
 };
 
-export const PHARMACY = { name: 'Holistic Health Hub Pharmacy — Leeds', formUrl: 'hhh.health/eligibility/leeds-ls1' };
+const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+const token = params.get('token');
+const isDemo = token === 'demo-token';
+
+export const PHARMACY = isDemo ? {
+  name: 'East Midlands Pharmacy Lincoln',
+  initials: 'EMP',
+  logoText: 'EM',
+  formUrl: 'eastmidlandspharmacy-eligibility.co.uk',
+  brandName: 'EMP × Curaleaf',
+  collectionPlace: 'East Midlands Pharmacy'
+} : {
+  name: 'Holistic Health Hub Pharmacy — Leeds',
+  initials: 'HHH',
+  logoText: 'HH',
+  formUrl: 'hhh.health/eligibility/leeds-ls1',
+  brandName: 'HHH × Curaleaf',
+  collectionPlace: 'HHH Leeds'
+};
 
 /* ═══════════════════════════════════════════════════════════
    Actions
    ═══════════════════════════════════════════════════════════ */
 
 export type Action =
+  | { type: 'SET_PORTAL_MODE'; mode: PortalMode }
+  | { type: 'SET_PATIENT_EMAIL'; email: string | null }
+  | { type: 'LOGOUT_PATIENT' }
   | { type: 'SET_SCREEN'; screen: Screen }
+  | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
+  | { type: 'ADD_SUBMISSION'; submission: EligibilitySubmission }
   | { type: 'UPLOAD_RECORDS'; subId: number }
   | { type: 'LOG_CALL'; subId: number }
   | { type: 'REFER_TO_CLINIC'; subId: number }
@@ -242,7 +280,7 @@ function buildSeedSubmissions(): EligibilitySubmission[] {
   const s2: EligibilitySubmission = {
     id: 2, name: 'Rebecca Allen', dob: '1994-11-02', mobile: '07700 900502', email: 'r.allen@email.com',
     postcode: 'LS2 8PQ', condition: 'Anxiety', ...base, marketing: true, source: 'Word of mouth',
-    status: 'New', recordsUploaded: false, calls: [], clinicRef: null, emailedAt: null, submittedAt: new Date(),
+    status: 'New', recordsUploaded: false, calls: [], clinicRef: null, emailedAt: null, submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
   };
   const s3: EligibilitySubmission = {
     id: 3, name: 'Daniel Price', dob: '1977-07-23', mobile: '07700 900503', email: 'd.price@email.com',
@@ -284,18 +322,59 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
     items: [
       { productId: 'P004', name: 'Noidecs T10:C10 Flos 10g', qty: 1, cost: 38.5, retail: 48, fee: 0 },
     ],
-    placed: false, poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
+    placed: true, poRef: 'PO-9002', status: 'ready', invoiceRef: 'INV-4071', trackingNumber: 'DPD882711', carrier: 'DPD',
+    readyAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), // 12 days ago
   };
   const o2: PatientOrder = {
-    id: 2, patientId: 'P-1002', date: new Date(new Date().getFullYear(), new Date().getMonth(), 1, 9, 0), feeExtra: 0,
-    payment: { status: 'none', amount: 0, ref: null, sentAt: null },
+    id: 2, patientId: 'P-1002', date: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000), feeExtra: 0,
+    payment: { status: 'paid', amount: 48, ref: 'WP-8812', sentAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
     prescriptions: [rx3],
   };
 
-  return { orders: [o1, o2], nextRx: 4 };
+  const rx4: Prescription = {
+    id: 4, prescriber: 'Dr. S. Patel', copyFileName: 'prescription_jdoe_overdue.pdf',
+    items: [
+      { productId: 'P001', name: 'Adven 20/1 THC Oil 30ml', qty: 1, cost: 42, retail: 79, fee: 0 },
+    ],
+    placed: true, poRef: 'PO-9003', status: 'approved', invoiceRef: 'INV-4073', trackingNumber: null, carrier: null,
+  };
+  const o3: PatientOrder = {
+    id: 3, patientId: 'P-1003', date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), feeExtra: 0,
+    payment: {
+      status: 'sent',
+      amount: 79,
+      ref: 'WP-8815',
+      sentAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
+    },
+    prescriptions: [rx4],
+  };
+
+  const rx5: Prescription = {
+    id: 5, prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_sbennett.pdf',
+    items: [
+      { productId: 'P006', name: 'Adven THC 10mg Capsules ×30', qty: 1, cost: 36, retail: 69, fee: 0 },
+    ],
+    placed: true, poRef: 'PO-9004', status: 'collected', invoiceRef: 'INV-4074', trackingNumber: null, carrier: null,
+  };
+  const o4: PatientOrder = {
+    id: 4, patientId: 'P-1004', date: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), feeExtra: 0, // 45 days ago
+    payment: {
+      status: 'paid',
+      amount: 69,
+      ref: 'WP-8816',
+      sentAt: new Date(Date.now() - 44 * 24 * 60 * 60 * 1000),
+    },
+    prescriptions: [rx5],
+  };
+
+  return { orders: [o1, o2, o3, o4], nextRx: 6 };
 }
 
 const seed = buildSeedOrders();
+
+const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+const modeParam = urlParams?.get('mode');
+const initialPortalMode: PortalMode = (modeParam === 'clinician' || modeParam === 'patient' || modeParam === 'gateway') ? (modeParam as PortalMode) : 'gateway';
 
 const initialState: AppState = {
   screen: 'home',
@@ -305,7 +384,9 @@ const initialState: AppState = {
   orders: seed.orders,
   activeOrderId: 1,
   toasts: [],
-  nextIds: { patient: 2000, rx: seed.nextRx, order: 3, submission: 5, clinic: 5201, invoice: 4072 },
+  nextIds: { patient: 2000, rx: seed.nextRx, order: 5, submission: 5, clinic: 5201, invoice: 4072 },
+  portalMode: initialPortalMode,
+  patientEmail: null,
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -328,8 +409,39 @@ function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_SCREEN':
       return { ...state, screen: action.screen };
+    case 'LOG_INTERACTION': {
+      return {
+        ...state,
+        crm: state.crm.map(p =>
+          p.id === action.patientId
+            ? {
+                ...p,
+                interactions: [
+                  ...(p.interactions || []),
+                  { ts: new Date(), type: action.interactionType, detail: action.detail }
+                ]
+              }
+            : p
+        )
+      };
+    }
+    case 'SET_PORTAL_MODE':
+      return { ...state, portalMode: action.mode };
+    case 'SET_PATIENT_EMAIL':
+      return { ...state, patientEmail: action.email };
+    case 'LOGOUT_PATIENT':
+      return { ...state, patientEmail: null, portalMode: 'gateway' };
 
     // ---- Referrals ----
+    case 'ADD_SUBMISSION': {
+      if (state.submissions.some(s => s.email === action.submission.email)) {
+        return state;
+      }
+      return {
+        ...state,
+        submissions: [action.submission, ...state.submissions],
+      };
+    }
     case 'UPLOAD_RECORDS': {
       return {
         ...state,
@@ -501,12 +613,13 @@ function reducer(state: AppState, action: Action): AppState {
       const nextState = mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
         ...r,
         status: 'ready',
+        readyAt: new Date(),
       })));
       const order = state.orders.find(o => o.id === action.orderId);
       const patientObj = order?.patientId ? state.crm.find(p => p.id === order.patientId) : null;
       const patientNameStr = patientObj?.name ?? 'Patient';
       
-      const msg = `Goods-In: Confirmed arrival of Rx #${action.rxId}. SMS notification sent to ${patientNameStr}: "Your prescription has arrived and is ready for collection at HHH Leeds."`;
+      const msg = `Goods-In: Confirmed arrival of Rx #${action.rxId}. SMS notification sent to ${patientNameStr}: "Your prescription has arrived and is ready for collection at ${PHARMACY.collectionPlace}."`;
       const newToast = { id: Date.now().toString() + Math.random(), message: msg, type: 'success' as const };
       nextState.toasts = [...nextState.toasts, newToast];
       return nextState;
@@ -556,6 +669,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const scheduledRef = useRef<Set<number>>(new Set());
 
+  // Listen to localStorage for incoming eligibility form submissions & patient payments
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'hhh_new_submission' && e.newValue) {
+        try {
+          const submission = JSON.parse(e.newValue);
+          submission.submittedAt = new Date(submission.submittedAt);
+          if (submission.calls) {
+            submission.calls = submission.calls.map((c: any) => ({ ts: new Date(c.ts) }));
+          }
+          dispatch({ type: 'ADD_SUBMISSION', submission });
+          dispatch({
+            type: 'ADD_TOAST',
+            message: `New Enquiry Received: ${submission.name} (${submission.condition})`,
+            toastType: 'info'
+          });
+          localStorage.removeItem('hhh_new_submission');
+        } catch (err) {
+          console.error('Error parsing localStorage submission:', err);
+        }
+      }
+
+      if (e.key === 'hhh_patient_payment_clear' && e.newValue) {
+        try {
+          const { orderId } = JSON.parse(e.newValue);
+          dispatch({ type: 'CONFIRM_PAYMENT', orderId });
+          dispatch({ type: 'PLACE_ORDER', orderId });
+          
+          // Get patient info for toast
+          const orderObj = state.orders.find(o => o.id === orderId);
+          const patientObj = orderObj?.patientId ? state.crm.find(p => p.id === orderObj.patientId) : null;
+          const name = patientObj?.name ?? 'Marcus Vance';
+
+          dispatch({
+            type: 'ADD_TOAST',
+            message: `Patient Portal: Worldpay invoice paid securely by patient ${name} (£${orderObj?.payment.amount.toFixed(2)}).`,
+            toastType: 'success'
+          });
+          localStorage.removeItem('hhh_patient_payment_clear');
+        } catch (err) {
+          console.error('Error parsing patient payment:', err);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [dispatch, state.orders, state.crm]);
+
   // Automated Payment Clearance & Curaleaf Placement Simulator
   useEffect(() => {
     state.orders.forEach(order => {
@@ -594,6 +756,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 15000); // advance every 15s for demo
     return () => clearInterval(interval);
   }, [state.orders]);
+
+  // Mirror state to localStorage for patient portal sync
+  useEffect(() => {
+    try {
+      localStorage.setItem('hhh_portal_state', JSON.stringify({
+        submissions: state.submissions,
+        orders: state.orders,
+        crm: state.crm
+      }));
+    } catch (e) {
+      console.error('Error writing portal state:', e);
+    }
+  }, [state.submissions, state.orders, state.crm]);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

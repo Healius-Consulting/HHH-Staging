@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Search, ChevronRight, Plus, X } from 'lucide-react';
-import { useApp, money, orderRevenue, RX_STATUS_LABELS } from '../context/AppContext';
+import { Search, ChevronRight, Plus, X, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
+import { useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
 
 /* ── Unified patient row model ── */
@@ -79,11 +79,11 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
       case 'New':
         return { label: 'New enquiry', pill: 'pill-red' };
       case 'Completed':
-        return { label: 'Referred', pill: 'pill-green' };
+        return { label: 'CRM Active', pill: 'pill-green' };
     }
   }
 
-  if (p.crmPatient) return { label: 'Referred', pill: 'pill-green' };
+  if (p.crmPatient) return { label: 'CRM Active', pill: 'pill-green' };
 
   return { label: '—', pill: 'pill-neutral' };
 }
@@ -99,9 +99,14 @@ function fmtDate(d: Date | string) {
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+type FilterTab = 'all' | 'enquiries' | 'active' | 'on-order';
+type SortKey = 'name' | 'status' | 'id';
+
 export default function Patients() {
   const { state, dispatch } = useApp();
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<FilterTab>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('name');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
 
   /* ── Build merged patient list ── */
@@ -141,21 +146,47 @@ export default function Patients() {
       }
     }
 
-    return Array.from(map.values()).sort((a, b) =>
-      a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }),
-    );
+    return Array.from(map.values());
   }, [state.crm, state.submissions, state.orders]);
 
-  /* ── Filtered list ── */
-  const filtered = useMemo(() => {
-    if (!search.trim()) return patients;
-    const q = search.toLowerCase();
-    return patients.filter(
-      p =>
-        p.name.toLowerCase().includes(q) ||
-        p.email.toLowerCase().includes(q),
-    );
-  }, [patients, search]);
+  /* ── Filtered & Sorted list ── */
+  const processedPatients = useMemo(() => {
+    let list = [...patients];
+
+    // 1. Search Query Filter
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        p =>
+          p.name.toLowerCase().includes(q) ||
+          p.email.toLowerCase().includes(q) ||
+          p.mobile.includes(q)
+      );
+    }
+
+    // 2. Tab Filter
+    if (activeTab === 'enquiries') {
+      list = list.filter(p => p.submission && p.submission.status !== 'Completed');
+    } else if (activeTab === 'active') {
+      list = list.filter(p => p.crmPatient !== null);
+    } else if (activeTab === 'on-order') {
+      list = list.filter(p => 
+        p.crmPatient && 
+        p.orders.some(o => o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))
+      );
+    }
+
+    // 3. Sorting
+    if (sortKey === 'name') {
+      list.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+    } else if (sortKey === 'status') {
+      list.sort((a, b) => deriveStatus(a).label.localeCompare(deriveStatus(b).label));
+    } else if (sortKey === 'id') {
+      list.sort((a, b) => b.id.localeCompare(a.id));
+    }
+
+    return list;
+  }, [patients, search, activeTab, sortKey]);
 
   const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
 
@@ -199,17 +230,139 @@ export default function Patients() {
     );
   };
 
+  // Metrics counts
+  const totalCRM = state.crm.length;
+  const activeEnquiries = state.submissions.filter(s => s.status !== 'Completed').length;
+  const onOrderCount = patients.filter(p => p.crmPatient && p.orders.some(o => o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))).length;
+
   return (
     <div className="page-body" style={{ position: 'relative' }}>
-      {/* ══ Search Row ══ */}
-      <div className="search-row" style={{ marginBottom: 16 }}>
-        <Search size={16} />
-        <input
-          className="input"
-          placeholder="Search patient database by name or email address..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
+      
+      {/* ══ Metrics Grid / Tab Switchers ══ */}
+      <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 20 }}>
+        {/* Card 1: All Patients */}
+        <div
+          className="card card-surface"
+          style={{
+            margin: 0,
+            padding: 12,
+            cursor: 'pointer',
+            border: activeTab === 'all' ? '1px solid var(--green-500)' : '1px solid var(--border)',
+            background: activeTab === 'all' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('all')}
+        >
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span>All Patients</span>
+            <Users size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} />
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'all' ? 'var(--green-100)' : 'inherit' }}>
+            {patients.length}
+          </span>
+        </div>
+
+        {/* Card 2: Enquiries */}
+        <div
+          className="card card-surface"
+          style={{
+            margin: 0,
+            padding: 12,
+            cursor: 'pointer',
+            border: activeTab === 'enquiries' ? '1px solid var(--green-500)' : '1px solid var(--border)',
+            background: activeTab === 'enquiries' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('enquiries')}
+        >
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span>Enquiries</span>
+            <Clipboard size={14} className={activeTab === 'enquiries' ? 'text-red' : 'text-muted'} />
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'enquiries' ? 'var(--green-100)' : 'inherit' }}>
+            {activeEnquiries}
+          </span>
+        </div>
+
+        {/* Card 3: Active Treatments */}
+        <div
+          className="card card-surface"
+          style={{
+            margin: 0,
+            padding: 12,
+            cursor: 'pointer',
+            border: activeTab === 'active' ? '1px solid var(--green-500)' : '1px solid var(--border)',
+            background: activeTab === 'active' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('active')}
+        >
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span>Active Treatments</span>
+            <CheckCircle size={14} className={activeTab === 'active' ? 'text-green' : 'text-muted'} />
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'active' ? 'var(--green-100)' : 'inherit' }}>
+            {totalCRM}
+          </span>
+        </div>
+
+        {/* Card 4: On Order */}
+        <div
+          className="card card-surface"
+          style={{
+            margin: 0,
+            padding: 12,
+            cursor: 'pointer',
+            border: activeTab === 'on-order' ? '1px solid var(--green-500)' : '1px solid var(--border)',
+            background: activeTab === 'on-order' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('on-order')}
+        >
+          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+            <span>On Order</span>
+            <Package size={14} className={activeTab === 'on-order' ? 'text-amber' : 'text-muted'} />
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'on-order' ? 'var(--green-100)' : 'inherit' }}>
+            {onOrderCount}
+          </span>
+        </div>
+      </div>
+
+      {/* ══ Search & Filtering Controls ══ */}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 16 }}>
+        {/* Search Input */}
+        <div className="search-row" style={{ flex: 1, minWidth: 260, margin: 0 }}>
+          <Search size={16} />
+          <input
+            className="input"
+            placeholder="Search CRM directory by name, email, or mobile..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+
+        {/* Sort selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+          <span className="text-muted font-semibold">Sort by:</span>
+          <select 
+            value={sortKey} 
+            onChange={e => setSortKey(e.target.value as SortKey)}
+            style={{
+              padding: '6px 12px',
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '6px',
+              color: 'var(--text-primary)',
+              fontFamily: 'inherit',
+              outline: 'none'
+            }}
+          >
+            <option value="name">Name (A-Z)</option>
+            <option value="status">Status</option>
+            <option value="id">Newest Created</option>
+          </select>
+        </div>
       </div>
 
       {/* ══ Patients directory list ══ */}
@@ -220,20 +373,29 @@ export default function Patients() {
               <th>Patient</th>
               <th>Email</th>
               <th>Mobile</th>
-              <th>Intake status</th>
+              <th>CRM status</th>
               <th className="text-right">Action</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {processedPatients.length === 0 ? (
               <tr>
                 <td colSpan={5}>
-                  <div className="empty-state">No matching patient records found.</div>
+                  <div className="empty-state">No matching patient records found in this category.</div>
                 </td>
               </tr>
             ) : (
-              filtered.map(p => {
+              processedPatients.map(p => {
                 const status = deriveStatus(p);
+                const hasUncollectedWarning = p.orders.some(o =>
+                  o.payment.status === 'paid' &&
+                  o.prescriptions.some(rx => {
+                    if (rx.status !== 'ready' || !rx.readyAt) return false;
+                    const readyDate = new Date(rx.readyAt);
+                    const diffDays = Math.floor((Date.now() - readyDate.getTime()) / (1000 * 60 * 60 * 24));
+                    return diffDays >= 10;
+                  })
+                );
                 return (
                   <tr
                     key={p.id}
@@ -242,14 +404,21 @@ export default function Patients() {
                   >
                     <td className="font-semibold">
                       <div className="flex items-center gap-sm">
-                        <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{initials(p.name)}</div>
+                        <div className="avatar" style={{ width: 28, height: 28, fontSize: 12 }}>{initials(p.name)}</div>
                         <span>{p.name}</span>
                       </div>
                     </td>
                     <td>{p.email}</td>
                     <td>{p.mobile}</td>
                     <td>
-                      <span className={`pill ${status.pill}`}>{status.label}</span>
+                      <div className="flex items-center gap-xs">
+                        <span className={`pill ${status.pill}`}>{status.label}</span>
+                        {hasUncollectedWarning && (
+                          <span className="pill pill-red" style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px' }}>
+                            ⚠️ 10d+ Overdue
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="text-right">
                       <button 
@@ -277,10 +446,10 @@ export default function Patients() {
           <div className="drawer">
             <div className="drawer-header">
               <div className="flex items-center gap-md">
-                <div className="avatar" style={{ width: 44, height: 44, fontSize: 16 }}>{initials(selectedPatient.name)}</div>
+                <div className="avatar" style={{ width: 50, height: 50, fontSize: 18 }}>{initials(selectedPatient.name)}</div>
                 <div>
-                  <h3 className="font-bold" style={{ fontSize: 16, color: 'var(--text-primary)' }}>{selectedPatient.name}</h3>
-                  <span className={`pill ${deriveStatus(selectedPatient).pill}`} style={{ fontSize: 10, marginTop: 4 }}>
+                  <h3 className="font-bold" style={{ fontSize: 18, color: 'var(--text-primary)' }}>{selectedPatient.name}</h3>
+                  <span className={`pill ${deriveStatus(selectedPatient).pill}`} style={{ fontSize: 12, marginTop: 4 }}>
                     {deriveStatus(selectedPatient).label}
                   </span>
                 </div>
@@ -303,6 +472,28 @@ export default function Patients() {
             </div>
 
             <div className="drawer-body">
+              {/* Check for uncollected warnings */}
+              {(() => {
+                const hasWarning = selectedPatient.orders.some(o =>
+                  o.payment.status === 'paid' &&
+                  o.prescriptions.some(rx => {
+                    if (rx.status !== 'ready' || !rx.readyAt) return false;
+                    const readyDate = new Date(rx.readyAt);
+                    const diffDays = Math.floor((Date.now() - readyDate.getTime()) / (1000 * 60 * 60 * 24));
+                    return diffDays >= 10;
+                  })
+                );
+                if (!hasWarning) return null;
+                return (
+                  <div className="card" style={{ margin: 0, padding: 14, background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#f87171', fontSize: '14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span className="font-bold text-sm" style={{ textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      ⚠️ 10-DAY COLLECTION WARNING
+                    </span>
+                    <span>This patient has a prescription that has remained uncollected for 10 or more days. Please follow up.</span>
+                  </div>
+                );
+              })()}
+
               {/* Contact info card */}
               <div className="card card-surface" style={{ margin: 0, padding: 14 }}>
                 <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 8 }}>Contact &amp; Address</span>
@@ -318,6 +509,50 @@ export default function Patients() {
                 </div>
               </div>
 
+              {/* Whitelabel Affiliation Info Card */}
+              <div className="card card-surface" style={{ margin: 0, padding: 14, borderLeft: '3px solid var(--accent-info)' }}>
+                <span className="text-xs font-bold text-info uppercase" style={{ display: 'block', marginBottom: 8 }}>Pharmacy Account Details</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+                  <div><strong className="text-secondary">Primary Pharmacy:</strong> {PHARMACY.name}</div>
+                  <div><strong className="text-secondary">Whitelabel Site:</strong> <span className="text-info">{PHARMACY.formUrl}</span></div>
+                  <div><strong className="text-secondary">System ID:</strong> <code style={{ fontSize: 11, background: 'rgba(255,255,255,0.05)', padding: '2px 4px', borderRadius: 4 }}>{selectedPatient.id}</code></div>
+                </div>
+              </div>
+
+              {/* Interaction Audit History Log */}
+              <div className="card card-surface" style={{ margin: 0, padding: 14 }}>
+                <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 10 }}>Audit &amp; Interaction Log</span>
+                {(!selectedPatient.crmPatient?.interactions || selectedPatient.crmPatient.interactions.length === 0) ? (
+                  <div className="text-xs text-muted text-center" style={{ padding: '8px 0' }}>No interactions logged yet for this patient.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, position: 'relative', paddingLeft: 14, borderLeft: '1px solid var(--border)' }}>
+                    {selectedPatient.crmPatient.interactions.map((log, idx) => (
+                      <div key={idx} style={{ position: 'relative', fontSize: 12 }}>
+                        <div style={{
+                          position: 'absolute',
+                          left: -18,
+                          top: 4,
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: 
+                            log.type.includes('Reminder') || log.type.includes('Resent') ? '#f59e0b' :
+                            log.type.includes('Collected') || log.type.includes('Cleared') ? '#10b981' :
+                            '#3b82f6'
+                        }} />
+                        <div className="flex justify-between" style={{ fontWeight: '600', marginBottom: 2 }}>
+                          <span className="text-primary">{log.type}</span>
+                          <span className="text-tertiary" style={{ fontSize: 10 }}>
+                            {new Date(log.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} &middot; {new Date(log.ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div className="text-muted text-xs">{log.detail}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Referral records details */}
               {selectedPatient.submission ? (
                 <div className="card" style={{ margin: 0, padding: 14 }}>
@@ -330,7 +565,7 @@ export default function Patients() {
                     </div>
                     <div className="kv-line">
                       <span className="text-secondary">Clinic Referral Code:</span>
-                      <span className="font-semibold text-info">{selectedPatient.submission.clinicRef || 'Awaiting issuance'}</span>
+                      <span className="font-semibold text-info">{selectedPatient.submission.clinicRef || 'Awaiting clinic code'}</span>
                     </div>
                     
                     <div className="divider" style={{ margin: '4px 0' }} />
@@ -338,7 +573,7 @@ export default function Patients() {
                     <div className="kv-line">
                       <span className="text-secondary">Tried ≥2 treatments:</span>
                       <span className={selectedPatient.submission.tried2 ? 'text-green' : 'text-red'}>
-                        {selectedPatient.submission.tried2 ? 'Yes' : 'No'}
+                        {selectedPatient.submission.tried2 ? 'Yes (Pass)' : 'No'}
                       </span>
                     </div>
                     <div className="kv-line">
@@ -350,7 +585,7 @@ export default function Patients() {
 
                     {selectedPatient.submission.calls.length > 0 && (
                       <div style={{ marginTop: 8 }}>
-                        <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 4 }}>Call Log logs</span>
+                        <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 4 }}>Call Log history</span>
                         <div style={{ background: 'var(--bg-root)', padding: 8, borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
                           {selectedPatient.submission.calls.map((call, idx) => (
                             <div key={idx} className="text-xs text-muted">
@@ -423,7 +658,7 @@ export default function Patients() {
                             {rx.placed && (
                               <div style={{ marginTop: 8 }}>
                                 <div className="flex justify-between text-xs" style={{ marginBottom: 4 }}>
-                                  <span className="text-muted" style={{ fontSize: 10 }}>DPD Status:</span>
+                                  <span className="text-muted" style={{ fontSize: 10 }}>Supplier Status:</span>
                                   <span className="font-semibold text-primary" style={{ fontSize: 10 }}>{RX_STATUS_LABELS[rx.status]}</span>
                                 </div>
                                 {renderTrackBar(rx.status)}

@@ -579,7 +579,7 @@ export default function CreateOrder() {
                   <button
                     key={t}
                     className={`chip ${catalogTypeFilter === t ? 'chip-active' : ''}`}
-                    style={{ padding: '2px 8px', fontSize: 10 }}
+                    style={{ padding: '4px 10px', fontSize: 12 }}
                     onClick={() => setCatalogTypeFilter(t)}
                   >
                     {t === 'All' ? 'All' : TYPE_LABELS[t] || t}
@@ -606,7 +606,7 @@ export default function CreateOrder() {
                       >
                         <div className="catalog-item-header">
                           <span className="catalog-item-name">{item.name}</span>
-                          <span className="pill pill-neutral" style={{ fontSize: 9, padding: '1px 5px' }}>
+                          <span className="pill pill-neutral" style={{ fontSize: 12, padding: '2px 8px' }}>
                             {TYPE_LABELS[item.type] || item.type}
                           </span>
                         </div>
@@ -614,7 +614,7 @@ export default function CreateOrder() {
                         <div className="catalog-item-meta">
                           <div className="stock-indicator">
                             <span className={getStockClass(item.stock)} />
-                            <span style={{ fontSize: 11 }}>{STOCK_LABELS[item.stock]}</span>
+                            <span style={{ fontSize: 13 }}>{STOCK_LABELS[item.stock]}</span>
                           </div>
                           
                           <div className="catalog-item-prices">

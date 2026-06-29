@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Patient Portal — Holistic Health Hub</title>
+<style>
+  :root {
+    --bg-root: #070A13;
+    --bg-surface: #121829;
+    --border: #1E293B;
+    --text-primary: #F8FAFC;
+    --text-secondary: #94A3B8;
+    --text-tertiary: #64748B;
+    --color-primary: #10B981;
+    --color-primary-glow: rgba(16, 185, 129, 0.15);
+    --green-bg: rgba(16, 185, 129, 0.15);
+    --green-text: #34D399;
+    --amber-bg: rgba(245, 158, 11, 0.15);
+    --amber-text: #FBBF24;
+    --red-bg: rgba(239, 68, 68, 0.15);
+    --red-text: #F87171;
+    --info-bg: rgba(59, 130, 246, 0.15);
+    --info-text: #60A5FA;
+    --radius-lg: 12px;
+    --radius-md: 8px;
+    --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  * { box-sizing: border-box; }
+  
+  body {
+    margin: 0;
+    background: var(--bg-root);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--text-primary);
+    line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+
+  .portal-container {
+    width: 100%;
+    max-width: 580px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 30px 24px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    transition: var(--transition);
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+
+  .logo {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+    background: var(--color-primary-glow);
+    border: 1px dashed var(--color-primary);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 20px;
+    margin: 0 auto 12px;
+  }
+
+  h1 { font-size: 22px; font-weight: 600; margin: 0; }
+  .subtitle { font-size: 13px; color: var(--text-secondary); margin: 4px 0 0; }
+
+  /* Login Panel */
+  .login-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  input.fi {
+    width: 100%;
+    font-family: inherit;
+    font-size: 15px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: #090D1A;
+    color: var(--text-primary);
+    outline: none;
+    transition: var(--transition);
+  }
+
+  input.fi:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-glow);
+  }
+
+  .btn {
+    width: 100%;
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 15px;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition);
+  }
+
+  .btn:hover {
+    background: #059669;
+    box-shadow: 0 4px 12px var(--color-primary-glow);
+  }
+
+  .error-banner {
+    background: var(--red-bg);
+    color: var(--red-text);
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    display: none;
+    text-align: center;
+  }
+
+  /* Tracking Panel */
+  .tracking-panel {
+    display: none;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 20px 0 10px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+
+  /* Timeline */
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin: 16px 0;
+  }
+
+  .timeline-item {
+    display: flex;
+    gap: 14px;
+    position: relative;
+  }
+
+  .timeline-item::after {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 24px;
+    bottom: -20px;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .timeline-item:last-child::after { display: none; }
+
+  .dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--bg-root);
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    z-index: 1;
+    transition: var(--transition);
+  }
+
+  .timeline-item.done .dot {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: #fff;
+  }
+
+  .timeline-item.active .dot {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 8px var(--color-primary);
+    background: var(--bg-root);
+    color: var(--color-primary);
+  }
+
+  .timeline-content {
+    flex: 1;
+    font-size: 13px;
+  }
+
+  .timeline-content h3 { font-size: 14px; margin: 0 0 3px; font-weight: 600; }
+  .timeline-content p { margin: 0; color: var(--text-secondary); font-size: 12px; }
+
+  /* Invoice Card */
+  .invoice-card {
+    background: #090D1A;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-top: 14px;
+  }
+
+  .invoice-kv {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .invoice-kv:last-child { margin-bottom: 0; }
+
+  .pill {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 100px;
+    text-transform: uppercase;
+  }
+  .pill-amber { background: var(--amber-bg); color: var(--amber-text); }
+  .pill-green { background: var(--green-bg); color: var(--green-text); }
+
+  /* Barcode container */
+  .barcode-box {
+    text-align: center;
+    padding: 16px;
+    background: #fff;
+    color: #000;
+    border-radius: var(--radius-md);
+    margin-top: 14px;
+  }
+  .barcode {
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 20px;
+    letter-spacing: 6px;
+    border-bottom: 3px double #000;
+    display: inline-block;
+    padding: 4px 10px;
+    margin-bottom: 4px;
+  }
+
+  .logout-btn {
+    margin-top: 24px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    width: auto;
+    align-self: center;
+    transition: var(--transition);
+  }
+  .logout-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.03);
+    border-color: var(--text-secondary);
+  }
+</style>
+</head>
+<body>
+
+<div class="portal-container" id="portal">
+  <div class="header">
+    <div class="logo">HH</div>
+    <h1>Holistic Health Hub</h1>
+    <p class="subtitle" id="portal-sub">Patient Secure Prescription &amp; Intake Tracker</p>
+  </div>
+
+  <!-- Login Area -->
+  <div class="login-panel" id="loginPanel">
+    <div class="error-banner" id="errorBanner"></div>
+    <div class="form-group">
+      <label for="emailInput">Enter your email address</label>
+      <input type="email" id="emailInput" class="fi" placeholder="patient@example.com" value="marcus.v@gmail.com">
+      <p style="font-size: 11px; color: var(--text-tertiary); margin: 4px 0 0;">Demo hint: Try <b>marcus.v@gmail.com</b> or submit a new enquiry to test.</p>
+    </div>
+    <button class="btn" onclick="attemptLogin()">Log In to Portal</button>
+  </div>
+
+  <!-- Tracking Area -->
+  <div class="tracking-panel" id="trackingPanel">
+    <div id="patientWelcome" style="font-size: 15px; font-weight: 600; margin-bottom: 12px; text-align: center;">Welcome</div>
+    
+    <!-- Intake Status -->
+    <div id="intakeSection">
+      <div class="section-title">Eligibility Referral Progress</div>
+      <div class="timeline" id="intakeTimeline"></div>
+    </div>
+
+    <!-- Active Prescription & Orders -->
+    <div id="prescriptionSection">
+      <div class="section-title">Active Prescription Sub-Orders</div>
+      <div id="prescriptionTimeline"></div>
+      <div id="invoiceContainer"></div>
+    </div>
+
+    <div style="display: flex; justify-content: center;">
+      <button class="logout-btn" onclick="logout()">Exit Portal</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let activeEmail = '';
+
+  // Whitelabel Dynamic Branding Sync
+  (function() {
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token');
+    const hasToken = token === 'demo-token';
+    
+    if (hasToken) {
+      document.querySelector('.logo').textContent = 'EM';
+      document.querySelector('h1').textContent = 'East Midlands Pharmacy';
+      document.getElementById('portal-sub').textContent = 'Patient Secure Prescription & Collection Tracker';
+    }
+  })();
+  
+  function getPortalState() {
+    try {
+      const stateStr = localStorage.getItem('hhh_portal_state');
+      if (stateStr) {
+        return JSON.parse(stateStr);
+      }
+    } catch (e) {
+      console.error('Error reading portal state from localStorage:', e);
+    }
+    // Return empty fallback structure
+    return { submissions: [], orders: [], crm: [] };
+  }
+
+  function attemptLogin() {
+    const err = document.getElementById('errorBanner');
+    err.style.display = 'none';
+    const email = document.getElementById('emailInput').value.trim().toLowerCase();
+    
+    if (!email) {
+      err.textContent = 'Please enter your email.';
+      err.style.display = 'block';
+      return;
+    }
+
+    const state = getPortalState();
+    
+    // Check if patient exists in submissions or CRM
+    const submission = state.submissions.find(s => s.email.toLowerCase() === email);
+    const crmObj = state.crm.find(p => p.email.toLowerCase() === email);
+    const hasOrders = state.orders.some(o => {
+      const pObj = state.crm.find(c => c.id === o.patientId);
+      return pObj && pObj.email.toLowerCase() === email;
+    });
+
+    if (!submission && !crmObj && !hasOrders) {
+      err.textContent = 'No records found for this email. Submit an eligibility form first.';
+      err.style.display = 'block';
+      return;
+    }
+
+    activeEmail = email;
+    document.getElementById('loginPanel').style.display = 'none';
+    document.getElementById('trackingPanel').style.display = 'block';
+    
+    // Set custom welcome name
+    const pName = crmObj ? crmObj.name : (submission ? submission.name : 'Patient');
+    document.getElementById('patientWelcome').textContent = `Welcome back, ${pName}`;
+    
+    // Render timelines
+    renderTracker();
+  }
+
+  function renderTracker() {
+    if (!activeEmail) return;
+    const state = getPortalState();
+    
+    const submission = state.submissions.find(s => s.email.toLowerCase() === activeEmail);
+    const crmObj = state.crm.find(p => p.email.toLowerCase() === activeEmail);
+
+    // 1. Render Intake Referral progress
+    const intakeTimeline = document.getElementById('intakeTimeline');
+    const intakeSection = document.getElementById('intakeSection');
+    
+    if (submission) {
+      intakeSection.style.display = 'block';
+      
+      const stages = ['New', 'Records uploaded', 'Referred to clinic', 'Completed'];
+      const labels = ['Referral Enquiry Created', 'Clinical Health Files Uploaded', 'Referred to Specialist Clinic', 'Approved & Registered in CRM'];
+      const descs = [
+        'Enquiry submitted. Awaiting document scanner upload.',
+        'OCR parsed patient clinical files, verifying eligibility criteria.',
+        'Intake referred to doctor for final clinical check-off.',
+        'Approved by doctor. Patient record successfully generated.'
+      ];
+
+      const currentIdx = stages.indexOf(submission.status);
+      let html = '';
+
+      labels.forEach((label, i) => {
+        let cls = 'timeline-item';
+        if (i < currentIdx || (submission.status === 'Completed' && i === currentIdx)) {
+          cls += ' done';
+        } else if (i === currentIdx) {
+          cls += ' active';
+        }
+        
+        html += `
+          <div class="${cls}">
+            <div class="dot">${i + 1}</div>
+            <div class="timeline-content">
+              <h3>${label}</h3>
+              <p>${descs[i]}</p>
+            </div>
+          </div>
+        `;
+      });
+      intakeTimeline.innerHTML = html;
+    } else if (crmObj) {
+      // Already fully registered patient in CRM
+      intakeSection.style.display = 'block';
+      intakeTimeline.innerHTML = `
+        <div class="timeline-item done">
+          <div class="dot">✓</div>
+          <div class="timeline-content">
+            <h3>CRM Intake Completed</h3>
+            <p>Your profile is fully active. You are registered under ID: ${crmObj.id}.</p>
+          </div>
+        </div>
+      `;
+    } else {
+      intakeSection.style.display = 'none';
+    }
+
+    // 2. Render Order & Prescription Tracking
+    const prescriptionSection = document.getElementById('prescriptionSection');
+    const rxTimeline = document.getElementById('prescriptionTimeline');
+    const invoiceContainer = document.getElementById('invoiceContainer');
+    
+    // Find active orders for this patient
+    const pId = crmObj ? crmObj.id : null;
+    const activeOrder = state.orders.find(o => o.patientId === pId);
+
+    if (activeOrder) {
+      prescriptionSection.style.display = 'block';
+      
+      const isAwaiting = activeOrder.payment.status === 'sent';
+      const isPaid = activeOrder.payment.status === 'paid';
+      
+      if (isAwaiting) {
+        rxTimeline.innerHTML = `
+          <div class="timeline-item active">
+            <div class="dot">!</div>
+            <div class="timeline-content">
+              <h3>Awaiting Payment Clearance</h3>
+              <p>Your consultant doctor has issued a digital prescription. Secure payment is required to release the wholesaler shipment.</p>
+            </div>
+          </div>
+        `;
+        
+        invoiceContainer.innerHTML = `
+          <div class="invoice-card">
+            <div class="invoice-kv">
+              <span style="color: var(--text-secondary)">Payment Reference:</span>
+              <span style="font-weight: 600;">${activeOrder.payment.ref || 'Pending'}</span>
+            </div>
+            <div class="invoice-kv">
+              <span style="color: var(--text-secondary)">Billing Amount:</span>
+              <span style="font-weight: 700; color: var(--green-text);">£${activeOrder.payment.amount.toFixed(2)}</span>
+            </div>
+            <div class="invoice-kv">
+              <span style="color: var(--text-secondary)">Invoice Status:</span>
+              <span class="pill pill-amber">Awaiting Payment</span>
+            </div>
+            <button class="btn" style="margin-top: 14px;" onclick="simulatePatientPayment(${activeOrder.id})">
+              💳 Pay Invoice Securely (Worldpay Sim)
+            </button>
+          </div>
+        `;
+      } else if (isPaid) {
+        // Find if we have sub-orders and trace status
+        const subOrders = activeOrder.prescriptions;
+        
+        if (subOrders.length === 0) {
+          rxTimeline.innerHTML = `
+            <div class="timeline-item done">
+              <div class="dot">✓</div>
+              <div class="timeline-content">
+                <h3>Order Cleared</h3>
+                <p>Worldpay transaction confirmed. Prescription is being submitted to the Curaleaf wholesaler.</p>
+              </div>
+            </div>
+          `;
+          invoiceContainer.innerHTML = '';
+        } else {
+          // Render tracking statuses for the first active sub-order for simplicity
+          const rx = subOrders[0];
+          const rxStages = ['approved', 'dispatched', 'ready', 'collected'];
+          const rxLabels = ['Order Approved', 'Dispatched (In Transit)', 'Ready for Collection', 'Collected'];
+          const rxDescs = [
+            'Prescription cleared and approved by pharmacy team.',
+            `Shipped via DPD Courier. Tracking Code: ${rx.trackingNumber || 'Pending'}`,
+            'Box safely received at pharmacy. Ready for pickup.',
+            'Collected from pharmacy collection counter.'
+          ];
+
+          const curIdx = rxStages.indexOf(rx.status);
+          let rxHtml = '';
+
+          rxLabels.forEach((label, i) => {
+            let cls = 'timeline-item';
+            if (i < curIdx || (rx.status === 'collected' && i === curIdx)) {
+              cls += ' done';
+            } else if (i === curIdx) {
+              cls += ' active';
+            }
+            
+            rxHtml += `
+              <div class="${cls}">
+                <div class="dot">${i + 1}</div>
+                <div class="timeline-content">
+                  <h3>${label}</h3>
+                  <p>${rxDescs[i]}</p>
+                </div>
+              </div>
+            `;
+          });
+          
+          rxTimeline.innerHTML = rxHtml;
+
+          // Barcode check-in helper if ready
+          if (rx.status === 'ready') {
+            invoiceContainer.innerHTML = `
+              <div class="barcode-box">
+                <span style="font-size: 12px; font-weight: bold; color: var(--text-tertiary); display: block; text-transform: uppercase; margin-bottom: 6px;">Pharmacy Collection Pass</span>
+                <div class="barcode">HH-${activeOrder.id}-${rx.id}</div>
+                <p style="font-size: 11px; margin: 4px 0 0; color: #64748B;">Show this barcode to the pharmacist at the counter to collect your prescription.</p>
+              </div>
+            `;
+          } else {
+            invoiceContainer.innerHTML = '';
+          }
+        }
+      } else {
+        prescriptionSection.style.display = 'none';
+      }
+    } else {
+      prescriptionSection.style.display = 'none';
+    }
+  }
+
+  function simulatePatientPayment(orderId) {
+    // Notify portal that patient cleared the invoice
+    localStorage.setItem('hhh_patient_payment_clear', JSON.stringify({ orderId }));
+    
+    // Simulate UI loader
+    const btn = document.querySelector('.invoice-card button');
+    btn.disabled = true;
+    btn.innerHTML = 'Clearing Worldpay Transaction...';
+    
+    setTimeout(() => {
+      // Re-trigger visual layout updates
+      renderTracker();
+    }, 1000);
+  }
+
+  function logout() {
+    activeEmail = '';
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token');
+    location.href = `/specs/HHH-Portal-Gateway.html` + (token ? `?token=${token}` : '');
+  }
+
+  // Poll state changes from localStorage periodically
+  setInterval(() => {
+    if (activeEmail) {
+      renderTracker();
+    }
+  }, 1000);
+</script>
+
+</body>
+</html>

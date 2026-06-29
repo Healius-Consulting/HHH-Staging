@@ -1,5 +1,5 @@
-import { useApp, type Screen } from '../context/AppContext';
-import { Home, Users, FilePlus, Clock, Package, UserSearch } from 'lucide-react';
+import { useApp, PHARMACY, type Screen } from '../context/AppContext';
+import { Home, Users, FilePlus, Clock, Package, UserSearch, LogOut } from 'lucide-react';
 
 const MENU_ITEMS: { key: Screen; label: string; icon: React.ReactNode }[] = [
   { key: 'home',      label: 'Dashboard',     icon: <Home size={16} /> },
@@ -30,8 +30,8 @@ export default function Navigation() {
       {/* Sidebar Top Header */}
       <div className="sidebar-header">
         <div className="sidebar-brand">
-          <div className="sidebar-logo">HH</div>
-          <span>HHH × Curaleaf</span>
+          <div className="sidebar-logo">{PHARMACY.logoText}</div>
+          <span>{PHARMACY.brandName}</span>
         </div>
       </div>
 
@@ -68,6 +68,13 @@ export default function Navigation() {
             <span className="user-profile-role">Pharmacist Admin</span>
           </div>
         </div>
+        <button
+          className="btn btn-sm"
+          style={{ width: '100%', marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'rgba(239, 68, 68, 0.1)', color: '#F87171', border: '1px solid rgba(239, 68, 68, 0.2)' }}
+          onClick={() => dispatch({ type: 'SET_PORTAL_MODE', mode: 'gateway' })}
+        >
+          <LogOut size={13} /> Exit to Gateway
+        </button>
       </div>
     </aside>
   );

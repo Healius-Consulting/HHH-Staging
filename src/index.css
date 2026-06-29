@@ -13,15 +13,15 @@
   --bg-overlay: rgba(3, 7, 18, 0.7);
 
   /* Borders */
-  --border: #1E293B;
-  --border-focus: #10B981;
+  --border: #334155;
+  --border-focus: #34D399;
   --border-hover: #38BDF8;
 
   /* Text */
-  --text-primary: #F8FAFC;
-  --text-secondary: #94A3B8;
-  --text-tertiary: #64748B;
-  --text-faint: #475569;
+  --text-primary: #FFFFFF;
+  --text-secondary: #E2E8F0;
+  --text-tertiary: #94A3B8;
+  --text-faint: #64748B;
   --text-inverse: #070A13;
 
   /* Neon Green (Curaleaf / Positive) */
@@ -64,14 +64,14 @@
   --transition-base: 250ms ease;
   --transition-slow: 400ms ease;
 
-  /* Typography */
+  /* Typography - Scaled up for enhanced legibility and pharmacy/clinical environments */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-xs: 0.6875rem;    /* 11px */
-  --font-sm: 0.8125rem;    /* 13px */
-  --font-base: 0.875rem;   /* 14px */
-  --font-md: 0.9375rem;    /* 15px */
-  --font-lg: 1.125rem;     /* 18px */
-  --font-xl: 1.5rem;       /* 24px */
+  --font-xs: 0.8125rem;    /* 13px */
+  --font-sm: 0.875rem;     /* 14px */
+  --font-base: 0.9375rem;  /* 15px */
+  --font-md: 1.0625rem;    /* 17px */
+  --font-lg: 1.25rem;      /* 20px */
+  --font-xl: 1.75rem;      /* 28px */
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -319,7 +319,8 @@ body {
   animation: pageFade 0.3s ease-out;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 100%;
+  padding-bottom: 32px;
 }
 
 @keyframes pageFade {
@@ -789,7 +790,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
-  font-size: var(--font-sm);
+  font-size: var(--font-base);
 }
 
 th, td {
@@ -1309,4 +1310,50 @@ tr:hover td {
 
 .search-row input {
   padding-left: 38px;
+}
+
+/* Card Exit Transitions */
+.card-exit {
+  animation: cardExit 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes cardExit {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    max-height: 500px;
+    margin-bottom: 16px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    border-width: 1px;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.9) translateY(-10px);
+    max-height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-width: 0;
+    overflow: hidden;
+  }
+}
+
+/* Gateway cards hover effect */
+.gateway-card-hover {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.25s ease, box-shadow 0.25s ease !important;
+}
+
+.gateway-card-hover:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5) !important;
+}
+
+.gateway-card-hover.clinician:hover {
+  border-color: #3B82F6 !important;
+}
+
+.gateway-card-hover.patient:hover {
+  border-color: var(--color-primary) !important;
 }
