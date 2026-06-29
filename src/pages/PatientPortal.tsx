@@ -210,8 +210,41 @@ export default function PatientPortal() {
   const crmObj = state.crm.find(p => p.email.toLowerCase() === email);
   const pId = crmObj ? crmObj.id : null;
   
+  // Find active orders for this patient
   const activeOrder = state.orders.find(o => o.patientId === pId);
   const pName = crmObj ? crmObj.name : (submission ? submission.name : 'Patient');
+
+  // Find all orders for this patient sorted by date descending
+  const patientOrders = state.orders
+    .filter(o => o.patientId === pId)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const currentOrder = patientOrders[0];
+  const pastOrders = patientOrders.slice(1);
+
+  const getRepeatEligibility = () => {
+    if (patientOrders.length === 0) return null;
+    const latest = patientOrders[0];
+    const latestDate = new Date(latest.date);
+    const nextEligibleDate = new Date(latestDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const diffTime = nextEligibleDate.getTime() - Date.now();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) {
+      return {
+        status: 'eligible',
+        label: '🟢 Eligible for Repeat Reorder',
+        desc: `It has been ${Math.floor((Date.now() - latestDate.getTime()) / (1000 * 60 * 60 * 24))} days since your last order. You can request a repeat assessment below.`
+      };
+    } else {
+      return {
+        status: 'pending',
+        label: `⏳ Next Repeat Opens in ${diffDays} Days`,
+        desc: `Eligible from ${nextEligibleDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} (30-day clinical cycle).`
+      };
+    }
+  };
+  const eligibility = getRepeatEligibility();
 
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', paddingBottom: 60, fontFamily: 'var(--font-family)' }}>
@@ -637,15 +670,32 @@ export default function PatientPortal() {
             </div>
           </div>
 
-          {/* B. Prescribed items list */}
-          {activeOrder && activeOrder.prescriptions.length > 0 && (
+          {/* B. Repeat Eligibility Card */}
+          {eligibility && (
+            <div className="card card-surface" style={{ padding: 20, margin: 0, border: '1px solid var(--border)' }}>
+              <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 0, marginBottom: 12 }}>
+                Repeat Reorder Schedule
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: eligibility.status === 'eligible' ? 'var(--green-100)' : 'var(--amber-500)' }}>
+                  {eligibility.label}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                  {eligibility.desc}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* C. Current Ordered Prescription Summary */}
+          {currentOrder && (
             <div className="card card-surface" style={{ padding: 20, margin: 0, border: '1px solid var(--border)' }}>
               <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 0, marginBottom: 16 }}>
-                Prescribed Products
+                Current Prescription ({new Date(currentOrder.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })})
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {activeOrder.prescriptions[0].items.map(item => (
-                  <div key={item.productId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: 8 }}>
+                {currentOrder.prescriptions.flatMap(rx => rx.items).map((item, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: 8 }}>
                     <div style={{ fontSize: 12 }}>
                       <span style={{ fontWeight: 600, color: '#fff', display: 'block' }}>{item.name}</span>
                       <span style={{ color: 'var(--text-tertiary)', display: 'block', marginTop: 2 }}>Qty: {item.qty} &times; 10g/30ml</span>
@@ -656,6 +706,37 @@ export default function PatientPortal() {
               </div>
             </div>
           )}
+
+          {/* D. Past Prescriptions History Card */}
+          <div className="card card-surface" style={{ padding: 20, margin: 0, border: '1px solid var(--border)' }}>
+            <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 0, marginBottom: 16 }}>
+              Prescription History
+            </h3>
+            {pastOrders.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)', textAlign: 'center', padding: '10px 0' }}>
+                No past prescriptions on file.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {pastOrders.map(order => {
+                  const itemsSummary = order.prescriptions.flatMap(rx => rx.items).map(i => `${i.name} (x${i.qty})`).join(', ');
+                  const dateStr = new Date(order.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                  return (
+                    <div key={order.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>{dateStr}</span>
+                        <span className="pill pill-neutral" style={{ fontSize: 9 }}>Order #{order.id}</span>
+                      </div>
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 260 }} title={itemsSummary}>
+                        {itemsSummary}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Total billing: <b>{money(order.prescriptions.reduce((t, r) => t + r.items.reduce((s, i) => s + i.retail * i.qty, 0), 0))}</b></span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {/* C. Trust / NHS Info */}
           <div className="card card-surface" style={{ padding: 16, margin: 0, border: '1px solid var(--border)', background: 'transparent' }}>
