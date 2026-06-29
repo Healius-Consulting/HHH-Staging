@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Search, ChevronRight, User } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { Search, ChevronRight, User, ArrowLeft, Plus, CreditCard } from 'lucide-react';
+import { useApp, money, orderRevenue } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
 
 /* ── Unified patient row model ── */
@@ -14,11 +14,21 @@ interface UnifiedPatient {
   orders: PatientOrder[];
 }
 
+const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Ready'] as const;
+
+function stepsCompleted(status: string): number {
+  switch (status) {
+    case 'awaiting-approval': return 0;
+    case 'approved':          return 1;
+    case 'dispatched':        return 2;
+    case 'ready':             return 3;
+    default:                  return -1;
+  }
+}
+
 /* ── Status derivation ── */
 function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
-  // 1. Check orders (highest-priority signals first)
   if (p.orders.length > 0) {
-    // Ready for collection: paid + any Rx ready
     if (
       p.orders.some(
         o =>
@@ -28,7 +38,6 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
     )
       return { label: 'Ready for collection', pill: 'pill-green' };
 
-    // In fulfilment: paid but not ready yet
     if (
       p.orders.some(
         o =>
@@ -38,11 +47,9 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
     )
       return { label: 'In fulfilment', pill: 'pill-info' };
 
-    // Awaiting payment
     if (p.orders.some(o => o.payment.status === 'sent'))
       return { label: 'Awaiting payment', pill: 'pill-amber' };
 
-    // Order in progress (has items, payment not yet sent)
     if (
       p.orders.some(
         o =>
@@ -53,7 +60,6 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
       return { label: 'Order in progress', pill: 'pill-info' };
   }
 
-  // 2. Check submission status
   if (p.submission) {
     switch (p.submission.status) {
       case 'Referred to clinic':
@@ -67,14 +73,11 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
     }
   }
 
-  // 3. CRM patient with no orders or submissions
   if (p.crmPatient) return { label: 'Referred', pill: 'pill-green' };
 
-  // 4. Fallback
   return { label: '—', pill: 'pill-neutral' };
 }
 
-/* ── Initials helper ── */
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 0) return '?';
@@ -82,9 +85,14 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+function fmtDate(d: Date | string) {
+  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export default function Patients() {
   const { state, dispatch } = useApp();
   const [search, setSearch] = useState('');
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
 
   /* ── Build merged patient list ── */
   const patients = useMemo(() => {
@@ -123,7 +131,6 @@ export default function Patients() {
       }
     }
 
-    // Sort alphabetically
     return Array.from(map.values()).sort((a, b) =>
       a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }),
     );
@@ -140,33 +147,238 @@ export default function Patients() {
     );
   }, [patients, search]);
 
-  /* ── Navigate on click ── */
-  const handleClick = (p: UnifiedPatient) => {
-    const status = deriveStatus(p);
+  const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
 
-    // If the patient has active orders, go to the review screen for the most recent one
-    if (
-      p.orders.length > 0 &&
-      ['Ready for collection', 'In fulfilment', 'Awaiting payment', 'Order in progress'].includes(
-        status.label,
-      )
-    ) {
-      const latestOrder = p.orders[p.orders.length - 1];
-      dispatch({ type: 'SET_ACTIVE_ORDER', orderId: latestOrder.id });
-      dispatch({ type: 'SET_SCREEN', screen: 'review' });
-      return;
+  const handleCreateOrder = (patient: UnifiedPatient) => {
+    // If patient is a CRM patient, create order directly. Otherwise, add to CRM first
+    let finalPatientId = patient.crmPatient?.id || null;
+    
+    if (!finalPatientId && patient.submission) {
+      // Simulate adding to CRM if they are not there yet
+      dispatch({ type: 'EMAIL_REFERRAL', subId: patient.submission.id });
+      // Use next expected ID
+      finalPatientId = 'P-' + state.nextIds.patient;
     }
 
-    // If the patient has a submission, go to referrals
-    if (p.submission) {
-      dispatch({ type: 'SET_SCREEN', screen: 'referrals' });
-      return;
-    }
-
-    // CRM patient with no orders — go to orders (could create one)
-    dispatch({ type: 'SET_SCREEN', screen: 'orders' });
+    dispatch({ type: 'NEW_ORDER', patientId: finalPatientId || undefined });
+    dispatch({ type: 'ADD_TOAST', message: `Created new order draft linked to ${patient.name}`, toastType: 'success' });
+    dispatch({ type: 'SET_SCREEN', screen: 'create' });
   };
 
+  const renderTrackBar = (status: string) => {
+    const done = stepsCompleted(status);
+    const progressWidth = done >= 0 ? done * 25 : 0;
+    return (
+      <div className="orders-timeline" style={{ margin: '12px 0 6px' }}>
+        <div 
+          className="orders-timeline-progress" 
+          style={{ width: `${progressWidth}%` }} 
+        />
+        {TRACK_STEPS.map((label, i) => {
+          let cls = 'timeline-step';
+          if (i < done || (status === 'ready' && i <= done)) cls += ' done';
+          else if (i === done && status !== 'ready') cls += ' active';
+          return (
+            <div key={label} className={cls}>
+              <div className="timeline-dot" style={{ width: 18, height: 18, fontSize: 8 }}>
+                {i + 1}
+              </div>
+              <span className="timeline-label" style={{ fontSize: 9 }}>{label}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── DETAILED VIEW ──
+  if (selectedPatient) {
+    const status = deriveStatus(selectedPatient);
+    return (
+      <div className="page-body">
+        {/* Back navigation */}
+        <button 
+          className="btn" 
+          onClick={() => setSelectedPatientId(null)}
+          style={{ marginBottom: 16, gap: 6 }}
+        >
+          <ArrowLeft size={14} /> Back to Patients
+        </button>
+
+        {/* Profile Header Card */}
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="flex items-center gap-md flex-wrap" style={{ justifyContent: 'space-between' }}>
+            <div className="flex items-center gap-md">
+              <div className="avatar" style={{ width: 50, height: 50, fontSize: 18 }}>{initials(selectedPatient.name)}</div>
+              <div>
+                <h3 className="font-bold" style={{ fontSize: 18, margin: 0 }}>{selectedPatient.name}</h3>
+                <p className="text-xs text-muted" style={{ margin: '2px 0 0' }}>
+                  {selectedPatient.email} &middot; {selectedPatient.mobile}
+                </p>
+                {selectedPatient.crmPatient?.address && (
+                  <p className="text-xs text-faint" style={{ margin: '2px 0 0' }}>
+                    {selectedPatient.crmPatient.address}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-md">
+              <span className={`pill ${status.pill}`} style={{ fontSize: 11, padding: '6px 12px' }}>
+                {status.label}
+              </span>
+              <button 
+                className="btn btn-primary btn-sm"
+                onClick={() => handleCreateOrder(selectedPatient)}
+              >
+                <Plus size={14} /> Create Order
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Split Grid */}
+        <div className="flex gap-lg flex-wrap" style={{ alignItems: 'flex-start' }}>
+          
+          {/* LEFT COLUMN: Order History */}
+          <div style={{ flex: 1, minWidth: 320 }}>
+            <h3 className="card-title" style={{ marginBottom: 12 }}>Order & Prescription History</h3>
+            
+            {selectedPatient.orders.length === 0 ? (
+              <div className="empty-state card">
+                <div className="empty-icon"><CreditCard size={20} /></div>
+                No orders placed yet. Click "Create Order" to build a prescription.
+              </div>
+            ) : (
+              [...selectedPatient.orders]
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                .map(order => (
+                  <div className="card" key={order.id} style={{ marginBottom: 16 }}>
+                    <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
+                      <span className="font-semibold text-sm">Order #{order.id}</span>
+                      <span className="text-xs text-muted">{fmtDate(order.date)}</span>
+                    </div>
+
+                    <div className="kv-line" style={{ padding: '4px 0' }}>
+                      <span className="text-xs text-muted">Worldpay Status</span>
+                      <span className={`pill ${
+                        order.payment.status === 'paid' ? 'pill-green' : 
+                        order.payment.status === 'sent' ? 'pill-amber' : 'pill-neutral'
+                      }`} style={{ fontSize: 9 }}>
+                        {order.payment.status === 'paid' ? 'Paid' : 
+                         order.payment.status === 'sent' ? 'Awaiting Payment' : 'Draft'}
+                      </span>
+                    </div>
+
+                    <div className="kv-line" style={{ padding: '4px 0', borderBottom: '1px solid var(--border)', marginBottom: 8 }}>
+                      <span className="text-xs text-muted">Total Charged</span>
+                      <span className="font-semibold text-sm">{money(orderRevenue(order))}</span>
+                    </div>
+
+                    {/* Prescriptions inside this order */}
+                    {order.prescriptions.map(rx => (
+                      <div key={rx.id} style={{ background: 'var(--bg-surface)', padding: 10, borderRadius: 8, marginTop: 8 }}>
+                        <div className="flex justify-between text-xs" style={{ marginBottom: 6 }}>
+                          <span className="font-semibold text-green">Rx #{rx.id} ({rx.prescriber || 'No prescriber'})</span>
+                          {rx.poRef && <span className="text-faint">{rx.poRef}</span>}
+                        </div>
+
+                        {/* Items list */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+                          {rx.items.map((item, i) => (
+                            <div key={i} className="flex justify-between text-xs text-muted">
+                              <span>{item.name} &times; {item.qty}</span>
+                              <span>{money(item.retail * item.qty + (item.fee || 0))}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Stepper tracking */}
+                        {rx.placed && renderTrackBar(rx.status)}
+                      </div>
+                    ))}
+                  </div>
+                ))
+            )}
+          </div>
+
+          {/* RIGHT COLUMN: Referral Details / Intake logs */}
+          <div style={{ width: 340, minWidth: 300 }}>
+            <h3 className="card-title" style={{ marginBottom: 12 }}>CRM Referral Records</h3>
+            
+            {selectedPatient.submission ? (
+              <div className="card">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  
+                  <div>
+                    <span className="text-xs text-faint" style={{ display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Medical Condition</span>
+                    <span className="text-sm font-semibold text-primary">{selectedPatient.submission.condition}</span>
+                  </div>
+
+                  <div>
+                    <span className="text-xs text-faint" style={{ display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Clinic Referral Ref</span>
+                    <span className="text-sm font-semibold text-primary">{selectedPatient.submission.clinicRef || 'Pending assignment'}</span>
+                  </div>
+
+                  <div className="divider" style={{ margin: '4px 0' }} />
+
+                  <div className="kv-line">
+                    <span className="text-xs text-muted">Tried ≥2 treatments</span>
+                    <span className={`text-xs font-semibold ${selectedPatient.submission.tried2 ? 'text-green' : 'text-red'}`}>
+                      {selectedPatient.submission.tried2 ? 'Yes' : 'No'}
+                    </span>
+                  </div>
+
+                  <div className="kv-line">
+                    <span className="text-xs text-muted">Psychosis exclusion</span>
+                    <span className={`text-xs font-semibold ${selectedPatient.submission.psychExclusion ? 'text-red' : 'text-green'}`}>
+                      {selectedPatient.submission.psychExclusion ? 'Yes (Excluded)' : 'No (Passed)'}
+                    </span>
+                  </div>
+
+                  <div className="divider" style={{ margin: '4px 0' }} />
+
+                  <div className="kv-line">
+                    <span className="text-xs text-muted">Intake consent</span>
+                    <span className="text-xs font-semibold">
+                      {selectedPatient.submission.consentReferral ? '✓ Referral' : ''} {selectedPatient.submission.consentShare ? '✓ Share' : ''}
+                    </span>
+                  </div>
+
+                  <div className="kv-line">
+                    <span className="text-xs text-muted">Submitted date</span>
+                    <span className="text-xs">{fmtDate(selectedPatient.submission.submittedAt)}</span>
+                  </div>
+
+                  {/* Processing log */}
+                  {selectedPatient.submission.calls.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <span className="text-xs font-bold text-muted" style={{ display: 'block', marginBottom: 4 }}>Call History Logs</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg-surface)', padding: 8, borderRadius: 6 }}>
+                        {selectedPatient.submission.calls.map((call, i) => (
+                          <div key={i} className="text-xs text-muted">
+                            📞 Call logged &middot; {fmtDate(call.ts)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+            ) : (
+              <div className="card text-muted text-sm text-center" style={{ padding: '24px 12px' }}>
+                💡 Patient added directly to CRM. No eligibility submission history available.
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // ── LIST VIEW ──
   return (
     <div className="page-body">
       <h2 className="page-title">Patients</h2>
@@ -206,8 +418,8 @@ export default function Patients() {
             <div
               key={p.id}
               className="patient-row"
-              onClick={() => handleClick(p)}
-              style={{ cursor: 'pointer' }}
+              onClick={() => setSelectedPatientId(p.id)}
+              style={{ cursor: 'pointer', transition: 'background var(--transition-fast)' }}
             >
               <div className="flex items-center gap-md" style={{ flex: 1 }}>
                 <div className="avatar">{initials(p.name)}</div>

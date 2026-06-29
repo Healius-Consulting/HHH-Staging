@@ -4,9 +4,9 @@ import { useApp, money, rxRevenue, type PatientOrder } from '../context/AppConte
 export default function AwaitingPayment() {
   const { state, dispatch } = useApp();
 
-  /* ── Filter orders with sent or paid payment status ── */
+  /* ── Filter orders with sent or paid payment status (that haven't been submitted to Curaleaf yet) ── */
   const matchingOrders = state.orders.filter(
-    o => o.payment.status === 'sent' || o.payment.status === 'paid'
+    o => o.payment.status === 'sent' || (o.payment.status === 'paid' && o.prescriptions.some(rx => !rx.placed))
   );
 
   const patientName = (patientId: string | null) => {
@@ -16,6 +16,19 @@ export default function AwaitingPayment() {
 
   const handlePlaceOrder = (orderId: number) => {
     dispatch({ type: 'PLACE_ORDER', orderId });
+  };
+
+  const handleSimulatePaymentClear = (orderId: number) => {
+    dispatch({ type: 'CONFIRM_PAYMENT', orderId });
+    dispatch({ type: 'PLACE_ORDER', orderId });
+
+    const orderObj = state.orders.find(o => o.id === orderId);
+    const name = orderObj?.patientId ? state.crm.find(p => p.id === orderObj.patientId)?.name : 'Marcus Vance';
+    dispatch({ 
+      type: 'ADD_TOAST', 
+      message: `Worldpay Webhook: Payment cleared instantly for ${name} (£${orderObj?.payment.amount.toFixed(2)}). Order submitted directly to Curaleaf.`, 
+      toastType: 'success' 
+    });
   };
 
   const renderCard = (order: PatientOrder) => {
@@ -89,9 +102,20 @@ export default function AwaitingPayment() {
 
         {/* ── Status / Actions ── */}
         {isSent && (
-          <div className="banner-amber flex items-center gap-sm" style={{ marginTop: 8 }}>
-            <Clock size={16} />
-            <span className="text-sm">Waiting for patient to complete payment via Worldpay link.</span>
+          <div className="flex flex-col gap-sm" style={{ marginTop: 8 }}>
+            <div className="banner-amber flex items-center gap-sm">
+              <Clock size={16} />
+              <span className="text-sm">
+                Waiting for patient to complete payment via Worldpay link. Clears automatically in 7 seconds.
+              </span>
+            </div>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={() => handleSimulatePaymentClear(order.id)}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              ⚡ Simulate Webhook Clearance (Instant)
+            </button>
           </div>
         )}
 
@@ -121,7 +145,7 @@ export default function AwaitingPayment() {
     <div className="page-body">
       <h2 className="page-title">Awaiting payment</h2>
       <p className="page-subtitle">
-        Orders with payment links sent to patients. Confirm payment from the Dashboard phone simulator.
+        Orders with payment links sent to patients. Payment clearing automatically redirects orders directly to Curaleaf fulfillment.
       </p>
 
       {matchingOrders.length === 0 ? (

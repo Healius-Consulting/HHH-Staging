@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useEffect, useRef, type ReactNode } from 'react';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -521,6 +521,30 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const scheduledRef = useRef<Set<number>>(new Set());
+
+  // Automated Payment Clearance & Curaleaf Placement Simulator
+  useEffect(() => {
+    state.orders.forEach(order => {
+      if (order.payment.status === 'sent' && !scheduledRef.current.has(order.id)) {
+        scheduledRef.current.add(order.id);
+
+        setTimeout(() => {
+          dispatch({ type: 'CONFIRM_PAYMENT', orderId: order.id });
+          dispatch({ type: 'PLACE_ORDER', orderId: order.id });
+
+          const patientObj = state.crm.find(p => p.id === order.patientId);
+          const patientNameStr = patientObj?.name ?? 'Marcus Vance';
+
+          dispatch({
+            type: 'ADD_TOAST',
+            message: `Worldpay Webhook: Payment cleared automatically for ${patientNameStr} (£${order.payment.amount.toFixed(2)}). Order submitted directly to Curaleaf.`,
+            toastType: 'success'
+          });
+        }, 7000); // auto-clear after 7 seconds
+      }
+    });
+  }, [state.orders, state.crm]);
 
   // Simulated status advancement timer (for demo)
   useEffect(() => {
