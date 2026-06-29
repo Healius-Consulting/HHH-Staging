@@ -58,16 +58,24 @@ export default function Orders() {
 
   const renderTrackBar = (status: RxStatus) => {
     const done = stepsCompleted(status);
+    const progressWidth = done >= 0 ? done * 25 : 0;
     return (
-      <div className="track-bar">
+      <div className="orders-timeline">
+        {/* Active progress fill line */}
+        <div 
+          className="orders-timeline-progress" 
+          style={{ width: `${progressWidth}%` }} 
+        />
         {TRACK_STEPS.map((label, i) => {
-          let cls = 'track-step';
+          let cls = 'timeline-step';
           if (i < done || (status === 'ready' && i <= done)) cls += ' done';
-          else if (i === done && status !== 'ready') cls += ' active tracking-node';
+          else if (i === done && status !== 'ready') cls += ' active';
           return (
-            <div key={label} className={cls} style={{ position: 'relative' }}>
-              <div className="bar" />
-              <span>{label}</span>
+            <div key={label} className={cls}>
+              <div className="timeline-dot">
+                {i + 1}
+              </div>
+              <span className="timeline-label">{label}</span>
             </div>
           );
         })}

@@ -214,10 +214,25 @@ export default function Dashboard() {
         </div>
 
         {/* ── Simulated Patient Phone Mockup ── */}
-        <div className="flex flex-col items-center" style={{ gap: 10 }}>
+        <div className="flex flex-col items-center" style={{ gap: 10, maxWidth: 310 }}>
           <div className="text-xs text-muted font-bold flex items-center gap-xs">
             <Smartphone size={12} className="text-green" />
             SIMULATED PATIENT SMARTPHONE
+          </div>
+
+          <div 
+            style={{ 
+              background: 'var(--green-50)', 
+              borderLeft: '4px solid var(--green-500)', 
+              padding: '10px 12px', 
+              borderRadius: '8px', 
+              fontSize: '11px', 
+              lineHeight: '1.4', 
+              color: 'var(--green-700)',
+              textAlign: 'left'
+            }}
+          >
+            💡 <strong>Demo Helper:</strong> This simulates the patient's phone. When you link a patient and click <strong>"Send Payment Link"</strong> in the workspace, a Worldpay notification slides down here. Tap it and swipe to pay to simulate a real payment webhook callback!
           </div>
 
           <div className="phone-frame">
