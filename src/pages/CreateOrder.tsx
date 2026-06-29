@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Upload, Plus, Minus, X, FileText, Send, CreditCard, User, CheckCircle } from 'lucide-react';
 import {
   useApp,
@@ -21,6 +22,39 @@ export default function CreateOrder() {
   const patient = activeOrder?.patientId
     ? state.crm.find(c => c.id === activeOrder.patientId) ?? null
     : null;
+
+  /* ── Prescription scan local progress ── */
+  const [scanningRxId, setScanningRxId] = useState<number | null>(null);
+  const [scanProgress, setScanProgress] = useState(0);
+
+  const startScan = (rxId: number) => {
+    setScanningRxId(rxId);
+    setScanProgress(0);
+    dispatch({ type: 'ADD_TOAST', message: 'Analyzing prescription PDF metadata...', toastType: 'info' });
+  };
+
+  useEffect(() => {
+    if (scanningRxId === null || !activeOrder) return;
+    const interval = setInterval(() => {
+      setScanProgress(prev => {
+        const next = prev + Math.floor(Math.random() * 14) + 6;
+        if (next >= 100) {
+          clearInterval(interval);
+          dispatch({
+            type: 'SET_RX_COPY',
+            orderId: activeOrder.id,
+            rxId: scanningRxId,
+            fileName: `prescription_scan_${scanningRxId}.pdf`,
+          });
+          dispatch({ type: 'ADD_TOAST', message: `Prescription scan file_scan_${scanningRxId}.pdf verified & attached.`, toastType: 'success' });
+          setScanningRxId(null);
+          return 100;
+        }
+        return next;
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [scanningRxId, activeOrder, dispatch]);
 
   /* ── Initials helper ── */
   const initials = (name: string) =>
@@ -95,11 +129,15 @@ export default function CreateOrder() {
                   value=""
                   onChange={e => {
                     if (e.target.value) {
+                      const p = state.crm.find(c => c.id === e.target.value);
                       dispatch({
                         type: 'SET_ORDER_PATIENT',
                         orderId: activeOrder.id,
                         patientId: e.target.value,
                       });
+                      if (p) {
+                        dispatch({ type: 'ADD_TOAST', message: `Linked patient "${p.name}" to prescription.`, toastType: 'success' });
+                      }
                     }
                   }}
                 >
@@ -144,16 +182,11 @@ export default function CreateOrder() {
 
                   {/* Upload zone */}
                   <div
-                    className={`upload-zone${rx.copyFileName ? ' uploaded' : ''}`}
-                    style={{ marginBottom: 10 }}
+                    className={`upload-zone${rx.copyFileName ? ' uploaded' : ''} ${scanningRxId === rx.id ? 'scanning' : ''}`}
+                    style={{ marginBottom: 10, cursor: (rx.copyFileName || scanningRxId === rx.id) ? 'default' : 'pointer' }}
                     onClick={() => {
-                      if (!rx.copyFileName) {
-                        dispatch({
-                          type: 'SET_RX_COPY',
-                          orderId: activeOrder.id,
-                          rxId: rx.id,
-                          fileName: `prescription_scan_${rx.id}.pdf`,
-                        });
+                      if (!rx.copyFileName && scanningRxId === null) {
+                        startScan(rx.id);
                       }
                     }}
                   >
@@ -165,7 +198,11 @@ export default function CreateOrder() {
                       )}
                     </div>
                     <div>
-                      {rx.copyFileName ? (
+                      {scanningRxId === rx.id ? (
+                        <span className="text-sm text-green font-semibold">
+                          Scanning: {scanProgress}%
+                        </span>
+                      ) : rx.copyFileName ? (
                         <span className="text-sm text-green font-semibold">
                           {rx.copyFileName}
                         </span>
@@ -176,6 +213,21 @@ export default function CreateOrder() {
                       )}
                     </div>
                   </div>
+
+                  {/* Interactive scanning loader */}
+                  {scanningRxId === rx.id && (
+                    <div className="scanner-container scanning" style={{ marginBottom: 10 }}>
+                      <div className="scanner-laser" />
+                      <div className="text-xs font-semibold text-green" style={{ marginBottom: 4 }}>
+                        Reading paper copy & matching signatures...
+                      </div>
+                      <div className="scan-progress-wrapper">
+                        <div className="scan-progress-track">
+                          <div className="scan-progress-fill" style={{ width: `${scanProgress}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Prescriber */}
                   <input
@@ -409,6 +461,7 @@ export default function CreateOrder() {
                       style={{ width: '100%' }}
                       onClick={() => {
                         dispatch({ type: 'SEND_PAYMENT_LINK', orderId: activeOrder.id });
+                        dispatch({ type: 'ADD_TOAST', message: 'Worldpay payment link generated & sent to patient.', toastType: 'success' });
                         dispatch({ type: 'SET_SCREEN', screen: 'review' });
                       }}
                     >

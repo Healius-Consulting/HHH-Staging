@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useApp, PHARMACY, type SubmissionStatus, type EligibilitySubmission } from '../context/AppContext';
 import { Upload, Phone, Send, CheckCircle, FileText, LinkIcon, Clock } from 'lucide-react';
 
@@ -36,8 +37,51 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
   const { dispatch } = useApp();
   const currentIdx = STAGES.indexOf(sub.status);
 
+  // Scanning progress states
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+
+  const handleUpload = () => {
+    setIsScanning(true);
+    setScanProgress(0);
+    dispatch({ type: 'ADD_TOAST', message: `Initializing health records scan for ${sub.name}...`, toastType: 'info' });
+  };
+
+  useEffect(() => {
+    if (!isScanning) return;
+    const interval = setInterval(() => {
+      setScanProgress(prev => {
+        const next = prev + Math.floor(Math.random() * 12) + 6;
+        if (next >= 100) {
+          clearInterval(interval);
+          setIsScanning(false);
+          dispatch({ type: 'UPLOAD_RECORDS', subId: sub.id });
+          dispatch({ type: 'ADD_TOAST', message: `OCR parsed 4 medical documents for ${sub.name}`, toastType: 'success' });
+          return 100;
+        }
+        return next;
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [isScanning, sub.id, sub.name, dispatch]);
+
+  const handleReferClinic = () => {
+    dispatch({ type: 'REFER_TO_CLINIC', subId: sub.id });
+    dispatch({ type: 'ADD_TOAST', message: `Referred ${sub.name} to clinic. Clinic Reference generated.`, toastType: 'success' });
+  };
+
+  const handleEmailConfirm = () => {
+    dispatch({ type: 'EMAIL_REFERRAL', subId: sub.id });
+    dispatch({ type: 'ADD_TOAST', message: `Referral confirmed. CRM profile created for ${sub.name}`, toastType: 'success' });
+  };
+
+  const handleLogCall = () => {
+    dispatch({ type: 'LOG_CALL', subId: sub.id });
+    dispatch({ type: 'ADD_TOAST', message: `Call logged for patient ${sub.name}`, toastType: 'info' });
+  };
+
   return (
-    <div className="card">
+    <div className="card" style={{ transition: 'all 0.3s ease' }}>
       {/* Header */}
       <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
         <span className="font-semibold">{sub.name}</span>
@@ -86,21 +130,37 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
         })}
       </div>
 
+      {/* Interactive scanning container */}
+      {isScanning && (
+        <div className="scanner-container scanning" style={{ marginTop: 12, marginBottom: 12 }}>
+          <div className="scanner-laser" />
+          <div className="text-xs font-semibold text-green" style={{ marginBottom: 6 }}>
+            OCR scanning records & extracting medical data...
+          </div>
+          <div className="scan-progress-wrapper">
+            <div className="scan-progress-track">
+              <div className="scan-progress-fill" style={{ width: `${scanProgress}%` }} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="flex gap-sm flex-wrap" style={{ marginTop: 10 }}>
         {!sub.recordsUploaded && (
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => dispatch({ type: 'UPLOAD_RECORDS', subId: sub.id })}
+            disabled={isScanning}
+            onClick={handleUpload}
           >
-            <Upload size={13} /> Upload health records
+            <Upload size={13} /> {isScanning ? `Scanning ${scanProgress}%...` : 'Upload health records'}
           </button>
         )}
 
         {sub.recordsUploaded && !sub.clinicRef && (
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => dispatch({ type: 'REFER_TO_CLINIC', subId: sub.id })}
+            onClick={handleReferClinic}
           >
             <Send size={13} /> Refer to Curaleaf Clinic
           </button>
@@ -109,7 +169,7 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
         {sub.clinicRef && !sub.emailedAt && (
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => dispatch({ type: 'EMAIL_REFERRAL', subId: sub.id })}
+            onClick={handleEmailConfirm}
           >
             <Send size={13} /> Email patient (confirm referral)
           </button>
@@ -117,7 +177,7 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
 
         <button
           className="btn btn-sm"
-          onClick={() => dispatch({ type: 'LOG_CALL', subId: sub.id })}
+          onClick={handleLogCall}
         >
           <Phone size={13} /> Log call
         </button>
@@ -146,7 +206,7 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
             )}
             {sub.calls.map((c, i) => (
               <div key={i} className="flex items-center gap-sm">
-                <Phone size={12} /> Call logged — {fmtDate(c.ts)} at {fmtTime(c.ts)}
+                <Phone size={12} /> Call logged — {fmtDate(new Date(c.ts))} at {fmtTime(new Date(c.ts))}
               </div>
             ))}
             {sub.clinicRef && (
@@ -156,7 +216,7 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
             )}
             {sub.emailedAt && (
               <div className="flex items-center gap-sm">
-                <CheckCircle size={12} /> Confirmation email sent — {fmtDate(sub.emailedAt)} at {fmtTime(sub.emailedAt)}
+                <CheckCircle size={12} /> Confirmation email sent — {fmtDate(new Date(sub.emailedAt))} at {fmtTime(new Date(sub.emailedAt))}
               </div>
             )}
           </div>

@@ -88,6 +88,12 @@ export interface EligibilitySubmission {
 
 export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'orders' | 'patients';
 
+export interface Toast {
+  id: string;
+  message: string;
+  type: 'success' | 'info' | 'warning' | 'error';
+}
+
 export interface AppState {
   screen: Screen;
   catalogue: CatalogueItem[];
@@ -95,6 +101,7 @@ export interface AppState {
   submissions: EligibilitySubmission[];
   orders: PatientOrder[];
   activeOrderId: number | null;
+  toasts: Toast[];
   nextIds: {
     patient: number;
     rx: number;
@@ -198,6 +205,9 @@ export type Action =
   // Submission to Curaleaf (simulated)
   | { type: 'PLACE_ORDER'; orderId: number }
   | { type: 'ADVANCE_RX_STATUS'; orderId: number; rxId: number }
+  // Toasts
+  | { type: 'ADD_TOAST'; message: string; toastType?: 'success' | 'info' | 'warning' | 'error' }
+  | { type: 'REMOVE_TOAST'; id: string }
   ;
 
 /* ═══════════════════════════════════════════════════════════
@@ -291,6 +301,7 @@ const initialState: AppState = {
   submissions: buildSeedSubmissions(),
   orders: seed.orders,
   activeOrderId: 1,
+  toasts: [],
   nextIds: { patient: 2000, rx: seed.nextRx, order: 3, submission: 5, clinic: 5201, invoice: 4072 },
 };
 
@@ -451,18 +462,45 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'ADVANCE_RX_STATUS': {
       const statusOrder: RxStatus[] = ['draft', 'awaiting-approval', 'approved', 'dispatched', 'ready'];
-      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => {
-        const idx = statusOrder.indexOf(r.status);
-        if (idx < statusOrder.length - 1) {
-          const nextStatus = statusOrder[idx + 1];
-          return {
-            ...r,
-            status: nextStatus,
-            trackingNumber: nextStatus === 'dispatched' ? 'DPD' + Math.random().toString(36).substring(2, 10).toUpperCase() : r.trackingNumber,
-          };
+      const order = state.orders.find(o => o.id === action.orderId);
+      const rx = order?.prescriptions.find(r => r.id === action.rxId);
+      if (!rx) return state;
+      const idx = statusOrder.indexOf(rx.status);
+      if (idx < statusOrder.length - 1) {
+        const nextStatus = statusOrder[idx + 1];
+        const nextState = mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+          ...r,
+          status: nextStatus,
+          trackingNumber: nextStatus === 'dispatched' ? 'DPD' + Math.random().toString(36).substring(2, 10).toUpperCase() : r.trackingNumber,
+        })));
+
+        let msg = '';
+        const poRefStr = rx.poRef || `PO-${88010 + action.orderId}-${rx.id}`;
+        if (nextStatus === 'approved') {
+          msg = `Curaleaf approved prescription ${poRefStr}`;
+        } else if (nextStatus === 'dispatched') {
+          msg = `Curaleaf order ${poRefStr} dispatched via DPD`;
+        } else if (nextStatus === 'ready') {
+          msg = `Curaleaf order ${poRefStr} is ready for collection`;
         }
-        return r;
-      }));
+
+        if (msg) {
+          const newToast = { id: Date.now().toString() + Math.random(), message: msg, type: 'info' as const };
+          nextState.toasts = [...nextState.toasts, newToast];
+        }
+        return nextState;
+      }
+      return state;
+    }
+
+    case 'ADD_TOAST': {
+      const id = Date.now().toString() + Math.random();
+      const newToast = { id, message: action.message, type: action.toastType || 'info' };
+      return { ...state, toasts: [...state.toasts, newToast] };
+    }
+
+    case 'REMOVE_TOAST': {
+      return { ...state, toasts: state.toasts.filter(t => t.id !== action.id) };
     }
 
     default:

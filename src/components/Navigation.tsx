@@ -37,7 +37,10 @@ export default function Navigation() {
           {tab.icon}
           {tab.label}
           {badges[tab.key] && (
-            <span className={`tab-badge ${badges[tab.key]!.warn ? 'warn' : ''}`}>
+            <span 
+              key={badges[tab.key]!.count} 
+              className={`tab-badge ${badges[tab.key]!.warn ? 'warn' : ''} badge-pop`}
+            >
               {badges[tab.key]!.count}
             </span>
           )}

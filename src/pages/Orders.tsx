@@ -63,10 +63,10 @@ export default function Orders() {
         {TRACK_STEPS.map((label, i) => {
           let cls = 'track-step';
           if (i < done || (status === 'ready' && i <= done)) cls += ' done';
-          else if (i === done && status !== 'ready') cls += ' active';
+          else if (i === done && status !== 'ready') cls += ' active tracking-node';
           return (
-            <div key={label} className={cls}>
-              <div className="track-dot" />
+            <div key={label} className={cls} style={{ position: 'relative' }}>
+              <div className="bar" />
               <span>{label}</span>
             </div>
           );

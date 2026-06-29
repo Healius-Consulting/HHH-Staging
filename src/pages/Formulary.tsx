@@ -44,9 +44,7 @@ export default function Formulary() {
     // If no active order, create one
     if (!order) {
       dispatch({ type: 'NEW_ORDER' });
-      // After dispatch the new order id will be state.nextIds.order (current value before dispatch)
       orderId = state.nextIds.order;
-      // The new order will have one blank Rx with id = state.nextIds.rx
       const rxId = state.nextIds.rx;
       const lineItem: LineItem = {
         productId: item.id,
@@ -59,6 +57,7 @@ export default function Formulary() {
       // Dispatch after a tick so new order is created
       setTimeout(() => {
         dispatch({ type: 'ADD_ITEM_TO_RX', orderId: orderId!, rxId, item: lineItem });
+        dispatch({ type: 'ADD_TOAST', message: `Created new order draft with "${item.name}".`, toastType: 'success' });
         dispatch({ type: 'SET_SCREEN', screen: 'create' });
       }, 0);
       return;
@@ -70,7 +69,7 @@ export default function Formulary() {
 
     // Check if product already exists in the target Rx
     if (rx.items.some(li => li.productId === item.id)) {
-      alert(`"${item.name}" is already in this prescription.`);
+      dispatch({ type: 'ADD_TOAST', message: `"${item.name}" is already in this prescription.`, toastType: 'warning' });
       return;
     }
 
@@ -84,6 +83,7 @@ export default function Formulary() {
     };
 
     dispatch({ type: 'ADD_ITEM_TO_RX', orderId: order.id, rxId: rx.id, item: lineItem });
+    dispatch({ type: 'ADD_TOAST', message: `Added "${item.name}" to prescription draft.`, toastType: 'success' });
     dispatch({ type: 'SET_SCREEN', screen: 'create' });
   };
 
