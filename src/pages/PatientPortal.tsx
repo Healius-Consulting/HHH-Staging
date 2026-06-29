@@ -387,6 +387,63 @@ export default function PatientPortal() {
         </div>
       )}
 
+      {/* 3. Patient Care & Services */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 0, marginBottom: 16 }}>
+          Patient Care &amp; Service Requests
+        </h3>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+          Need a repeat prescription copy, or want to schedule a clinical consultation check-up? Use the quick actions below to alert your pharmacy.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <button
+            className="btn btn-sm"
+            disabled={!crmObj}
+            style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', justifyContent: 'center', height: 'auto', textAlign: 'center' }}
+            onClick={() => {
+              if (!crmObj) return;
+              dispatch({
+                type: 'LOG_INTERACTION',
+                patientId: crmObj.id,
+                interactionType: 'Repeat Requested',
+                detail: 'Patient requested repeat prescription copy of previous order via patient portal.'
+              });
+              dispatch({
+                type: 'ADD_TOAST',
+                message: 'Repeat prescription request submitted to pharmacy dashboard.',
+                toastType: 'success'
+              });
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 700 }}>🔁 Request Repeat Rx</span>
+            <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>Reorders last checked meds</span>
+          </button>
+
+          <button
+            className="btn btn-sm"
+            disabled={!crmObj}
+            style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', justifyContent: 'center', height: 'auto', textAlign: 'center' }}
+            onClick={() => {
+              if (!crmObj) return;
+              dispatch({
+                type: 'LOG_INTERACTION',
+                patientId: crmObj.id,
+                interactionType: 'Appointment Requested',
+                detail: 'Patient requested check-up call/appointment scheduling via patient portal.'
+              });
+              dispatch({
+                type: 'ADD_TOAST',
+                message: 'Check-up callback request submitted to pharmacy dashboard.',
+                toastType: 'success'
+              });
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 700 }}>📅 Book Check-up</span>
+            <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>Schedule call with pharmacist</span>
+          </button>
+        </div>
+      </div>
+
       {/* Security note */}
       <p style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-tertiary)' }}>
         🔒 Your information is handled securely and shared only with your pharmacy and the specialist clinic.

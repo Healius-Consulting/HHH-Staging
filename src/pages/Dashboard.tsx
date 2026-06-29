@@ -86,7 +86,65 @@ export default function Dashboard() {
       days: Math.floor((Date.now() - new Date(s.submittedAt).getTime()) / (1000 * 60 * 60 * 24)),
     }));
 
-  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length;
+  // 5. Patient Portal Requests
+  const portalRequests = state.crm.flatMap(p => {
+    const alerts: {
+      type: 'repeat-req' | 'appointment-req';
+      id: string;
+      patientName: string;
+      patientId: string;
+      timeStr: string;
+      ts: Date;
+    }[] = [];
+
+    const interactions = p.interactions || [];
+
+    // Find latest Repeat Request
+    const repeatReqs = interactions.filter(i => i.type === 'Repeat Requested');
+    if (repeatReqs.length > 0) {
+      const latestReq = [...repeatReqs].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0];
+      const repeatResolves = interactions.filter(i => i.type === 'Repeat Rx Initiated' || i.type === 'Request Resolved');
+      const latestResolve = repeatResolves.length > 0 
+        ? [...repeatResolves].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0]
+        : null;
+
+      if (!latestResolve || new Date(latestReq.ts).getTime() > new Date(latestResolve.ts).getTime()) {
+        alerts.push({
+          type: 'repeat-req',
+          id: `repeat-req-${p.id}`,
+          patientName: p.name,
+          patientId: p.id,
+          timeStr: new Date(latestReq.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+          ts: new Date(latestReq.ts),
+        });
+      }
+    }
+
+    // Find latest Appointment Request
+    const apptReqs = interactions.filter(i => i.type === 'Appointment Requested');
+    if (apptReqs.length > 0) {
+      const latestReq = [...apptReqs].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0];
+      const apptResolves = interactions.filter(i => i.type === 'Callback Scheduled' || i.type === 'Request Resolved');
+      const latestResolve = apptResolves.length > 0 
+        ? [...apptResolves].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0]
+        : null;
+
+      if (!latestResolve || new Date(latestReq.ts).getTime() > new Date(latestResolve.ts).getTime()) {
+        alerts.push({
+          type: 'appointment-req',
+          id: `appt-req-${p.id}`,
+          patientName: p.name,
+          patientId: p.id,
+          timeStr: new Date(latestReq.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+          ts: new Date(latestReq.ts),
+        });
+      }
+    }
+
+    return alerts;
+  });
+
+  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length + portalRequests.length;
 
   /* ── Recent orders (last 5) ── */
   const recentOrders = [...state.orders]
@@ -299,6 +357,92 @@ export default function Dashboard() {
                         }}
                       >
                         Create Repeat Rx
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Patient Portal Repeat Requests */}
+                {portalRequests.filter(r => r.type === 'repeat-req').map(alert => (
+                  <div key={alert.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'rgba(16, 185, 129, 0.08)', borderRadius: 8, borderLeft: '3px solid #10b981' }}>
+                    <div style={{ fontSize: 14 }}>
+                      <span className="font-semibold text-primary" style={{ display: 'block', fontSize: 15 }}>Portal Request: Repeat Prescription &middot; {alert.patientName}</span>
+                      <span className="text-secondary text-xs">Patient requested repeat order copy via portal on {alert.timeStr}. Action required.</span>
+                    </div>
+                    <div className="flex gap-xs">
+                      <button
+                        className="btn btn-sm btn-primary"
+                        style={{ background: '#10b981', borderColor: '#10b981', fontSize: 12, padding: '6px 12px' }}
+                        onClick={() => {
+                          dispatch({
+                            type: 'LOG_INTERACTION',
+                            patientId: alert.patientId,
+                            interactionType: 'Repeat Rx Initiated',
+                            detail: 'Repeat prescription process initiated from patient portal request.'
+                          });
+                          dispatch({ type: 'NEW_ORDER', patientId: alert.patientId });
+                          dispatch({ type: 'SET_SCREEN', screen: 'create' });
+                          dispatch({ type: 'ADD_TOAST', message: `Initiating repeat Rx builder for ${alert.patientName}.`, toastType: 'info' });
+                        }}
+                      >
+                        Create Repeat Rx
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        style={{ fontSize: 12, padding: '6px 12px' }}
+                        onClick={() => {
+                          dispatch({
+                            type: 'LOG_INTERACTION',
+                            patientId: alert.patientId,
+                            interactionType: 'Request Resolved',
+                            detail: 'Dismissed patient portal repeat prescription request.'
+                          });
+                          dispatch({ type: 'ADD_TOAST', message: 'Request dismissed.', toastType: 'info' });
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Patient Portal Appointment Requests */}
+                {portalRequests.filter(r => r.type === 'appointment-req').map(alert => (
+                  <div key={alert.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'rgba(59, 130, 246, 0.08)', borderRadius: 8, borderLeft: '3px solid #3b82f6' }}>
+                    <div style={{ fontSize: 14 }}>
+                      <span className="font-semibold text-primary" style={{ display: 'block', fontSize: 15 }}>Portal Request: Schedule Check-up &middot; {alert.patientName}</span>
+                      <span className="text-secondary text-xs">Patient requested clinical assessment check-up via portal on {alert.timeStr}.</span>
+                    </div>
+                    <div className="flex gap-xs">
+                      <button
+                        className="btn btn-sm btn-primary"
+                        style={{ fontSize: 12, padding: '6px 12px' }}
+                        onClick={() => {
+                          dispatch({
+                            type: 'LOG_INTERACTION',
+                            patientId: alert.patientId,
+                            interactionType: 'Callback Scheduled',
+                            detail: 'Scheduled patient-requested check-up assessment call.'
+                          });
+                          dispatch({ type: 'ADD_TOAST', message: `Callback scheduled for ${alert.patientName}.`, toastType: 'success' });
+                        }}
+                      >
+                        Log Callback
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        style={{ fontSize: 12, padding: '6px 12px' }}
+                        onClick={() => {
+                          dispatch({
+                            type: 'LOG_INTERACTION',
+                            patientId: alert.patientId,
+                            interactionType: 'Request Resolved',
+                            detail: 'Dismissed patient portal appointment check-up request.'
+                          });
+                          dispatch({ type: 'ADD_TOAST', message: 'Request dismissed.', toastType: 'info' });
+                        }}
+                      >
+                        Dismiss
                       </button>
                     </div>
                   </div>
