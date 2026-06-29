@@ -4,7 +4,7 @@ import { LogOut, AlertCircle } from 'lucide-react';
 
 export default function PatientPortal() {
   const { state, dispatch } = useApp();
-  const [emailInput, setEmailInput] = useState('marcus.v@gmail.com');
+  const [emailInput, setEmailInput] = useState('m.khan@email.com');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const attemptLogin = () => {
@@ -108,7 +108,7 @@ export default function PatientPortal() {
               outline: 'none'
             }}
           />
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Demo hint: Try <b>marcus.v@gmail.com</b> or submit a new enquiry to test.</span>
+          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Demo hint: Try <b>m.khan@email.com</b> (Awaiting Payment demo) or <b>a.smith@email.com</b>.</span>
         </div>
 
         <button className="btn btn-primary" style={{ width: '100%', padding: 12 }} onClick={attemptLogin}>
