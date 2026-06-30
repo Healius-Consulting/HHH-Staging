@@ -57,146 +57,66 @@ export default function PatientPortal() {
   // ═══════════════════════════════════════════════════════════
   if (!state.patientEmail) {
     return (
-      <div style={{
-        maxWidth: 680,
-        margin: '60px auto',
-        fontFamily: 'var(--font-family)',
-      }}>
-        {/* Portal card wrapper */}
-        <div style={{
-          background: 'rgba(18, 24, 41, 0.85)',
-          backdropFilter: 'blur(16px)',
-          border: '1px solid var(--border)',
-          borderRadius: '24px',
-          padding: '40px 32px',
-          boxShadow: 'var(--shadow-lg), 0 0 40px rgba(16, 185, 129, 0.05)',
-        }}>
-          {/* Header */}
-          <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <div style={{
-              width: 64,
-              height: 64,
-              borderRadius: '16px',
-              background: 'linear-gradient(135deg, var(--green-600) 0%, var(--green-700) 100%)',
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: 26,
-              margin: '0 auto 16px',
-              boxShadow: '0 8px 24px rgba(16, 185, 129, 0.25)'
-            }}>
-              {PHARMACY.logoText}
-            </div>
-            <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>{PHARMACY.name}</h1>
-            <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '6px 0 0' }}>Patient Treatment &amp; Prescription Portal</p>
+      <div className="patient-shell">
+        <div className="patient-panel">
+          <div className="patient-hero">
+            <div className="patient-hero__logo">{PHARMACY.logoText}</div>
+            <h1 className="patient-hero__title">{PHARMACY.name}</h1>
+            <p className="patient-hero__subtitle">Patient Treatment &amp; Prescription Portal</p>
           </div>
 
           {errorMsg && (
-            <div className="banner banner-red" style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, padding: '10px 14px' }}>
+            <div className="banner banner-red patient-error">
               <AlertCircle size={18} />
               <span>{errorMsg}</span>
             </div>
           )}
 
-          {/* Interactive Demo Personas Selector */}
-          <div style={{ marginBottom: 28 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', display: 'block', marginBottom: 12, letterSpacing: '0.05em' }}>
-              Quick Demo Accounts (Click to Log In)
-            </span>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }} className="portal-grid">
-              
-              {/* Persona 1: Mohammed Khan */}
-              <div 
-                onClick={() => attemptLogin('m.khan@email.com')}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '12px',
-                  padding: '14px',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.2s ease',
-                  position: 'relative'
-                }}
-                className="gateway-card-hover"
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ fontWeight: 600, fontSize: 14, color: '#fff' }}>Mohammed Khan</span>
-                  <span className="pill pill-amber" style={{ fontSize: 9 }}>Awaiting Pay</span>
+          <div className="persona-section">
+            <span className="persona-section__label">Quick Demo Accounts (Click to Log In)</span>
+            <div className="persona-grid">
+              <div className="persona-card gateway-card-hover" onClick={() => attemptLogin('m.khan@email.com')}>
+                <div className="persona-card__head">
+                  <span className="persona-card__name">Mohammed Khan</span>
+                  <span className="pill pill-amber persona-pill">Awaiting Pay</span>
                 </div>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block' }}>m.khan@email.com</span>
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'block', marginTop: 4 }}>Outstanding Order: <b>£79.00</b></span>
+                <span className="persona-card__email">m.khan@email.com</span>
+                <span className="persona-card__meta">Outstanding Order: <b>£79.00</b></span>
               </div>
 
-              {/* Persona 2: Aisha Smith */}
-              <div 
-                onClick={() => attemptLogin('a.smith@email.com')}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '12px',
-                  padding: '14px',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.2s ease',
-                  position: 'relative'
-                }}
-                className="gateway-card-hover"
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ fontWeight: 600, fontSize: 14, color: '#fff' }}>Aisha Smith</span>
-                  <span className="pill pill-green" style={{ fontSize: 9 }}>Meds Ready</span>
+              <div className="persona-card gateway-card-hover" onClick={() => attemptLogin('a.smith@email.com')}>
+                <div className="persona-card__head">
+                  <span className="persona-card__name">Aisha Smith</span>
+                  <span className="pill pill-green persona-pill">Meds Ready</span>
                 </div>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block' }}>a.smith@email.com</span>
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'block', marginTop: 4 }}>Counter Collection Pass Active</span>
+                <span className="persona-card__email">a.smith@email.com</span>
+                <span className="persona-card__meta">Counter Collection Pass Active</span>
               </div>
-
             </div>
           </div>
 
-          <div style={{ height: '1px', background: 'var(--border)', margin: '24px 0' }} />
+          <div className="divider" />
 
-          {/* Form input login */}
-          <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 24 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Or log in with your email address
-            </label>
-            <div style={{ display: 'flex', gap: 10 }}>
+          <div className="patient-login-form">
+            <label className="form-label">Or log in with your email address</label>
+            <div className="patient-login-row">
               <input
                 type="email"
+                className="input"
                 value={emailInput}
                 onChange={e => setEmailInput(e.target.value)}
                 placeholder="patient@example.com"
-                style={{
-                  flex: 1,
-                  padding: '12px 14px',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  background: '#090D1A',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'inherit',
-                  outline: 'none',
-                  fontSize: 14
-                }}
               />
-              <button 
-                className="btn btn-primary" 
-                style={{ padding: '0 20px', display: 'inline-flex', gap: 8, whiteSpace: 'nowrap' }} 
-                onClick={() => attemptLogin()}
-              >
+              <button className="btn btn-primary patient-login-btn" onClick={() => attemptLogin()}>
                 Log In <ArrowRight size={16} />
               </button>
             </div>
           </div>
 
-          {/* Security details info */}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', marginTop: 12 }}>
+          <div className="patient-security">
             <Shield size={14} className="text-muted" />
-            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>NHS patient data sharing and GDPR compliance standards applied.</span>
+            <span>NHS patient data sharing and GDPR compliance standards applied.</span>
           </div>
-
         </div>
       </div>
     );
@@ -247,111 +167,74 @@ export default function PatientPortal() {
   const eligibility = getRepeatEligibility();
 
   return (
-    <div style={{ maxWidth: 1080, margin: '0 auto', paddingBottom: 60, fontFamily: 'var(--font-family)' }}>
-      
-      {/* ── App Shell Header ── */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        background: 'var(--bg-sidebar)',
-        border: '1px solid var(--border)',
-        borderRadius: '16px',
-        padding: '16px 24px',
-        marginBottom: 24,
-        boxShadow: 'var(--shadow-sm)'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{
-            width: 44,
-            height: 44,
-            borderRadius: '10px',
-            background: 'linear-gradient(135deg, var(--green-600) 0%, var(--green-700) 100%)',
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 800,
-            fontSize: 20
-          }}>
-            {PHARMACY.logoText}
-          </div>
+    <div className="patient-app">
+      <div className="patient-app-header">
+        <div className="patient-app-header__brand">
+          <div className="patient-app-header__logo">{PHARMACY.logoText}</div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: '#fff' }}>{pName}</h2>
+            <h2 className="patient-app-header__name">
+              {pName}
               {crmObj ? (
-                <span className="pill pill-green" style={{ fontSize: 10 }}>Registered Care</span>
+                <span className="pill pill-green persona-pill">Registered Care</span>
               ) : (
-                <span className="pill pill-info" style={{ fontSize: 10 }}>Pre-Screening Stage</span>
+                <span className="pill pill-info persona-pill">Pre-Screening Stage</span>
               )}
-            </div>
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Logged into {PHARMACY.name} &middot; {email}</span>
+            </h2>
+            <span className="patient-app-header__meta">Logged into {PHARMACY.name} &middot; {email}</span>
           </div>
         </div>
 
-        <button className="btn btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px' }} onClick={handleLogout}>
+        <button className="btn btn-sm flex items-center gap-sm" onClick={handleLogout}>
           <LogOut size={14} /> Log Out &amp; Exit
         </button>
       </div>
 
-      {/* ── Dashboard Content Layout Grid ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24 }} className="portal-grid">
-        
-        {/* LEFT COLUMN: ACTIVE CARE & TIMELINES */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div className="patient-app-grid">
+        <div className="patient-app-col">
           
           {/* 1. Secure billing checker / counters */}
           {activeOrder && (
-            <div className="card card-surface" style={{ padding: 24, margin: 0, border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 20 }}>
-                <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="card card-surface patient-card-section">
+              <div className="patient-section-head">
+                <h3 className="patient-section-title">
                   <CreditCard size={18} className="text-info" /> Active Prescription Billing &amp; Invoicing
                 </h3>
-                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Order ID: #{activeOrder.id}</span>
+                <span className="text-xs text-tertiary">Order ID: #{activeOrder.id}</span>
               </div>
 
               {activeOrder.payment.status === 'sent' ? (
                 <div>
-                  <div className="banner banner-amber" style={{ display: 'flex', gap: 12, padding: '12px 14px', marginBottom: 20 }}>
+                  <div className="banner banner-amber flex gap-sm" style={{ marginBottom: 20 }}>
                     <Clock size={20} style={{ flexShrink: 0, marginTop: 2 }} />
                     <div>
-                      <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Worldpay Payment Link Active</h4>
-                      <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      <h4 className="font-semibold text-sm" style={{ margin: 0 }}>Worldpay Payment Link Active</h4>
+                      <p className="text-xs text-secondary" style={{ margin: '2px 0 0', lineHeight: 1.5 }}>
                         Your specialist clinician has uploaded the digital prescription. Secure Worldpay settlement is required to release the pharmaceutical cargo from the Wholesaler.
                       </p>
                     </div>
                   </div>
 
-                  <div style={{
-                    background: 'rgba(0, 0, 0, 0.25)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '12px',
-                    padding: '16px 20px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 12
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Wholesale Invoice Amount:</span>
-                      <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{money(activeOrder.payment.amount)}</span>
+                  <div className="invoice-panel">
+                    <div className="invoice-line">
+                      <span>Wholesale Invoice Amount:</span>
+                      <strong>{money(activeOrder.payment.amount)}</strong>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Dispensing Counter Fee:</span>
-                      <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Included (£0.00)</span>
+                    <div className="invoice-line">
+                      <span>Dispensing Counter Fee:</span>
+                      <strong>Included (£0.00)</strong>
                     </div>
-                    <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700 }}>
-                      <span style={{ color: '#fff' }}>Total Amount Due:</span>
-                      <span style={{ color: 'var(--green-100)', fontSize: 18 }}>{money(activeOrder.payment.amount)}</span>
+                    <div className="divider" style={{ margin: '4px 0' }} />
+                    <div className="invoice-total">
+                      <span>Total Amount Due:</span>
+                      <span>{money(activeOrder.payment.amount)}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                      <span style={{ color: 'var(--text-tertiary)' }}>Billing Gateway:</span>
-                      <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Worldpay API Secure Checkout</span>
+                    <div className="invoice-line">
+                      <span>Billing Gateway:</span>
+                      <strong>Worldpay API Secure Checkout</strong>
                     </div>
 
                     <button 
-                      className="btn btn-primary" 
-                      style={{ width: '100%', padding: '14px', fontSize: 14, fontWeight: 700, marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center' }} 
+                      className="btn btn-primary invoice-pay-btn" 
                       onClick={() => simulatePatientPayment(activeOrder.id)}
                     >
                       <CreditCard size={18} /> Pay Invoice via Worldpay Gateway
@@ -487,8 +370,8 @@ export default function PatientPortal() {
 
           {/* 2. Clinical Referral Checklist (Pre-screening Flow) */}
           {(submission || crmObj) && (
-            <div className="card card-surface" style={{ padding: 24, margin: 0, border: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)', paddingBottom: 12, marginTop: 0, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="card card-surface patient-card-section">
+              <h3 className="patient-section-title" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 20 }}>
                 <Clipboard size={18} className="text-info" /> Clinical Eligibility Intake Roadmap
               </h3>
               
@@ -549,24 +432,13 @@ export default function PatientPortal() {
                   })}
                 </div>
               ) : (
-                <div style={{ display: 'flex', gap: 14, alignItems: 'center', background: 'rgba(16, 185, 129, 0.05)', padding: '16px 20px', borderRadius: 12, border: '1px solid rgba(16, 185, 129, 0.15)' }}>
-                  <div style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: '50%',
-                    background: 'var(--green-500)',
-                    color: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 16,
-                    flexShrink: 0
-                  }}>
+                <div className="crm-complete-banner">
+                  <div className="crm-complete-banner__icon">
                     <Check size={18} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fff' }}>CRM Registration Fully Active</h4>
-                    <p style={{ margin: '2px 0 0', color: 'var(--text-secondary)', fontSize: 12 }}>
+                    <h4 className="font-semibold text-sm" style={{ margin: 0 }}>CRM Registration Fully Active</h4>
+                    <p className="text-xs text-secondary" style={{ margin: '2px 0 0' }}>
                       Your clinical intake has completed successfully. You are officially registered in the local pharmacy network.
                     </p>
                   </div>
@@ -578,14 +450,10 @@ export default function PatientPortal() {
         </div>
 
         {/* RIGHT COLUMN: SERVICES, TREATMENTS, SECURITY */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          
-          {/* A. Quick Patient Service Requests */}
-          <div className="card card-surface" style={{ padding: 20, margin: 0, border: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 0, marginBottom: 16 }}>
-              Pharmacy Care Desk
-            </h3>
-            <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: 16 }}>
+        <div className="patient-app-col">
+          <div className="card card-surface patient-card-section">
+            <h3 className="patient-sidebar-title">Pharmacy Care Desk</h3>
+            <p className="text-xs text-secondary" style={{ lineHeight: 1.4, marginBottom: 16 }}>
               Alert your counter staff or schedule a follow-up medical cannabis assessment in one click:
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -672,25 +540,22 @@ export default function PatientPortal() {
 
           {/* B. Repeat Eligibility Card */}
           {eligibility && (
-            <div className="card card-surface" style={{ padding: 20, margin: 0, border: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 0, marginBottom: 12 }}>
-                Repeat Reorder Schedule
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: eligibility.status === 'eligible' ? 'var(--green-100)' : 'var(--amber-500)' }}>
+            <div className="card card-surface patient-card-section">
+              <h3 className="patient-sidebar-title">Repeat Reorder Schedule</h3>
+              <div className="flex flex-col gap-sm">
+                <span className={`font-semibold text-sm ${eligibility.status === 'eligible' ? 'text-green' : 'text-amber'}`}>
                   {eligibility.label}
                 </span>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                <span className="text-xs text-secondary" style={{ lineHeight: 1.4 }}>
                   {eligibility.desc}
                 </span>
               </div>
             </div>
           )}
 
-          {/* C. Current Ordered Prescription Summary */}
           {currentOrder && (
-            <div className="card card-surface" style={{ padding: 20, margin: 0, border: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 0, marginBottom: 16 }}>
+            <div className="card card-surface patient-card-section">
+              <h3 className="patient-sidebar-title">
                 Current Prescription ({new Date(currentOrder.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })})
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -708,10 +573,8 @@ export default function PatientPortal() {
           )}
 
           {/* D. Past Prescriptions History Card */}
-          <div className="card card-surface" style={{ padding: 20, margin: 0, border: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 0, marginBottom: 16 }}>
-              Prescription History
-            </h3>
+          <div className="card card-surface patient-card-section">
+            <h3 className="patient-sidebar-title">Prescription History</h3>
             {pastOrders.length === 0 ? (
               <div style={{ fontSize: 12, color: 'var(--text-tertiary)', textAlign: 'center', padding: '10px 0' }}>
                 No past prescriptions on file.
@@ -739,7 +602,7 @@ export default function PatientPortal() {
           </div>
 
           {/* C. Trust / NHS Info */}
-          <div className="card card-surface" style={{ padding: 16, margin: 0, border: '1px solid var(--border)', background: 'transparent' }}>
+          <div className="card card-surface patient-card-section" style={{ background: 'transparent' }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
               <Shield size={16} className="text-info" style={{ flexShrink: 0, marginTop: 2 }} />
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>

@@ -73,12 +73,11 @@ export default function AwaitingPayment() {
     const isExiting = exitingOrderId === order.id;
 
     return (
-      <div className={`card ${isExiting ? 'card-exit' : ''}`} key={order.id} style={{ marginBottom: 16 }}>
-        {/* ── Card Header ── */}
-        <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+      <div className={`card card-spaced ${isExiting ? 'card-exit' : ''}`} key={order.id}>
+        <div className="card-header">
           <div className="flex items-center gap-sm">
             <CreditCard size={16} className="text-secondary" />
-            <span className="font-semibold" style={{ fontSize: 15 }}>{patientName(order.patientId)}</span>
+            <span className="card-title-md">{patientName(order.patientId)}</span>
             <span className="text-muted text-sm">&mdash; Order Session #{order.id}</span>
           </div>
           {isSent && <span className="pill pill-amber">Link Active</span>}
@@ -87,8 +86,7 @@ export default function AwaitingPayment() {
 
         <div className="divider" />
 
-        {/* ── Payment Details ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
+        <div className="detail-grid">
           <div className="kv-line">
             <span className="text-muted text-sm">Requested Amount:</span>
             <span className="font-bold text-primary">{money(payment.amount)}</span>
@@ -119,9 +117,9 @@ export default function AwaitingPayment() {
 
         {/* ── Prescriptions List ── */}
         <div style={{ marginBottom: 12 }}>
-          <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 6 }}>Prescription sub-orders in this session</span>
+          <span className="section-label">Prescription sub-orders in this session</span>
           {prescriptions.map((rx, idx) => (
-            <div key={rx.id} className="flex items-center justify-between" style={{ padding: '6px 0', background: 'rgba(0,0,0,0.15)', paddingLeft: 12, paddingRight: 12, borderRadius: 6, marginBottom: 6 }}>
+            <div key={rx.id} className="rx-sub-line">
               <div className="flex items-center gap-sm">
                 <ExternalLink size={14} className="text-secondary" />
                 <span className="text-sm font-semibold">Rx #{idx + 1} &mdash; {rx.prescriber || 'Pending prescriber'}</span>
@@ -180,71 +178,29 @@ export default function AwaitingPayment() {
   return (
     <div className="page-body">
       {/* ══ Payment Stage Switchers ══ */}
-      <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 20 }}>
-        {/* Card 1: All Payments */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeSubTab === 'all' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeSubTab === 'all' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveSubTab('all')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+      <div className="filter-grid">
+        <div className={`card card-surface filter-card ${activeSubTab === 'all' ? 'active' : ''}`} onClick={() => setActiveSubTab('all')}>
+          <div className="filter-card__head">
             <span>All Payments</span>
             <CreditCard size={14} className={activeSubTab === 'all' ? 'text-info' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeSubTab === 'all' ? 'var(--green-100)' : 'inherit' }}>
-            {awaitingOrders.length + paidOrders.length}
-          </span>
+          <span className="filter-card__value">{awaitingOrders.length + paidOrders.length}</span>
         </div>
 
-        {/* Card 2: Awaiting Payment */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeSubTab === 'awaiting' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeSubTab === 'awaiting' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveSubTab('awaiting')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeSubTab === 'awaiting' ? 'active' : ''}`} onClick={() => setActiveSubTab('awaiting')}>
+          <div className="filter-card__head">
             <span>Awaiting Payment</span>
             <Clock size={14} className={activeSubTab === 'awaiting' ? 'text-amber' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeSubTab === 'awaiting' ? 'var(--green-100)' : 'inherit' }}>
-            {awaitingOrders.length}
-          </span>
+          <span className="filter-card__value">{awaitingOrders.length}</span>
         </div>
 
-        {/* Card 3: Paid Transactions */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeSubTab === 'paid' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeSubTab === 'paid' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveSubTab('paid')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeSubTab === 'paid' ? 'active' : ''}`} onClick={() => setActiveSubTab('paid')}>
+          <div className="filter-card__head">
             <span>Paid / Cleared</span>
             <CheckCircle size={14} className={activeSubTab === 'paid' ? 'text-green' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeSubTab === 'paid' ? 'var(--green-100)' : 'inherit' }}>
-            {paidOrders.length}
-          </span>
+          <span className="filter-card__value">{paidOrders.length}</span>
         </div>
       </div>
 
@@ -253,7 +209,7 @@ export default function AwaitingPayment() {
           <div className="empty-icon">
             {activeSubTab === 'awaiting' ? <Clock size={28} /> : <CheckCircle size={28} />}
           </div>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          <p className="empty-desc">
             {activeSubTab === 'awaiting' 
               ? 'No pending patient billing requests active.' 
               : 'No completed transactions recorded in this session.'}

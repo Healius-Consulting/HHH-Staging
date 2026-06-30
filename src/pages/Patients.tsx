@@ -239,100 +239,42 @@ export default function Patients() {
     <div className="page-body" style={{ position: 'relative' }}>
       
       {/* ══ Metrics Grid / Tab Switchers ══ */}
-      <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 20 }}>
-        {/* Card 1: All Patients */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'all' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'all' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('all')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+      <div className="filter-grid">
+        <div className={`card card-surface filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
+          <div className="filter-card__head">
             <span>All Patients</span>
             <Users size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'all' ? 'var(--green-100)' : 'inherit' }}>
-            {patients.length}
-          </span>
+          <span className="filter-card__value">{patients.length}</span>
         </div>
 
-        {/* Card 2: Enquiries */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'enquiries' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'enquiries' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('enquiries')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeTab === 'enquiries' ? 'active' : ''}`} onClick={() => setActiveTab('enquiries')}>
+          <div className="filter-card__head">
             <span>Enquiries</span>
             <Clipboard size={14} className={activeTab === 'enquiries' ? 'text-red' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'enquiries' ? 'var(--green-100)' : 'inherit' }}>
-            {activeEnquiries}
-          </span>
+          <span className="filter-card__value">{activeEnquiries}</span>
         </div>
 
-        {/* Card 3: Active Treatments */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'active' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'active' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('active')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
+          <div className="filter-card__head">
             <span>Active Treatments</span>
             <CheckCircle size={14} className={activeTab === 'active' ? 'text-green' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'active' ? 'var(--green-100)' : 'inherit' }}>
-            {totalCRM}
-          </span>
+          <span className="filter-card__value">{totalCRM}</span>
         </div>
 
-        {/* Card 4: On Order */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'on-order' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'on-order' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('on-order')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeTab === 'on-order' ? 'active' : ''}`} onClick={() => setActiveTab('on-order')}>
+          <div className="filter-card__head">
             <span>On Order</span>
             <Package size={14} className={activeTab === 'on-order' ? 'text-amber' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'on-order' ? 'var(--green-100)' : 'inherit' }}>
-            {onOrderCount}
-          </span>
+          <span className="filter-card__value">{onOrderCount}</span>
         </div>
       </div>
 
-      {/* ══ Search & Filtering Controls ══ */}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 16 }}>
-        {/* Search Input */}
-        <div className="search-row" style={{ flex: 1, minWidth: 260, margin: 0 }}>
+      <div className="toolbar-row">
+        <div className="search-row">
           <Search size={16} />
           <input
             className="input"

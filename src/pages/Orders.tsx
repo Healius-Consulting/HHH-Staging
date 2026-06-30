@@ -12,12 +12,12 @@ import {
 
 const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Ready', 'Collected'] as const;
 
-const STATUS_TABS: { key: RxStatus; label: string; icon: React.ReactNode }[] = [
-  { key: 'awaiting-approval', label: '1. Awaiting Approval', icon: <Clock size={13} /> },
-  { key: 'approved',          label: '2. Approved',          icon: <CheckCircle size={13} /> },
-  { key: 'dispatched',        label: '3. In Transit',        icon: <Truck size={13} /> },
-  { key: 'ready',             label: '4. Ready for Collection', icon: <Package size={13} /> },
-  { key: 'collected',         label: '5. Collected',         icon: <CheckCircle size={13} /> },
+const STATUS_TABS: { key: RxStatus; label: string; shortLabel: string; icon: React.ReactNode }[] = [
+  { key: 'awaiting-approval', label: 'Awaiting Approval', shortLabel: 'Awaiting', icon: <Clock size={14} /> },
+  { key: 'approved',          label: 'Approved',          shortLabel: 'Approved', icon: <CheckCircle size={14} /> },
+  { key: 'dispatched',        label: 'In Transit',        shortLabel: 'In Transit', icon: <Truck size={14} /> },
+  { key: 'ready',             label: 'Ready for Collection', shortLabel: 'Ready', icon: <Package size={14} /> },
+  { key: 'collected',         label: 'Collected',         shortLabel: 'Collected', icon: <CheckCircle size={14} /> },
 ];
 
 function stepsCompleted(status: RxStatus): number {
@@ -106,10 +106,9 @@ export default function Orders() {
     return (
       <div className="orders-timeline-container">
         <div className="orders-timeline">
-          {/* Active progress fill line */}
-          <div 
-            className="orders-timeline-progress" 
-            style={{ width: `${progressWidth}%` }} 
+          <div
+            className="orders-timeline-progress"
+            style={{ width: `${progressWidth}%` }}
           />
           {TRACK_STEPS.map((label, i) => {
             let cls = 'timeline-step';
@@ -117,9 +116,7 @@ export default function Orders() {
             else if (i === done && status !== 'collected') cls += ' active';
             return (
               <div key={label} className={cls}>
-                <div className="timeline-dot">
-                  {i + 1}
-                </div>
+                <div className="timeline-dot">{i + 1}</div>
                 <span className="timeline-label">{label}</span>
               </div>
             );
@@ -139,19 +136,18 @@ export default function Orders() {
       : 0;
 
     return (
-      <div className={`card ${isExiting ? 'card-exit' : ''}`} key={`${orderId}-${rx.id}`} style={{ marginBottom: 16 }}>
-        {/* Card Header */}
-        <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+      <div className={`card order-card ${isExiting ? 'card-exit' : ''}`} key={`${orderId}-${rx.id}`}>
+        <div className="order-card__header">
           <div>
-            <div className="flex items-center gap-sm">
-              <span className="font-semibold text-sm" style={{ fontSize: 15 }}>{pName}</span>
-              <span className="text-muted text-xs">&middot; Rx #{rxIdx} inside Order #{orderId}</span>
+            <div className="flex items-center gap-sm flex-wrap">
+              <span className="card-title-md">{pName}</span>
+              <span className="text-muted text-xs">Rx #{rxIdx} · Order #{orderId}</span>
             </div>
-            <div className="text-xs text-muted" style={{ marginTop: 2 }}>
-              Ordered: {fmtDate(date)} &middot; Prescriber: {rx.prescriber || 'Pending'}
+            <div className="order-card__meta">
+              Ordered {fmtDate(date)} · Prescriber: {rx.prescriber || 'Pending'}
             </div>
           </div>
-          <div className="flex flex-col items-end gap-xs">
+          <div className="order-card__aside">
             <span className="font-bold text-green">{money(rxRevenue(rx))}</span>
             <span className={`pill ${STATUS_PILL[rx.status] ?? 'pill-neutral'}`}>
               {RX_STATUS_LABELS[rx.status]}
@@ -160,70 +156,54 @@ export default function Orders() {
         </div>
 
         {readyDays >= 10 && (
-          <div style={{
-            background: 'rgba(239, 68, 68, 0.12)',
-            border: '1px solid rgba(239, 68, 68, 0.25)',
-            color: '#f87171',
-            padding: '8px 12px',
-            borderRadius: '6px',
-            marginBottom: 12,
-            fontSize: '12px',
-            fontWeight: '600',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <span>⚠️ CRITICAL: Prescription has been uncollected for {readyDays} days. Follow-up required.</span>
+          <div className="banner banner-red">
+            <span className="text-sm">
+              Prescription uncollected for {readyDays} days — follow-up required.
+            </span>
           </div>
         )}
 
-        <div className="divider" />
+        <div className="order-card__section">
+          <span className="section-label section-label--spaced">Fulfilment progress</span>
+          {renderTrackBar(rx.status)}
+        </div>
 
-        {/* Stepper Timeline */}
-        {renderTrackBar(rx.status)}
-
-        {/* Courier details & invoice links */}
-        <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-          <div className="flex items-center gap-sm text-xs text-secondary">
-            <FileText size={14} className="text-muted" />
-            <span>Supplier Reference: <strong className="text-primary">{rx.poRef || 'Pending Approval'}</strong></span>
+        <div className="detail-grid" style={{ marginBottom: 0 }}>
+          <div className="detail-cell">
+            <FileText size={13} className="text-muted" style={{ display: 'inline', marginRight: 6, verticalAlign: -2 }} />
+            <strong className="text-primary">Supplier ref:</strong>{' '}
+            {rx.poRef || 'Pending approval'}
           </div>
-          
+
           {rx.trackingNumber && (
-            <div className="flex items-center gap-sm text-xs text-secondary">
-              <Truck size={14} className="text-muted" />
-              <span>
-                Courier tracking: <span className="font-semibold text-primary">{rx.trackingNumber}</span> ({rx.carrier})
-              </span>
+            <div className="detail-cell">
+              <Truck size={13} className="text-muted" style={{ display: 'inline', marginRight: 6, verticalAlign: -2 }} />
+              <strong className="text-primary">Tracking:</strong>{' '}
+              {rx.trackingNumber} ({rx.carrier})
             </div>
           )}
-          
+
           {rx.invoiceRef && (
-            <div className="flex items-center justify-between text-xs text-secondary">
-              <div className="flex items-center gap-sm">
-                <FileText size={14} className="text-muted" />
-                <span>
-                  Invoice ref: <span className="font-semibold text-primary">{rx.invoiceRef}</span>
-                </span>
-              </div>
-              <button className="btn btn-xs btn-sm" style={{ gap: 4, padding: '2px 8px', fontSize: 10 }}>
-                <Download size={10} /> PDF Invoice
+            <div className="detail-cell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span>
+                <FileText size={13} className="text-muted" style={{ display: 'inline', marginRight: 6, verticalAlign: -2 }} />
+                <strong className="text-primary">Invoice:</strong> {rx.invoiceRef}
+              </span>
+              <button className="btn btn-xs btn-sm" style={{ gap: 4, padding: '2px 8px', fontSize: 10, flexShrink: 0 }}>
+                <Download size={10} /> PDF
               </button>
             </div>
           )}
         </div>
 
-        {/* Action Triggers */}
         {(rx.status === 'dispatched' || rx.status === 'ready') && (
-          <div style={{ marginTop: 12, padding: 10, background: 'var(--bg-elevated)', borderRadius: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span className="text-xs font-bold text-muted uppercase">Pharmacy Check-in Actions:</span>
-            
+          <div className="order-card__actions">
             {rx.status === 'dispatched' && (
               <button
                 className="btn btn-sm btn-primary"
                 onClick={() => handleActionWithAnimation(orderId, rx.id, 'RECEIVE_SHIPMENT')}
               >
-                Confirm Arrived (Goods-In Check-In)
+                Confirm arrived (goods-in)
               </button>
             )}
 
@@ -233,29 +213,26 @@ export default function Orders() {
                   className="btn btn-sm"
                   onClick={() => setPrintingRx({ rx, patientName: pName })}
                 >
-                  <Printer size={12} /> Print Dispensing Label
+                  <Printer size={12} /> Print dispensing label
                 </button>
                 <button
                   className="btn btn-sm btn-primary"
                   onClick={() => handleActionWithAnimation(orderId, rx.id, 'HANDOVER_TO_PATIENT')}
                 >
-                  Handover to Patient
+                  Handover to patient
                 </button>
               </>
             )}
           </div>
         )}
 
-        <div className="divider" style={{ borderStyle: 'dashed' }} />
-
-        {/* Prescription items list */}
         {rx.items.length > 0 && (
-          <div className="item-list">
-            <span className="text-xs font-bold text-muted uppercase">Prescribed Products</span>
+          <div className="order-card__products">
+            <span className="section-label">Prescribed products</span>
             {rx.items.map(item => (
-              <div key={item.productId} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
-                <span className="text-secondary">{item.name} &times; {item.qty}</span>
-                <span className="font-semibold text-primary" style={{ marginLeft: 'auto' }}>{money(lineRevenue(item))}</span>
+              <div key={item.productId} className="order-product-line">
+                <span className="text-secondary">{item.name} × {item.qty}</span>
+                <span className="font-semibold text-primary">{money(lineRevenue(item))}</span>
               </div>
             ))}
           </div>
@@ -264,33 +241,33 @@ export default function Orders() {
     );
   };
 
+  const activeTabLabel = activeTab === 'all'
+    ? 'All stages'
+    : STATUS_TABS.find(t => t.key === activeTab)?.label ?? 'Filtered';
+
   return (
     <div className="page-body">
-      {/* ══ Fulfillment Stage stats switchers ══ */}
-      <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 20 }}>
-        {/* Card 0: All Orders */}
+      <div className="orders-toolbar">
+        <span className="text-sm text-secondary">
+          <strong className="text-primary">{filteredSubOrders.length}</strong>
+          {' '}prescription{filteredSubOrders.length === 1 ? '' : 's'}
+          {activeTab !== 'all' && <> in <strong className="text-primary">{activeTabLabel}</strong></>}
+        </span>
+        <span className="text-xs text-tertiary">
+          {allSubOrders.length} total across paid orders
+        </span>
+      </div>
+
+      <div className="filter-grid orders-stage-grid">
         <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: '10px 12px',
-            cursor: 'pointer',
-            border: activeTab === 'all' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'all' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 4
-          }}
+          className={`card card-surface filter-card ${activeTab === 'all' ? 'active' : ''}`}
           onClick={() => setActiveTab('all')}
         >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
-            <span style={{ fontSize: 10 }}>All Orders</span>
+          <div className="filter-card__head">
+            <span>All Orders</span>
             <Package size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 20, fontWeight: 700, display: 'block', color: activeTab === 'all' ? 'var(--green-100)' : 'inherit' }}>
-            {allSubOrders.length}
-          </span>
+          <span className="filter-card__value">{allSubOrders.length}</span>
         </div>
 
         {STATUS_TABS.map(tab => {
@@ -304,44 +281,32 @@ export default function Orders() {
           return (
             <div
               key={tab.key}
-              className="card card-surface"
-              style={{
-                margin: 0,
-                padding: '10px 12px',
-                cursor: 'pointer',
-                border: activeTab === tab.key ? '1px solid var(--green-500)' : '1px solid var(--border)',
-                background: activeTab === tab.key ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-                transition: 'all 0.2s ease',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4
-              }}
+              className={`card card-surface filter-card ${activeTab === tab.key ? 'active' : ''}`}
               onClick={() => setActiveTab(tab.key)}
             >
-              <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
-                <span style={{ fontSize: 10 }}>{tab.label.split('. ')[1]}</span>
-                {React.cloneElement(tab.icon as React.ReactElement<any>, { className: iconColor, size: 14 })}
+              <div className="filter-card__head">
+                <span>{tab.shortLabel}</span>
+                {React.cloneElement(tab.icon as React.ReactElement<{ className?: string; size?: number }>, { className: iconColor })}
               </div>
-              <span style={{ fontSize: 20, fontWeight: 700, display: 'block', color: activeTab === tab.key ? 'var(--green-100)' : 'inherit' }}>
-                {count}
-              </span>
+              <span className="filter-card__value">{count}</span>
             </div>
           );
         })}
       </div>
 
-      {/* ── Sub-orders list ── */}
       {filteredSubOrders.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">
             <Package size={28} />
           </div>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          <p className="empty-desc">
             No prescription sub-orders currently in this stage.
           </p>
         </div>
       ) : (
-        filteredSubOrders.map(so => renderSubOrderCard(so))
+        <div className="orders-list">
+          {filteredSubOrders.map(so => renderSubOrderCard(so))}
+        </div>
       )}
 
       {/* ── ZPL Thermal Dispensing Label Print Preview Modal ── */}

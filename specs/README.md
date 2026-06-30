@@ -17,10 +17,16 @@ Referral / eligibility intake → clinic referral (Curaleaf Clinic) → prescrip
 | `HHH-Ordering-Platform-Mockup.svg` | Static visual mockup of the ordering screen. |
 | `Rocky_API_Technical_Requirements_v1.5.docx` | The Technical Requirements Document (TRD) — 52 functional requirements (F-01–F-52), API endpoints, expected payloads, non-functional requirements, and open items. |
 | `TRD-redline-Rx-suborder-flow.md`, `TRD-redline-patient-payment.md` | Requirement redlines pending merge into the TRD. |
+| `production-architecture.md` | Production architecture — hosting (frontend, backend, UK infra), security, hardened embed model, integrations, and the full pharmacy onboarding playbook (legal → go-live). |
+| `full_project_breakdown.md` | Technical breakdown of the current React prototype — file-by-file map of clinician/patient portals, state schemas, and static spec assets. |
+| `project-manager-playbook.md` | **Self-contained go-live guide** for Project Manager (Owner) — master checklists, per-pharmacy runbook, onboarding form, UAT sign-off, meeting agenda, Curaleaf chase list. Use this alone for pre-go-live task breakdown. |
+| `uk-compliance-register.md` | **Master UK requirements register** — labelled checklist (REQ-UK, REQ-ICO, REQ-GPHC, PRE-LIVE gates) with ICO/GPhC/DPA 2018 references. |
 
 ## How to view
 
-Open the `.html` files **directly in a browser** — no server needed. State is in-memory, so a refresh resets the demo; seed data is included so every flow is explorable.
+**React SPA prototype** (`src/`): run `npm install && npm run dev`, then open the Vite dev URL. Portal gateway → clinician or patient console; in-memory state resets on refresh.
+
+**Static HTML specs** (`specs/*.html`): open **directly in a browser** — no server needed. State is in-memory; seed data is included so every flow is explorable.
 
 ## Key architecture & decisions
 

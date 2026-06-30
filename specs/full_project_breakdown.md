@@ -2,6 +2,8 @@
 
 This document provides a comprehensive technical breakdown of all files created, modified, and integrated during the development of the Curaleaf B2B2C prescription management platform.
 
+> **UK compliance:** Production go-live requirements are labelled in `uk-compliance-register.md`. Architecture and onboarding: `production-architecture.md`, `project-manager-playbook.md`.
+
 ---
 
 ## 🏛️ System Architecture & Data Flow
@@ -56,7 +58,7 @@ flowchart TD
 #### 📄 `src/App.tsx` (Modified)
 * **Purpose**: Configures the root component layout, portal gateways, and application notifications.
 * **Key Features**:
-  * **Portal Gateway Selector**: Renders high-end cards detailing the separate purposes of the clinician console vs. patient wellness space.
+  * **Portal Gateway Selector**: Renders clinician vs. patient entry cards using shared CSS (`gateway-page`, `gateway-grid`, `gateway-card`) — inline styles removed in favour of the design system.
   * **Toast Notification Manager**: Renders overlay alert toasts (`success | info | warning | error`) driven by dispatch actions.
   * **Root Router**: Renders the respective sub-screens (`Dashboard | Referrals | CreateOrder | AwaitingPayment | Orders | Patients | PatientPortal`) depending on the session variables.
 
@@ -79,7 +81,8 @@ flowchart TD
 #### 📄 `src/pages/Dashboard.tsx` (Modified)
 * **Purpose**: The operations console for pharmacy counter staff.
 * **Key Features**:
-  * **Urgent Action Items Widget**: Evaluates state collections and dynamically lists urgent follow-up panels:
+  * **Stats Grid**: Clickable `stat-card` tiles for at-a-glance counts (shared `stats-grid` layout).
+  * **Urgent Action Items Widget**: Evaluates state collections and dynamically lists urgent follow-up panels in `alert-item` rows:
     * *Eligibility Intake Bottlenecks* (Referral forms pending review $>48$ hours).
     * *Uncollected Medication Warnings* (Ready medicines sitting counter-ready $\ge 10$ days).
     * *Overdue Payments* (Active Worldpay link outstanding $>3$ days).
@@ -101,10 +104,13 @@ flowchart TD
   * **OCR Document Scanner Simulator**: Interactive loading bar simulating records scanning, verifying conditions, and logging audit approvals.
 
 #### 📄 `src/pages/Orders.tsx` (Modified)
-* **Purpose**: Oversees B2B wholesaler transit and counter collection check-ins.
+* **Purpose**: Oversees B2B wholesaler transit and counter collection check-ins — one card per prescription sub-order.
 * **Key Features**:
-  * **Fulfillment Stage Grid**: Switcher grid tracking `All Orders | Awaiting Approval | Approved | In Transit | Ready | Collected`.
-  * **Confirm Arrived (Goods-In)**: Registers incoming wholesaler packages, assigns local counter locations, and triggers counter barcode collection codes to patients.
+  * **Stage Filter Grid**: `filter-card` switcher (`All Orders | Awaiting | Approved | In Transit | Ready | Collected`) with live counts and toolbar summary.
+  * **Per-Rx Order Cards**: Each paid sub-order renders as an `order-card` with revenue pill, supplier ref, tracking, and product line items.
+  * **Fulfilment Timeline**: Five-step `orders-timeline` progress bar (Submitted → Collected) with animated fill track.
+  * **Goods-In & Handover Actions**: Confirm arrived / handover to patient with `card-exit` transition; uncollected ≥10 days shows `banner-red` warning.
+  * **ZPL Dispensing Label Modal**: Print-preview modal simulating thermal label output for ready prescriptions.
 
 #### 📄 `src/pages/AwaitingPayment.tsx` (Modified)
 * **Purpose**: Displays active Worldpay invoice links and tracks cleared collections.
@@ -121,11 +127,16 @@ flowchart TD
 
 ### 5. Layout & Design System
 #### 📄 `src/index.css` (Modified)
-* **Purpose**: Configures the design system tokens, typography scales, and visual layouts.
-* **Key Upgrades**:
-  * **Readability Overhaul**: Scaled root typographic sizing tokens up (XS to 13px, SM to 14px, Base Body to 15px, and Table text to 15px) for easier scanning.
-  * **Enhanced Contrast Rules**: Upgraded primary text to white (`#FFFFFF`) and secondary copy to slate-200 (`#E2E8F0`), creating a high-contrast **10:1 ratio** on card backgrounds to satisfy accessibility needs.
-  * **Card Divider Borders**: Set border definitions to slate-700 (`#334155`) for crisp card grids.
+* **Purpose**: Central design system — tokens, component classes, and page layouts shared across clinician and patient portals.
+* **Design Tokens**: Refined dark clinical SaaS palette (`--bg-*`, `--color-primary` emerald, `--color-clinician` indigo), radius/shadow/motion scales, and Inter typography steps (`--font-xs` through `--font-xl`).
+* **Refreshed UI Components** (2026 demo polish): Reusable classes replacing per-page inline styles:
+  * **Portal gateway** — `.gateway-page`, `.gateway-card`, `.gateway-eligibility`
+  * **Dashboard** — `.stats-grid`, `.stat-card`, `.alert-item`, `.duties-checklist`
+  * **Filter/tab switchers** — `.filter-grid`, `.filter-card` (Referrals, Patients, Awaiting Payment, Orders)
+  * **Orders fulfilment** — `.orders-toolbar`, `.orders-stage-grid`, `.order-card`, `.orders-timeline`, `.card-exit`
+  * **Patient portal shell** — `.portal-shell`, `.portal-header`, `.portal-card`
+  * **Shared polish** — `.page-body`, `.empty-state`, `.banner-*`, `.section-label`, `.detail-grid`
+* **Accessibility**: High-contrast text tokens and scaled body/table font sizes for counter-staff readability.
 
 #### 📄 `src/components/Navigation.tsx` (Modified)
 * **Purpose**: Sidebar navigation displaying active screen labels and page transition tabs.

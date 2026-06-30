@@ -141,8 +141,8 @@ export default function CreateOrder() {
   return (
     <div className="page-body">
       {/* ── Active draft selection chips ── */}
-      <div className="flex items-center gap-sm" style={{ flexWrap: 'wrap', marginBottom: 16 }}>
-        <span className="text-xs font-bold text-muted uppercase">Active Session drafts:</span>
+      <div className="flex items-center gap-sm chip-row">
+        <span className="section-label" style={{ margin: 0 }}>Active Session drafts:</span>
         {draftOrders.map(o => {
           const p = o.patientId ? state.crm.find(c => c.id === o.patientId) : null;
           return (
@@ -243,13 +243,7 @@ export default function CreateOrder() {
                   return (
                     <div 
                       key={rx.id} 
-                      className={`card ${isSelected ? 'card-surface' : ''}`}
-                      style={{ 
-                        cursor: 'pointer',
-                        borderColor: isSelected ? 'var(--green-500)' : 'var(--border)',
-                        boxShadow: isSelected ? 'var(--shadow-glow)' : 'none',
-                        margin: 0
-                      }}
+                      className={`card rx-block ${isSelected ? 'selected card-surface' : ''}`}
                       onClick={() => setSelectedRxId(rx.id)}
                     >
                       <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>

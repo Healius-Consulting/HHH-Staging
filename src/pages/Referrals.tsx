@@ -89,24 +89,22 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
   };
 
   return (
-    <div className={`card ${isExiting ? 'card-exit' : ''}`} style={{ transition: 'all 0.3s ease', marginBottom: 16 }}>
-      {/* Header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-        <span className="font-semibold text-sm" style={{ fontSize: 15 }}>{sub.name}</span>
+    <div className={`card card-spaced ${isExiting ? 'card-exit' : ''}`}>
+      <div className="card-header">
+        <span className="card-title-md">{sub.name}</span>
         {statusPill(sub.status)}
       </div>
 
-      {/* Patient details grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
-        <div className="text-xs text-secondary" style={{ lineHeight: 1.6 }}>
+      <div className="detail-grid">
+        <div className="detail-cell">
           <strong className="text-primary">Medical Condition:</strong> {sub.condition}<br />
           <strong className="text-primary">DOB:</strong> {sub.dob} &middot; <strong className="text-primary">Postcode:</strong> {sub.postcode}
         </div>
-        <div className="text-xs text-secondary" style={{ lineHeight: 1.6 }}>
+        <div className="detail-cell">
           <strong className="text-primary">Email:</strong> {sub.email}<br />
           <strong className="text-primary">Mobile:</strong> {sub.mobile}
         </div>
-        <div className="text-xs text-secondary" style={{ lineHeight: 1.6 }}>
+        <div className="detail-cell">
           <strong className="text-primary">Tried ≥2 treatments:</strong>{' '}
           <span className={sub.tried2 ? 'text-green font-semibold' : 'text-red font-semibold'}>{sub.tried2 ? 'Yes (Pass)' : 'No'}</span><br />
           <strong className="text-primary">Psychosis exclusion:</strong>{' '}
@@ -114,8 +112,7 @@ function SubmissionCard({ sub }: { sub: EligibilitySubmission }) {
         </div>
       </div>
 
-      {/* Consent metadata */}
-      <div className="text-xs text-tertiary" style={{ marginBottom: 12, background: 'rgba(0,0,0,0.15)', padding: '6px 12px', borderRadius: 6 }}>
+      <div className="consent-meta">
         <strong>Consent Logs:</strong> &nbsp;
         Costs &amp; referral: {sub.consentReferral ? '✓' : '✗'} &nbsp;·&nbsp;
         Share records: {sub.consentShare ? '✓' : '✗'} &nbsp;·&nbsp;
@@ -245,17 +242,16 @@ export default function Referrals() {
   return (
     <div className="page-body">
       {/* Eligibility form URL co-branding card */}
-      <div className="card card-surface" style={{ marginBottom: 16 }}>
-        <div className="flex items-center gap-sm text-sm justify-between flex-wrap">
-          <div className="flex items-center gap-sm">
+      <div className="card card-surface intake-banner">
+        <div className="intake-banner__inner">
+          <div className="flex items-center gap-sm text-sm">
             <LinkIcon size={14} className="text-green" />
             <span className="text-muted">Eligibility Intake Form Widget:</span>
             <a
               href="/specs/HHH-Eligibility-Form.html"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-green font-semibold"
-              style={{ textDecoration: 'none', borderBottom: '1px dashed var(--green-500)', paddingBottom: 1 }}
+              className="intake-banner__link"
             >
               {PHARMACY.formUrl} (Open Live Widget)
             </a>
@@ -265,115 +261,45 @@ export default function Referrals() {
       </div>
 
       {/* Stats summary grid / tab selectors */}
-      <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
-        {/* All Intake Records */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'all' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'all' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('all')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+      <div className="filter-grid">
+        <div className={`card card-surface filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
+          <div className="filter-card__head">
             <span>All Intake</span>
             <FileText size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'all' ? 'var(--green-100)' : 'inherit' }}>
-            {state.submissions.length}
-          </span>
+          <span className="filter-card__value">{state.submissions.length}</span>
         </div>
 
-        {/* Enquiries */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'New' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'New' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('New')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeTab === 'New' ? 'active' : ''}`} onClick={() => setActiveTab('New')}>
+          <div className="filter-card__head">
             <span>Enquiries</span>
             <Clock size={14} className={activeTab === 'New' ? 'text-red' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'New' ? 'var(--green-100)' : 'inherit' }}>
-            {state.submissions.filter(s => s.status === 'New').length}
-          </span>
+          <span className="filter-card__value">{state.submissions.filter(s => s.status === 'New').length}</span>
         </div>
 
-        {/* Clinical Files */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'Records uploaded' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'Records uploaded' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('Records uploaded')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeTab === 'Records uploaded' ? 'active' : ''}`} onClick={() => setActiveTab('Records uploaded')}>
+          <div className="filter-card__head">
             <span>Clinical Files</span>
             <FileText size={14} className={activeTab === 'Records uploaded' ? 'text-amber' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'Records uploaded' ? 'var(--green-100)' : 'inherit' }}>
-            {state.submissions.filter(s => s.status === 'Records uploaded').length}
-          </span>
+          <span className="filter-card__value">{state.submissions.filter(s => s.status === 'Records uploaded').length}</span>
         </div>
 
-        {/* Referred */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'Referred to clinic' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'Referred to clinic' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('Referred to clinic')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeTab === 'Referred to clinic' ? 'active' : ''}`} onClick={() => setActiveTab('Referred to clinic')}>
+          <div className="filter-card__head">
             <span>Referred</span>
             <Send size={14} className={activeTab === 'Referred to clinic' ? 'text-info' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'Referred to clinic' ? 'var(--green-100)' : 'inherit' }}>
-            {state.submissions.filter(s => s.status === 'Referred to clinic').length}
-          </span>
+          <span className="filter-card__value">{state.submissions.filter(s => s.status === 'Referred to clinic').length}</span>
         </div>
 
-        {/* Active in CRM */}
-        <div
-          className="card card-surface"
-          style={{
-            margin: 0,
-            padding: 12,
-            cursor: 'pointer',
-            border: activeTab === 'Completed' ? '1px solid var(--green-500)' : '1px solid var(--border)',
-            background: activeTab === 'Completed' ? 'rgba(16, 185, 129, 0.05)' : 'var(--card-bg)',
-            transition: 'all 0.2s ease'
-          }}
-          onClick={() => setActiveTab('Completed')}
-        >
-          <div className="flex justify-between items-center text-xs font-bold text-muted uppercase">
+        <div className={`card card-surface filter-card ${activeTab === 'Completed' ? 'active' : ''}`} onClick={() => setActiveTab('Completed')}>
+          <div className="filter-card__head">
             <span>Active in CRM</span>
             <CheckCircle size={14} className={activeTab === 'Completed' ? 'text-green' : 'text-muted'} />
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, display: 'block', marginTop: 4, color: activeTab === 'Completed' ? 'var(--green-100)' : 'inherit' }}>
-            {state.submissions.filter(s => s.status === 'Completed').length}
-          </span>
+          <span className="filter-card__value">{state.submissions.filter(s => s.status === 'Completed').length}</span>
         </div>
       </div>
 

@@ -69,8 +69,7 @@ export default function Navigation() {
           </div>
         </div>
         <button
-          className="btn btn-sm"
-          style={{ width: '100%', marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'rgba(239, 68, 68, 0.1)', color: '#F87171', border: '1px solid rgba(239, 68, 68, 0.2)' }}
+          className="btn btn-sm sidebar-exit"
           onClick={() => dispatch({ type: 'SET_PORTAL_MODE', mode: 'gateway' })}
         >
           <LogOut size={13} /> Exit to Gateway
