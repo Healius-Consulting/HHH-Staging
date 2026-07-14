@@ -851,7 +851,7 @@ function renderOrders(){
     if(o.payment.sentAt)info+=`<div class="kv"><span class="muted">Payment link sent</span><span>${fmtStamp(new Date(o.payment.sentAt))}</span></div>`;
     if(o.payment.paidAt)info+=`<div class="kv"><span class="muted">Payment received</span><span>${fmtStamp(o.payment.paidAt)}</span></div>`;
     let adv;
-    if(st<2){adv=`<button class="btn" style="margin-top:8px;" onclick="advance(${o.id},${r.id})">Simulate next update (polling)</button>${st===0?` <button class="btn" onclick="undoPlace(${o.id},${r.id})">Cancel (undo)</button>`:''}`;}
+    if(st<2){adv=`<span class="tiny">Awaiting verified Curaleaf Rocky status polling.</span>${st===0?` <button class="btn" onclick="undoPlace(${o.id},${r.id})">Cancel (undo)</button>`:''}`;}
     else if(st===2){adv= rxExpired(r) ? `<button class="btn" style="margin-top:8px" disabled>Cannot dispense — prescription expired</button>` : `<button class="btn primary" style="margin-top:8px;" onclick="markReceived(${o.id},${r.id})">Mark received at pharmacy</button><div class="tiny" style="margin-top:6px;color:var(--tt)">In transit via ${r.carrier||'DPD'}. Confirm goods-in to notify the patient it's ready to collect.</div>`;}
     else if(st===3){adv= rxExpired(r) ? `<button class="btn" style="margin-top:8px" disabled>Cannot dispense — prescription expired</button>` : `<div class="tiny" style="margin-top:8px;color:var(--green)">✓ Ready for collection — patient notified</div><button class="btn primary" style="margin-top:8px" onclick="markCollected(${o.id},${r.id})">Mark as collected</button>`;}
     else{adv='<div class="tiny" style="margin-top:8px;color:var(--green)">✓ Collected — handover complete</div>';}
@@ -868,7 +868,6 @@ function renderOrders(){
       <div class="acc-items" style="margin-top:7px"><div class="tiny" style="font-weight:600;margin-bottom:2px">Stage history (date &amp; time)</div>${hist||'<div class="tiny" style="color:var(--tt)">—</div>'}</div>
       ${adv}${renderNotifs(o)}</div></div>`;}).join('');
 }
-function advance(oid,rid){const o=po(oid),r=rxOf(o,rid);if(r.status<2){r.status++;r.stamps=r.stamps||{};r.stamps[r.status]=stampNow();}if(r.status===1&&!r.invoice)r.invoice='INV-'+(nextInv++);if(r.status===2&&!r.tracking){r.tracking='CL'+Math.floor(100000+Math.random()*900000)+'GB';r.carrier='DPD';}renderOrders();}
 function markReceived(oid,rid){const o=po(oid),r=rxOf(o,rid);if(r.status!==2)return;if(rxExpired(r))return;r.status=3;r.stamps=r.stamps||{};r.stamps[3]=stampNow();const p=pat(o);notify(o,'Ready for collection',(p?'Hi '+p.name.split(' ')[0]+', ':'')+'your medication (Rx #'+r.id+') is ready to collect from the pharmacy.','SMS / Email');renderOrders();}
 function markCollected(oid,rid){const o=po(oid),r=rxOf(o,rid);if(r.status!==3)return;if(rxExpired(r))return;r.status=4;r.collectedAt=stampNow();r.stamps=r.stamps||{};r.stamps[4]=r.collectedAt;const p=pat(o);if(p){(patientEvents[p.email]=patientEvents[p.email]||[]).push({date:r.collectedAt,rxId:r.id,items:r.items.length,po:r.po});}renderOrders();}
 function deleteOrder(oid){const o=po(oid);if(!o||o.payment.status!=='none')return;const p=pat(o);if(confirm('Delete this order'+(p?' for '+p.name:'')+'? This cannot be undone.')){porders=porders.filter(function(x){return x.id!==oid;});if(activePO===oid)activePO=null;renderCreate();}}

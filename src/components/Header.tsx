@@ -3,15 +3,15 @@ import { useApp } from '../context/AppContext';
 const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   home: {
     title: 'Pharmacy Dashboard',
-    subtitle: 'Overview of daily clinic referrals, payment requests, and supply chain status.',
+    subtitle: 'Overview of HHH-approved patients, prescription preparation, payment requests and supply-chain status.',
   },
   referrals: {
-    title: 'Clinic Intake Directory',
-    subtitle: 'Process new patient enquiries, verify medical histories, and issue clinic referrals.',
+    title: 'HHH Patient Onboarding',
+    subtitle: 'Track patients attributed to your pharmacy while Holistic Health Hub completes its review and onboarding decision.',
   },
   create: {
     title: 'Rx Builder Workspace',
-    subtitle: 'Unified workspace: Link CRM patients, verify prescriptions, and assign products from Curaleaf.',
+    subtitle: 'Select an HHH-approved patient, verify the doctor’s prescription, and prepare the Curaleaf order.',
   },
   review: {
     title: 'Payments & Billing',
@@ -24,6 +24,14 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   patients: {
     title: 'Patients CRM Directory',
     subtitle: 'Search the patient index and view order histories, clinical files, and logged activities.',
+  },
+  resources: {
+    title: 'Eligibility Form & Content Pack',
+    subtitle: 'Copy the pharmacy-specific patient link, save its QR code, or hand a website pack to developers.',
+  },
+  settings: {
+    title: 'Organisation Settings',
+    subtitle: 'Review your Worldpay connection, pharmacy pricing, enabled modules and go-live requirements.',
   },
 };
 

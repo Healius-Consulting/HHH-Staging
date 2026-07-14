@@ -1,5 +1,7 @@
 # HHH Platform — Project Manager (Owner) Playbook
 
+> **Delivery decision update:** Pharmacies receive a unique hosted-form link and QR asset pack. Their developers design the pharmacy page/button and link out to HHH; they do not paste an iframe or form code. See `ADR-hosted-form-link-out.md`; this supersedes older embed instructions below.
+
 **Purpose:** Single document for go-live planning. Use this with the Developer to assign every task before the first live pharmacy.  
 **Partner role:** Developer (platform build, hosting, integrations)  
 **Last updated:** June 2026
@@ -16,7 +18,7 @@
 2. Manage **referrals → prescriptions → patient payment → Curaleaf ordering → collection** in a staff console
 3. Optionally give patients a **portal** (pay, track, collect)
 
-**End-to-end journey:** Eligibility intake → clinic referral → prescription issued → order from Curaleaf (Rocky API) → patient pays (Worldpay) → goods arrive at pharmacy → patient collects.
+**End-to-end journey:** Pharmacy-token eligibility intake → Shaylen/HHH telephone review → HHH programme-onboarding decision → doctor issues prescription → pharmacy validates prescription and sets price → patient pays into that pharmacy's Worldpay account (or pharmacy-managed route) → HHH transmits the order to Curaleaf → goods arrive at pharmacy → patient collects.
 
 **Your job:** Get pharmacies signed, compliant, trained, and live. Chase legal, Curaleaf, and Worldpay. First line of support.
 
@@ -69,33 +71,36 @@ Copy this into a shared tracker (Notion / spreadsheet). Each row: **Owner | Stat
 
 ---
 
-### 3A. Company & founder (once — before first pharmacy partner)
+### 3A. Operator identity, company & ownership (once — before first pharmacy partner)
+
+**Recorded boundary:** Healius Consulting is the operating/business name and HHH (Holistic Health Hub) is the platform brand. Do not put “HHH Ltd” on a contract, privacy notice, ICO registration or insurance policy unless Shaylen supplies evidence that this is the exact registered legal entity.
 
 | ID | Label | Task | Owner | Done |
 |----|-------|------|-------|------|
-| C-01 | REQ-LEGAL | **HHH Ltd** incorporated (if not already) | PM + directors | ☐ |
-| C-02 | REQ-LEGAL | **Founder / shareholder agreement** between you and Developer (or other founders) | PM + solicitor | ☐ |
-| C-03 | REQ-LEGAL | **Partner agreement template** (pharmacy ↔ HHH) drafted by solicitor | Solicitor; PM negotiates | ☐ |
+| C-01 | REQ-LEGAL | Verify the legal entity behind the **Healius Consulting** business name and **HHH** platform: exact legal name, legal status/form, company number (if any), registered office and authority to contract | Shaylen + solicitor | ☐ |
+| C-02 | REQ-LEGAL | **Founder / shareholder agreement** where applicable, plus written ownership/licence of the HHH name, domains, software and content | PM + solicitor | ☐ |
+| C-03 | REQ-LEGAL | **Partner agreement template** (pharmacy ↔ verified Healius legal entity, trading as HHH) drafted by solicitor | Solicitor; PM negotiates | ☐ |
 | C-04 | REQ-LEGAL | **DPA template** + written **controller/processor opinion** | Solicitor | ☐ |
-| C-05 | REQ-UK | **HHH ICO registration** at [ico.org.uk/data-protection-fee](https://ico.org.uk/for-organisations/data-protection-fee/) (~£40–60/yr) — after solicitor confirms you must register | PM | ☐ |
-| C-06 | REC-UK | **Professional indemnity + cyber insurance** for HHH | PM | ☐ |
-| C-07 | OPEN | **Decide data controller model:** pharmacy = controller / HHH = processor (typical) OR HHH = controller — **solicitor must confirm** | Solicitor | ☐ |
+| C-05 | REQ-UK | Register/pay the ICO data protection fee in the **verified operator legal name** if required after role assessment | PM | ☐ |
+| C-06 | REC-UK | **Professional indemnity + cyber insurance** held by the verified operator and covering HHH activities | PM | ☐ |
+| C-07 | OPEN | **Decide data controller model:** pharmacy and verified Healius legal entity operating HHH — **solicitor must confirm each role** | Solicitor | ☐ |
+| C-08 | REQ-LEGAL | Put required operator legal details and trading-name wording on the website, email footer, contracts, invoices, privacy notices and patient-facing surfaces | PM + solicitor + DEV | ☐ |
 
 **Solicitor brief (first engagement, ~£1.5k–£5k):** C-03, C-04, C-07, privacy notices, Art. 6 + Art. 9 lawful basis for health data.
 
 ---
 
-### 3B. HHH platform compliance (once — before first live patient)
+### 3B. Healius Consulting / HHH platform compliance (once — before first live patient)
 
 | ID | Label | Task | Owner | Done |
 |----|-------|------|-------|------|
 | G-01 | REQ-ICO | **DPIA** (Data Protection Impact Assessment) — special category health data + online access = high risk | Advisor signs; DEV writes technical sections | ☐ |
 | G-02 | REQ-ICO | **ROPA** (Record of Processing Activities) | PM + advisor; DEV lists what system processes | ☐ |
-| G-03 | REQ-UK | **Privacy notices** published — patient (embed + portal), staff | Solicitor drafts; DEV implements | ☐ |
+| G-03 | REQ-UK | **Privacy notices** published — patient (hosted form + portal) and staff; verified operator identity and party roles included | Solicitor drafts; DEV implements | ☐ |
 | G-04 | REQ-UK | **Eligibility form consent wording** — care vs marketing **separate** checkboxes; explicit consent for health data | Solicitor drafts; DEV implements | ☐ |
 | G-05 | REQ-ICO | **Appropriate Policy Document** (if using DPA 2018 Schedule 1 for health care processing) | Solicitor / advisor | ☐ |
-| G-06 | REQ-UK | **DPA signed with each pharmacy** (use template from C-04) | PM | ☐ |
-| G-07 | REQ-UK | **Sub-processor DPAs on file:** AWS, Worldpay, Twilio, Postmark, Curaleaf | PM obtains; solicitor reviews | ☐ |
+| G-06 | REQ-UK | **DPA signed between the verified Healius legal entity and each pharmacy** (use template from C-04) | PM | ☐ |
+| G-07 | REQ-UK | **Sub-processor DPAs on file in the verified operator name:** hosting, Worldpay, communications services and Curaleaf as applicable | PM obtains; solicitor reviews | ☐ |
 | G-08 | REQ-ICO | **Data retention policy** written; DEV implements automated deletion | Advisor approves periods; DEV builds | ☐ |
 | G-09 | REQ-ICO | **Personal data breach procedure** — who calls who; 72h ICO notification if required | PM + advisor; DEV containment | ☐ |
 | G-10 | REQ-ICO | **Individual rights procedure** — patient access / erasure requests | PM process; DEV tooling | ☐ |
@@ -130,11 +135,11 @@ Copy this into a shared tracker (Notion / spreadsheet). Each row: **Owner | Stat
 
 | ID | Label | Task | Owner | Done |
 |----|-------|------|-------|------|
-| I-01 | OPEN | **Worldpay model decided:** each pharmacy has own merchant OR HHH aggregates | PM + solicitor | ☐ |
+| I-01 | OPEN | **Approve working Worldpay model:** each pharmacy connects its own merchant account and patient funds settle directly to that pharmacy; obtain Worldpay/legal confirmation | PM + solicitor | ☐ |
 | I-02 | OPEN | **Curaleaf TRD §9** open items closed (see Section 9) | PM chases Mike Baker / Phil Jones | ☐ |
 | I-03 | REQ-LEGAL | **DPA with Curaleaf** | PM | ☐ |
 | I-04 | REQ-PM | **Rocky API credentials** per pharmacy (from Curaleaf) | PM → DEV | ☐ |
-| I-05 | REQ-PM | **Worldpay merchant live** (or sandbox for UAT only) | PM → DEV | ☐ |
+| I-05 | REQ-PM | **Worldpay merchant connection live per pharmacy** with direct-settlement and reconciliation rules approved (sandbox for UAT only) | PM → DEV | ☐ |
 
 ---
 

@@ -6,7 +6,7 @@ Working **prototype and technical specification** for the Holistic Health Hub (H
 
 ## The end-to-end journey
 
-Referral / eligibility intake → clinic referral (Curaleaf Clinic) → prescription issued → ordering from Curaleaf (Rocky API) → patient payment (Worldpay) → dispensing & **collection at the pharmacy**.
+Pharmacy-token eligibility intake → Shaylen/HHH telephone review and programme-onboarding decision → doctor-issued prescription → pharmacy pricing and payment into that pharmacy's Worldpay account (or its own payment route) → HHH transmits the order to Curaleaf (Rocky API) → dispensing and **collection at the pharmacy**.
 
 ## What's in here
 
@@ -16,8 +16,12 @@ Referral / eligibility intake → clinic referral (Curaleaf Clinic) → prescrip
 | `HHH-Eligibility-Form.html` | The patient-facing eligibility form (the replacement for the external pharmsmart "add-patient" page). **Open in a browser.** |
 | `HHH-Ordering-Platform-Mockup.svg` | Static visual mockup of the ordering screen. |
 | `Rocky_API_Technical_Requirements_v1.5.docx` | The Technical Requirements Document (TRD) — 52 functional requirements (F-01–F-52), API endpoints, expected payloads, non-functional requirements, and open items. |
+| `Rocky_API_Technical_Requirements_v1.6.docx` | Newer TRD recovered from the July `main` update; use with the Rocky API reference and confirm final sandbox behaviour. |
+| `Rocky-API-Reference.md` | Confirmed Rocky routes and schemas plus corrections to earlier endpoint/auth/courier assumptions. |
 | `TRD-redline-Rx-suborder-flow.md`, `TRD-redline-patient-payment.md` | Requirement redlines pending merge into the TRD. |
 | `production-architecture.md` | Production architecture — hosting (frontend, backend, UK infra), security, hardened embed model, integrations, and the full pharmacy onboarding playbook (legal → go-live). |
+| `separate-form-deployment.md` | Exact build and environment setup for hosting the eligibility form, portal and shared API on separate domains. |
+| `ADR-hosted-form-link-out.md` | Accepted decision: pharmacies design their page and link to the centrally hosted tokenised form; no iframe or copied form code. |
 | `full_project_breakdown.md` | Technical breakdown of the current React prototype — file-by-file map of clinician/patient portals, state schemas, and static spec assets. |
 | `project-manager-playbook.md` | **Self-contained go-live guide** for Project Manager (Owner) — master checklists, per-pharmacy runbook, onboarding form, UAT sign-off, meeting agenda, Curaleaf chase list. Use this alone for pre-go-live task breakdown. |
 | `uk-compliance-register.md` | **Master UK requirements register** — labelled checklist (REQ-UK, REQ-ICO, REQ-GPHC, PRE-LIVE gates) with ICO/GPhC/DPA 2018 references. |
@@ -39,7 +43,7 @@ Referral / eligibility intake → clinic referral (Curaleaf Clinic) → prescrip
 
 ## Integrations the production build will need
 
-- **Curaleaf Rocky API** — `GET /products`, `POST /prescription`, `POST /purchase-order`, `GET /shipments` (polling; **no webhooks**). Auth: per-pharmacy API key + username pair.
+- **Curaleaf Rocky API** — versioned `/v1/` routes for formulas, products, prescriptions, purchase orders, quotes, shipments and event polling. Auth: `X-API-Key`; keep per-pharmacy keys server-side.
 - **Worldpay** — hosted payment + webhooks for pay/paid status.
 - **HHH CRM** — referred-patient records (the prototype mocks this).
 - **SMS / email provider** — the "ready for collection" notification.

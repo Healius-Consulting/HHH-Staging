@@ -61,13 +61,6 @@ export default function Orders() {
     }, 400);
   };
 
-  const paidOrders = state.orders.filter(o => o.payment.status === 'paid');
-
-  const patientName = (patientId: string | null) => {
-    if (!patientId) return 'Unassigned';
-    return state.crm.find(p => p.id === patientId)?.name ?? 'Unknown';
-  };
-
   const fmtDate = (d: Date) =>
     new Date(d).toLocaleDateString('en-GB', {
       day: 'numeric',
@@ -78,8 +71,8 @@ export default function Orders() {
   /* ── Flatten all prescriptions from paid orders to track independently ── */
   const allSubOrders = useMemo(() => {
     const list: FlatSubOrder[] = [];
-    paidOrders.forEach(order => {
-      const pName = patientName(order.patientId);
+    state.orders.filter(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'paid').forEach(order => {
+      const pName = order.patientId ? state.crm.find(patient => patient.organisationId === state.currentOrganisationId && patient.id === order.patientId)?.name ?? 'Unknown' : 'Unassigned';
       order.prescriptions.forEach((rx, idx) => {
         list.push({
           orderId: order.id,
@@ -91,7 +84,7 @@ export default function Orders() {
       });
     });
     return list;
-  }, [paidOrders, state.crm]);
+  }, [state.currentOrganisationId, state.crm, state.orders]);
 
   // Filter sub-orders matching active status tab
   const filteredSubOrders = useMemo(() => {

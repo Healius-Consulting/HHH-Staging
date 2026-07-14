@@ -72,18 +72,18 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
 
   if (p.submission) {
     switch (p.submission.status) {
-      case 'Referred to clinic':
-        return { label: 'Referred to clinic', pill: 'pill-info' };
-      case 'Records uploaded':
-        return { label: 'Records uploaded', pill: 'pill-amber' };
+      case 'Under HHH review':
+        return { label: 'Under HHH review', pill: 'pill-amber' };
       case 'New':
         return { label: 'New enquiry', pill: 'pill-red' };
-      case 'Completed':
-        return { label: 'CRM Active', pill: 'pill-green' };
+      case 'Approved':
+        return { label: 'HHH approved', pill: 'pill-green' };
+      case 'Declined':
+        return { label: 'Not onboarded', pill: 'pill-red' };
     }
   }
 
-  if (p.crmPatient) return { label: 'CRM Active', pill: 'pill-green' };
+  if (p.crmPatient) return { label: p.crmPatient.status, pill: p.crmPatient.status === 'HHH approved' ? 'pill-green' : 'pill-red' };
 
   return { label: '—', pill: 'pill-neutral' };
 }
@@ -114,7 +114,7 @@ export default function Patients() {
     const map = new Map<string, UnifiedPatient>();
 
     // Add CRM patients keyed by email
-    for (const crm of state.crm) {
+    for (const crm of state.crm.filter(patient => patient.organisationId === state.currentOrganisationId)) {
       const key = crm.email.toLowerCase();
       map.set(key, {
         id: crm.id,
@@ -128,7 +128,7 @@ export default function Patients() {
     }
 
     // Merge submissions
-    for (const sub of state.submissions) {
+    for (const sub of state.submissions.filter(item => item.organisationId === state.currentOrganisationId)) {
       const key = sub.email.toLowerCase();
       const existing = map.get(key);
       if (existing) {
@@ -147,7 +147,7 @@ export default function Patients() {
     }
 
     return Array.from(map.values());
-  }, [state.crm, state.submissions, state.orders]);
+  }, [state.crm, state.submissions, state.orders, state.currentOrganisationId]);
 
   /* ── Filtered & Sorted list ── */
   const processedPatients = useMemo(() => {
@@ -166,7 +166,7 @@ export default function Patients() {
 
     // 2. Tab Filter
     if (activeTab === 'enquiries') {
-      list = list.filter(p => p.submission && p.submission.status !== 'Completed');
+      list = list.filter(p => p.submission && p.submission.status !== 'Approved' && p.submission.status !== 'Declined');
     } else if (activeTab === 'active') {
       list = list.filter(p => p.crmPatient !== null);
     } else if (activeTab === 'on-order') {
@@ -191,14 +191,12 @@ export default function Patients() {
   const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
 
   const handleCreateOrder = (patient: UnifiedPatient) => {
-    let finalPatientId = patient.crmPatient?.id || null;
-    
-    if (!finalPatientId && patient.submission) {
-      dispatch({ type: 'EMAIL_REFERRAL', subId: patient.submission.id });
-      finalPatientId = 'P-' + state.nextIds.patient;
+    const finalPatientId = patient.crmPatient?.status === 'HHH approved' ? patient.crmPatient.id : null;
+    if (!finalPatientId) {
+      dispatch({ type: 'ADD_TOAST', message: `${patient.name} cannot be added to an order until HHH approves programme onboarding.`, toastType: 'warning' });
+      return;
     }
-
-    dispatch({ type: 'NEW_ORDER', patientId: finalPatientId || undefined });
+    dispatch({ type: 'NEW_ORDER', patientId: finalPatientId });
     dispatch({ type: 'ADD_TOAST', message: `Created new order draft linked to ${patient.name}`, toastType: 'success' });
     dispatch({ type: 'SET_SCREEN', screen: 'create' });
   };
@@ -231,8 +229,8 @@ export default function Patients() {
   };
 
   // Metrics counts
-  const totalCRM = state.crm.length;
-  const activeEnquiries = state.submissions.filter(s => s.status !== 'Completed').length;
+  const totalCRM = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId).length;
+  const activeEnquiries = state.submissions.filter(s => s.organisationId === state.currentOrganisationId && (s.status === 'New' || s.status === 'Under HHH review')).length;
   const onOrderCount = patients.filter(p => p.crmPatient && p.orders.some(o => o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))).length;
 
   return (
@@ -399,6 +397,7 @@ export default function Patients() {
               <div className="flex items-center gap-sm">
                 <button
                   className="btn btn-primary btn-sm"
+                  disabled={selectedPatient.crmPatient?.status !== 'HHH approved'}
                   onClick={() => handleCreateOrder(selectedPatient)}
                 >
                   <Plus size={12} /> Create Order
@@ -506,9 +505,10 @@ export default function Patients() {
                       <span className="font-semibold text-primary">{selectedPatient.submission.condition}</span>
                     </div>
                     <div className="kv-line">
-                      <span className="text-secondary">Clinic Referral Code:</span>
-                      <span className="font-semibold text-info">{selectedPatient.submission.clinicRef || 'Awaiting clinic code'}</span>
+                      <span className="text-secondary">HHH onboarding decision:</span>
+                      <span className="font-semibold text-info">{selectedPatient.submission.status}</span>
                     </div>
+                    {selectedPatient.submission.reviewedBy && <div className="kv-line"><span className="text-secondary">Reviewed by:</span><span className="font-semibold text-primary">{selectedPatient.submission.reviewedBy}</span></div>}
                     
                     <div className="divider" style={{ margin: '4px 0' }} />
 

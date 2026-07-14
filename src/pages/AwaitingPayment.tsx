@@ -1,41 +1,22 @@
-import { useState, useEffect } from 'react';
-import { Clock, CheckCircle, CreditCard, ExternalLink, Send } from 'lucide-react';
-import { useApp, money, rxRevenue, type PatientOrder } from '../context/AppContext';
+import { useState } from 'react';
+import { Banknote, Clock, CheckCircle, CreditCard, ExternalLink, ReceiptText, Send } from 'lucide-react';
+import { useApp, money, rxRevenue, type ManualTender, type PatientOrder } from '../context/AppContext';
+
+type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
+const DEFAULT_MANUAL_FORM: ManualPaymentForm = { tender: 'epos-card', reference: '', notes: '', confirmed: false };
 
 export default function AwaitingPayment() {
   const { state, dispatch } = useApp();
   const [activeSubTab, setActiveSubTab] = useState<'all' | 'awaiting' | 'paid'>('awaiting');
-  const [prevOrders, setPrevOrders] = useState<PatientOrder[]>(state.orders);
-  const [exitingOrderId, setExitingOrderId] = useState<number | null>(null);
+  const [manualForms, setManualForms] = useState<Record<number, ManualPaymentForm>>({});
 
-  useEffect(() => {
-    // Find if any order transitioned from 'sent' to 'paid'
-    const transitioned = state.orders.find(order => {
-      const prev = prevOrders.find(p => p.id === order.id);
-      return prev && prev.payment.status === 'sent' && order.payment.status === 'paid';
-    });
-
-    if (transitioned) {
-      if (activeSubTab === 'awaiting' && exitingOrderId !== transitioned.id) {
-        setExitingOrderId(transitioned.id);
-        const timer = setTimeout(() => {
-          setExitingOrderId(null);
-          setPrevOrders(state.orders);
-        }, 400);
-        return () => clearTimeout(timer);
-      }
-    }
-
-    if (!exitingOrderId) {
-      setPrevOrders(state.orders);
-    }
-  }, [state.orders, prevOrders, activeSubTab, exitingOrderId]);
+  const tenantOrders = state.orders.filter(order => order.organisationId === state.currentOrganisationId);
 
   // Awaiting payments: status === 'sent'
-  const awaitingOrders = prevOrders.filter(o => o.payment.status === 'sent');
+  const awaitingOrders = tenantOrders.filter(o => o.payment.status === 'sent');
 
   // Paid payments: status === 'paid'
-  const paidOrders = state.orders.filter(o => o.payment.status === 'paid');
+  const paidOrders = tenantOrders.filter(o => o.payment.status === 'paid');
 
   const matchingOrders = activeSubTab === 'all'
     ? [...awaitingOrders, ...paidOrders].sort((a, b) => b.id - a.id)
@@ -45,24 +26,25 @@ export default function AwaitingPayment() {
 
   const patientName = (patientId: string | null) => {
     if (!patientId) return 'Unassigned';
-    return state.crm.find(p => p.id === patientId)?.name ?? 'Unknown';
+    return state.crm.find(p => p.organisationId === state.currentOrganisationId && p.id === patientId)?.name ?? 'Unknown';
   };
 
   const handlePlaceOrder = (orderId: number) => {
     dispatch({ type: 'PLACE_ORDER', orderId });
+    dispatch({ type: 'ADD_TOAST', message: 'HHH transmitted the approved, paid prescription order to Curaleaf.', toastType: 'success' });
   };
 
-  const handleSimulatePaymentClear = (orderId: number) => {
-    dispatch({ type: 'CONFIRM_PAYMENT', orderId });
-    dispatch({ type: 'PLACE_ORDER', orderId });
+  const updateManualForm = (orderId: number, patch: Partial<ManualPaymentForm>) => {
+    setManualForms(current => ({ ...current, [orderId]: { ...(current[orderId] ?? DEFAULT_MANUAL_FORM), ...patch } }));
+  };
 
-    const orderObj = state.orders.find(o => o.id === orderId);
-    const name = orderObj?.patientId ? state.crm.find(p => p.id === orderObj.patientId)?.name : 'Marcus Vance';
-    dispatch({ 
-      type: 'ADD_TOAST', 
-      message: `Worldpay Webhook: Payment cleared instantly for ${name} (£${orderObj?.payment.amount.toFixed(2)}). Order submitted directly to Curaleaf.`, 
-      toastType: 'success' 
-    });
+  const handleRecordManualPayment = (order: PatientOrder) => {
+    const form = manualForms[order.id] ?? DEFAULT_MANUAL_FORM;
+    if (!form.confirmed) return;
+    dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
+    dispatch({ type: 'PLACE_ORDER', orderId: order.id });
+    const label = form.tender === 'epos-card' ? 'EPOS card' : form.tender === 'bank-transfer' ? 'bank transfer' : form.tender;
+    dispatch({ type: 'ADD_TOAST', message: `${money(order.payment.amount)} ${label} payment recorded. HHH transmitted the order to Curaleaf.`, toastType: 'success' });
   };
 
   const renderCard = (order: PatientOrder) => {
@@ -70,18 +52,17 @@ export default function AwaitingPayment() {
     const isSent = payment.status === 'sent';
     const isPaid = payment.status === 'paid';
     const allPlaced = prescriptions.length > 0 && prescriptions.every(rx => rx.placed);
-    const isExiting = exitingOrderId === order.id;
 
     return (
-      <div className={`card card-spaced ${isExiting ? 'card-exit' : ''}`} key={order.id}>
+      <div className="card card-spaced" key={order.id}>
         <div className="card-header">
           <div className="flex items-center gap-sm">
             <CreditCard size={16} className="text-secondary" />
             <span className="card-title-md">{patientName(order.patientId)}</span>
             <span className="text-muted text-sm">&mdash; Order Session #{order.id}</span>
           </div>
-          {isSent && <span className="pill pill-amber">Link Active</span>}
-          {isPaid && <span className="pill pill-green"><CheckCircle size={12} /> Paid</span>}
+          {isSent && <span className="pill pill-amber">{payment.route === 'worldpay' ? 'Worldpay link active' : 'Awaiting pharmacy confirmation'}</span>}
+          {isPaid && <span className="pill pill-green"><CheckCircle size={12} /> {payment.route === 'worldpay' ? 'Paid online' : 'Paid at pharmacy'}</span>}
         </div>
 
         <div className="divider" />
@@ -91,15 +72,25 @@ export default function AwaitingPayment() {
             <span className="text-muted text-sm">Requested Amount:</span>
             <span className="font-bold text-primary">{money(payment.amount)}</span>
           </div>
-          {payment.ref && (
+          <div className="kv-line">
+            <span className="text-muted text-sm">Payment route:</span>
+            <span className="text-sm font-semibold">{payment.route === 'worldpay' ? 'Worldpay online checkout' : 'Pharmacy-managed / EPOS'}</span>
+          </div>
+          {payment.route === 'worldpay' && payment.ref && (
             <div className="kv-line">
               <span className="text-muted text-sm">Worldpay Reference:</span>
               <span className="text-sm font-semibold">{payment.ref}</span>
             </div>
           )}
+          {payment.manualTender && <div className="kv-line"><span className="text-muted text-sm">Tender received:</span><span className="text-sm font-semibold">{{ 'epos-card': 'EPOS card', cash: 'Cash', 'bank-transfer': 'Bank transfer', other: 'Other' }[payment.manualTender]}</span></div>}
+          {payment.manualReference && <div className="kv-line"><span className="text-muted text-sm">Invoice / receipt reference:</span><span className="text-sm font-semibold">{payment.manualReference}</span></div>}
+          {payment.manualNotes && <div className="kv-line"><span className="text-muted text-sm">Payment notes:</span><span className="text-sm">{payment.manualNotes}</span></div>}
+          {payment.manualRecordedBy && <div className="kv-line"><span className="text-muted text-sm">Recorded by:</span><span className="text-sm font-semibold">{payment.manualRecordedBy}</span></div>}
+          {payment.paidAt && <div className="kv-line"><span className="text-muted text-sm">Payment confirmed:</span><span className="text-sm">{new Date(payment.paidAt).toLocaleString('en-GB')}</span></div>}
+          {isPaid && <div className="kv-line settlement-net-line"><span className="text-muted text-sm">Settled to:</span><span className="font-bold text-green">{payment.route === 'worldpay' ? 'Pharmacy Worldpay merchant' : 'Pharmacy directly'}</span></div>}
           {payment.sentAt && (
             <div className="kv-line">
-              <span className="text-muted text-sm">Dispatched Date:</span>
+              <span className="text-muted text-sm">{payment.route === 'worldpay' ? 'Payment link sent:' : 'Payment route selected:'}</span>
               <span className="text-sm">
                 {new Date(payment.sentAt).toLocaleString('en-GB', {
                   day: 'numeric',
@@ -135,30 +126,39 @@ export default function AwaitingPayment() {
         <div className="divider" />
 
         {/* ── Status / Actions ── */}
-        {isSent && (
+        {isSent && payment.route === 'worldpay' && (
           <div className="flex flex-col gap-sm" style={{ marginTop: 8 }}>
             <div className="banner-amber flex items-center gap-sm" style={{ margin: 0 }}>
               <Clock size={16} />
               <span className="text-xs font-semibold">
-                Waiting for patient Worldpay transaction. Callback simulator completes automatically in 7 seconds.
+                Awaiting verified Worldpay payment. This order will remain pending until the hosted checkout and webhook integration is connected.
               </span>
             </div>
-            <button
-              className="btn btn-sm btn-primary"
-              onClick={() => handleSimulatePaymentClear(order.id)}
-              style={{ alignSelf: 'flex-start' }}
-            >
-              ⚡ Simulate Immediate Worldpay Webhook Payment
-            </button>
           </div>
         )}
+
+        {isSent && payment.route === 'pharmacy' && (() => {
+          const form = manualForms[order.id] ?? DEFAULT_MANUAL_FORM;
+          return (
+            <div className="manual-payment-panel">
+              <div className="manual-payment-heading"><div className="payment-route-icon"><Banknote size={18} /></div><div><strong>Record pharmacy payment</strong><span>Take payment using the pharmacy’s own EPOS, till or banking process, then confirm it here.</span></div></div>
+              <div className="manual-payment-grid">
+                <label>Payment method<select className="input select" value={form.tender} onChange={event => updateManualForm(order.id, { tender: event.target.value as ManualTender })}><option value="epos-card">EPOS card</option><option value="cash">Cash</option><option value="bank-transfer">Bank transfer</option><option value="other">Other</option></select></label>
+                <label>Invoice / receipt reference <span className="text-muted">(optional)</span><input className="input" value={form.reference} onChange={event => updateManualForm(order.id, { reference: event.target.value })} placeholder="e.g. TILL-1048 or invoice ID" /></label>
+              </div>
+              <label>Additional payment notes <span className="text-muted">(optional)</span><textarea className="input manual-payment-notes" value={form.notes} onChange={event => updateManualForm(order.id, { notes: event.target.value })} placeholder="Anything useful for reconciliation or the audit trail" /></label>
+              <label className="manual-payment-confirm"><input type="checkbox" checked={form.confirmed} onChange={event => updateManualForm(order.id, { confirmed: event.target.checked })} /><span><strong>I confirm {money(payment.amount)} has been received by the pharmacy</strong><small>This manual check replaces a Worldpay webhook for this order.</small></span></label>
+              <button className="btn btn-primary" disabled={!form.confirmed} onClick={() => handleRecordManualPayment(order)}><ReceiptText size={14} /> Record payment and send through HHH</button>
+            </div>
+          );
+        })()}
 
         {isPaid && (
           <div style={{ marginTop: 8 }}>
             {allPlaced ? (
               <div className="banner-green flex items-center gap-sm" style={{ margin: 0, padding: 8 }}>
                 <CheckCircle size={16} />
-                <span className="text-xs font-semibold">All sub-orders placed with Curaleaf supplier.</span>
+                <span className="text-xs font-semibold">HHH transmitted all sub-orders to Curaleaf.</span>
               </div>
             ) : (
               <button
@@ -166,7 +166,7 @@ export default function AwaitingPayment() {
                 onClick={() => handlePlaceOrder(order.id)}
               >
                 <Send size={14} />
-                Place order with Curaleaf
+                Send to Curaleaf through HHH
               </button>
             )}
           </div>

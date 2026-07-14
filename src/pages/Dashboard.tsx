@@ -3,26 +3,30 @@ import { useApp } from '../context/AppContext';
 
 export default function Dashboard() {
   const { state, dispatch } = useApp();
+  const organisationId = state.currentOrganisationId;
+  const tenantOrders = state.orders.filter(order => order.organisationId === organisationId);
+  const tenantPatients = state.crm.filter(patient => patient.organisationId === organisationId);
+  const curaleafIntegration = state.platformIntegrations.find(integration => integration.id === 'curaleaf');
 
   /* ── Computed stats ── */
-  const newReferrals = state.submissions.filter(s => s.status !== 'Completed').length;
-  const awaitingPayment = state.orders.filter(o => o.payment.status === 'sent').length;
+  const newReferrals = state.submissions.filter(s => s.organisationId === organisationId && (s.status === 'New' || s.status === 'Under HHH review')).length;
+  const awaitingPayment = tenantOrders.filter(o => o.payment.status === 'sent').length;
 
-  const inFulfilment = state.orders.filter(o =>
+  const inFulfilment = tenantOrders.filter(o =>
     o.payment.status === 'paid' &&
     o.prescriptions.some(rx => rx.status !== 'ready')
   ).length;
 
-  const readyForCollection = state.orders.filter(o =>
+  const readyForCollection = tenantOrders.filter(o =>
     o.payment.status === 'paid' &&
     o.prescriptions.length > 0 &&
     o.prescriptions.every(rx => rx.status === 'ready')
   ).length;
 
   // 1. Uncollected warnings (10+ days)
-  const uncollectedAlerts = state.orders.flatMap(o => {
-    const pName = state.crm.find(p => p.id === o.patientId)?.name ?? 'Unknown';
-    const pMobile = state.crm.find(p => p.id === o.patientId)?.mobile ?? '';
+  const uncollectedAlerts = tenantOrders.flatMap(o => {
+    const pName = tenantPatients.find(p => p.id === o.patientId)?.name ?? 'Unknown';
+    const pMobile = tenantPatients.find(p => p.id === o.patientId)?.mobile ?? '';
     return o.prescriptions
       .filter(rx => rx.status === 'ready' && rx.readyAt && (Date.now() - new Date(rx.readyAt).getTime()) >= 10 * 24 * 60 * 60 * 1000)
       .map(rx => ({
@@ -38,11 +42,11 @@ export default function Dashboard() {
   });
 
   // 2. Overdue payments (3+ days)
-  const overduePaymentAlerts = state.orders
+  const overduePaymentAlerts = tenantOrders
     .filter(o => o.payment.status === 'sent' && o.payment.sentAt && (Date.now() - new Date(o.payment.sentAt).getTime()) >= 3 * 24 * 60 * 60 * 1000)
     .map(o => {
-      const pName = state.crm.find(p => p.id === o.patientId)?.name ?? 'Unknown';
-      const pEmail = state.crm.find(p => p.id === o.patientId)?.email ?? '';
+      const pName = tenantPatients.find(p => p.id === o.patientId)?.name ?? 'Unknown';
+      const pEmail = tenantPatients.find(p => p.id === o.patientId)?.email ?? '';
       const amount = o.prescriptions.reduce((sum, rx) => sum + rx.items.reduce((s, item) => s + (item.retail * item.qty + (item.fee || 0)), 0), 0);
       return {
         type: 'payment' as const,
@@ -57,8 +61,8 @@ export default function Dashboard() {
     });
 
   // 3. Repeat overdue (30+ days)
-  const repeatAlerts = state.crm.map(p => {
-    const pOrders = state.orders.filter(o => o.patientId === p.id);
+  const repeatAlerts = tenantPatients.map(p => {
+    const pOrders = tenantOrders.filter(o => o.patientId === p.id);
     if (pOrders.length === 0) return null;
     const latestOrder = [...pOrders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
     const daysSince = Math.floor((Date.now() - new Date(latestOrder.date).getTime()) / (1000 * 60 * 60 * 24));
@@ -76,7 +80,7 @@ export default function Dashboard() {
 
   // 4. Intake Pending Bottleneck (> 48h)
   const intakeAlerts = state.submissions
-    .filter(s => s.status !== 'Completed' && (Date.now() - new Date(s.submittedAt).getTime()) >= 48 * 60 * 60 * 1000)
+    .filter(s => s.organisationId === organisationId && (s.status === 'New' || s.status === 'Under HHH review') && (Date.now() - new Date(s.submittedAt).getTime()) >= 48 * 60 * 60 * 1000)
     .map(s => ({
       type: 'intake' as const,
       id: `intake-${s.id}`,
@@ -87,7 +91,7 @@ export default function Dashboard() {
     }));
 
   // 5. Patient Portal Requests
-  const portalRequests = state.crm.flatMap(p => {
+  const portalRequests = tenantPatients.flatMap(p => {
     const alerts: {
       type: 'repeat-req' | 'appointment-req';
       id: string;
@@ -147,13 +151,13 @@ export default function Dashboard() {
   const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length + portalRequests.length;
 
   /* ── Recent orders (last 5) ── */
-  const recentOrders = [...state.orders]
+  const recentOrders = [...tenantOrders]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5);
 
   const patientName = (patientId: string | null) => {
     if (!patientId) return 'Unassigned';
-    return state.crm.find(p => p.id === patientId)?.name ?? 'Unknown';
+    return tenantPatients.find(p => p.id === patientId)?.name ?? 'Unknown';
   };
 
   const paymentPill = (status: string) => {
@@ -170,7 +174,7 @@ export default function Dashboard() {
       <div className="stats-grid">
         <div className="card card-surface stat-card" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'referrals' })}>
           <div className="stat-card__head">
-            <span className="stat-card__label">New Clinic Referrals</span>
+            <span className="stat-card__label">Awaiting HHH Decisions</span>
             <Activity size={18} className="text-info" />
           </div>
           <div className="flex items-baseline gap-xs">
@@ -432,8 +436,8 @@ export default function Dashboard() {
             <div className="duty-item">
               <input type="checkbox" checked={newReferrals === 0} readOnly />
               <div>
-                <span className="font-semibold" style={{ display: 'block' }}>Process Clinic Intake</span>
-                <span className="text-muted text-xs">{newReferrals} clinic referrals awaiting verification and CRM sync.</span>
+                <span className="font-semibold" style={{ display: 'block' }}>Review onboarding status</span>
+                <span className="text-muted text-xs">{newReferrals} pharmacy-attributed enquiries are still with HHH for review.</span>
               </div>
             </div>
             <div className="duty-item">
@@ -456,7 +460,7 @@ export default function Dashboard() {
 
           <div className="integration-note">
             <h4><FileText size={12} /> Curaleaf Integration</h4>
-            <p>Connected to Curaleaf Rocky API. Orders placed are tracked via REST endpoints.</p>
+            <p>{curaleafIntegration?.status === 'connected' ? 'Connected to Curaleaf Rocky. Supplier orders and shipment events are available.' : 'Platform connection is pending live Curaleaf credentials. The configured formulary remains available for workflow testing.'}</p>
           </div>
         </div>
 

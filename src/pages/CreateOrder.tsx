@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Upload, Plus, Minus, X, FileText, Send, CreditCard, User, CheckCircle, Search, AlertTriangle, ListFilter } from 'lucide-react';
+import { Upload, Plus, Minus, X, FileText, Send, CreditCard, User, CheckCircle, Search, AlertTriangle, ListFilter, Banknote } from 'lucide-react';
 import {
   useApp,
   money,
@@ -19,12 +19,14 @@ const TYPE_FILTERS = ['All', 'oil', 'flos', 'capsule', 'lozenge', 'vape'] as con
 
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
+  const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
 
   /* ── Draft Orders Selection ── */
-  const draftOrders = state.orders.filter(o => o.payment.status === 'none');
-  const activeOrder = state.orders.find(o => o.id === state.activeOrderId && o.payment.status === 'none');
+  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && patient.status === 'HHH approved');
+  const draftOrders = state.orders.filter(o => o.organisationId === state.currentOrganisationId && o.payment.status === 'none');
+  const activeOrder = state.orders.find(o => o.organisationId === state.currentOrganisationId && o.id === state.activeOrderId && o.payment.status === 'none');
   const patient = activeOrder?.patientId
-    ? state.crm.find(c => c.id === activeOrder.patientId) ?? null
+    ? tenantPatients.find(c => c.id === activeOrder.patientId) ?? null
     : null;
 
   /* ── Active Prescription Selection ── */
@@ -55,25 +57,23 @@ export default function CreateOrder() {
   useEffect(() => {
     if (scanningRxId === null || !activeOrder) return;
     const interval = setInterval(() => {
-      setScanProgress(prev => {
-        const next = prev + Math.floor(Math.random() * 14) + 6;
-        if (next >= 100) {
-          clearInterval(interval);
-          dispatch({
-            type: 'SET_RX_COPY',
-            orderId: activeOrder.id,
-            rxId: scanningRxId,
-            fileName: `prescription_scan_${scanningRxId}.pdf`,
-          });
-          dispatch({ type: 'ADD_TOAST', message: `Prescription copy prescription_scan_${scanningRxId}.pdf verified & attached.`, toastType: 'success' });
-          setScanningRxId(null);
-          return 100;
-        }
-        return next;
-      });
+      setScanProgress(prev => Math.min(100, prev + Math.floor(Math.random() * 14) + 6));
     }, 100);
     return () => clearInterval(interval);
-  }, [scanningRxId, activeOrder, dispatch]);
+  }, [scanningRxId, activeOrder]);
+
+  useEffect(() => {
+    if (scanProgress < 100 || scanningRxId === null || !activeOrder) return;
+    const completedRxId = scanningRxId;
+    setScanningRxId(null);
+    dispatch({
+      type: 'SET_RX_COPY',
+      orderId: activeOrder.id,
+      rxId: completedRxId,
+      fileName: `prescription_scan_${completedRxId}.pdf`,
+    });
+    dispatch({ type: 'ADD_TOAST', message: `Prescription copy prescription_scan_${completedRxId}.pdf verified & attached.`, toastType: 'success' });
+  }, [scanProgress, scanningRxId, activeOrder, dispatch]);
 
   /* ── Product Catalog Search & Category Filters ── */
   const [catalogQuery, setCatalogQuery] = useState('');
@@ -144,7 +144,7 @@ export default function CreateOrder() {
       <div className="flex items-center gap-sm chip-row">
         <span className="section-label" style={{ margin: 0 }}>Active Session drafts:</span>
         {draftOrders.map(o => {
-          const p = o.patientId ? state.crm.find(c => c.id === o.patientId) : null;
+          const p = o.patientId ? tenantPatients.find(c => c.id === o.patientId) : null;
           return (
             <button
               key={o.id}
@@ -207,7 +207,7 @@ export default function CreateOrder() {
                       value=""
                       onChange={e => {
                         if (e.target.value) {
-                          const p = state.crm.find(c => c.id === e.target.value);
+                          const p = tenantPatients.find(c => c.id === e.target.value);
                           dispatch({
                             type: 'SET_ORDER_PATIENT',
                             orderId: activeOrder.id,
@@ -220,12 +220,13 @@ export default function CreateOrder() {
                       }}
                     >
                       <option value="">Link a CRM patient...</option>
-                      {state.crm.map(c => (
+                      {tenantPatients.map(c => (
                         <option key={c.id} value={c.id}>
                           {c.name} ({c.email})
                         </option>
                       ))}
                     </select>
+                    <small className="text-muted">Only patients approved for programme onboarding by HHH are available.</small>
                   </div>
                 )}
               </div>
@@ -410,6 +411,11 @@ export default function CreateOrder() {
                                   </button>
                                 </div>
 
+                                <label className="line-price-editor">
+                                  <span>Patient price</span>
+                                  <span className="money-input"><span>£</span><input aria-label={`Patient price for ${item.name}`} type="number" min="0" step="0.01" value={item.retail} onChange={event => dispatch({ type: 'SET_ITEM_RETAIL', orderId: activeOrder.id, rxId: rx.id, productId: item.productId, retail: Math.max(0, Number(event.target.value)) })} /></span>
+                                </label>
+
                                 <div>
                                   <span className="text-faint">Cost: {money(lineCost(item))} &middot; </span>
                                   <span className={margin >= 25 ? 'text-green' : 'text-amber'}>
@@ -487,6 +493,13 @@ export default function CreateOrder() {
                   <span>{money(orderCost(activeOrder))}</span>
                 </div>
 
+                <label className="order-delivery-selector">
+                  <span><strong>Delivery option</strong><small>Charges are controlled by {organisation.tradingName}.</small></span>
+                  <select className="input select" value={activeOrder.deliveryOptionId ?? ''} onChange={event => dispatch({ type: 'SET_ORDER_DELIVERY', orderId: activeOrder.id, optionId: event.target.value })}>
+                    {organisation.deliveryOptions.filter(option => option.enabled).map(option => <option key={option.id} value={option.id}>{option.label} · {money(option.amount)}</option>)}
+                  </select>
+                </label>
+
                 {(() => {
                   const rev = orderRevenue(activeOrder);
                   const cost = orderCost(activeOrder);
@@ -502,7 +515,7 @@ export default function CreateOrder() {
                 })()}
 
                 <div className="kv-line total" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-                  <span>Order Grand Total</span>
+                  <span>Patient total <small className="text-muted">including {money(activeOrder.feeExtra)} delivery</small></span>
                   <span className="text-green font-bold">{money(orderRevenue(activeOrder))}</span>
                 </div>
 
@@ -511,30 +524,49 @@ export default function CreateOrder() {
                   {(() => {
                     const noPatient = !activeOrder.patientId;
                     const missingCopy = activeOrder.prescriptions.some(rx => !rx.copyFileName);
+                    const missingPrescriber = activeOrder.prescriptions.some(rx => !rx.prescriber.trim());
                     const noItems = activeOrder.prescriptions.some(rx => rx.items.length === 0);
-                    const disabled = noPatient || missingCopy || noItems;
+                    const disabled = noPatient || missingCopy || missingPrescriber || noItems;
 
                     return (
                       <div>
+                        <span className="section-label">Choose how the patient will pay</span>
+                        <div className="payment-route-grid">
                         <button
-                          className="btn btn-primary"
+                          className="payment-route-option worldpay"
                           disabled={disabled}
-                          style={{ width: '100%', padding: '12px' }}
                           onClick={() => {
                             dispatch({ type: 'SEND_PAYMENT_LINK', orderId: activeOrder.id });
-                            dispatch({ type: 'ADD_TOAST', message: 'Worldpay payment request SMS/Email sent to patient.', toastType: 'success' });
+                            dispatch({ type: 'ADD_TOAST', message: 'Worldpay online payment selected. Checkout creation will activate when this pharmacy’s merchant account is connected.', toastType: 'info' });
                             dispatch({ type: 'SET_SCREEN', screen: 'review' });
                           }}
                         >
-                          <Send size={14} /> Send Worldpay Payment Link
+                          <span className="payment-route-icon"><CreditCard size={18} /></span>
+                          <span><strong>Worldpay online</strong><small>Payment settles directly to this pharmacy’s approved merchant account.</small></span>
+                          <Send size={14} />
                         </button>
+                        <button
+                          className="payment-route-option pharmacy"
+                          disabled={disabled}
+                          onClick={() => {
+                            dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
+                            dispatch({ type: 'ADD_TOAST', message: 'Order moved to pharmacy-managed payment. Confirm receipt after taking payment by EPOS, cash or another method.', toastType: 'info' });
+                            dispatch({ type: 'SET_SCREEN', screen: 'review' });
+                          }}
+                        >
+                          <span className="payment-route-icon"><Banknote size={18} /></span>
+                          <span><strong>Pharmacy / EPOS</strong><small>Take card, cash, transfer or another payment and confirm it manually.</small></span>
+                          <CheckCircle size={14} />
+                        </button>
+                        </div>
                         {disabled && (
                           <div className="text-xs text-amber" style={{ marginTop: 8, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                             <AlertTriangle size={12} />
                             <span>
                               {noPatient && 'Link a CRM patient'}
                               {!noPatient && missingCopy && 'Upload copy for all prescriptions'}
-                              {!noPatient && !missingCopy && noItems && 'Add products to all prescriptions'}
+                              {!noPatient && !missingCopy && missingPrescriber && 'Record the prescribing doctor for all prescriptions'}
+                              {!noPatient && !missingCopy && !missingPrescriber && noItems && 'Add products to all prescriptions'}
                             </span>
                           </div>
                         )}
@@ -613,7 +645,7 @@ export default function CreateOrder() {
                           
                           <div className="catalog-item-prices">
                             <span>Cost: {money(item.cost)}</span>
-                            <span className="font-semibold text-primary">Price: {money(item.retail)}</span>
+                            <span className="font-semibold text-primary">Guide price: {money(item.retail)}</span>
                           </div>
                         </div>
 

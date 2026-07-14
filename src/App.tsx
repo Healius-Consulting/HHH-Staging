@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { AppProvider, useApp } from './context/AppContext';
+import { useEffect, useState, type FormEvent } from 'react';
+import { AppProvider, useApp, type StaffSession } from './context/AppContext';
 import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
@@ -9,8 +9,13 @@ import AwaitingPayment from './pages/AwaitingPayment';
 import Orders from './pages/Orders';
 import Patients from './pages/Patients';
 import PatientPortal from './pages/PatientPortal';
-import { PHARMACY } from './context/AppContext';
-import { X, CheckCircle, Info, AlertTriangle, AlertCircle, Stethoscope, User } from 'lucide-react';
+import AdminPortal from './pages/AdminPortal';
+import EligibilityForm from './pages/EligibilityForm';
+import PharmacyResources from './pages/PharmacyResources';
+import PharmacySettings from './pages/PharmacySettings';
+import { eligibilityUrl } from './utils/pharmacyResources';
+import { tenantThemeVariables } from './utils/tenantTheme';
+import { X, CheckCircle, Info, AlertTriangle, AlertCircle, User, ShieldCheck, Mail, LockKeyhole, LogIn, Building2 } from 'lucide-react';
 
 function ToastItem({ toast }: { toast: { id: string; message: string; type: 'success' | 'info' | 'warning' | 'error' } }) {
   const { dispatch } = useApp();
@@ -60,93 +65,66 @@ function ToastContainer() {
   );
 }
 
-function PortalGateway() {
-  const { dispatch } = useApp();
-  const tokenStr = typeof window !== 'undefined' ? window.location.search : '';
+const DEMO_STAFF_ACCOUNTS: Array<StaffSession & { password: string; label: string }> = [
+  { email: 'admin@hhh.health', password: 'AdminDemo2026!', name: 'HHH Platform Admin', role: 'admin', label: 'HHH administrator' },
+  { email: 'leeds@hhh.health', password: 'PharmacyDemo2026!', name: 'Leeds Pharmacy Manager', role: 'pharmacy', organisationId: '11111111-1111-4111-8111-111111111111', label: 'HHH Leeds pharmacy' },
+  { email: 'lincoln@hhh.health', password: 'PharmacyDemo2026!', name: 'Lincoln Pharmacy Manager', role: 'pharmacy', organisationId: '22222222-2222-4222-8222-222222222222', label: 'East Midlands pharmacy' },
+];
+
+function StaffLogin() {
+  const { state, dispatch } = useApp();
+  const organisation = state.organisations[0];
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const signIn = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const account = DEMO_STAFF_ACCOUNTS.find(candidate => candidate.email.toLowerCase() === email.trim().toLowerCase() && candidate.password === password);
+    if (!account) { setError('Email or password not recognised. Use one of the demo accounts below.'); return; }
+    const { password: _password, label: _label, ...session } = account;
+    dispatch({ type: 'SIGN_IN_STAFF', session });
+  };
+
+  const chooseDemo = (account: typeof DEMO_STAFF_ACCOUNTS[number]) => {
+    setEmail(account.email); setPassword(account.password); setError('');
+  };
 
   return (
-    <div className="gateway-page">
-      <div className="gateway-hero">
-        <div className="gateway-logo">{PHARMACY.logoText}</div>
-        <h1 className="gateway-title">{PHARMACY.name}</h1>
-        <p className="gateway-subtitle">B2B2C Prescription Management Portal Gateway</p>
-      </div>
+    <div className="staff-login-page">
+      <section className="staff-login-brand">
+        <img className="staff-login-wordmark" src="/holistic-health-hub-logo.png" alt="Holistic Health Hub" />
+        <p className="section-label">Healius Consulting platform</p>
+        <h1>One secure sign-in.<br />The right workspace.</h1>
+        <p>Administrators see all pharmacy clients. Pharmacy staff are routed directly into their organisation’s private operations portal.</p>
+        <div className="staff-login-trust"><span><ShieldCheck size={16} /> Role-based access</span><span><Building2 size={16} /> Pharmacy tenant isolation</span></div>
+      </section>
 
-      <div className="gateway-grid">
-        <div
-          onClick={() => dispatch({ type: 'SET_PORTAL_MODE', mode: 'clinician' })}
-          className="card card-surface gateway-card gateway-card--clinician gateway-card-hover clinician"
-        >
-          <div>
-            <div className="gateway-card-icon">
-              <Stethoscope size={22} />
-            </div>
-            <h2>Clinician &amp; Pharmacy Portal</h2>
-            <p>
-              For pharmacy staff and clinic administrators to manage referrals, build prescriptions,
-              track Worldpay payments, and handle goods check-in.
-            </p>
-          </div>
-          <button
-            className="btn btn-clinician"
-            onClick={(e) => {
-              e.stopPropagation();
-              dispatch({ type: 'SET_PORTAL_MODE', mode: 'clinician' });
-            }}
-          >
-            Enter Clinician Portal
-          </button>
+      <section className="staff-login-panel">
+        <form className="card staff-login-card" onSubmit={signIn}>
+          <div className="staff-login-heading"><div className="resource-icon"><LockKeyhole size={20} /></div><div><p className="section-label">Staff access</p><h2>Sign in to HHH</h2></div></div>
+          <label className="staff-login-field">Email address<div className="staff-login-input"><Mail size={16} /><input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="username" required placeholder="name@pharmacy.co.uk" /></div></label>
+          <label className="staff-login-field">Password<div className="staff-login-input"><LockKeyhole size={16} /><input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" required /></div></label>
+          {error && <div className="banner banner-red"><AlertCircle size={15} /> {error}</div>}
+          <button className="btn btn-primary staff-login-submit" type="submit"><LogIn size={16} /> Sign in</button>
+          <p className="staff-login-note">Prototype authentication only. Production access will use server-side identity, MFA and auditable sessions.</p>
+        </form>
+
+        <div className="staff-demo-accounts">
+          <p className="section-label">Demo accounts · select then sign in</p>
+          {DEMO_STAFF_ACCOUNTS.map(account => <button type="button" key={account.email} className={`staff-demo-account ${email === account.email ? 'selected' : ''}`} onClick={() => chooseDemo(account)}><span className="staff-demo-icon">{account.role === 'admin' ? <ShieldCheck size={15} /> : <Building2 size={15} />}</span><span><strong>{account.label}</strong><small>{account.email}</small></span><small>{account.password}</small></button>)}
         </div>
 
-        <div
-          onClick={() => dispatch({ type: 'SET_PORTAL_MODE', mode: 'patient' })}
-          className="card card-surface gateway-card gateway-card--patient gateway-card-hover patient"
-        >
-          <div>
-            <div className="gateway-card-icon">
-              <User size={22} />
-            </div>
-            <h2>Patient Portal</h2>
-            <p>
-              For patients to track referral progress, pay invoices securely via Worldpay,
-              and download collection barcodes when medication is ready.
-            </p>
-          </div>
-          <button
-            className="btn btn-primary"
-            onClick={(e) => {
-              e.stopPropagation();
-              dispatch({ type: 'SET_PORTAL_MODE', mode: 'patient' });
-            }}
-          >
-            Enter Patient Portal
-          </button>
-        </div>
-      </div>
-
-      <div className="gateway-eligibility">
-        <div>
-          <h3>Prescription Service Inquiry</h3>
-          <p>
-            Not registered yet? Take our 2-minute eligibility pre-screening to see if you qualify
-            for specialist medical cannabis referral via your pharmacy.
-          </p>
-        </div>
-        <a
-          href={`/specs/HHH-Eligibility-Form.html${tokenStr}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn btn-outline-primary btn-sm"
-        >
-          Am I Eligible?
-        </a>
-      </div>
+        <div className="staff-login-links"><button className="btn btn-sm" onClick={() => { dispatch({ type: 'SET_CURRENT_ORGANISATION', organisationId: organisation.id }); dispatch({ type: 'SET_PORTAL_MODE', mode: 'patient' }); }}><User size={14} /> Patient portal</button><a href={eligibilityUrl(organisation)} target="_blank" rel="noreferrer">Patient eligibility form</a></div>
+      </section>
     </div>
   );
 }
 
 function AppContent() {
   const { state } = useApp();
+  const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
+  const tenantStyle = tenantThemeVariables(organisation.brand.primary) as React.CSSProperties;
 
   const renderScreen = () => {
     switch (state.screen) {
@@ -156,6 +134,8 @@ function AppContent() {
       case 'review':    return <AwaitingPayment />;
       case 'orders':    return <Orders />;
       case 'patients':  return <Patients />;
+      case 'resources': return <PharmacyResources />;
+      case 'settings':  return <PharmacySettings />;
       default:          return <Dashboard />;
     }
   };
@@ -163,7 +143,7 @@ function AppContent() {
   if (state.portalMode === 'gateway') {
     return (
       <>
-        <PortalGateway />
+        <StaffLogin />
         <ToastContainer />
       </>
     );
@@ -171,15 +151,28 @@ function AppContent() {
 
   if (state.portalMode === 'patient') {
     return (
-      <div className="gateway-page" style={{ justifyContent: 'flex-start', overflowY: 'auto' }}>
+      <div className="gateway-page tenant-surface" style={{ ...tenantStyle, justifyContent: 'flex-start', overflowY: 'auto' }}>
         <PatientPortal />
         <ToastContainer />
       </div>
     );
   }
 
+  if (state.portalMode === 'admin') {
+    if (state.staffSession?.role !== 'admin') return <><StaffLogin /><ToastContainer /></>;
+    return <><AdminPortal /><ToastContainer /></>;
+  }
+
+  if (state.portalMode === 'eligibility') {
+    return <><EligibilityForm /><ToastContainer /></>;
+  }
+
+  if (state.portalMode === 'clinician' && !state.staffSession) {
+    return <><StaffLogin /><ToastContainer /></>;
+  }
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={tenantStyle}>
       <Navigation />
       <div className="app-main">
         <Header />

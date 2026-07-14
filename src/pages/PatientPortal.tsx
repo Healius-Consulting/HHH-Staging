@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useApp, money, PHARMACY } from '../context/AppContext';
+import { useApp, money } from '../context/AppContext';
 import { 
   LogOut, AlertCircle, CreditCard, Clock, CheckCircle, 
   Clipboard, Shield, ArrowRight, Check, Barcode
@@ -7,6 +7,8 @@ import {
 
 export default function PatientPortal() {
   const { state, dispatch } = useApp();
+  const organisationId = state.currentOrganisationId;
+  const organisation = state.organisations.find(item => item.id === organisationId) ?? state.organisations[0];
   const [emailInput, setEmailInput] = useState('m.khan@email.com');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -18,10 +20,10 @@ export default function PatientPortal() {
       return;
     }
 
-    const submission = state.submissions.find(s => s.email.toLowerCase() === email);
-    const crmObj = state.crm.find(p => p.email.toLowerCase() === email);
+    const submission = state.submissions.find(s => s.organisationId === organisationId && s.email.toLowerCase() === email);
+    const crmObj = state.crm.find(p => p.organisationId === organisationId && p.email.toLowerCase() === email);
     const hasOrders = state.orders.some(o => {
-      const pObj = state.crm.find(c => c.id === o.patientId);
+      const pObj = state.crm.find(c => c.organisationId === organisationId && c.id === o.patientId);
       return pObj && pObj.email.toLowerCase() === email;
     });
 
@@ -37,21 +39,6 @@ export default function PatientPortal() {
     dispatch({ type: 'LOGOUT_PATIENT' });
   };
 
-  const simulatePatientPayment = (orderId: number) => {
-    dispatch({ type: 'CONFIRM_PAYMENT', orderId });
-    dispatch({ type: 'PLACE_ORDER', orderId });
-    
-    const orderObj = state.orders.find(o => o.id === orderId);
-    const patientObj = orderObj?.patientId ? state.crm.find(p => p.id === orderObj.patientId) : null;
-    const name = patientObj?.name ?? 'Marcus Vance';
-
-    dispatch({
-      type: 'ADD_TOAST',
-      message: `Worldpay Gateway: Payment of £${orderObj?.payment.amount.toFixed(2)} processed securely for ${name}. Order dispatched to Curaleaf wholesaler.`,
-      toastType: 'success'
-    });
-  };
-
   // ═══════════════════════════════════════════════════════════
   // LOGIN SCREEN
   // ═══════════════════════════════════════════════════════════
@@ -60,8 +47,8 @@ export default function PatientPortal() {
       <div className="patient-shell">
         <div className="patient-panel">
           <div className="patient-hero">
-            <div className="patient-hero__logo">{PHARMACY.logoText}</div>
-            <h1 className="patient-hero__title">{PHARMACY.name}</h1>
+            <div className="patient-hero__logo">{organisation.logoText}</div>
+            <h1 className="patient-hero__title">{organisation.name}</h1>
             <p className="patient-hero__subtitle">Patient Treatment &amp; Prescription Portal</p>
           </div>
 
@@ -115,7 +102,7 @@ export default function PatientPortal() {
 
           <div className="patient-security">
             <Shield size={14} className="text-muted" />
-            <span>NHS patient data sharing and GDPR compliance standards applied.</span>
+            <span>Access is limited to records held for this pharmacy. Production login will use a secure one-time link or verification code.</span>
           </div>
         </div>
       </div>
@@ -126,17 +113,17 @@ export default function PatientPortal() {
   // LOGGED-IN PORTAL DASHBOARD
   // ═══════════════════════════════════════════════════════════
   const email = state.patientEmail.toLowerCase();
-  const submission = state.submissions.find(s => s.email.toLowerCase() === email);
-  const crmObj = state.crm.find(p => p.email.toLowerCase() === email);
+  const submission = state.submissions.find(s => s.organisationId === organisationId && s.email.toLowerCase() === email);
+  const crmObj = state.crm.find(p => p.organisationId === organisationId && p.email.toLowerCase() === email);
   const pId = crmObj ? crmObj.id : null;
   
   // Find active orders for this patient
-  const activeOrder = state.orders.find(o => o.patientId === pId);
+  const activeOrder = state.orders.find(o => o.organisationId === organisationId && o.patientId === pId);
   const pName = crmObj ? crmObj.name : (submission ? submission.name : 'Patient');
 
   // Find all orders for this patient sorted by date descending
   const patientOrders = state.orders
-    .filter(o => o.patientId === pId)
+    .filter(o => o.organisationId === organisationId && o.patientId === pId)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const currentOrder = patientOrders[0];
@@ -170,7 +157,7 @@ export default function PatientPortal() {
     <div className="patient-app">
       <div className="patient-app-header">
         <div className="patient-app-header__brand">
-          <div className="patient-app-header__logo">{PHARMACY.logoText}</div>
+          <div className="patient-app-header__logo">{organisation.logoText}</div>
           <div>
             <h2 className="patient-app-header__name">
               {pName}
@@ -180,7 +167,7 @@ export default function PatientPortal() {
                 <span className="pill pill-info persona-pill">Pre-Screening Stage</span>
               )}
             </h2>
-            <span className="patient-app-header__meta">Logged into {PHARMACY.name} &middot; {email}</span>
+            <span className="patient-app-header__meta">Logged into {organisation.name} &middot; {email}</span>
           </div>
         </div>
 
@@ -202,26 +189,26 @@ export default function PatientPortal() {
                 <span className="text-xs text-tertiary">Order ID: #{activeOrder.id}</span>
               </div>
 
-              {activeOrder.payment.status === 'sent' ? (
+              {activeOrder.payment.status === 'sent' ? activeOrder.payment.route === 'worldpay' ? (
                 <div>
                   <div className="banner banner-amber flex gap-sm" style={{ marginBottom: 20 }}>
                     <Clock size={20} style={{ flexShrink: 0, marginTop: 2 }} />
                     <div>
-                      <h4 className="font-semibold text-sm" style={{ margin: 0 }}>Worldpay Payment Link Active</h4>
+                      <h4 className="font-semibold text-sm" style={{ margin: 0 }}>Worldpay Online Payment Selected</h4>
                       <p className="text-xs text-secondary" style={{ margin: '2px 0 0', lineHeight: 1.5 }}>
-                        Your specialist clinician has uploaded the digital prescription. Secure Worldpay settlement is required to release the pharmaceutical cargo from the Wholesaler.
+                        Your specialist clinician has uploaded the digital prescription. Secure checkout will become available here once the live Worldpay integration is connected.
                       </p>
                     </div>
                   </div>
 
                   <div className="invoice-panel">
                     <div className="invoice-line">
-                      <span>Wholesale Invoice Amount:</span>
-                      <strong>{money(activeOrder.payment.amount)}</strong>
+                      <span>Prescription items:</span>
+                      <strong>{money(Math.max(0, activeOrder.payment.amount - activeOrder.feeExtra))}</strong>
                     </div>
                     <div className="invoice-line">
-                      <span>Dispensing Counter Fee:</span>
-                      <strong>Included (£0.00)</strong>
+                      <span>{activeOrder.deliveryLabel ?? 'Delivery'}:</span>
+                      <strong>{money(activeOrder.feeExtra)}</strong>
                     </div>
                     <div className="divider" style={{ margin: '4px 0' }} />
                     <div className="invoice-total">
@@ -230,15 +217,23 @@ export default function PatientPortal() {
                     </div>
                     <div className="invoice-line">
                       <span>Billing Gateway:</span>
-                      <strong>Worldpay API Secure Checkout</strong>
+                      <strong>{organisation.name} · Worldpay Secure Checkout</strong>
                     </div>
 
                     <button 
                       className="btn btn-primary invoice-pay-btn" 
-                      onClick={() => simulatePatientPayment(activeOrder.id)}
+                      disabled
                     >
-                      <CreditCard size={18} /> Pay Invoice via Worldpay Gateway
+                      <CreditCard size={18} /> Worldpay checkout integration pending
                     </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="banner banner-amber flex gap-sm">
+                  <Clock size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <h4 className="font-semibold text-sm" style={{ margin: 0 }}>Payment arranged with your pharmacy</h4>
+                    <p className="text-xs text-secondary" style={{ margin: '2px 0 0', lineHeight: 1.5 }}>Your pharmacy has selected its own payment process for this order. Please pay {money(activeOrder.payment.amount)} using the instructions provided by the pharmacy or at the counter. No online Worldpay payment is required here.</p>
                   </div>
                 </div>
               ) : activeOrder.payment.status === 'paid' ? (
@@ -246,9 +241,9 @@ export default function PatientPortal() {
                   <div className="banner banner-green" style={{ display: 'flex', gap: 12, padding: '12px 14px', marginBottom: 20 }}>
                     <CheckCircle size={20} style={{ flexShrink: 0, marginTop: 2 }} />
                     <div>
-                      <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Worldpay Payment Cleared &amp; Confirmed</h4>
+                      <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{activeOrder.payment.route === 'worldpay' ? 'Worldpay Payment Cleared & Confirmed' : 'Pharmacy Payment Received & Confirmed'}</h4>
                       <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
-                        Transaction ref: <b>{activeOrder.payment.ref || 'WP-8812'}</b> cleared. Prescriptions checked in with the Curaleaf fulfillment wholesaler.
+                        {activeOrder.payment.route === 'worldpay' ? <>Transaction ref: <b>{activeOrder.payment.ref || 'Worldpay confirmed'}</b> cleared.</> : <>Payment recorded by the pharmacy{activeOrder.payment.manualReference ? <> under reference <b>{activeOrder.payment.manualReference}</b></> : null}.</>} Prescriptions checked in with the Curaleaf fulfillment wholesaler.
                       </p>
                     </div>
                   </div>
@@ -284,7 +279,7 @@ export default function PatientPortal() {
                                       top: 22,
                                       bottom: -22,
                                       width: 2,
-                                      background: i < curIdx ? 'var(--green-500)' : 'var(--border)',
+                                      background: i < curIdx ? 'var(--tenant-primary)' : 'var(--border)',
                                       zIndex: 0
                                     }} />
                                   )}
@@ -294,15 +289,15 @@ export default function PatientPortal() {
                                     width: 24,
                                     height: 24,
                                     borderRadius: '50%',
-                                    background: isDone ? 'var(--green-500)' : 'var(--bg-root)',
-                                    border: isDone ? '2px solid var(--green-500)' : (isActive ? '2px solid var(--green-500)' : '2px solid var(--border)'),
-                                    color: isDone ? '#fff' : (isActive ? 'var(--green-100)' : 'var(--text-secondary)'),
+                                    background: isDone ? 'var(--tenant-primary)' : 'var(--bg-root)',
+                                    border: isDone ? '2px solid var(--tenant-primary)' : (isActive ? '2px solid var(--tenant-primary)' : '2px solid var(--border)'),
+                                    color: isDone ? 'var(--tenant-on-primary)' : (isActive ? 'var(--tenant-primary)' : 'var(--text-secondary)'),
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     fontSize: 10,
                                     fontWeight: 700,
-                                    boxShadow: isActive ? '0 0 10px rgba(16, 185, 129, 0.4)' : 'none',
+                                    boxShadow: isActive ? '0 0 0 3px var(--tenant-focus-ring)' : 'none',
                                     zIndex: 1,
                                     flexShrink: 0
                                   }}>
@@ -310,7 +305,7 @@ export default function PatientPortal() {
                                   </div>
 
                                   <div style={{ flex: 1 }}>
-                                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: (isDone || isActive) ? '#fff' : 'var(--text-secondary)' }}>{label}</h4>
+                                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: (isDone || isActive) ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</h4>
                                     <p style={{ margin: '2px 0 0', color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.4 }}>{rxDescs[i]}</p>
                                   </div>
                                 </div>
@@ -372,36 +367,36 @@ export default function PatientPortal() {
           {(submission || crmObj) && (
             <div className="card card-surface patient-card-section">
               <h3 className="patient-section-title" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 20 }}>
-                <Clipboard size={18} className="text-info" /> Clinical Eligibility Intake Roadmap
+                <Clipboard size={18} className="text-info" /> HHH Programme Onboarding
               </h3>
               
               {submission ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingLeft: 8 }}>
-                  {['New', 'Records uploaded', 'Referred to clinic', 'Completed'].map((stage, i) => {
-                    const stages = ['New', 'Records uploaded', 'Referred to clinic', 'Completed'];
-                    const labels = ['Referral Enquiry Created', 'Clinical Health Files Uploaded', 'Referred to Specialist Clinic', 'Approved & Registered in CRM'];
+                  {submission.status === 'Declined' && <div className="banner banner-red"><AlertCircle size={16} /><span>HHH did not approve programme onboarding following review. This is not a diagnosis; contact Holistic Health Hub if you need the decision explained.</span></div>}
+                  {['New', 'Under HHH review', 'Approved'].map((stage, i) => {
+                    const stages = ['New', 'Under HHH review', 'Approved'];
+                    const labels = ['Enquiry received', 'HHH telephone review', 'Approved for programme onboarding'];
                     const descs = [
-                      'Pre-screening form submitted. Medical records verification pending.',
-                      'OCR parsed medical history, verifying tried/failed criteria.',
-                      'Eligibility cleared. Folder referred to specialist doctor clinic.',
-                      'B2B reference confirmed. Patient profile created in CRM.'
+                      'Your pharmacy-linked eligibility form has been received.',
+                      'Holistic Health Hub reviews your information and contacts you before making an onboarding decision.',
+                      'Your profile is released to your selected pharmacy. A doctor must still issue a valid prescription before medicine can be ordered.'
                     ];
                     
-                    const currentIdx = stages.indexOf(submission.status);
-                    let isDone = i < currentIdx || (submission.status === 'Completed' && i === currentIdx);
+                    const currentIdx = submission.status === 'Declined' ? 1 : stages.indexOf(submission.status);
+                    let isDone = i < currentIdx || (submission.status === 'Approved' && i === currentIdx);
                     let isActive = i === currentIdx;
 
                     return (
                       <div key={stage} style={{ display: 'flex', gap: 16, position: 'relative' }}>
                         {/* Vertical line connector */}
-                        {i < 3 && (
+                        {i < 2 && (
                           <div style={{
                             position: 'absolute',
                             left: 11,
                             top: 22,
                             bottom: -22,
                             width: 2,
-                            background: i < currentIdx ? 'var(--green-500)' : 'var(--border)'
+                            background: i < currentIdx ? 'var(--tenant-primary)' : 'var(--border)'
                           }} />
                         )}
 
@@ -409,22 +404,22 @@ export default function PatientPortal() {
                           width: 24,
                           height: 24,
                           borderRadius: '50%',
-                          background: isDone ? 'var(--green-500)' : 'var(--bg-root)',
-                          border: isDone ? '2px solid var(--green-500)' : (isActive ? '2px solid var(--green-500)' : '2px solid var(--border)'),
-                          color: isDone ? '#fff' : (isActive ? 'var(--green-100)' : 'var(--text-secondary)'),
+                          background: isDone ? 'var(--tenant-primary)' : 'var(--bg-root)',
+                          border: isDone ? '2px solid var(--tenant-primary)' : (isActive ? '2px solid var(--tenant-primary)' : '2px solid var(--border)'),
+                          color: isDone ? 'var(--tenant-on-primary)' : (isActive ? 'var(--tenant-primary)' : 'var(--text-secondary)'),
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontSize: 10,
                           fontWeight: 700,
-                          boxShadow: isActive ? '0 0 8px rgba(16, 185, 129, 0.3)' : 'none',
+                          boxShadow: isActive ? '0 0 0 3px var(--tenant-focus-ring)' : 'none',
                           zIndex: 1,
                           flexShrink: 0
                         }}>
                           {isDone ? <Check size={12} /> : i + 1}
                         </div>
                         <div style={{ flex: 1 }}>
-                          <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: (isDone || isActive) ? '#fff' : 'var(--text-secondary)' }}>{labels[i]}</h4>
+                          <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: (isDone || isActive) ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{labels[i]}</h4>
                           <p style={{ margin: '2px 0 0', color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.4 }}>{descs[i]}</p>
                         </div>
                       </div>
@@ -437,9 +432,9 @@ export default function PatientPortal() {
                     <Check size={18} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <h4 className="font-semibold text-sm" style={{ margin: 0 }}>CRM Registration Fully Active</h4>
+                    <h4 className="font-semibold text-sm" style={{ margin: 0 }}>HHH Programme Onboarding Approved</h4>
                     <p className="text-xs text-secondary" style={{ margin: '2px 0 0' }}>
-                      Your clinical intake has completed successfully. You are officially registered in the local pharmacy network.
+                      Holistic Health Hub has approved your programme onboarding and released your profile to this pharmacy. Medicine still requires a valid prescription from an authorised doctor.
                     </p>
                   </div>
                 </div>
@@ -470,7 +465,7 @@ export default function PatientPortal() {
                   height: 'auto', 
                   width: '100%', 
                   textAlign: 'left',
-                  background: 'rgba(255, 255, 255, 0.02)',
+                  background: 'var(--bg-surface)',
                   borderColor: 'var(--border)'
                 }}
                 onClick={() => {
@@ -488,7 +483,7 @@ export default function PatientPortal() {
                   });
                 }}
               >
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                   🔁 Request Repeat Rx
                 </span>
                 <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>Order copy of last verified meds</span>
@@ -506,7 +501,7 @@ export default function PatientPortal() {
                   height: 'auto', 
                   width: '100%', 
                   textAlign: 'left',
-                  background: 'rgba(255, 255, 255, 0.02)',
+                  background: 'var(--bg-surface)',
                   borderColor: 'var(--border)'
                 }}
                 onClick={() => {
@@ -524,7 +519,7 @@ export default function PatientPortal() {
                   });
                 }}
               >
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                   📅 Schedule Check-up Call
                 </span>
                 <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>Request call with pharmacist</span>
@@ -560,12 +555,12 @@ export default function PatientPortal() {
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {currentOrder.prescriptions.flatMap(rx => rx.items).map((item, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: 8 }}>
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
                     <div style={{ fontSize: 12 }}>
-                      <span style={{ fontWeight: 600, color: '#fff', display: 'block' }}>{item.name}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'block' }}>{item.name}</span>
                       <span style={{ color: 'var(--text-tertiary)', display: 'block', marginTop: 2 }}>Qty: {item.qty} &times; 10g/30ml</span>
                     </div>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green-100)' }}>{money(item.retail * item.qty)}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--tenant-primary)' }}>{money(item.retail * item.qty)}</span>
                   </div>
                 ))}
               </div>
@@ -585,9 +580,9 @@ export default function PatientPortal() {
                   const itemsSummary = order.prescriptions.flatMap(rx => rx.items).map(i => `${i.name} (x${i.qty})`).join(', ');
                   const dateStr = new Date(order.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
                   return (
-                    <div key={order.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: 10 }}>
+                    <div key={order.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>{dateStr}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{dateStr}</span>
                         <span className="pill pill-neutral" style={{ fontSize: 9 }}>Order #{order.id}</span>
                       </div>
                       <span style={{ fontSize: 11, color: 'var(--text-secondary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 260 }} title={itemsSummary}>
@@ -602,7 +597,7 @@ export default function PatientPortal() {
           </div>
 
           {/* C. Trust / NHS Info */}
-          <div className="card card-surface patient-card-section" style={{ background: 'transparent' }}>
+          <div className="card card-surface patient-card-section">
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
               <Shield size={16} className="text-info" style={{ flexShrink: 0, marginTop: 2 }} />
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>

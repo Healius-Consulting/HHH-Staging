@@ -3,20 +3,29 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "workspaces": ["services/api"],
   "scripts": {
     "dev": "vite",
+    "dev:eligibility": "vite --config vite.eligibility.config.ts",
+    "dev:api": "npm run dev --workspace @hhh/api",
     "build": "tsc -b && vite build",
+    "build:eligibility": "vite build --config vite.eligibility.config.ts",
+    "build:api": "npm run build --workspace @hhh/api",
+    "build:all": "npm run build && npm run build:eligibility && npm run build:api",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
+    "jszip": "^3.10.1",
     "lucide-react": "^1.22.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",

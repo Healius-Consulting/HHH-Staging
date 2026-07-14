@@ -1,4 +1,5 @@
-import { createContext, useContext, useReducer, useEffect, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
+import { getCuraleafConnectionStatus, getPortalEligibilitySubmissions, isApiConfigured } from '../shared/api';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -13,13 +14,22 @@ export interface CatalogueItem {
   type: 'oil' | 'flos' | 'capsule' | 'lozenge' | 'vape';
 }
 
+export interface DeliveryOption {
+  id: string;
+  label: string;
+  description: string;
+  amount: number;
+  enabled: boolean;
+}
+
 export interface CRMPatient {
   id: string;
+  organisationId: string;
   name: string;
   email: string;
   mobile: string;
   address?: string;
-  status: string;
+  status: 'HHH approved' | 'Suspended';
   interactions?: { ts: Date | string; type: string; detail: string }[];
 }
 
@@ -49,25 +59,36 @@ export interface Prescription {
 }
 
 export type PaymentStatus = 'none' | 'sent' | 'paid';
+export type PaymentRoute = 'worldpay' | 'pharmacy' | null;
+export type ManualTender = 'epos-card' | 'cash' | 'bank-transfer' | 'other';
 
 export interface PatientOrder {
   id: number;
+  organisationId: string;
   patientId: string | null;
   date: Date;
+  deliveryOptionId: string | null;
+  deliveryLabel: string | null;
   feeExtra: number;
   payment: {
     status: PaymentStatus;
+    route: PaymentRoute;
     amount: number;
     ref: string | null;
     sentAt: Date | null;
+    paidAt: Date | null;
+    manualTender: ManualTender | null;
+    manualReference: string | null;
+    manualNotes: string | null;
+    manualRecordedBy: string | null;
   };
   prescriptions: Prescription[];
 }
 
-export type SubmissionStatus = 'New' | 'Records uploaded' | 'Referred to clinic' | 'Completed';
+export type SubmissionStatus = 'New' | 'Under HHH review' | 'Approved' | 'Declined';
 
 export interface EligibilitySubmission {
-  id: number;
+  id: number | string;
   name: string;
   dob: string;
   mobile: string;
@@ -83,14 +104,89 @@ export interface EligibilitySubmission {
   status: SubmissionStatus;
   recordsUploaded: boolean;
   calls: { ts: Date }[];
-  clinicRef: string | null;
-  emailedAt: Date | null;
+  reviewedAt: Date | string | null;
+  reviewedBy: string | null;
+  decisionNote: string | null;
   submittedAt: Date;
+  organisationId: string;
+  pharmacyName: string;
+  referralToken: string;
 }
 
-export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'orders' | 'patients';
+export interface PharmacyTenant {
+  id: string;
+  slug: string;
+  referralToken: string;
+  name: string;
+  tradingName: string;
+  logoText: string;
+  gphcNumber: string;
+  superintendent: string;
+  address: string;
+  websiteDomains: string[];
+  status: 'live' | 'onboarding' | 'paused';
+  staffCount: number;
+  platformFeeMonthly: number | null;
+  deliveryOptions: DeliveryOption[];
+  brand: {
+    primary: string;
+    portalName: string;
+  };
+  modules: Record<TenantModule, boolean>;
+  worldpay: {
+    status: 'not-connected' | 'onboarding' | 'connected' | 'action-required';
+    environment: 'sandbox' | 'live';
+    merchantId: string | null;
+    merchantName: string | null;
+    lastSyncedAt: Date | string | null;
+  };
+}
 
-export type PortalMode = 'gateway' | 'clinician' | 'patient';
+export const PLATFORM_OPERATOR = {
+  operatingName: 'Healius Consulting',
+  platformName: 'HHH',
+  platformLongName: 'Holistic Health Hub',
+  legalName: null as string | null,
+  companyNumber: null as string | null,
+  registeredOffice: null as string | null,
+  website: 'www.healiusconsulting.com',
+  contactEmail: 'spatel@healiusconsulting.com',
+} as const;
+
+export type TenantModule = 'intake' | 'rx' | 'payments' | 'supplierOrders' | 'patients' | 'resources';
+
+export type ComplianceStatus = 'not-started' | 'in-progress' | 'ready' | 'not-applicable' | 'blocked';
+
+export interface ComplianceItem {
+  id: string;
+  organisationId: string | null;
+  category: 'Data protection' | 'Pharmacy governance' | 'Payments' | 'Security' | 'Clinical scope' | 'Contracts';
+  requirement: string;
+  reference: string;
+  owner: string;
+  status: ComplianceStatus;
+  requiredForLive: boolean;
+  evidence: string | null;
+  reviewDate: string | null;
+}
+
+export interface PlatformIntegration {
+  id: 'curaleaf' | 'worldpay' | 'eligibility-api' | 'notifications';
+  name: string;
+  description: string;
+  status: 'connected' | 'pending' | 'attention';
+}
+
+export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'orders' | 'patients' | 'resources' | 'settings';
+
+export type PortalMode = 'gateway' | 'admin' | 'clinician' | 'patient' | 'eligibility';
+
+export interface StaffSession {
+  email: string;
+  name: string;
+  role: 'admin' | 'pharmacy';
+  organisationId?: string;
+}
 
 export interface Toast {
   id: string;
@@ -111,11 +207,15 @@ export interface AppState {
     rx: number;
     order: number;
     submission: number;
-    clinic: number;
     invoice: number;
   };
   portalMode: PortalMode;
   patientEmail: string | null;
+  organisations: PharmacyTenant[];
+  currentOrganisationId: string;
+  staffSession: StaffSession | null;
+  platformIntegrations: PlatformIntegration[];
+  complianceItems: ComplianceItem[];
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -133,24 +233,58 @@ export const CATALOGUE: CatalogueItem[] = [
   { id: 'P008', name: 'Curaleaf 510 Vape Cartridge 0.5g', cost: 34,   retail: 64,   stock: 'in',  type: 'vape' },
 ];
 
+const DEFAULT_DELIVERY_OPTIONS: DeliveryOption[] = [
+  { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
+  { id: 'priority', label: 'Priority tracked delivery', description: 'Faster service where available from the supplier.', amount: 12.95, enabled: true },
+  { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
+];
+
+export const ORGANISATIONS: PharmacyTenant[] = [
+  {
+    id: '11111111-1111-4111-8111-111111111111', slug: 'hhh-leeds', referralToken: 'hhh-leeds-7x4p9k',
+    name: 'Holistic Health Hub Pharmacy — Leeds', tradingName: 'HHH Leeds', logoText: 'HH',
+    gphcNumber: '9012345', superintendent: 'Shaylen Patel',
+    address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['hhh.health'],
+    status: 'onboarding', staffCount: 4,
+    platformFeeMonthly: null,
+    deliveryOptions: DEFAULT_DELIVERY_OPTIONS.map(option => ({ ...option })),
+    brand: { primary: '#0f766e', portalName: 'HHH Leeds Patient Services' },
+    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
+    worldpay: { status: 'connected', environment: 'sandbox', merchantId: 'WP-DEMO-LEEDS', merchantName: 'HHH Leeds', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
+  },
+  {
+    id: '22222222-2222-4222-8222-222222222222', slug: 'east-midlands-lincoln', referralToken: 'emp-lincoln-3m8q2v',
+    name: 'East Midlands Pharmacy Lincoln', tradingName: 'EMP Lincoln', logoText: 'EM',
+    gphcNumber: '9019876', superintendent: 'A. Pharmacist',
+    address: 'Lincoln, Lincolnshire, United Kingdom', websiteDomains: ['eastmidlandspharmacy.co.uk'],
+    status: 'onboarding', staffCount: 2,
+    platformFeeMonthly: null,
+    deliveryOptions: DEFAULT_DELIVERY_OPTIONS.map(option => ({ ...option })),
+    brand: { primary: '#315b7d', portalName: 'EMP Lincoln Patient Services' },
+    modules: { intake: true, rx: true, payments: true, supplierOrders: false, patients: true, resources: true },
+    worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+  },
+];
+
 const SEED_CRM: CRMPatient[] = [
-  { id: 'P-1001', name: 'James Doe',        email: 'j.doe@email.com',      mobile: '07700 900111', address: '12 High St, Leeds LS1 4AB',     status: 'Referred' },
-  { id: 'P-1002', name: 'Aisha Smith',      email: 'a.smith@email.com',    mobile: '07700 900222', address: '4 Oak Rd, Leeds LS2 8PQ',       status: 'Referred',
+  { id: 'P-1001', organisationId: ORGANISATIONS[0].id, name: 'James Doe',        email: 'j.doe@email.com',      mobile: '07700 900111', address: '12 High St, Leeds LS1 4AB',     status: 'HHH approved' },
+  { id: 'P-1002', organisationId: ORGANISATIONS[0].id, name: 'Aisha Smith',      email: 'a.smith@email.com',    mobile: '07700 900222', address: '4 Oak Rd, Leeds LS2 8PQ',       status: 'HHH approved',
     interactions: [
       { ts: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), type: 'Invoice Dispatched', detail: 'Sent Worldpay invoice link for £48.00.' },
       { ts: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), type: 'Prescription Ready', detail: 'Meds received from wholesaler. Sent counter collection alert SMS.' }
     ]
   },
-  { id: 'P-1003', name: 'Mohammed Khan',    email: 'm.khan@email.com',     mobile: '07700 900333', address: '9 Park Ave, Leeds LS6 1RT',     status: 'Referred' },
-  { id: 'P-1004', name: 'Sophie Bennett',   email: 's.bennett@email.com',  mobile: '07700 900444', address: '27 Cardigan Rd, Leeds LS6 3AA', status: 'Referred',
+  { id: 'P-1003', organisationId: ORGANISATIONS[0].id, name: 'Mohammed Khan',    email: 'm.khan@email.com',     mobile: '07700 900333', address: '9 Park Ave, Leeds LS6 1RT',     status: 'HHH approved' },
+  { id: 'P-1004', organisationId: ORGANISATIONS[0].id, name: 'Sophie Bennett',   email: 's.bennett@email.com',  mobile: '07700 900444', address: '27 Cardigan Rd, Leeds LS6 3AA', status: 'HHH approved',
     interactions: [
       { ts: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), type: 'Meds Collected', detail: 'Dispensed 10g Noidecs CD to patient at counter.' }
     ]
   },
-  { id: 'P-1005', name: "Daniel O'Connor",  email: 'd.oconnor@email.com',  mobile: '07700 900555', address: '8 Burley St, Leeds LS3 1JX',    status: 'Referred' },
-  { id: 'P-1006', name: 'Priya Patel',      email: 'p.patel@email.com',    mobile: '07700 900666', address: '15 Roundhay Rd, Leeds LS8 5AQ', status: 'Referred' },
-  { id: 'P-1007', name: 'Liam Murphy',      email: 'l.murphy@email.com',   mobile: '07700 900777', address: '3 Kirkstall Ln, Leeds LS5 3BW', status: 'Referred' },
-  { id: 'P-1008', name: 'Grace Thompson',   email: 'g.thompson@email.com', mobile: '07700 900888', address: '41 Otley Rd, Leeds LS16 5JT',   status: 'Referred' },
+  { id: 'P-1005', organisationId: ORGANISATIONS[0].id, name: "Daniel O'Connor",  email: 'd.oconnor@email.com',  mobile: '07700 900555', address: '8 Burley St, Leeds LS3 1JX',    status: 'HHH approved' },
+  { id: 'P-1006', organisationId: ORGANISATIONS[0].id, name: 'Priya Patel',      email: 'p.patel@email.com',    mobile: '07700 900666', address: '15 Roundhay Rd, Leeds LS8 5AQ', status: 'HHH approved' },
+  { id: 'P-1007', organisationId: ORGANISATIONS[0].id, name: 'Liam Murphy',      email: 'l.murphy@email.com',   mobile: '07700 900777', address: '3 Kirkstall Ln, Leeds LS5 3BW', status: 'HHH approved' },
+  { id: 'P-1008', organisationId: ORGANISATIONS[0].id, name: 'Grace Thompson',   email: 'g.thompson@email.com', mobile: '07700 900888', address: '41 Otley Rd, Leeds LS16 5JT',   status: 'HHH approved' },
+  { id: 'P-1009', organisationId: ORGANISATIONS[1].id, name: 'Daniel Price',     email: 'd.price@email.com',    mobile: '07700 900503', address: 'LS2 7DR',                       status: 'HHH approved' },
 ];
 
 /* ═══════════════════════════════════════════════════════════
@@ -191,22 +325,15 @@ export const RX_STATUS_LABELS: Record<RxStatus, string> = {
 
 const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
 const token = params.get('token');
-const isDemo = token === 'demo-token';
+const urlOrganisation = ORGANISATIONS.find(org => org.referralToken === token) ?? ORGANISATIONS[0];
 
-export const PHARMACY = isDemo ? {
-  name: 'East Midlands Pharmacy Lincoln',
-  initials: 'EMP',
-  logoText: 'EM',
-  formUrl: 'eastmidlandspharmacy-eligibility.co.uk',
-  brandName: 'EMP × Curaleaf',
-  collectionPlace: 'East Midlands Pharmacy'
-} : {
-  name: 'Holistic Health Hub Pharmacy — Leeds',
-  initials: 'HHH',
-  logoText: 'HH',
-  formUrl: 'hhh.health/eligibility/leeds-ls1',
-  brandName: 'HHH × Curaleaf',
-  collectionPlace: 'HHH Leeds'
+export const PHARMACY = {
+  name: urlOrganisation.name,
+  initials: urlOrganisation.logoText,
+  logoText: urlOrganisation.logoText,
+  formUrl: `?mode=eligibility&token=${urlOrganisation.referralToken}`,
+  brandName: `${urlOrganisation.tradingName} × Curaleaf`,
+  collectionPlace: urlOrganisation.tradingName,
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -215,35 +342,46 @@ export const PHARMACY = isDemo ? {
 
 export type Action =
   | { type: 'SET_PORTAL_MODE'; mode: PortalMode }
+  | { type: 'SIGN_IN_STAFF'; session: StaffSession }
+  | { type: 'SIGN_OUT_STAFF' }
+  | { type: 'SET_CURRENT_ORGANISATION'; organisationId: string }
+  | { type: 'ADD_ORGANISATION'; organisation: PharmacyTenant }
+  | { type: 'UPDATE_ORGANISATION'; organisationId: string; updates: Partial<PharmacyTenant> }
+  | { type: 'UPDATE_WORLDPAY'; organisationId: string; updates: Partial<PharmacyTenant['worldpay']> }
+  | { type: 'UPDATE_COMPLIANCE'; itemId: string; status: ComplianceStatus; evidence?: string }
+  | { type: 'UPDATE_PLATFORM_INTEGRATION'; integrationId: PlatformIntegration['id']; status: PlatformIntegration['status']; description?: string }
   | { type: 'SET_PATIENT_EMAIL'; email: string | null }
   | { type: 'LOGOUT_PATIENT' }
   | { type: 'SET_SCREEN'; screen: Screen }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
   | { type: 'ADD_SUBMISSION'; submission: EligibilitySubmission }
-  | { type: 'UPLOAD_RECORDS'; subId: number }
-  | { type: 'LOG_CALL'; subId: number }
-  | { type: 'REFER_TO_CLINIC'; subId: number }
-  | { type: 'EMAIL_REFERRAL'; subId: number }
+  | { type: 'UPLOAD_RECORDS'; subId: EligibilitySubmission['id'] }
+  | { type: 'LOG_CALL'; subId: EligibilitySubmission['id'] }
+  | { type: 'APPROVE_ONBOARDING'; subId: EligibilitySubmission['id']; note?: string }
+  | { type: 'DECLINE_ONBOARDING'; subId: EligibilitySubmission['id']; note?: string }
   // Orders
   | { type: 'NEW_ORDER'; patientId?: string }
   | { type: 'SET_ACTIVE_ORDER'; orderId: number }
   | { type: 'SET_ORDER_PATIENT'; orderId: number; patientId: string }
+  | { type: 'SET_ORDER_DELIVERY'; orderId: number; optionId: string }
   | { type: 'ADD_RX'; orderId: number }
   | { type: 'SET_RX_PRESCRIBER'; orderId: number; rxId: number; prescriber: string }
   | { type: 'SET_RX_COPY'; orderId: number; rxId: number; fileName: string }
   | { type: 'ADD_ITEM_TO_RX'; orderId: number; rxId: number; item: LineItem }
   | { type: 'REMOVE_ITEM_FROM_RX'; orderId: number; rxId: number; productId: string }
   | { type: 'UPDATE_ITEM_QTY'; orderId: number; rxId: number; productId: string; qty: number }
+  | { type: 'SET_ITEM_RETAIL'; orderId: number; rxId: number; productId: string; retail: number }
   | { type: 'SET_ITEM_FEE'; orderId: number; rxId: number; productId: string; fee: number }
   | { type: 'REMOVE_RX'; orderId: number; rxId: number }
   | { type: 'CLEAR_ORDER'; orderId: number }
   // Payment
   | { type: 'SEND_PAYMENT_LINK'; orderId: number }
+  | { type: 'START_MANUAL_PAYMENT'; orderId: number }
   | { type: 'CONFIRM_PAYMENT'; orderId: number }
-  // Submission to Curaleaf (simulated)
+  | { type: 'RECORD_MANUAL_PAYMENT'; orderId: number; tender: ManualTender; reference?: string; notes?: string }
+  // Submission to Curaleaf (adapter pending live Rocky credentials)
   | { type: 'PLACE_ORDER'; orderId: number }
-  | { type: 'ADVANCE_RX_STATUS'; orderId: number; rxId: number }
   | { type: 'RECEIVE_SHIPMENT'; orderId: number; rxId: number }
   | { type: 'HANDOVER_TO_PATIENT'; orderId: number; rxId: number }
   // Toasts
@@ -262,36 +400,39 @@ function blankRx(id: number): Prescription {
   };
 }
 
-function blankOrder(id: number, patientId: string | null): PatientOrder {
+function blankOrder(id: number, patientId: string | null, organisationId: string): PatientOrder {
   return {
-    id, patientId, date: new Date(), feeExtra: 0,
-    payment: { status: 'none', amount: 0, ref: null, sentAt: null },
+    id, organisationId, patientId, date: new Date(), deliveryOptionId: null, deliveryLabel: null, feeExtra: 0,
+    payment: { status: 'none', route: null, amount: 0, ref: null, sentAt: null, paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions: [blankRx(1)],
   };
 }
 
 function buildSeedSubmissions(): EligibilitySubmission[] {
-  const base = { tried2: true, psychExclusion: false, consentReferral: true, consentShare: true };
+  const base = { tried2: true, psychExclusion: false, consentReferral: true, consentShare: true, organisationId: '11111111-1111-4111-8111-111111111111', pharmacyName: 'Holistic Health Hub Pharmacy — Leeds', referralToken: 'hhh-leeds-7x4p9k' };
   const s1: EligibilitySubmission = {
     id: 1, name: 'Tom Hughes', dob: '1989-04-12', mobile: '07700 900501', email: 't.hughes@email.com',
     postcode: 'LS1 6PJ', condition: 'Chronic Pain', ...base, marketing: false, source: 'Google',
-    status: 'New', recordsUploaded: false, calls: [], clinicRef: null, emailedAt: null, submittedAt: new Date(),
+    status: 'New', recordsUploaded: false, calls: [], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(),
   };
   const s2: EligibilitySubmission = {
     id: 2, name: 'Rebecca Allen', dob: '1994-11-02', mobile: '07700 900502', email: 'r.allen@email.com',
     postcode: 'LS2 8PQ', condition: 'Anxiety', ...base, marketing: true, source: 'Word of mouth',
-    status: 'New', recordsUploaded: false, calls: [], clinicRef: null, emailedAt: null, submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
+    status: 'Under HHH review', recordsUploaded: false, calls: [{ ts: new Date(Date.now() - 24 * 60 * 60 * 1000) }], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
   };
   const s3: EligibilitySubmission = {
     id: 3, name: 'Daniel Price', dob: '1977-07-23', mobile: '07700 900503', email: 'd.price@email.com',
     postcode: 'LS2 7DR', condition: 'Chronic Pain', ...base, marketing: false, source: 'Poster / Leaflet',
-    status: 'Records uploaded', recordsUploaded: true, calls: [], clinicRef: null, emailedAt: null, submittedAt: new Date(),
+    status: 'Approved', recordsUploaded: true, calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Approved for programme onboarding after telephone review.', submittedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
   };
   const s4: EligibilitySubmission = {
     id: 4, name: 'Sara Knight', dob: '1985-02-15', mobile: '07700 900504', email: 's.knight@email.com',
     postcode: 'LS1 5DA', condition: 'Insomnia', ...base, marketing: false, source: 'Text',
-    status: 'Referred to clinic', recordsUploaded: true, calls: [], clinicRef: 'CLN-5200', emailedAt: null, submittedAt: new Date(),
+    status: 'Declined', recordsUploaded: true, calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Not onboarded following HHH review.', submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
   };
+  s3.organisationId = '22222222-2222-4222-8222-222222222222';
+  s3.pharmacyName = 'East Midlands Pharmacy Lincoln';
+  s3.referralToken = 'emp-lincoln-3m8q2v';
   return [s1, s2, s3, s4];
 }
 
@@ -312,8 +453,8 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
     placed: false, poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
   };
   const o1: PatientOrder = {
-    id: 1, patientId: 'P-1001', date: new Date(), feeExtra: 0,
-    payment: { status: 'none', amount: 0, ref: null, sentAt: null },
+    id: 1, organisationId: ORGANISATIONS[0].id, patientId: 'P-1001', date: new Date(), deliveryOptionId: 'standard', deliveryLabel: 'Standard tracked delivery', feeExtra: 6.95,
+    payment: { status: 'none', route: null, amount: 0, ref: null, sentAt: null, paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions: [rx1, rx2],
   };
 
@@ -326,8 +467,8 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
     readyAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), // 12 days ago
   };
   const o2: PatientOrder = {
-    id: 2, patientId: 'P-1002', date: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000), feeExtra: 0,
-    payment: { status: 'paid', amount: 48, ref: 'WP-8812', sentAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
+    id: 2, organisationId: ORGANISATIONS[0].id, patientId: 'P-1002', date: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000), deliveryOptionId: 'collection', deliveryLabel: 'No delivery charge', feeExtra: 0,
+    payment: { status: 'paid', route: 'worldpay', amount: 48, ref: 'WP-8812', sentAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), paidAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions: [rx3],
   };
 
@@ -339,12 +480,14 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
     placed: true, poRef: 'PO-9003', status: 'approved', invoiceRef: 'INV-4073', trackingNumber: null, carrier: null,
   };
   const o3: PatientOrder = {
-    id: 3, patientId: 'P-1003', date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), feeExtra: 0,
+    id: 3, organisationId: ORGANISATIONS[0].id, patientId: 'P-1003', date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), deliveryOptionId: 'collection', deliveryLabel: 'No delivery charge', feeExtra: 0,
     payment: {
       status: 'sent',
+      route: 'worldpay',
       amount: 79,
       ref: 'WP-8815',
       sentAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
+      paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null,
     },
     prescriptions: [rx4],
   };
@@ -357,12 +500,14 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
     placed: true, poRef: 'PO-9004', status: 'collected', invoiceRef: 'INV-4074', trackingNumber: null, carrier: null,
   };
   const o4: PatientOrder = {
-    id: 4, patientId: 'P-1004', date: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), feeExtra: 0, // 45 days ago
+    id: 4, organisationId: ORGANISATIONS[0].id, patientId: 'P-1004', date: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), deliveryOptionId: 'collection', deliveryLabel: 'No delivery charge', feeExtra: 0, // 45 days ago
     payment: {
       status: 'paid',
+      route: 'pharmacy',
       amount: 69,
-      ref: 'WP-8816',
+      ref: null,
       sentAt: new Date(Date.now() - 44 * 24 * 60 * 60 * 1000),
+      paidAt: new Date(Date.now() - 44 * 24 * 60 * 60 * 1000), manualTender: 'cash', manualReference: 'TILL-1048', manualNotes: 'Paid at pharmacy counter.', manualRecordedBy: 'S. Patel',
     },
     prescriptions: [rx5],
   };
@@ -372,9 +517,60 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
 
 const seed = buildSeedOrders();
 
+function buildComplianceItems(): ComplianceItem[] {
+  const platform: ComplianceItem[] = [
+    { id: 'CON-00', organisationId: null, category: 'Contracts', requirement: 'Verify the legal entity behind the Healius Consulting business name and HHH platform, including legal name, company status/number, registered office and authority to contract', reference: 'Contracting-party and statutory disclosure gate', owner: 'Shaylen Patel + solicitor', status: 'blocked', requiredForLive: true, evidence: 'Business name and domain seen in correspondence; registered legal identity not yet supplied', reviewDate: '2026-07-28' },
+    { id: 'CON-00A', organisationId: null, category: 'Contracts', requirement: 'Record ownership or licence of the HHH name, domains, software, content and patient-facing materials', reference: 'Brand and intellectual-property chain of title', owner: 'Director + solicitor', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'ICO-01', organisationId: null, category: 'Data protection', requirement: 'Confirm Healius Consulting / HHH controller and processor roles and register the verified legal entity with the ICO where required', reference: 'UK GDPR · ICO data protection fee', owner: 'Director + legal adviser', status: 'in-progress', requiredForLive: true, evidence: null, reviewDate: '2026-08-14' },
+    { id: 'ICO-02', organisationId: null, category: 'Data protection', requirement: 'Approve DPIA for special-category patient data and tenant model', reference: 'UK GDPR Art. 35', owner: 'DPO adviser + Healius Consulting', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: '2026-08-14' },
+    { id: 'ICO-03', organisationId: null, category: 'Data protection', requirement: 'Document Article 6 lawful bases, Article 9 conditions and ROPA', reference: 'UK GDPR Arts. 6, 9 and 30', owner: 'Legal adviser', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'ICO-04', organisationId: null, category: 'Data protection', requirement: 'Publish patient, pharmacy staff and eligibility privacy notices naming the verified Healius legal entity and each party’s role', reference: 'UK GDPR Arts. 13–14', owner: 'Healius Consulting + legal adviser', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'ICO-05', organisationId: null, category: 'Data protection', requirement: 'Approve retention, deletion, DSAR and breach-response procedures', reference: 'UK GDPR accountability', owner: 'Healius Consulting operations', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'ICO-06', organisationId: null, category: 'Data protection', requirement: 'Approve consent records, Appropriate Policy Document and withdrawal process where applicable', reference: 'DPA 2018 · UK GDPR Art. 9', owner: 'DPO adviser + legal adviser', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'ICO-07', organisationId: null, category: 'Data protection', requirement: 'Document cookie use and separate care communications from optional marketing', reference: 'PECR + UK GDPR', owner: 'Healius Consulting operations + legal adviser', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'CON-01', organisationId: null, category: 'Contracts', requirement: 'Approve pharmacy services agreement, DPA and sub-processor schedule in the verified Healius legal entity name (trading as HHH)', reference: 'UK GDPR Art. 28', owner: 'Director + solicitor', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'CON-02', organisationId: null, category: 'Contracts', requirement: 'Confirm professional indemnity, cyber insurance and supplier liability cover is held by the verified operator and covers the HHH service', reference: 'Commercial assurance', owner: 'Director + insurance adviser', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'SEC-01', organisationId: null, category: 'Security', requirement: 'MFA, role-based access and tenant isolation verified', reference: 'Security go-live control', owner: 'Technical lead', status: 'in-progress', requiredForLive: true, evidence: 'Prototype roles implemented; production identity pending', reviewDate: '2026-08-14' },
+    { id: 'SEC-02', organisationId: null, category: 'Security', requirement: 'Encryption, backups, recovery test, audit logs and incident runbook verified', reference: 'UK GDPR Art. 32', owner: 'Technical lead', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'SEC-03', organisationId: null, category: 'Security', requirement: 'Independent penetration test and vulnerability remediation', reference: 'Security assurance', owner: 'Technical lead', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'SEC-04', organisationId: null, category: 'Security', requirement: 'Supplier due diligence, UK/EU data locations and international transfer safeguards recorded', reference: 'UK GDPR processor assurance', owner: 'DPO adviser + technical lead', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'SEC-05', organisationId: null, category: 'Security', requirement: 'Business continuity, disaster recovery and restore test completed', reference: 'Operational resilience', owner: 'Technical lead + director', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'PAY-01', organisationId: null, category: 'Payments', requirement: 'Worldpay confirms each pharmacy can connect an approved merchant account and receive patient funds directly', reference: 'Worldpay platform and merchant approval', owner: 'Director + Worldpay', status: 'blocked', requiredForLive: true, evidence: 'Awaiting Worldpay confirmation of the tenant connection model', reviewDate: '2026-07-28' },
+    { id: 'PAY-02', organisationId: null, category: 'Payments', requirement: 'Hosted checkout, signed webhooks and PCI DSS scope approved', reference: 'PCI DSS', owner: 'Worldpay + technical lead', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'PAY-03', organisationId: null, category: 'Payments', requirement: 'Refunds, chargebacks, reconciliation, descriptor and settlement responsibilities documented', reference: 'Worldpay operating model', owner: 'Director + Worldpay', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: 'CLN-01', organisationId: null, category: 'Clinical scope', requirement: 'Document whether CQC, NHS DSPT, DCB0129 or MHRA scope is triggered', reference: 'Scope assessment — professional advice required', owner: 'Director + regulatory adviser', status: 'in-progress', requiredForLive: true, evidence: 'Initial scope: software and administration only', reviewDate: '2026-08-14' },
+    { id: 'CLN-02', organisationId: null, category: 'Clinical scope', requirement: 'Patient-facing accessibility and reasonable-adjustment review completed', reference: 'Equality Act 2010 · target WCAG 2.2 AA', owner: 'Technical lead + operations', status: 'in-progress', requiredForLive: true, evidence: 'Responsive layout tested; formal audit pending', reviewDate: null },
+    { id: 'CLN-03', organisationId: null, category: 'Clinical scope', requirement: 'HHH programme-onboarding approval is defined as an administrative gate, with telephone review, decision reason and approver audit; it does not replace diagnosis, prescribing or pharmacy checks', reference: 'Operating scope and clinical safety boundary', owner: 'Shaylen + solicitor/regulatory adviser', status: 'in-progress', requiredForLive: true, evidence: 'Prototype enforces HHH approval before the patient enters the pharmacy ordering CRM', reviewDate: '2026-08-14' },
+  ];
+
+  const tenantItems = ORGANISATIONS.flatMap((organisation, index): ComplianceItem[] => [
+    { id: `${organisation.slug}-GPHC`, organisationId: organisation.id, category: 'Pharmacy governance', requirement: 'GPhC registration, premises and superintendent details verified', reference: 'GPhC standards', owner: 'Pharmacy + Healius Consulting onboarding', status: index === 0 ? 'ready' : 'in-progress', requiredForLive: true, evidence: index === 0 ? `GPhC ${organisation.gphcNumber}` : null, reviewDate: '2027-07-01' },
+    { id: `${organisation.slug}-DPA`, organisationId: organisation.id, category: 'Contracts', requirement: 'Pharmacy agreement and data processing terms signed', reference: 'Tenant go-live gate', owner: 'Director + pharmacy', status: index === 0 ? 'in-progress' : 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: `${organisation.slug}-RISK`, organisationId: organisation.id, category: 'Pharmacy governance', requirement: 'CBPM and distance-service risk assessments held on file', reference: 'GPhC pharmacy responsibility', owner: 'Superintendent pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: `${organisation.slug}-TRAIN`, organisationId: organisation.id, category: 'Pharmacy governance', requirement: 'Staff training, confidentiality and UAT sign-off completed', reference: 'Tenant go-live gate', owner: 'Pharmacy manager', status: index === 0 ? 'in-progress' : 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: `${organisation.slug}-WP`, organisationId: organisation.id, category: 'Payments', requirement: 'Pharmacy Worldpay merchant and direct settlement destination approved', reference: 'Worldpay tenant connection', owner: 'Pharmacy + Worldpay', status: organisation.worldpay.status === 'connected' ? 'ready' : 'not-started', requiredForLive: true, evidence: organisation.worldpay.merchantId, reviewDate: null },
+    { id: `${organisation.slug}-FORM`, organisationId: organisation.id, category: 'Data protection', requirement: 'Eligibility link, operator/controller identity, privacy wording, consent capture and attribution UAT approved', reference: 'Patient intake go-live gate', owner: 'Healius Consulting + pharmacy', status: index === 0 ? 'in-progress' : 'not-started', requiredForLive: true, evidence: index === 0 ? 'Sandbox attribution verified; legal identity/privacy approval outstanding' : null, reviewDate: null },
+    { id: `${organisation.slug}-PI`, organisationId: organisation.id, category: 'Pharmacy governance', requirement: 'Professional indemnity and responsible pharmacist arrangements confirmed', reference: 'GPhC pharmacy responsibility', owner: 'Pharmacy superintendent', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: `${organisation.slug}-CD`, organisationId: organisation.id, category: 'Pharmacy governance', requirement: 'Controlled-drug storage, register, incident and destruction SOPs confirmed', reference: 'Pharmacy-owned controlled drug obligations', owner: 'Responsible pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: `${organisation.slug}-RX`, organisationId: organisation.id, category: 'Clinical scope', requirement: 'Prescription validity, prescriber verification and dispensing SOP approved', reference: 'HMR / CBPM workflow', owner: 'Superintendent pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: `${organisation.slug}-COMPLAINTS`, organisationId: organisation.id, category: 'Pharmacy governance', requirement: 'Patient complaints, safeguarding and clinical escalation routes published', reference: 'Pharmacy governance', owner: 'Pharmacy manager', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+    { id: `${organisation.slug}-ACCESS`, organisationId: organisation.id, category: 'Security', requirement: 'Staff roles, MFA enrolment and access review signed off', reference: 'Tenant access control', owner: 'Pharmacy manager + Healius Consulting', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+  ]);
+
+  return [...platform, ...tenantItems];
+}
+
 const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
 const modeParam = urlParams?.get('mode');
-const initialPortalMode: PortalMode = (modeParam === 'clinician' || modeParam === 'patient' || modeParam === 'gateway') ? (modeParam as PortalMode) : 'gateway';
+let storedStaffSession: StaffSession | null = null;
+try {
+  storedStaffSession = JSON.parse(sessionStorage.getItem('hhh_staff_session') || 'null') as StaffSession | null;
+} catch { storedStaffSession = null; }
+const initialPortalMode: PortalMode = modeParam === 'eligibility' || modeParam === 'patient'
+  ? modeParam
+  : storedStaffSession?.role === 'admin' ? 'admin' : storedStaffSession?.role === 'pharmacy' ? 'clinician' : 'gateway';
+const initialToken = urlParams?.get('token');
+const initialOrganisation = ORGANISATIONS.find(org => org.referralToken === initialToken || org.id === storedStaffSession?.organisationId) ?? ORGANISATIONS[0];
 
 const initialState: AppState = {
   screen: 'home',
@@ -384,9 +580,19 @@ const initialState: AppState = {
   orders: seed.orders,
   activeOrderId: 1,
   toasts: [],
-  nextIds: { patient: 2000, rx: seed.nextRx, order: 5, submission: 5, clinic: 5201, invoice: 4072 },
+  nextIds: { patient: 2000, rx: seed.nextRx, order: 5, submission: 5, invoice: 4072 },
   portalMode: initialPortalMode,
   patientEmail: null,
+  organisations: ORGANISATIONS,
+  currentOrganisationId: initialOrganisation.id,
+  staffSession: storedStaffSession,
+  platformIntegrations: [
+    { id: 'eligibility-api', name: 'HHH Eligibility API', description: 'Token routing and patient intake', status: 'connected' },
+    { id: 'curaleaf', name: 'Curaleaf Rocky', description: 'Product, prescription and supplier ordering', status: 'pending' },
+    { id: 'worldpay', name: 'Worldpay', description: 'Pharmacy-owned hosted checkout, payment webhooks and direct settlement', status: 'pending' },
+    { id: 'notifications', name: 'Patient notifications', description: 'Ready-for-collection SMS and email', status: 'pending' },
+  ],
+  complianceItems: buildComplianceItems(),
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -427,6 +633,44 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'SET_PORTAL_MODE':
       return { ...state, portalMode: action.mode };
+    case 'SIGN_IN_STAFF':
+      return {
+        ...state,
+        staffSession: action.session,
+        currentOrganisationId: action.session.organisationId ?? state.currentOrganisationId,
+        portalMode: action.session.role === 'admin' ? 'admin' : 'clinician',
+      };
+    case 'SIGN_OUT_STAFF':
+      return { ...state, staffSession: null, portalMode: 'gateway', screen: 'home' };
+    case 'SET_CURRENT_ORGANISATION':
+      return { ...state, currentOrganisationId: action.organisationId };
+    case 'UPDATE_PLATFORM_INTEGRATION':
+      return { ...state, platformIntegrations: state.platformIntegrations.map(integration => integration.id === action.integrationId ? { ...integration, status: action.status, description: action.description ?? integration.description } : integration) };
+    case 'ADD_ORGANISATION':
+      return {
+        ...state,
+        organisations: [...state.organisations, action.organisation],
+        complianceItems: [
+          ...state.complianceItems,
+          { id: `${action.organisation.slug}-GPHC`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'GPhC registration, premises and superintendent details verified', reference: 'GPhC standards', owner: 'Pharmacy + HHH onboarding', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-DPA`, organisationId: action.organisation.id, category: 'Contracts', requirement: 'Pharmacy agreement and data processing terms signed', reference: 'Tenant go-live gate', owner: 'Director + pharmacy', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-RISK`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'CBPM and distance-service risk assessments held on file', reference: 'GPhC pharmacy responsibility', owner: 'Superintendent pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-TRAIN`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'Staff training, confidentiality and UAT sign-off completed', reference: 'Tenant go-live gate', owner: 'Pharmacy manager', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-WP`, organisationId: action.organisation.id, category: 'Payments', requirement: 'Pharmacy Worldpay merchant and direct settlement destination approved', reference: 'Worldpay tenant connection', owner: 'Pharmacy + Worldpay', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-FORM`, organisationId: action.organisation.id, category: 'Data protection', requirement: 'Eligibility link, privacy wording, consent capture and attribution UAT approved', reference: 'Patient intake go-live gate', owner: 'HHH + pharmacy', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-PI`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'Professional indemnity and responsible pharmacist arrangements confirmed', reference: 'GPhC pharmacy responsibility', owner: 'Pharmacy superintendent', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-CD`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'Controlled-drug storage, register, incident and destruction SOPs confirmed', reference: 'Pharmacy-owned controlled drug obligations', owner: 'Responsible pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-RX`, organisationId: action.organisation.id, category: 'Clinical scope', requirement: 'Prescription validity, prescriber verification and dispensing SOP approved', reference: 'HMR / CBPM workflow', owner: 'Superintendent pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-COMPLAINTS`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'Patient complaints, safeguarding and clinical escalation routes published', reference: 'Pharmacy governance', owner: 'Pharmacy manager', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+          { id: `${action.organisation.slug}-ACCESS`, organisationId: action.organisation.id, category: 'Security', requirement: 'Staff roles, MFA enrolment and access review signed off', reference: 'Tenant access control', owner: 'Pharmacy manager + HHH', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
+        ],
+      };
+    case 'UPDATE_ORGANISATION':
+      return { ...state, organisations: state.organisations.map(org => org.id === action.organisationId ? { ...org, ...action.updates } : org) };
+    case 'UPDATE_WORLDPAY':
+      return { ...state, organisations: state.organisations.map(org => org.id === action.organisationId ? { ...org, worldpay: { ...org.worldpay, ...action.updates } } : org) };
+    case 'UPDATE_COMPLIANCE':
+      return { ...state, complianceItems: state.complianceItems.map(item => item.id === action.itemId ? { ...item, status: action.status, evidence: action.evidence ?? item.evidence } : item) };
     case 'SET_PATIENT_EMAIL':
       return { ...state, patientEmail: action.email };
     case 'LOGOUT_PATIENT':
@@ -434,7 +678,7 @@ function reducer(state: AppState, action: Action): AppState {
 
     // ---- Referrals ----
     case 'ADD_SUBMISSION': {
-      if (state.submissions.some(s => s.email === action.submission.email)) {
+      if (state.submissions.some(s => s.organisationId === action.submission.organisationId && s.email.toLowerCase() === action.submission.email.toLowerCase())) {
         return state;
       }
       return {
@@ -446,7 +690,7 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         submissions: state.submissions.map(s =>
-          s.id === action.subId ? { ...s, recordsUploaded: true, status: s.status === 'New' ? 'Records uploaded' as const : s.status } : s
+          s.id === action.subId ? { ...s, recordsUploaded: true } : s
         ),
       };
     }
@@ -454,44 +698,60 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         submissions: state.submissions.map(s =>
-          s.id === action.subId ? { ...s, calls: [...s.calls, { ts: new Date() }] } : s
+          s.id === action.subId && s.status !== 'Approved' && s.status !== 'Declined'
+            ? { ...s, calls: [...s.calls, { ts: new Date() }], status: 'Under HHH review' as const }
+            : s
         ),
       };
     }
-    case 'REFER_TO_CLINIC': {
-      const clinicRef = 'CLN-' + state.nextIds.clinic;
-      return {
-        ...state,
-        nextIds: { ...state.nextIds, clinic: state.nextIds.clinic + 1 },
-        submissions: state.submissions.map(s =>
-          s.id === action.subId && s.recordsUploaded ? { ...s, clinicRef, status: 'Referred to clinic' as const } : s
-        ),
-      };
-    }
-    case 'EMAIL_REFERRAL': {
+    case 'APPROVE_ONBOARDING': {
       const sub = state.submissions.find(s => s.id === action.subId);
-      if (!sub || !sub.clinicRef) return state;
-      let crm = [...state.crm];
-      let nextPatId = state.nextIds.patient;
-      if (!crm.find(c => c.email === sub.email)) {
-        crm.push({ id: 'P-' + nextPatId, name: sub.name, email: sub.email, mobile: sub.mobile, address: sub.postcode, status: 'Referred' });
-        nextPatId++;
-      }
+      if (!sub || sub.calls.length === 0 || sub.status === 'Declined') return state;
+      const existing = state.crm.find(patient => patient.organisationId === sub.organisationId && patient.email.toLowerCase() === sub.email.toLowerCase());
+      const patientId = existing?.id ?? `P-${state.nextIds.patient}`;
+      const approvedBy = state.staffSession?.name ?? 'HHH administrator';
+      const approvedAt = new Date();
       return {
         ...state,
-        crm,
-        nextIds: { ...state.nextIds, patient: nextPatId },
+        crm: existing ? state.crm.map(patient => patient.id === existing.id ? { ...patient, status: 'HHH approved' as const } : patient) : [...state.crm, {
+          id: patientId,
+          organisationId: sub.organisationId,
+          name: sub.name,
+          email: sub.email,
+          mobile: sub.mobile,
+          address: sub.postcode,
+          status: 'HHH approved' as const,
+          interactions: [{ ts: approvedAt, type: 'HHH onboarding approved', detail: `${approvedBy} approved programme onboarding after patient review.` }],
+        }],
+        nextIds: { ...state.nextIds, patient: existing ? state.nextIds.patient : state.nextIds.patient + 1 },
         submissions: state.submissions.map(s =>
-          s.id === action.subId ? { ...s, emailedAt: new Date(), status: 'Completed' as const } : s
+          s.id === action.subId ? { ...s, status: 'Approved' as const, reviewedAt: approvedAt, reviewedBy: approvedBy, decisionNote: action.note?.trim() || 'Approved for programme onboarding after HHH telephone review.' } : s
+        ),
+      };
+    }
+    case 'DECLINE_ONBOARDING': {
+      const sub = state.submissions.find(s => s.id === action.subId);
+      if (!sub || sub.calls.length === 0 || sub.status === 'Approved') return state;
+      const reviewedBy = state.staffSession?.name ?? 'HHH administrator';
+      return {
+        ...state,
+        submissions: state.submissions.map(s =>
+          s.id === action.subId ? { ...s, status: 'Declined' as const, reviewedAt: new Date(), reviewedBy, decisionNote: action.note?.trim() || 'Not onboarded following HHH review.' } : s
         ),
       };
     }
 
     // ---- Orders ----
     case 'NEW_ORDER': {
+      if (action.patientId && !state.crm.some(patient => patient.id === action.patientId && patient.organisationId === state.currentOrganisationId && patient.status === 'HHH approved')) return state;
       const id = state.nextIds.order;
       const rxId = state.nextIds.rx;
-      const newOrder = blankOrder(id, action.patientId || null);
+      const newOrder = blankOrder(id, action.patientId || null, state.currentOrganisationId);
+      const organisation = state.organisations.find(item => item.id === state.currentOrganisationId);
+      const delivery = organisation?.deliveryOptions.find(option => option.enabled) ?? null;
+      newOrder.deliveryOptionId = delivery?.id ?? null;
+      newOrder.deliveryLabel = delivery?.label ?? null;
+      newOrder.feeExtra = delivery?.amount ?? 0;
       newOrder.prescriptions = [blankRx(rxId)];
       return {
         ...state,
@@ -502,8 +762,18 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'SET_ACTIVE_ORDER':
       return { ...state, activeOrderId: action.orderId };
-    case 'SET_ORDER_PATIENT':
-      return mapOrder(state, action.orderId, o => ({ ...o, patientId: action.patientId }));
+    case 'SET_ORDER_PATIENT': {
+      const order = state.orders.find(item => item.id === action.orderId);
+      const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && item.status === 'HHH approved');
+      return patient ? mapOrder(state, action.orderId, o => ({ ...o, patientId: patient.id })) : state;
+    }
+    case 'SET_ORDER_DELIVERY': {
+      const order = state.orders.find(item => item.id === action.orderId);
+      const organisation = state.organisations.find(item => item.id === order?.organisationId);
+      const delivery = organisation?.deliveryOptions.find(option => option.id === action.optionId && option.enabled);
+      if (!delivery) return state;
+      return mapOrder(state, action.orderId, o => ({ ...o, deliveryOptionId: delivery.id, deliveryLabel: delivery.label, feeExtra: delivery.amount }));
+    }
     case 'ADD_RX': {
       const rxId = state.nextIds.rx;
       return {
@@ -525,6 +795,10 @@ function reducer(state: AppState, action: Action): AppState {
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
         ...r, items: r.items.map(i => i.productId === action.productId ? { ...i, qty: Math.max(1, action.qty) } : i),
       })));
+    case 'SET_ITEM_RETAIL':
+      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+        ...r, items: r.items.map(i => i.productId === action.productId ? { ...i, retail: Math.max(0, action.retail) } : i),
+      })));
     case 'SET_ITEM_FEE':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
         ...r, items: r.items.map(i => i.productId === action.productId ? { ...i, fee: action.fee } : i),
@@ -539,13 +813,29 @@ function reducer(state: AppState, action: Action): AppState {
     // ---- Payment ----
     case 'SEND_PAYMENT_LINK': {
       const order = findOrder(state, action.orderId);
-      if (!order) return state;
+      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status === 'HHH approved');
+      const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
+      if (!order || !patientApproved || !prescriptionReady) return state;
       const amount = orderRevenue(order);
       const nextState = mapOrder(state, action.orderId, o => ({
         ...o,
-        payment: { ...o.payment, status: 'sent', amount, ref: 'WP-' + Date.now().toString(36).toUpperCase(), sentAt: new Date() },
+        payment: { ...o.payment, status: 'sent', route: 'worldpay', amount, ref: null, sentAt: new Date(), paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
       }));
       // Find another draft order (payment status 'none') to make active
+      const nextDraft = nextState.orders.find(o => o.payment.status === 'none' && o.id !== action.orderId);
+      nextState.activeOrderId = nextDraft ? nextDraft.id : null;
+      return nextState;
+    }
+    case 'START_MANUAL_PAYMENT': {
+      const order = findOrder(state, action.orderId);
+      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status === 'HHH approved');
+      const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
+      if (!order || !patientApproved || !prescriptionReady) return state;
+      const amount = orderRevenue(order);
+      const nextState = mapOrder(state, action.orderId, o => ({
+        ...o,
+        payment: { ...o.payment, status: 'sent', route: 'pharmacy', amount, ref: null, sentAt: new Date(), paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
+      }));
       const nextDraft = nextState.orders.find(o => o.payment.status === 'none' && o.id !== action.orderId);
       nextState.activeOrderId = nextDraft ? nextDraft.id : null;
       return nextState;
@@ -553,11 +843,28 @@ function reducer(state: AppState, action: Action): AppState {
     case 'CONFIRM_PAYMENT':
       return mapOrder(state, action.orderId, o => ({
         ...o,
-        payment: { ...o.payment, status: 'paid' },
+        payment: { ...o.payment, status: 'paid', paidAt: new Date() },
+      }));
+    case 'RECORD_MANUAL_PAYMENT':
+      return mapOrder(state, action.orderId, o => o.payment.route !== 'pharmacy' ? o : ({
+        ...o,
+        payment: {
+          ...o.payment,
+          status: 'paid',
+          paidAt: new Date(),
+          manualTender: action.tender,
+          manualReference: action.reference?.trim() || null,
+          manualNotes: action.notes?.trim() || null,
+          manualRecordedBy: state.staffSession?.name || 'Pharmacy staff',
+        },
       }));
 
     // ---- Curaleaf submission simulation ----
     case 'PLACE_ORDER': {
+      const order = findOrder(state, action.orderId);
+      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status === 'HHH approved');
+      const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
+      if (!order || order.payment.status !== 'paid' || !patientApproved || !prescriptionReady) return state;
       const invBase = state.nextIds.invoice;
       let invCounter = 0;
       return {
@@ -578,36 +885,6 @@ function reducer(state: AppState, action: Action): AppState {
         })),
         nextIds: { ...state.nextIds, invoice: invBase + invCounter },
       };
-    }
-    case 'ADVANCE_RX_STATUS': {
-      const statusOrder: RxStatus[] = ['draft', 'awaiting-approval', 'approved', 'dispatched'];
-      const order = state.orders.find(o => o.id === action.orderId);
-      const rx = order?.prescriptions.find(r => r.id === action.rxId);
-      if (!rx) return state;
-      const idx = statusOrder.indexOf(rx.status);
-      if (idx < statusOrder.length - 1) {
-        const nextStatus = statusOrder[idx + 1];
-        const nextState = mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
-          ...r,
-          status: nextStatus,
-          trackingNumber: nextStatus === 'dispatched' ? 'DPD' + Math.random().toString(36).substring(2, 10).toUpperCase() : r.trackingNumber,
-        })));
-
-        let msg = '';
-        const poRefStr = rx.poRef || `PO-${88010 + action.orderId}-${rx.id}`;
-        if (nextStatus === 'approved') {
-          msg = `Curaleaf approved prescription ${poRefStr}`;
-        } else if (nextStatus === 'dispatched') {
-          msg = `Curaleaf order ${poRefStr} dispatched via DPD`;
-        }
-
-        if (msg) {
-          const newToast = { id: Date.now().toString() + Math.random(), message: msg, type: 'info' as const };
-          nextState.toasts = [...nextState.toasts, newToast];
-        }
-        return nextState;
-      }
-      return state;
     }
     case 'RECEIVE_SHIPMENT': {
       const nextState = mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
@@ -667,9 +944,80 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const scheduledRef = useRef<Set<number>>(new Set());
 
-  // Listen to localStorage for incoming eligibility form submissions & patient payments
+  useEffect(() => {
+    if (state.staffSession) sessionStorage.setItem('hhh_staff_session', JSON.stringify(state.staffSession));
+    else sessionStorage.removeItem('hhh_staff_session');
+  }, [state.staffSession]);
+
+  useEffect(() => {
+    if (!isApiConfigured || !state.staffSession) return;
+    let cancelled = false;
+    getCuraleafConnectionStatus().then(status => {
+      if (cancelled) return;
+      const writeState = status.writeConfigured ? 'Write credential securely configured but not exercised by this check.' : 'Write credential is not configured.';
+      dispatch({
+        type: 'UPDATE_PLATFORM_INTEGRATION',
+        integrationId: 'curaleaf',
+        status: status.connected ? 'connected' : status.configured ? 'attention' : 'pending',
+        description: `${status.message} ${writeState}`,
+      });
+    }).catch(error => console.warn('Curaleaf status check unavailable:', error));
+    return () => { cancelled = true; };
+  }, [state.staffSession]);
+
+  // Cross-domain intake sync. In production, the access token comes from staff authentication.
+  useEffect(() => {
+    if (!isApiConfigured) return;
+    let cancelled = false;
+    const sync = async () => {
+      const organisations = state.portalMode === 'admin'
+        ? state.organisations
+        : state.organisations.filter(org => org.id === state.currentOrganisationId);
+      try {
+        const groups = await Promise.all(organisations.map(async organisation => ({
+          organisation,
+          records: await getPortalEligibilitySubmissions(organisation.id),
+        })));
+        if (cancelled) return;
+        groups.forEach(({ organisation, records }) => records.forEach(record => dispatch({
+          type: 'ADD_SUBMISSION',
+          submission: {
+            id: record.id,
+            name: `${record.firstName} ${record.surname}`,
+            dob: record.dob,
+            mobile: record.mobile,
+            email: record.email,
+            postcode: record.postcode,
+            condition: record.condition,
+            tried2: record.tried2,
+            psychExclusion: record.psychExclusion,
+            consentReferral: record.consentReferral,
+            consentShare: record.consentShare,
+            marketing: record.marketing,
+            source: record.source,
+            status: record.status,
+            recordsUploaded: false,
+            calls: [],
+            reviewedAt: record.reviewedAt,
+            reviewedBy: record.reviewedBy,
+            decisionNote: record.decisionNote,
+            submittedAt: new Date(record.submittedAt),
+            organisationId: record.organisationId,
+            pharmacyName: record.pharmacyName,
+            referralToken: organisation.referralToken,
+          },
+        })));
+      } catch (error) {
+        console.warn('Eligibility API sync unavailable:', error);
+      }
+    };
+    void sync();
+    const interval = window.setInterval(() => void sync(), 15000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [state.currentOrganisationId, state.organisations, state.portalMode]);
+
+  // Legacy same-origin eligibility form bridge. Real cross-domain intake uses the API above.
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'hhh_new_submission' && e.newValue) {
@@ -690,72 +1038,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           console.error('Error parsing localStorage submission:', err);
         }
       }
-
-      if (e.key === 'hhh_patient_payment_clear' && e.newValue) {
-        try {
-          const { orderId } = JSON.parse(e.newValue);
-          dispatch({ type: 'CONFIRM_PAYMENT', orderId });
-          dispatch({ type: 'PLACE_ORDER', orderId });
-          
-          // Get patient info for toast
-          const orderObj = state.orders.find(o => o.id === orderId);
-          const patientObj = orderObj?.patientId ? state.crm.find(p => p.id === orderObj.patientId) : null;
-          const name = patientObj?.name ?? 'Marcus Vance';
-
-          dispatch({
-            type: 'ADD_TOAST',
-            message: `Patient Portal: Worldpay invoice paid securely by patient ${name} (£${orderObj?.payment.amount.toFixed(2)}).`,
-            toastType: 'success'
-          });
-          localStorage.removeItem('hhh_patient_payment_clear');
-        } catch (err) {
-          console.error('Error parsing patient payment:', err);
-        }
-      }
     };
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [dispatch, state.orders, state.crm]);
-
-  // Automated Payment Clearance & Curaleaf Placement Simulator
-  useEffect(() => {
-    state.orders.forEach(order => {
-      if (order.payment.status === 'sent' && !scheduledRef.current.has(order.id)) {
-        scheduledRef.current.add(order.id);
-
-        setTimeout(() => {
-          dispatch({ type: 'CONFIRM_PAYMENT', orderId: order.id });
-          dispatch({ type: 'PLACE_ORDER', orderId: order.id });
-
-          const patientObj = state.crm.find(p => p.id === order.patientId);
-          const patientNameStr = patientObj?.name ?? 'Marcus Vance';
-
-          dispatch({
-            type: 'ADD_TOAST',
-            message: `Worldpay Webhook: Payment cleared automatically for ${patientNameStr} (£${order.payment.amount.toFixed(2)}). Order submitted directly to Curaleaf.`,
-            toastType: 'success'
-          });
-        }, 7000); // auto-clear after 7 seconds
-      }
-    });
-  }, [state.orders, state.crm]);
-
-  // Simulated status advancement timer (for demo)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      state.orders.forEach(order => {
-        if (order.payment.status === 'paid') {
-          order.prescriptions.forEach(rx => {
-            if (rx.placed && rx.status !== 'dispatched' && rx.status !== 'ready' && rx.status !== 'collected') {
-              dispatch({ type: 'ADVANCE_RX_STATUS', orderId: order.id, rxId: rx.id });
-            }
-          });
-        }
-      });
-    }, 15000); // advance every 15s for demo
-    return () => clearInterval(interval);
-  }, [state.orders]);
+  }, [dispatch]);
 
   // Mirror state to localStorage for patient portal sync
   useEffect(() => {

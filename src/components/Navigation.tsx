@@ -1,23 +1,29 @@
-import { useApp, PHARMACY, type Screen } from '../context/AppContext';
-import { Home, Users, FilePlus, Clock, Package, UserSearch, LogOut } from 'lucide-react';
+import { useApp, type Screen } from '../context/AppContext';
+import { Home, Users, FilePlus, Clock, Package, UserSearch, LogOut, QrCode, Settings } from 'lucide-react';
 
-const MENU_ITEMS: { key: Screen; label: string; icon: React.ReactNode }[] = [
+const MENU_ITEMS: { key: Screen; label: string; icon: React.ReactNode; module?: keyof import('../context/AppContext').PharmacyTenant['modules'] }[] = [
   { key: 'home',      label: 'Dashboard',     icon: <Home size={16} /> },
-  { key: 'referrals', label: 'Clinic Intake',  icon: <Users size={16} /> },
-  { key: 'create',    label: 'Rx Builder',     icon: <FilePlus size={16} /> },
-  { key: 'review',    label: 'Payments',       icon: <Clock size={16} /> },
-  { key: 'orders',    label: 'Supplier Orders', icon: <Package size={16} /> },
-  { key: 'patients',  label: 'Patients CRM',   icon: <UserSearch size={16} /> },
+  { key: 'referrals', label: 'HHH Onboarding',  icon: <Users size={16} />, module: 'intake' },
+  { key: 'create',    label: 'Rx Builder',     icon: <FilePlus size={16} />, module: 'rx' },
+  { key: 'review',    label: 'Payments',       icon: <Clock size={16} />, module: 'payments' },
+  { key: 'orders',    label: 'Supplier Orders', icon: <Package size={16} />, module: 'supplierOrders' },
+  { key: 'patients',  label: 'Patients CRM',   icon: <UserSearch size={16} />, module: 'patients' },
+  { key: 'resources', label: 'Form & Content Pack', icon: <QrCode size={16} />, module: 'resources' },
+  { key: 'settings', label: 'Organisation Settings', icon: <Settings size={16} /> },
 ];
 
 export default function Navigation() {
   const { state, dispatch } = useApp();
+  const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
+  const tenantOrders = state.orders.filter(order => order.organisationId === organisation.id);
+  const isAdminViewingClient = state.staffSession?.role === 'admin';
+  const staffInitials = (state.staffSession?.name || 'Staff User').split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase();
 
   // Badge counts
-  const newReferrals = state.submissions.filter(s => s.status !== 'Completed').length;
-  const draftOrders = state.orders.filter(o => o.payment.status === 'none' && o.prescriptions.some(r => r.items.length > 0)).length;
-  const awaitingPayment = state.orders.filter(o => o.payment.status === 'sent').length;
-  const activeOrders = state.orders.filter(o => o.payment.status === 'paid' && o.prescriptions.some(r => r.status !== 'ready')).length;
+  const newReferrals = state.submissions.filter(s => s.organisationId === organisation.id && (s.status === 'New' || s.status === 'Under HHH review')).length;
+  const draftOrders = tenantOrders.filter(o => o.payment.status === 'none' && o.prescriptions.some(r => r.items.length > 0)).length;
+  const awaitingPayment = tenantOrders.filter(o => o.payment.status === 'sent').length;
+  const activeOrders = tenantOrders.filter(o => o.payment.status === 'paid' && o.prescriptions.some(r => r.status !== 'ready')).length;
 
   const badges: Partial<Record<Screen, { count: number; warn?: boolean }>> = {};
   if (newReferrals > 0) badges.referrals = { count: newReferrals };
@@ -30,14 +36,14 @@ export default function Navigation() {
       {/* Sidebar Top Header */}
       <div className="sidebar-header">
         <div className="sidebar-brand">
-          <div className="sidebar-logo">{PHARMACY.logoText}</div>
-          <span>{PHARMACY.brandName}</span>
+          <div className="sidebar-logo">{organisation.logoText}</div>
+          <span>{organisation.tradingName}</span>
         </div>
       </div>
 
       {/* Navigation Menu */}
       <nav className="sidebar-menu">
-        {MENU_ITEMS.map(item => (
+        {MENU_ITEMS.filter(item => !item.module || organisation.modules[item.module]).map(item => (
           <button
             key={item.key}
             className={`sidebar-item ${state.screen === item.key ? 'active' : ''}`}
@@ -62,17 +68,17 @@ export default function Navigation() {
       {/* Sidebar Footer User Profile */}
       <div className="sidebar-footer">
         <div className="user-profile-card">
-          <div className="user-profile-avatar">SP</div>
+          <div className="user-profile-avatar">{staffInitials}</div>
           <div className="user-profile-info">
-            <span className="user-profile-name">S. Patel</span>
-            <span className="user-profile-role">Pharmacist Admin</span>
+            <span className="user-profile-name">{state.staffSession?.name || 'Staff User'}</span>
+            <span className="user-profile-role">{isAdminViewingClient ? 'HHH admin viewing client' : `Pharmacy staff · ${organisation.status}`}</span>
           </div>
         </div>
         <button
           className="btn btn-sm sidebar-exit"
-          onClick={() => dispatch({ type: 'SET_PORTAL_MODE', mode: 'gateway' })}
+          onClick={() => dispatch(isAdminViewingClient ? { type: 'SET_PORTAL_MODE', mode: 'admin' } : { type: 'SIGN_OUT_STAFF' })}
         >
-          <LogOut size={13} /> Exit to Gateway
+          <LogOut size={13} /> {isAdminViewingClient ? 'Back to HHH Admin' : 'Sign out'}
         </button>
       </div>
     </aside>

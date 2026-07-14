@@ -504,8 +504,8 @@
               <span style="color: var(--text-secondary)">Invoice Status:</span>
               <span class="pill pill-amber">Awaiting Payment</span>
             </div>
-            <button class="btn" style="margin-top: 14px;" onclick="simulatePatientPayment(${activeOrder.id})">
-              💳 Pay Invoice Securely (Worldpay Sim)
+            <button class="btn" style="margin-top: 14px;" disabled>
+              💳 Worldpay checkout integration pending
             </button>
           </div>
         `;
@@ -579,21 +579,6 @@
     } else {
       prescriptionSection.style.display = 'none';
     }
-  }
-
-  function simulatePatientPayment(orderId) {
-    // Notify portal that patient cleared the invoice
-    localStorage.setItem('hhh_patient_payment_clear', JSON.stringify({ orderId }));
-    
-    // Simulate UI loader
-    const btn = document.querySelector('.invoice-card button');
-    btn.disabled = true;
-    btn.innerHTML = 'Clearing Worldpay Transaction...';
-    
-    setTimeout(() => {
-      // Re-trigger visual layout updates
-      renderTracker();
-    }, 1000);
   }
 
   function logout() {
