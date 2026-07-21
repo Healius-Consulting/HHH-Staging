@@ -6,5 +6,4 @@ export const api = onRequest({
   timeoutSeconds: 60,
   memory: '512MiB',
   maxInstances: 20,
-  secrets: ['CURALEAF_API_KEY'],
 }, app);

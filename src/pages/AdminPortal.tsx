@@ -26,9 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import {
-  PLATFORM_OPERATOR,
   useApp,
-  type ComplianceStatus,
   type PharmacyTenant,
   type TenantModule,
 } from '../context/AppContext';
@@ -36,7 +34,9 @@ import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources'
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { useAuth } from '../auth/useAuth';
 import AccessibilityPanel from '../accessibility/AccessibilityPanel';
-import { activateCuraleafPharmacy, createOrganisation } from '../shared/api';
+import { activateCuraleafPharmacy, createOrganisation, getPharmacySetupStatus } from '../shared/api';
+import type { PharmacySetupStatus } from '../shared/contracts';
+import { SETUP_TASKS } from '../onboarding/setup';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'compliance' | 'integrations';
 
@@ -47,22 +47,6 @@ const MODULE_LABELS: Record<TenantModule, string> = {
   supplierOrders: 'Supplier orders',
   patients: 'Patient directory',
   resources: 'Form and content pack',
-};
-
-const STATUS_LABELS: Record<ComplianceStatus, string> = {
-  'not-started': 'Not started',
-  'in-progress': 'In progress',
-  ready: 'Ready',
-  'not-applicable': 'Not applicable',
-  blocked: 'Blocked',
-};
-
-const STATUS_PILLS: Record<ComplianceStatus, string> = {
-  'not-started': 'pill-neutral',
-  'in-progress': 'pill-amber',
-  ready: 'pill-green',
-  'not-applicable': 'pill-info',
-  blocked: 'pill-red',
 };
 
 const defaultModules: PharmacyTenant['modules'] = {
@@ -84,7 +68,7 @@ function AdminHeader({ view, setView }: { view: AdminView; setView: (view: Admin
     { id: 'overview', label: 'Clients', icon: <LayoutDashboard size={15} /> },
     { id: 'referrals', label: 'Onboarding', icon: <UserCheck size={15} /> },
     { id: 'patients', label: 'Patients', icon: <Users size={15} /> },
-    { id: 'compliance', label: 'Compliance', icon: <ClipboardCheck size={15} /> },
+    { id: 'compliance', label: 'Readiness', icon: <ClipboardCheck size={15} /> },
     { id: 'integrations', label: 'Integrations', icon: <Settings2 size={15} /> },
   ];
   return (
@@ -156,7 +140,7 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
           <div className="form-section-heading"><span>02</span><div><strong>Tenant identity</strong><small>The colour is applied consistently across that pharmacy’s workspace.</small></div></div>
           <div className="brand-colour-field"><input type="color" value={primary} onChange={event => setPrimary(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primary.toUpperCase()} · secondary generated automatically</small></div><div className="onboarding-palette"><i style={{ background: onboardingTheme.primary }} /><i style={{ background: onboardingTheme.secondary }} /><i style={{ background: onboardingTheme.primarySoft }} /></div><div className="brand-preview-button" style={{ background: onboardingTheme.primary, color: onboardingTheme.onPrimary }}>Action</div></div>
 
-          <div className="onboarding-callout"><ShieldCheck size={17} /><span>The tenant starts in onboarding status. It cannot be marked live until its mandatory compliance gates have evidence.</span></div>
+          <div className="onboarding-callout"><ShieldCheck size={17} /><span>The tenant starts in onboarding status. Its six setup steps must be completed before live processing begins.</span></div>
           {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
           <div className="drawer-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={busy}><Plus size={14} /> {busy ? 'Creating securely…' : 'Create onboarding record'}</button></div>
         </form>
@@ -171,7 +155,8 @@ export default function AdminPortal() {
   const [query, setQuery] = useState('');
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [complianceScope, setComplianceScope] = useState('all');
+  const [setupByOrganisation, setSetupByOrganisation] = useState<Record<string, PharmacySetupStatus>>({});
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [curaleafOrganisationId, setCuraleafOrganisationId] = useState(state.organisations[0]?.id ?? '');
   const [curaleafCustomerId, setCuraleafCustomerId] = useState('');
   const [curaleafPortalEmail, setCuraleafPortalEmail] = useState('');
@@ -183,6 +168,29 @@ export default function AdminPortal() {
   useEffect(() => {
     document.querySelector<HTMLElement>('.admin-shell')?.scrollTo({ top: 0 });
   }, [view, selectedOrganisationId]);
+
+  useEffect(() => {
+    if (!state.organisations.length) {
+      setSetupByOrganisation({});
+      return;
+    }
+    let cancelled = false;
+    setSetupError(null);
+    void Promise.all(state.organisations.map(organisation => getPharmacySetupStatus(organisation.id)))
+      .then(statuses => {
+        if (!cancelled) setSetupByOrganisation(Object.fromEntries(statuses.map(status => [status.organisationId, status])));
+      })
+      .catch(error => {
+        if (!cancelled) setSetupError(error instanceof Error ? error.message : 'Pharmacy readiness could not be loaded.');
+      });
+    return () => { cancelled = true; };
+  }, [state.organisations]);
+
+  useEffect(() => {
+    if (!curaleafOrganisationId || !state.organisations.some(org => org.id === curaleafOrganisationId)) {
+      setCuraleafOrganisationId(state.organisations[0]?.id ?? '');
+    }
+  }, [curaleafOrganisationId, state.organisations]);
   const submissionsByOrganisation = useMemo(
     () => new Map(state.organisations.map(org => [org.id, state.submissions.filter(sub => sub.organisationId === org.id)])),
     [state.organisations, state.submissions],
@@ -208,20 +216,20 @@ export default function AdminPortal() {
     const org = state.organisations.find(item => item.id === patient.organisationId);
     return `${patient.name} ${patient.email} ${patient.mobile} ${org?.name ?? ''}`.toLowerCase().includes(query.toLowerCase());
   });
-  const platformItems = state.complianceItems.filter(item => item.organisationId === null);
-  const blockingItems = state.complianceItems.filter(item => item.requiredForLive && item.status !== 'ready' && item.status !== 'not-applicable');
   const liveCount = state.organisations.filter(org => org.status === 'live').length;
+  const remainingSetupSteps = Object.values(setupByOrganisation).reduce((total, status) => total + status.requiredCount - status.completedCount, 0);
 
   const tenantReadiness = (organisationId: string) => {
-    const items = state.complianceItems.filter(item => item.organisationId === organisationId && item.requiredForLive);
-    const ready = items.filter(item => item.status === 'ready' || item.status === 'not-applicable').length;
-    return { ready, total: items.length, percent: items.length ? Math.round(ready / items.length * 100) : 0 };
+    const status = setupByOrganisation[organisationId];
+    const ready = status?.completedCount ?? 0;
+    const total = status?.requiredCount ?? SETUP_TASKS.length;
+    return { ready, total, percent: total ? Math.round(ready / total * 100) : 0 };
   };
 
   if (selectedOrganisation) {
     const submissions = submissionsByOrganisation.get(selectedOrganisation.id) ?? [];
     const patients = crmByOrganisation.get(selectedOrganisation.id) ?? [];
-    const compliance = state.complianceItems.filter(item => item.organisationId === selectedOrganisation.id);
+    const setupStatus = setupByOrganisation[selectedOrganisation.id];
     const readiness = tenantReadiness(selectedOrganisation.id);
     const formUrl = eligibilityUrl(selectedOrganisation);
     const tenantTheme = deriveTenantTheme(selectedOrganisation.brand.primary);
@@ -236,13 +244,13 @@ export default function AdminPortal() {
 
           <section className="admin-client-heading">
             <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Client account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
-            <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><strong>{readiness.percent}% go-live evidence</strong></div>
+            <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><strong>{readiness.percent}% setup complete</strong></div>
           </section>
 
           <div className="stats-grid admin-detail-stats">
             <div className="stat-card"><Users size={18} /><strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong><span>Attributed patients</span></div>
             <div className="stat-card"><UserRound size={18} /><strong>{selectedOrganisation.staffCount}</strong><span>Staff accounts</span></div>
-            <div className="stat-card"><ClipboardCheck size={18} /><strong>{readiness.ready}/{readiness.total}</strong><span>Mandatory gates ready</span></div>
+            <div className="stat-card"><ClipboardCheck size={18} /><strong>{readiness.ready}/{readiness.total}</strong><span>Setup steps complete</span></div>
             <div className="stat-card"><CreditCard size={18} /><strong>{selectedOrganisation.platformFeeMonthly == null ? 'Not set' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`}</strong><span>Monthly platform fee</span></div>
           </div>
 
@@ -290,8 +298,9 @@ export default function AdminPortal() {
           </div>
 
           <section className="card admin-patient-table admin-client-compliance">
-            <div className="admin-directory-head"><div><p className="section-label">Tenant gate</p><h2>Pharmacy compliance evidence</h2><p>All mandatory records must be ready before this client processes live patient data.</p></div><span className="pill pill-info">{readiness.ready} of {readiness.total} ready</span></div>
-            <div className="compliance-table table-wrap"><table><thead><tr><th>Requirement</th><th>Owner</th><th>Evidence</th><th>Status</th></tr></thead><tbody>{compliance.map(item => <tr key={item.id}><td><strong>{item.requirement}</strong><small>{item.reference}</small></td><td>{item.owner}</td><td><input className="compliance-evidence-input" aria-label={`Evidence for ${item.id}`} value={item.evidence ?? ''} onChange={event => dispatch({ type: 'UPDATE_COMPLIANCE', itemId: item.id, status: item.status, evidence: event.target.value })} placeholder="Document, link or note" /></td><td><select className={`status-select ${STATUS_PILLS[item.status]}`} value={item.status} onChange={event => dispatch({ type: 'UPDATE_COMPLIANCE', itemId: item.id, status: event.target.value as ComplianceStatus })}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td></tr>)}</tbody></table></div>
+            <div className="admin-directory-head"><div><p className="section-label">Go-live checklist</p><h2>Pharmacy setup</h2><p>The pharmacy completes its operational steps in Settings; HHH completes Curaleaf activation.</p></div><span className="pill pill-info">{readiness.ready} of {readiness.total} complete</span></div>
+            {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
+            <div className="compliance-table table-wrap"><table><thead><tr><th>Setup step</th><th>Evidence</th><th>Status</th></tr></thead><tbody>{SETUP_TASKS.map(definition => { const task = setupStatus?.tasks.find(item => item.id === definition.id); return <tr key={definition.id}><td><strong>{definition.title}</strong><small>{definition.description}</small></td><td>{task?.evidence || 'Not supplied yet'}</td><td><span className={`pill ${task?.completed ? 'pill-green' : 'pill-amber'}`}>{task?.completed ? 'Complete' : 'Waiting'}</span></td></tr>; })}</tbody></table></div>
           </section>
 
           <section className="card admin-patient-table">
@@ -310,17 +319,18 @@ export default function AdminPortal() {
         <div className="stat-card"><Building2 size={18} /><strong>{state.organisations.length}</strong><span>Pharmacy clients</span></div>
         <div className="stat-card"><ShieldCheck size={18} /><strong>{liveCount}</strong><span>Live tenants</span></div>
         <div className="stat-card"><Users size={18} /><strong>{allPatients.length}</strong><span>Attributed patients</span></div>
-        <div className="stat-card"><AlertCircle size={18} /><strong>{blockingItems.length}</strong><span>Open mandatory controls</span></div>
+        <div className="stat-card"><AlertCircle size={18} /><strong>{remainingSetupSteps}</strong><span>Setup steps remaining</span></div>
       </div>
 
-      <section className="card admin-attention-strip">
-        <div><AlertCircle size={18} /><span><strong>Production gate is not complete</strong><small>{platformItems.filter(item => item.requiredForLive && item.status !== 'ready' && item.status !== 'not-applicable').length} platform controls still require evidence, including the Worldpay settlement model and DPIA.</small></span></div>
-        <button className="btn btn-sm" onClick={() => setView('compliance')}>Open compliance register</button>
-      </section>
+      {remainingSetupSteps > 0 && <section className="card admin-attention-strip">
+        <div><AlertCircle size={18} /><span><strong>Some pharmacy setup is still incomplete</strong><small>{remainingSetupSteps} step{remainingSetupSteps === 1 ? '' : 's'} remain across the current pharmacy clients.</small></span></div>
+        <button className="btn btn-sm" onClick={() => setView('compliance')}>Open readiness</button>
+      </section>}
 
       <section className="card admin-directory">
         <div className="admin-directory-head"><div><h2>Pharmacy clients</h2><p>Account records, tenant configuration and patient attribution.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or GPhC number" /></label></div>
         <div className="admin-org-list">
+          {filteredOrganisations.length === 0 && <div className="empty-state">{state.organisations.length === 0 ? 'No pharmacy clients have been onboarded yet.' : 'No pharmacy clients match this search.'}</div>}
           {filteredOrganisations.map(org => {
             const submissions = submissionsByOrganisation.get(org.id) ?? [];
             const patients = crmByOrganisation.get(org.id) ?? [];
@@ -389,20 +399,19 @@ export default function AdminPortal() {
     </>
   );
 
-  const complianceItems = state.complianceItems.filter(item => complianceScope === 'all' ? true : complianceScope === 'platform' ? item.organisationId === null : item.organisationId === complianceScope);
   const renderCompliance = () => (
     <>
-      <div className="admin-title"><div><p className="section-label">Assurance and evidence</p><h1>Compliance register</h1><p>A single operational register for platform controls and pharmacy-specific go-live evidence.</p></div><span className="pill pill-amber"><AlertCircle size={13} /> Professional review required</span></div>
-      <section className="integration-boundary card operator-identity"><Building2 size={20} /><div><strong>Platform identity and contracting boundary</strong><p><b>{PLATFORM_OPERATOR.platformName}</b> ({PLATFORM_OPERATOR.platformLongName}) is the platform brand used by <b>{PLATFORM_OPERATOR.operatingName}</b>. The exact registered legal entity behind that business name, company status/number and registered office are not yet verified, so contracts, ICO registration, insurance and live privacy notices remain blocked until Shaylen supplies those details.</p></div></section>
+      <div className="admin-title"><div><p className="section-label">Operational setup</p><h1>Pharmacy readiness</h1><p>A concise view of the six steps each pharmacy must complete before live processing.</p></div><span className="pill pill-info"><ClipboardCheck size={13} /> Six-step checklist</span></div>
       <section className="compliance-summary-grid">
-        <div className="card"><span>Mandatory controls</span><strong>{state.complianceItems.filter(item => item.requiredForLive).length}</strong><small>Platform and tenant records</small></div>
-        <div className="card"><span>Evidence ready</span><strong>{state.complianceItems.filter(item => item.status === 'ready').length}</strong><small>Verified or recorded</small></div>
-        <div className="card"><span>Blocked</span><strong>{state.complianceItems.filter(item => item.status === 'blocked').length}</strong><small>Needs an external decision</small></div>
-        <div className="card"><span>Due for action</span><strong>{state.complianceItems.filter(item => item.status === 'not-started' || item.status === 'in-progress').length}</strong><small>Work remains open</small></div>
+        <div className="card"><span>Pharmacies</span><strong>{state.organisations.length}</strong><small>Current client accounts</small></div>
+        <div className="card"><span>Fully ready</span><strong>{Object.values(setupByOrganisation).filter(status => status.completed).length}</strong><small>All six steps complete</small></div>
+        <div className="card"><span>Steps complete</span><strong>{Object.values(setupByOrganisation).reduce((total, status) => total + status.completedCount, 0)}</strong><small>Across all pharmacies</small></div>
+        <div className="card"><span>Still waiting</span><strong>{remainingSetupSteps}</strong><small>Steps requiring action</small></div>
       </section>
       <section className="card admin-patient-table compliance-register">
-        <div className="admin-directory-head"><div><h2>Requirements and evidence</h2><p>This register supports governance; it does not replace solicitor, DPO, GPhC, CQC, NHS or Worldpay advice.</p></div><select className="input compliance-scope" value={complianceScope} onChange={event => setComplianceScope(event.target.value)}><option value="all">All scopes</option><option value="platform">Healius Consulting · HHH platform</option>{state.organisations.map(org => <option key={org.id} value={org.id}>{org.tradingName}</option>)}</select></div>
-        <div className="table-wrap"><table><thead><tr><th>Scope / category</th><th>Requirement</th><th>Owner</th><th>Evidence</th><th>Status</th></tr></thead><tbody>{complianceItems.map(item => { const org = state.organisations.find(record => record.id === item.organisationId); return <tr key={item.id}><td><span className="compliance-id">{item.id}</span><strong>{org?.tradingName ?? 'Healius Consulting · HHH'}</strong><small>{item.category}</small></td><td><strong>{item.requirement}</strong><small>{item.reference}{item.requiredForLive ? ' · Required for live' : ''}</small></td><td>{item.owner}</td><td><input className="compliance-evidence-input" aria-label={`Evidence for ${item.id}`} value={item.evidence ?? ''} onChange={event => dispatch({ type: 'UPDATE_COMPLIANCE', itemId: item.id, status: item.status, evidence: event.target.value })} placeholder="Document, link or note" /></td><td><select className={`status-select ${STATUS_PILLS[item.status]}`} value={item.status} onChange={event => dispatch({ type: 'UPDATE_COMPLIANCE', itemId: item.id, status: event.target.value as ComplianceStatus })}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td></tr>; })}</tbody></table></div>
+        <div className="admin-directory-head"><div><h2>Client setup progress</h2><p>Open a client to see its evidence. Pharmacy staff update their own steps; Curaleaf activation remains HHH-admin only.</p></div></div>
+        {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
+        {state.organisations.length === 0 ? <div className="empty-state">No pharmacy clients have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Setup progress</th><th>Next action</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const status = setupByOrganisation[organisation.id]; const readiness = tenantReadiness(organisation.id); const nextTask = SETUP_TASKS.find(definition => !status?.tasks.find(task => task.id === definition.id)?.completed); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>{readiness.percent}% ready</small></td><td><strong>{nextTask?.title ?? 'No action required'}</strong><small>{nextTask?.id === 'curaleaf_account' ? 'HHH administrator' : nextTask ? 'Pharmacy team' : 'Setup complete'}</small></td><td><span className={`pill ${status?.completed ? 'pill-green' : 'pill-amber'}`}>{status?.completed ? 'Ready' : 'In setup'}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
       </section>
     </>
   );
@@ -419,6 +428,8 @@ export default function AdminPortal() {
       });
       if (!status.connected) throw new Error(status.message || 'The credentials were stored but Curaleaf verification did not succeed.');
       const pharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
+      const updatedSetup = await getPharmacySetupStatus(curaleafOrganisationId);
+      setSetupByOrganisation(current => ({ ...current, [curaleafOrganisationId]: updatedSetup }));
       dispatch({ type: 'ADD_TOAST', message: `${pharmacy?.tradingName ?? 'Pharmacy'} activated with Curaleaf ${status.maskedIdentifier ?? ''}.`, toastType: 'success' });
       setCuraleafCustomerId('');
       setCuraleafPortalEmail('');

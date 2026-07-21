@@ -26,7 +26,33 @@ import {
 import { PharmacySetupWizard } from './onboarding/PharmacySetupWizard';
 import { SetupRequired } from './onboarding/SetupRequired';
 import { usePharmacySetup } from './onboarding/usePharmacySetup';
-import { getPortalSession } from './shared/api';
+import { getAdminOrganisations, getPortalSession } from './shared/api';
+import type { PortalOrganisation } from './shared/contracts';
+
+function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
+  return {
+    id: record.id,
+    slug: record.tradingName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    referralToken: record.referralToken ?? '',
+    name: record.name,
+    tradingName: record.tradingName,
+    logoText: record.logoText,
+    gphcNumber: record.gphcNumber,
+    superintendent: record.superintendent,
+    address: record.address,
+    websiteDomains: record.websiteDomains ?? [],
+    status: record.status,
+    staffCount: 0,
+    platformFeeMonthly: null,
+    deliveryOptions: [
+      { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
+      { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
+    ],
+    brand: { primary: record.primaryColour, portalName: `${record.tradingName} Patient Services` },
+    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
+    worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+  };
+}
 
 function ToastItem({ toast }: { toast: { id: string; message: string; type: 'success' | 'info' | 'warning' | 'error' } }) {
   const { dispatch } = useApp();
@@ -92,35 +118,18 @@ function AuthSessionBridge() {
   }, [authState.phase, authState.staff, dispatch, signOutStaff, state.staffSession]);
 
   useEffect(() => {
-    if (authState.phase !== 'authenticated' || authState.staff?.role !== 'pharmacy_staff' || !authState.staff.organisationId) return;
+    if (authState.phase !== 'authenticated' || !authState.staff) return;
     let cancelled = false;
-    void getPortalSession().then(session => {
-      if (cancelled || !session.organisation) return;
-      const record = session.organisation;
-      const organisation: PharmacyTenant = {
-        id: record.id,
-        slug: record.tradingName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-        referralToken: record.referralToken ?? '',
-        name: record.name,
-        tradingName: record.tradingName,
-        logoText: record.logoText,
-        gphcNumber: record.gphcNumber,
-        superintendent: record.superintendent,
-        address: record.address,
-        websiteDomains: record.websiteDomains ?? [],
-        status: record.status,
-        staffCount: 0,
-        platformFeeMonthly: null,
-        deliveryOptions: [
-          { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
-          { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
-        ],
-        brand: { primary: record.primaryColour, portalName: `${record.tradingName} Patient Services` },
-        modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
-        worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
-      };
-      dispatch({ type: 'ADD_ORGANISATION', organisation });
-    }).catch(error => {
+    const loadOrganisations = authState.staff.role === 'hhh_admin'
+      ? getAdminOrganisations().then(records => {
+          if (!cancelled) dispatch({ type: 'SET_ORGANISATIONS', organisations: records.map(toPharmacyTenant) });
+        })
+      : getPortalSession().then(session => {
+          if (!cancelled && session.organisation) {
+            dispatch({ type: 'SET_ORGANISATIONS', organisations: [toPharmacyTenant(session.organisation)] });
+          }
+        });
+    void loadOrganisations.catch(error => {
       if (!cancelled) dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Pharmacy profile could not be loaded.', toastType: 'error' });
     });
     return () => { cancelled = true; };

@@ -1,10 +1,12 @@
 # Firebase and Vercel deployment runbook
 
-This repository deploys as three independently configured surfaces:
+This repository supports three independently configured surfaces:
 
 1. **Staff portal** — Vercel project using `vercel.json`, output `dist`.
 2. **Public eligibility form** — a second Vercel project using `vercel.eligibility.json`, output `dist-eligibility`.
 3. **Authenticated API** — Firebase Functions in `europe-west2`, with Firestore, Storage, App Check and Secret Manager.
+
+For the temporary staging setup, the staff portal and public eligibility form share `https://hhh.thinktimeless.co.uk`. Eligibility links use `?mode=eligibility`, and Vercel proxies `/api/*` to the Firebase Function so the browser sees one public domain.
 
 Production must start with empty patient, referral and order collections. The React seed records are enabled only in local Vite development when Firebase is not configured.
 
@@ -17,7 +19,7 @@ Production must start with empty patient, referral and order collections. The Re
 - Deploy the Firestore indexes/rules, Storage rules and Functions from the repository root.
 - Grant the Functions runtime service account the minimum Secret Manager accessor role for the named integration secrets.
 - Never put Curaleaf API keys or Worldpay merchant secrets in `VITE_*` variables.
-- Configure HHH’s one Curaleaf API key once with `firebase functions:secrets:set CURALEAF_API_KEY`. Pharmacy activation then stores only that pharmacy’s customer ID and returned portal email in its Europe-hosted secret.
+- The API can be deployed before Curaleaf supplies HHH’s key, so eligibility and onboarding testing are not blocked. Once the key arrives, create the single `CURALEAF_API_KEY` value in Secret Manager and grant the Functions runtime service account access to that named secret. Pharmacy activation then stores only that pharmacy’s customer ID and returned portal email in its Europe-hosted secret.
 
 Example deployment after selecting the correct Firebase project:
 
@@ -32,6 +34,7 @@ firebase deploy --only firestore:rules,firestore:indexes,storage,functions
 - Use `vercel.json` (the default).
 - Configure the Firebase web values, API URL and App Check site key from `.env.example`.
 - Keep Preview and Production values separate. Preview must point only at the non-production Firebase project.
+- For the temporary shared-domain deployment, set `VITE_API_BASE_URL=https://hhh.thinktimeless.co.uk/api` and `VITE_ELIGIBILITY_FORM_URL=https://hhh.thinktimeless.co.uk`.
 
 ## Eligibility Vercel project
 

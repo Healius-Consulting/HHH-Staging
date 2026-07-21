@@ -7,6 +7,7 @@ import type {
   EligibilitySubmissionReceipt,
   EligibilitySubmissionRecord,
   PharmacySetupStatus,
+  PortalOrganisation,
   PublicPharmacy,
   SetupTaskId,
   StaffAccessibilityPreferences,
@@ -70,6 +71,10 @@ export function createOrganisation(input: CreateOrganisationInput) {
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export function getAdminOrganisations() {
+  return apiRequest<PortalOrganisation[]>('/v1/portal/admin/organisations');
 }
 
 export function getPharmacySetupStatus(organisationId: string) {

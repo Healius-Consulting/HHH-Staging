@@ -1,6 +1,6 @@
 import { config } from './config.js';
 import { HttpError } from './http.js';
-import { readIntegrationSecret } from './secrets.js';
+import { readIntegrationSecret, readPlatformSecret } from './secrets.js';
 
 const REQUEST_TIMEOUT_MS = 12_000;
 
@@ -23,7 +23,7 @@ function customerIds(value: unknown): string[] {
 
 export async function curaleafRequest<T = CuraleafResult>(organisationId: string, path: string, init: RequestInit = {}): Promise<T> {
   const credential = await readIntegrationSecret<CuraleafCredential>(organisationId, 'curaleaf');
-  if (!config.CURALEAF_API_KEY) throw new HttpError(503, 'The HHH Curaleaf API key is not configured.', 'PLATFORM_INTEGRATION_NOT_CONNECTED');
+  const apiKey = config.CURALEAF_API_KEY ?? await readPlatformSecret('CURALEAF_API_KEY');
   const method = (init.method ?? 'GET').toUpperCase();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -32,7 +32,7 @@ export async function curaleafRequest<T = CuraleafResult>(organisationId: string
       ...init,
       method,
       signal: controller.signal,
-      headers: { Accept: 'application/json', 'X-API-Key': config.CURALEAF_API_KEY, ...init.headers },
+      headers: { Accept: 'application/json', 'X-API-Key': apiKey, ...init.headers },
     });
     const text = await response.text();
     const body = text ? JSON.parse(text) as T : null as T;
@@ -56,7 +56,8 @@ export async function curaleafConnectionStatus(organisationId: string) {
     const response = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/formulas/?pageSize=1');
     return { configured: true, connected: true, writeConfigured: true, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: 'Curaleaf pharmacy access verified.', sampleAvailable: Boolean(response) };
   } catch (error) {
-    return { configured: error instanceof HttpError && error.code !== 'INTEGRATION_NOT_CONNECTED', connected: false, writeConfigured: false, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: error instanceof Error ? error.message : 'Connection check failed.' };
+    const missingConfiguration = error instanceof HttpError && ['INTEGRATION_NOT_CONNECTED', 'PLATFORM_INTEGRATION_NOT_CONNECTED'].includes(error.code);
+    return { configured: !missingConfiguration, connected: false, writeConfigured: false, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: error instanceof Error ? error.message : 'Connection check failed.' };
   }
 }
 

@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
-  ALLOWED_ORIGINS: z.string().default('http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174'),
+  ALLOWED_ORIGINS: z.string().default('https://hhh.thinktimeless.co.uk,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174'),
   FIREBASE_PROJECT_ID: z.string().min(1).optional(),
   FIREBASE_STORAGE_BUCKET: z.string().min(1).optional(),
   REQUIRE_APP_CHECK: z.enum(['true', 'false']).default('false'),

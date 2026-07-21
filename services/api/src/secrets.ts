@@ -52,3 +52,14 @@ export async function readIntegrationSecret<T extends Record<string, string>>(or
     throw new HttpError(503, `${integration === 'curaleaf' ? 'Curaleaf' : 'Worldpay'} is not connected for this pharmacy.`, 'INTEGRATION_NOT_CONNECTED');
   }
 }
+
+export async function readPlatformSecret(secretId: 'CURALEAF_API_KEY'): Promise<string> {
+  try {
+    const [version] = await client.accessSecretVersion({ name: `projects/${projectId()}/secrets/${secretId}/versions/latest` });
+    const value = version.payload?.data?.toString().trim();
+    if (!value) throw new Error('Secret payload is empty.');
+    return value;
+  } catch {
+    throw new HttpError(503, 'The HHH Curaleaf API key is not configured.', 'PLATFORM_INTEGRATION_NOT_CONNECTED');
+  }
+}

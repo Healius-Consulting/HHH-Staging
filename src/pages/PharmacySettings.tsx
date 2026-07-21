@@ -1,6 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
-  AlertCircle,
   ArrowUpRight,
   Building2,
   CheckCircle2,
@@ -34,13 +33,6 @@ export default function PharmacySettings() {
   const { state, dispatch } = useApp();
   const [showConnectionDetails, setShowConnectionDetails] = useState(false);
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
-  const pharmacyCompliance = useMemo(
-    () => state.complianceItems.filter(item => item.organisationId === organisation.id),
-    [organisation.id, state.complianceItems],
-  );
-  const complete = pharmacyCompliance.filter(item => item.status === 'ready' || item.status === 'not-applicable').length;
-  const required = pharmacyCompliance.filter(item => item.requiredForLive);
-
   const startWorldpayOnboarding = () => {
     dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { status: 'onboarding' } });
     dispatch({ type: 'ADD_TOAST', message: 'Worldpay onboarding started. Continue in the secure Worldpay window when platform access is configured.', toastType: 'info' });
@@ -107,19 +99,13 @@ export default function PharmacySettings() {
         <section className="card settings-card">
           <div className="settings-card-head">
             <div className="settings-card-icon"><ShieldCheck size={18} /></div>
-            <div><p className="section-label">Go-live evidence</p><h2>Compliance readiness</h2></div>
-            <strong className="settings-score">{complete}/{pharmacyCompliance.length}</strong>
+            <div><p className="section-label">Go-live setup</p><h2>Operational readiness</h2></div>
+            <CheckCircle2 size={24} className="text-green" />
           </div>
-          <div className="compliance-progress"><span style={{ width: `${pharmacyCompliance.length ? complete / pharmacyCompliance.length * 100 : 0}%` }} /></div>
           <div className="compact-checklist">
-            {pharmacyCompliance.map(item => (
-              <div key={item.id}>
-                {item.status === 'ready' ? <CheckCircle2 size={16} className="text-green" /> : <AlertCircle size={16} className={item.status === 'blocked' ? 'text-red' : 'text-amber'} />}
-                <span><strong>{item.requirement}</strong><small>{item.owner} · {item.status.replace('-', ' ')}</small></span>
-              </div>
-            ))}
+            <div><CheckCircle2 size={16} className="text-green" /><span><strong>Six setup steps completed</strong><small>Profile, Curaleaf account, payment route, pricing, communications and walkthrough recorded</small></span></div>
           </div>
-          <p className="settings-footnote">Healius Consulting administers the HHH master evidence register. Your pharmacy must complete all {required.length} mandatory tenant gates before live activation.</p>
+          <p className="settings-footnote">HHH administrators can review the recorded evidence and connection status from the client readiness screen.</p>
         </section>
       </div>
 

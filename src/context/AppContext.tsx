@@ -366,6 +366,7 @@ export type Action =
   | { type: 'SIGN_IN_STAFF'; session: StaffSession }
   | { type: 'SIGN_OUT_STAFF' }
   | { type: 'SET_CURRENT_ORGANISATION'; organisationId: string }
+  | { type: 'SET_ORGANISATIONS'; organisations: PharmacyTenant[] }
   | { type: 'ADD_ORGANISATION'; organisation: PharmacyTenant }
   | { type: 'UPDATE_ORGANISATION'; organisationId: string; updates: Partial<PharmacyTenant> }
   | { type: 'UPDATE_WORLDPAY'; organisationId: string; updates: Partial<PharmacyTenant['worldpay']> }
@@ -595,17 +596,17 @@ const initialOrganisation = ORGANISATIONS.find(org => org.referralToken === init
 
 const initialState: AppState = {
   screen: 'home',
-  catalogue: CATALOGUE,
-  crm: [...SEED_CRM],
-  submissions: buildSeedSubmissions(),
-  orders: seed.orders,
-  activeOrderId: 1,
+  catalogue: usePrototypeState ? CATALOGUE : [],
+  crm: usePrototypeState ? [...SEED_CRM] : [],
+  submissions: usePrototypeState ? buildSeedSubmissions() : [],
+  orders: usePrototypeState ? seed.orders : [],
+  activeOrderId: usePrototypeState ? 1 : null,
   toasts: [],
   nextIds: { patient: 2000, rx: seed.nextRx, order: 5, submission: 5, invoice: 4072 },
   portalMode: initialPortalMode,
   workspaceMode: 'training',
-  organisations: ORGANISATIONS,
-  currentOrganisationId: initialOrganisation.id,
+  organisations: usePrototypeState ? ORGANISATIONS : [],
+  currentOrganisationId: usePrototypeState ? initialOrganisation.id : '',
   staffSession: storedStaffSession,
   platformIntegrations: [
     { id: 'eligibility-api', name: 'HHH Eligibility API', description: 'Token routing and patient intake', status: 'connected' },
@@ -613,7 +614,7 @@ const initialState: AppState = {
     { id: 'worldpay', name: 'Worldpay', description: 'Pharmacy-owned hosted checkout, payment webhooks and direct settlement', status: 'pending' },
     { id: 'notifications', name: 'Patient notifications', description: 'Ready-for-collection SMS and email', status: 'pending' },
   ],
-  complianceItems: buildComplianceItems(),
+  complianceItems: usePrototypeState ? buildComplianceItems() : [],
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -667,7 +668,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_WORKSPACE_MODE': {
       if (action.mode === 'training') {
         const organisationId = action.organisationId ?? state.currentOrganisationId;
-        if (state.workspaceMode === 'training' && state.orders.every(order => order.organisationId === organisationId)) return state;
+        if (state.workspaceMode === 'training' && state.orders.length > 0 && state.orders.every(order => order.organisationId === organisationId)) return state;
         const training = buildTenantTrainingData(organisationId);
         return {
           ...state,
@@ -708,39 +709,33 @@ function reducer(state: AppState, action: Action): AppState {
         portalMode: 'gateway',
         workspaceMode: 'training',
         screen: 'home',
-        catalogue: CATALOGUE,
-        crm: [...SEED_CRM],
-        submissions: buildSeedSubmissions(),
-        orders: trainingSeed.orders,
-        activeOrderId: 1,
+        catalogue: usePrototypeState ? CATALOGUE : [],
+        crm: usePrototypeState ? [...SEED_CRM] : [],
+        submissions: usePrototypeState ? buildSeedSubmissions() : [],
+        orders: usePrototypeState ? trainingSeed.orders : [],
+        activeOrderId: usePrototypeState ? 1 : null,
+        organisations: usePrototypeState ? ORGANISATIONS : [],
+        currentOrganisationId: usePrototypeState ? initialOrganisation.id : '',
+        complianceItems: usePrototypeState ? buildComplianceItems() : [],
       };
     }
     case 'SET_CURRENT_ORGANISATION':
       return { ...state, currentOrganisationId: action.organisationId };
+    case 'SET_ORGANISATIONS':
+      return {
+        ...state,
+        organisations: action.organisations,
+        currentOrganisationId: action.organisations.some(organisation => organisation.id === state.currentOrganisationId)
+          ? state.currentOrganisationId
+          : action.organisations[0]?.id ?? '',
+      };
     case 'UPDATE_PLATFORM_INTEGRATION':
       return { ...state, platformIntegrations: state.platformIntegrations.map(integration => integration.id === action.integrationId ? { ...integration, status: action.status, description: action.description ?? integration.description } : integration) };
     case 'ADD_ORGANISATION':
       if (state.organisations.some(organisation => organisation.id === action.organisation.id)) {
         return { ...state, organisations: state.organisations.map(organisation => organisation.id === action.organisation.id ? action.organisation : organisation) };
       }
-      return {
-        ...state,
-        organisations: [...state.organisations, action.organisation],
-        complianceItems: [
-          ...state.complianceItems,
-          { id: `${action.organisation.slug}-GPHC`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'GPhC registration, premises and superintendent details verified', reference: 'GPhC standards', owner: 'Pharmacy + HHH onboarding', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-DPA`, organisationId: action.organisation.id, category: 'Contracts', requirement: 'Pharmacy agreement and data processing terms signed', reference: 'Tenant go-live gate', owner: 'Director + pharmacy', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-RISK`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'CBPM and distance-service risk assessments held on file', reference: 'GPhC pharmacy responsibility', owner: 'Superintendent pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-TRAIN`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'Staff training, confidentiality and UAT sign-off completed', reference: 'Tenant go-live gate', owner: 'Pharmacy manager', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-WP`, organisationId: action.organisation.id, category: 'Payments', requirement: 'Pharmacy Worldpay merchant and direct settlement destination approved', reference: 'Worldpay tenant connection', owner: 'Pharmacy + Worldpay', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-FORM`, organisationId: action.organisation.id, category: 'Data protection', requirement: 'Eligibility link, privacy wording, consent capture and attribution UAT approved', reference: 'Patient intake go-live gate', owner: 'HHH + pharmacy', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-PI`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'Professional indemnity and responsible pharmacist arrangements confirmed', reference: 'GPhC pharmacy responsibility', owner: 'Pharmacy superintendent', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-CD`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'Controlled-drug storage, register, incident and destruction SOPs confirmed', reference: 'Pharmacy-owned controlled drug obligations', owner: 'Responsible pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-RX`, organisationId: action.organisation.id, category: 'Clinical scope', requirement: 'Prescription validity, prescriber verification and dispensing SOP approved', reference: 'HMR / CBPM workflow', owner: 'Superintendent pharmacist', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-COMPLAINTS`, organisationId: action.organisation.id, category: 'Pharmacy governance', requirement: 'Patient complaints, safeguarding and clinical escalation routes published', reference: 'Pharmacy governance', owner: 'Pharmacy manager', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-          { id: `${action.organisation.slug}-ACCESS`, organisationId: action.organisation.id, category: 'Security', requirement: 'Staff roles, MFA enrolment and access review signed off', reference: 'Tenant access control', owner: 'Pharmacy manager + HHH', status: 'not-started', requiredForLive: true, evidence: null, reviewDate: null },
-        ],
-      };
+      return { ...state, organisations: [...state.organisations, action.organisation] };
     case 'UPDATE_ORGANISATION':
       return { ...state, organisations: state.organisations.map(org => org.id === action.organisationId ? { ...org, ...action.updates } : org) };
     case 'UPDATE_WORLDPAY':
@@ -1072,7 +1067,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Cross-domain intake sync. In production, the access token comes from staff authentication.
   useEffect(() => {
-    if (!isApiConfigured || !state.staffSession || state.workspaceMode !== 'live') return;
+    if (!isApiConfigured || !state.staffSession || (state.portalMode !== 'admin' && state.workspaceMode !== 'live')) return;
     let cancelled = false;
     const sync = async () => {
       const organisations = state.portalMode === 'admin'

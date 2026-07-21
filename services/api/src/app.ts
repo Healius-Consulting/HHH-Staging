@@ -460,6 +460,17 @@ app.patch('/v1/portal/shipments/:id/status', async (request, response, next) => 
   try { const input = z.object({ organisationId: idSchema.optional(), status: z.enum(['ready_for_collection', 'collected', 'exception']) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); const current = await getTenantRecord('shipments', idSchema.parse(request.params.id), organisationId); if (input.status === 'ready_for_collection' && current.status !== 'received') throw new HttpError(409, 'A full goods-in receipt is required before collection readiness.', 'GOODS_IN_REQUIRED'); if (input.status === 'collected' && current.status !== 'ready_for_collection') throw new HttpError(409, 'Only ready medication can be marked collected.', 'INVALID_STATUS_TRANSITION'); const result = await updateTenantRecord('shipments', current.id as string, organisationId, { status: input.status }); await audit(request, 'shipment.status_updated', { organisationId, shipmentId: current.id, status: input.status }); response.json(result); } catch (error) { next(error); }
 });
 
+app.get('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const snapshot = await firestore.collection('organisations').limit(500).get();
+    const organisations = snapshot.docs
+      .map(document => document.data())
+      .sort((a, b) => String(a.tradingName ?? a.name).localeCompare(String(b.tradingName ?? b.name)));
+    await audit(request, 'organisation.list_viewed', { recordCount: organisations.length });
+    response.json(organisations);
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (request, response, next) => {
   try {
     const input = z.object({ name: z.string().min(1).max(200), tradingName: z.string().min(1).max(200), gphcNumber: z.string().min(1).max(50), superintendent: z.string().min(1).max(200), address: z.string().min(1).max(500), primaryColour: z.string().regex(/^#[0-9a-fA-F]{6}$/), logoText: z.string().min(1).max(4), websiteDomains: z.array(z.string().trim().min(1).max(253)).max(20).default([]), status: z.literal('onboarding').default('onboarding') }).parse(request.body);

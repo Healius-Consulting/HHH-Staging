@@ -6,7 +6,7 @@ import { deriveTenantTheme } from './tenantTheme';
 export function eligibilityUrl(org: PharmacyTenant) {
   const configuredBase = (import.meta.env.VITE_ELIGIBILITY_FORM_URL as string | undefined) || (import.meta.env.DEV ? 'http://localhost:5174' : undefined);
   const url = new URL(configuredBase || window.location.origin + window.location.pathname);
-  if (!configuredBase) url.searchParams.set('mode', 'eligibility');
+  url.searchParams.set('mode', 'eligibility');
   url.searchParams.set('token', org.referralToken);
   return url.toString();
 }
