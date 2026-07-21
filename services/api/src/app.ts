@@ -247,8 +247,13 @@ app.get('/v1/portal/session', async (request, response, next) => {
       firestore.collection('staffUsers').doc(actor.uid).get(),
       actor.organisationId ? getRecord('organisations', actor.organisationId) : Promise.resolve(null),
     ]);
+    const profile = staffSnapshot.data() ?? null;
+    if (profile?.status === 'invited') {
+      await staffSnapshot.ref.set({ status: 'active', activatedAt: timestamp(), updatedAt: timestamp() }, { merge: true });
+      profile.status = 'active';
+    }
     await audit(request, 'session.verified');
-    response.json({ uid: actor.uid, email: actor.email, role: actor.role, organisationId: actor.organisationId, profile: staffSnapshot.data() ?? null, organisation });
+    response.json({ uid: actor.uid, email: actor.email, role: actor.role, organisationId: actor.organisationId, profile, organisation });
   } catch (error) { next(error); }
 });
 
@@ -532,9 +537,86 @@ app.patch('/v1/portal/admin/organisations/:id', requireRole('hhh_admin'), async 
   } catch (error) { next(error); }
 });
 
+app.get('/v1/portal/admin/staff', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const organisationId = idSchema.parse(request.query.organisationId);
+    await getRecord('organisations', organisationId);
+    const snapshot = await firestore.collection('staffUsers').where('organisationId', '==', organisationId).limit(500).get();
+    const records = snapshot.docs
+      .map(document => document.data())
+      .filter(record => record.role === 'pharmacy_staff')
+      .sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')));
+    const ownerUid = records.find(record => record.contactRole === 'owner')?.id ?? records[0]?.id;
+    await audit(request, 'staff.list_viewed', { organisationId, recordCount: records.length });
+    response.json(records.map(record => ({
+      uid: record.id,
+      email: record.email,
+      displayName: record.displayName,
+      role: 'pharmacy_staff',
+      organisationId,
+      contactRole: record.id === ownerUid ? 'owner' : 'staff',
+      status: record.status ?? 'invited',
+      createdAt: record.createdAt,
+    })));
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (request, response, next) => {
   try {
-    const input = z.object({ email: z.email(), displayName: z.string().min(1).max(200), role: z.enum(['hhh_admin', 'pharmacy_staff']), organisationId: idSchema.nullable() }).refine(value => value.role === 'hhh_admin' ? value.organisationId === null : Boolean(value.organisationId), { message: 'Pharmacy staff require exactly one organisation.' }).parse(request.body); if (input.organisationId) await getRecord('organisations', input.organisationId); const user = await auth.createUser({ email: input.email.toLowerCase(), displayName: input.displayName, emailVerified: false, disabled: false }); await auth.setCustomUserClaims(user.uid, { role: input.role, organisationId: input.organisationId }); await firestore.collection('staffUsers').doc(user.uid).set({ id: user.uid, schemaVersion: 1, email: input.email.toLowerCase(), displayName: input.displayName, role: input.role, organisationId: input.organisationId, status: 'invited', preferences: preferencesSchema.parse({ theme: 'clinical-light' }), createdAt: timestamp(), updatedAt: timestamp() }); const actionLink = await auth.generatePasswordResetLink(input.email, { url: allowedOrigins.values().next().value ?? 'http://localhost:5173' }); await createRecord('notificationOutbox', { organisationId: input.organisationId, kind: 'staff_invitation', recipient: input.email.toLowerCase(), templateData: { displayName: input.displayName, actionLink }, status: 'pending' }); await audit(request, 'staff.invited', { organisationId: input.organisationId, staffUid: user.uid, role: input.role }); response.status(201).json({ uid: user.uid, email: input.email, role: input.role, organisationId: input.organisationId, invitationQueued: true });
+    const input = z.object({
+      email: z.email().transform(value => value.toLowerCase()),
+      displayName: z.string().trim().min(1).max(200),
+      role: z.enum(['hhh_admin', 'pharmacy_staff']),
+      organisationId: idSchema.nullable(),
+    }).refine(value => value.role === 'hhh_admin' ? value.organisationId === null : Boolean(value.organisationId), { message: 'Pharmacy staff require exactly one organisation.' }).parse(request.body);
+    if (input.organisationId) await getRecord('organisations', input.organisationId);
+
+    const user = await auth.createUser({ email: input.email, displayName: input.displayName, emailVerified: false, disabled: false });
+    await auth.setCustomUserClaims(user.uid, { role: input.role, organisationId: input.organisationId });
+    const createdAt = timestamp();
+    let contactRole: 'owner' | 'staff' | null = null;
+
+    if (input.role === 'pharmacy_staff' && input.organisationId) {
+      const existingSnapshot = await firestore.collection('staffUsers').where('organisationId', '==', input.organisationId).limit(500).get();
+      const existingStaff = existingSnapshot.docs
+        .filter(document => document.data().role === 'pharmacy_staff')
+        .sort((a, b) => String(a.data().createdAt ?? '').localeCompare(String(b.data().createdAt ?? '')));
+      const organisationRef = firestore.collection('organisations').doc(input.organisationId);
+      const staffRef = firestore.collection('staffUsers').doc(user.uid);
+      await firestore.runTransaction(async transaction => {
+        const organisation = await transaction.get(organisationRef);
+        let ownerUid = organisation.data()?.primaryContactUid as string | undefined;
+        if (!ownerUid) {
+          ownerUid = existingStaff[0]?.id ?? user.uid;
+          transaction.set(organisationRef, { primaryContactUid: ownerUid, updatedAt: createdAt }, { merge: true });
+          if (existingStaff[0]) transaction.set(existingStaff[0].ref, { contactRole: 'owner', updatedAt: createdAt }, { merge: true });
+        }
+        contactRole = ownerUid === user.uid ? 'owner' : 'staff';
+        transaction.set(staffRef, {
+          id: user.uid,
+          schemaVersion: 1,
+          email: input.email,
+          displayName: input.displayName,
+          role: input.role,
+          organisationId: input.organisationId,
+          contactRole,
+          status: 'invited',
+          preferences: preferencesSchema.parse({ theme: 'clinical-light' }),
+          createdAt,
+          updatedAt: createdAt,
+        });
+      });
+    } else {
+      await firestore.collection('staffUsers').doc(user.uid).set({
+        id: user.uid, schemaVersion: 1, email: input.email, displayName: input.displayName, role: input.role,
+        organisationId: input.organisationId, contactRole, status: 'invited', preferences: preferencesSchema.parse({ theme: 'clinical-light' }), createdAt, updatedAt: createdAt,
+      });
+    }
+
+    const actionLink = await auth.generatePasswordResetLink(input.email, { url: allowedOrigins.values().next().value ?? 'http://localhost:5173' });
+    await createRecord('notificationOutbox', { organisationId: input.organisationId, kind: 'staff_invitation', recipient: input.email, templateData: { displayName: input.displayName, actionLink, contactRole }, status: 'pending' });
+    await audit(request, 'staff.invited', { organisationId: input.organisationId, staffUid: user.uid, role: input.role, contactRole });
+    response.status(201).json({ uid: user.uid, email: input.email, displayName: input.displayName, role: input.role, organisationId: input.organisationId, contactRole, status: 'invited', createdAt, invitationQueued: true, actionLink });
   } catch (error) { next(error); }
 });
 

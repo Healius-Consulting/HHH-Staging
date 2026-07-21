@@ -7,6 +7,9 @@ import type {
   EligibilitySubmissionReceipt,
   EligibilitySubmissionRecord,
   PharmacySetupStatus,
+  PharmacyStaffAccount,
+  PharmacyStaffInvitation,
+  CreatePharmacyStaffInput,
   PortalOrganisation,
   PublicPharmacy,
   SetupTaskId,
@@ -82,6 +85,17 @@ export function updateOrganisation(organisationId: string, input: UpdateOrganisa
   return apiRequest<PortalOrganisation>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
+  });
+}
+
+export function getPharmacyStaff(organisationId: string) {
+  return apiRequest<PharmacyStaffAccount[]>(`/v1/portal/admin/staff?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+export function createPharmacyStaffInvitation(input: CreatePharmacyStaffInput) {
+  return apiRequest<PharmacyStaffInvitation>('/v1/portal/admin/staff/invitations', {
+    method: 'POST',
+    body: JSON.stringify({ ...input, role: 'pharmacy_staff' }),
   });
 }
 

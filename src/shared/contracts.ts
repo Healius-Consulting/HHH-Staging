@@ -167,3 +167,25 @@ export interface PortalSession {
   profile: Record<string, unknown> | null;
   organisation: PortalOrganisation | null;
 }
+
+export interface PharmacyStaffAccount {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: 'pharmacy_staff';
+  organisationId: string;
+  contactRole: 'owner' | 'staff';
+  status: 'invited' | 'active' | 'disabled';
+  createdAt: string;
+}
+
+export interface CreatePharmacyStaffInput {
+  organisationId: string;
+  email: string;
+  displayName: string;
+}
+
+export interface PharmacyStaffInvitation extends PharmacyStaffAccount {
+  invitationQueued: boolean;
+  actionLink: string;
+}

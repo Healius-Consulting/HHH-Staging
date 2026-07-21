@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -21,6 +21,7 @@ import {
   Settings2,
   ShieldCheck,
   UserRound,
+  UserPlus,
   UserCheck,
   UserX,
   Users,
@@ -35,8 +36,8 @@ import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources'
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { useAuth } from '../auth/useAuth';
 import AccessibilityPanel from '../accessibility/AccessibilityPanel';
-import { activateCuraleafPharmacy, createOrganisation, getPharmacySetupStatus, updateOrganisation } from '../shared/api';
-import type { PharmacySetupStatus, UpdateOrganisationInput } from '../shared/contracts';
+import { activateCuraleafPharmacy, createOrganisation, createPharmacyStaffInvitation, getPharmacySetupStatus, getPharmacyStaff, updateOrganisation } from '../shared/api';
+import type { PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'compliance' | 'integrations';
@@ -223,6 +224,79 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
   );
 }
 
+function PharmacyStaffManager({ organisation, onCountChange }: { organisation: PharmacyTenant; onCountChange: (count: number) => void }) {
+  const { dispatch } = useApp();
+  const [staff, setStaff] = useState<PharmacyStaffAccount[]>([]);
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [invitation, setInvitation] = useState<PharmacyStaffInvitation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void getPharmacyStaff(organisation.id)
+      .then(records => {
+        if (cancelled) return;
+        setStaff(records);
+        onCountChange(records.length);
+      })
+      .catch(cause => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Staff accounts could not be loaded.');
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [organisation.id, onCountChange]);
+
+  const invite = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setInvitation(null);
+    try {
+      const created = await createPharmacyStaffInvitation({ organisationId: organisation.id, displayName, email });
+      const updated = [...staff, created];
+      setStaff(updated);
+      setInvitation(created);
+      setDisplayName('');
+      setEmail('');
+      onCountChange(updated.length);
+      dispatch({ type: 'ADD_TOAST', message: `${created.displayName} was added to ${organisation.tradingName}.`, toastType: 'success' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The staff account could not be created.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyInvitation = async () => {
+    if (!invitation) return;
+    await navigator.clipboard.writeText(invitation.actionLink);
+    dispatch({ type: 'ADD_TOAST', message: 'Secure account setup link copied.', toastType: 'success' });
+  };
+
+  return (
+    <section className="card admin-staff-card">
+      <div className="admin-directory-head"><div><p className="section-label">Account access</p><h2>Pharmacy staff</h2><p>Create staff access for this pharmacy. The first account is tagged Owner only to identify the main contact; it receives no additional permissions.</p></div><span className="pill pill-info"><Users size={13} /> {staff.length} account{staff.length === 1 ? '' : 's'}</span></div>
+      <form className="admin-staff-invite-form" onSubmit={invite}>
+        <label>Staff member name<input className="input" value={displayName} onChange={event => setDisplayName(event.target.value)} autoComplete="off" required /></label>
+        <label>Work email address<input className="input" type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="off" required /></label>
+        <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Add staff account'}</button>
+      </form>
+      {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
+      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>{invitation.contactRole === 'owner' ? 'Owner account created' : 'Staff account created'}</strong><span>Send this one-time Firebase setup link to {invitation.email}. They will choose a password and verify their email before entering the pharmacy workspace.</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
+      <div className="admin-staff-list">
+        {loading && <div className="empty-state">Loading staff accounts…</div>}
+        {!loading && staff.length === 0 && <div className="empty-state">No pharmacy staff accounts yet. The first person added will be tagged Owner.</div>}
+        {staff.map(account => <div className="admin-staff-row" key={account.uid}><div className="staff-avatar">{account.displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()}</div><div><strong>{account.displayName}</strong><span>{account.email}</span></div><span className={`pill ${account.contactRole === 'owner' ? 'pill-info' : 'pill-neutral'}`}>{account.contactRole === 'owner' ? 'Owner' : 'Staff'}</span><span className={`pill ${account.status === 'active' ? 'pill-green' : account.status === 'disabled' ? 'pill-red' : 'pill-amber'}`}>{account.status}</span></div>)}
+      </div>
+    </section>
+  );
+}
+
 export default function AdminPortal() {
   const { state, dispatch } = useApp();
   const [view, setView] = useState<AdminView>('overview');
@@ -239,6 +313,9 @@ export default function AdminPortal() {
   const [curaleafError, setCuraleafError] = useState<string | null>(null);
 
   const selectedOrganisation = state.organisations.find(org => org.id === selectedOrganisationId);
+  const updateSelectedStaffCount = useCallback((count: number) => {
+    if (selectedOrganisationId) dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisationId, updates: { staffCount: count } });
+  }, [dispatch, selectedOrganisationId]);
 
   useEffect(() => {
     document.querySelector<HTMLElement>('.admin-shell')?.scrollTo({ top: 0 });
@@ -326,6 +403,8 @@ export default function AdminPortal() {
             <div className="stat-card"><ClipboardCheck size={18} /><strong>{readiness.ready}/{readiness.total}</strong><span>Setup steps complete</span></div>
             <div className="stat-card"><CreditCard size={18} /><strong>{selectedOrganisation.platformFeeMonthly == null ? 'Not set' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`}</strong><span>Monthly platform fee</span></div>
           </div>
+
+          <PharmacyStaffManager key={selectedOrganisation.id} organisation={selectedOrganisation} onCountChange={updateSelectedStaffCount} />
 
           <div className="admin-detail-grid admin-config-grid">
             <section className="card admin-detail-card">
