@@ -42,7 +42,20 @@ export interface LineItem {
   fee: number;       // dispensing fee
 }
 
-export type RxStatus = 'draft' | 'awaiting-approval' | 'approved' | 'dispatched' | 'ready' | 'collected';
+export type RxStatus =
+  | 'draft'
+  | 'awaiting-approval'
+  | 'approved'
+  | 'dispatched'
+  | 'partially-received'
+  | 'received'
+  | 'ready'
+  | 'collected';
+
+export interface GoodsReceiptLine {
+  productId: string;
+  quantityReceived: number;
+}
 
 export interface Prescription {
   id: number;
@@ -55,6 +68,10 @@ export interface Prescription {
   invoiceRef: string | null;
   trackingNumber: string | null;
   carrier: string | null;
+  receivedItems?: GoodsReceiptLine[];
+  goodsInAt?: Date | string | null;
+  goodsInBy?: string | null;
+  goodsInNote?: string | null;
   readyAt?: Date | string | null;
 }
 
@@ -179,7 +196,8 @@ export interface PlatformIntegration {
 
 export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'orders' | 'patients' | 'resources' | 'settings';
 
-export type PortalMode = 'gateway' | 'admin' | 'clinician' | 'patient' | 'eligibility';
+export type PortalMode = 'gateway' | 'admin' | 'clinician';
+export type WorkspaceMode = 'training' | 'live';
 
 export interface StaffSession {
   email: string;
@@ -210,7 +228,7 @@ export interface AppState {
     invoice: number;
   };
   portalMode: PortalMode;
-  patientEmail: string | null;
+  workspaceMode: WorkspaceMode;
   organisations: PharmacyTenant[];
   currentOrganisationId: string;
   staffSession: StaffSession | null;
@@ -319,6 +337,8 @@ export const RX_STATUS_LABELS: Record<RxStatus, string> = {
   'awaiting-approval': 'Awaiting supplier approval',
   approved: 'Approved',
   dispatched: 'Dispatched to pharmacy',
+  'partially-received': 'Partially received',
+  received: 'Received — checks required',
   ready: 'Ready for collection',
   collected: 'Collected by patient',
 };
@@ -342,6 +362,7 @@ export const PHARMACY = {
 
 export type Action =
   | { type: 'SET_PORTAL_MODE'; mode: PortalMode }
+  | { type: 'SET_WORKSPACE_MODE'; mode: WorkspaceMode; organisationId?: string }
   | { type: 'SIGN_IN_STAFF'; session: StaffSession }
   | { type: 'SIGN_OUT_STAFF' }
   | { type: 'SET_CURRENT_ORGANISATION'; organisationId: string }
@@ -350,8 +371,6 @@ export type Action =
   | { type: 'UPDATE_WORLDPAY'; organisationId: string; updates: Partial<PharmacyTenant['worldpay']> }
   | { type: 'UPDATE_COMPLIANCE'; itemId: string; status: ComplianceStatus; evidence?: string }
   | { type: 'UPDATE_PLATFORM_INTEGRATION'; integrationId: PlatformIntegration['id']; status: PlatformIntegration['status']; description?: string }
-  | { type: 'SET_PATIENT_EMAIL'; email: string | null }
-  | { type: 'LOGOUT_PATIENT' }
   | { type: 'SET_SCREEN'; screen: Screen }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
@@ -382,7 +401,8 @@ export type Action =
   | { type: 'RECORD_MANUAL_PAYMENT'; orderId: number; tender: ManualTender; reference?: string; notes?: string }
   // Submission to Curaleaf (adapter pending live Rocky credentials)
   | { type: 'PLACE_ORDER'; orderId: number }
-  | { type: 'RECEIVE_SHIPMENT'; orderId: number; rxId: number }
+  | { type: 'RECORD_GOODS_RECEIPT'; orderId: number; rxId: number; lines: GoodsReceiptLine[]; note?: string }
+  | { type: 'MARK_READY_FOR_COLLECTION'; orderId: number; rxId: number }
   | { type: 'HANDOVER_TO_PATIENT'; orderId: number; rxId: number }
   // Toasts
   | { type: 'ADD_TOAST'; message: string; toastType?: 'success' | 'info' | 'warning' | 'error' }
@@ -463,7 +483,8 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
     items: [
       { productId: 'P004', name: 'Noidecs T10:C10 Flos 10g', qty: 1, cost: 38.5, retail: 48, fee: 0 },
     ],
-    placed: true, poRef: 'PO-9002', status: 'ready', invoiceRef: 'INV-4071', trackingNumber: 'DPD882711', carrier: 'DPD',
+    placed: true, poRef: 'PO-9002', status: 'ready', invoiceRef: 'INV-4071', trackingNumber: null, carrier: null,
+    receivedItems: [{ productId: 'P004', quantityReceived: 1 }], goodsInAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), goodsInBy: 'S. Patel',
     readyAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), // 12 days ago
   };
   const o2: PatientOrder = {
@@ -561,14 +582,14 @@ function buildComplianceItems(): ComplianceItem[] {
 }
 
 const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-const modeParam = urlParams?.get('mode');
+const usePrototypeState = import.meta.env.DEV && !import.meta.env.VITE_FIREBASE_API_KEY;
 let storedStaffSession: StaffSession | null = null;
 try {
-  storedStaffSession = JSON.parse(sessionStorage.getItem('hhh_staff_session') || 'null') as StaffSession | null;
+  storedStaffSession = usePrototypeState
+    ? JSON.parse(sessionStorage.getItem('hhh_staff_session') || 'null') as StaffSession | null
+    : null;
 } catch { storedStaffSession = null; }
-const initialPortalMode: PortalMode = modeParam === 'eligibility' || modeParam === 'patient'
-  ? modeParam
-  : storedStaffSession?.role === 'admin' ? 'admin' : storedStaffSession?.role === 'pharmacy' ? 'clinician' : 'gateway';
+const initialPortalMode: PortalMode = storedStaffSession?.role === 'admin' ? 'admin' : storedStaffSession?.role === 'pharmacy' ? 'clinician' : 'gateway';
 const initialToken = urlParams?.get('token');
 const initialOrganisation = ORGANISATIONS.find(org => org.referralToken === initialToken || org.id === storedStaffSession?.organisationId) ?? ORGANISATIONS[0];
 
@@ -582,7 +603,7 @@ const initialState: AppState = {
   toasts: [],
   nextIds: { patient: 2000, rx: seed.nextRx, order: 5, submission: 5, invoice: 4072 },
   portalMode: initialPortalMode,
-  patientEmail: null,
+  workspaceMode: 'training',
   organisations: ORGANISATIONS,
   currentOrganisationId: initialOrganisation.id,
   staffSession: storedStaffSession,
@@ -611,6 +632,16 @@ function mapRx(order: PatientOrder, rxId: number, fn: (rx: Prescription) => Pres
   return { ...order, prescriptions: order.prescriptions.map(r => r.id === rxId ? fn({ ...r }) : r) };
 }
 
+function buildTenantTrainingData(organisationId: string) {
+  const trainingSeed = buildSeedOrders();
+  return {
+    crm: SEED_CRM.map(patient => ({ ...patient, organisationId })),
+    submissions: buildSeedSubmissions().map(submission => ({ ...submission, organisationId, pharmacyName: 'Training pharmacy', referralToken: 'training-only' })),
+    orders: trainingSeed.orders.map(order => ({ ...order, organisationId })),
+    nextRx: trainingSeed.nextRx,
+  };
+}
+
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_SCREEN':
@@ -633,6 +664,35 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'SET_PORTAL_MODE':
       return { ...state, portalMode: action.mode };
+    case 'SET_WORKSPACE_MODE': {
+      if (action.mode === 'training') {
+        const organisationId = action.organisationId ?? state.currentOrganisationId;
+        if (state.workspaceMode === 'training' && state.orders.every(order => order.organisationId === organisationId)) return state;
+        const training = buildTenantTrainingData(organisationId);
+        return {
+          ...state,
+          workspaceMode: 'training',
+          screen: 'home',
+          catalogue: CATALOGUE,
+          crm: training.crm,
+          submissions: training.submissions,
+          orders: training.orders,
+          activeOrderId: 1,
+          nextIds: { patient: 2000, rx: training.nextRx, order: 5, submission: 5, invoice: 4072 },
+        };
+      }
+      if (state.workspaceMode === action.mode) return state;
+      return {
+        ...state,
+        workspaceMode: 'live',
+        screen: 'home',
+        catalogue: [],
+        crm: [],
+        submissions: [],
+        orders: [],
+        activeOrderId: null,
+      };
+    }
     case 'SIGN_IN_STAFF':
       return {
         ...state,
@@ -640,13 +700,29 @@ function reducer(state: AppState, action: Action): AppState {
         currentOrganisationId: action.session.organisationId ?? state.currentOrganisationId,
         portalMode: action.session.role === 'admin' ? 'admin' : 'clinician',
       };
-    case 'SIGN_OUT_STAFF':
-      return { ...state, staffSession: null, portalMode: 'gateway', screen: 'home' };
+    case 'SIGN_OUT_STAFF': {
+      const trainingSeed = buildSeedOrders();
+      return {
+        ...state,
+        staffSession: null,
+        portalMode: 'gateway',
+        workspaceMode: 'training',
+        screen: 'home',
+        catalogue: CATALOGUE,
+        crm: [...SEED_CRM],
+        submissions: buildSeedSubmissions(),
+        orders: trainingSeed.orders,
+        activeOrderId: 1,
+      };
+    }
     case 'SET_CURRENT_ORGANISATION':
       return { ...state, currentOrganisationId: action.organisationId };
     case 'UPDATE_PLATFORM_INTEGRATION':
       return { ...state, platformIntegrations: state.platformIntegrations.map(integration => integration.id === action.integrationId ? { ...integration, status: action.status, description: action.description ?? integration.description } : integration) };
     case 'ADD_ORGANISATION':
+      if (state.organisations.some(organisation => organisation.id === action.organisation.id)) {
+        return { ...state, organisations: state.organisations.map(organisation => organisation.id === action.organisation.id ? action.organisation : organisation) };
+      }
       return {
         ...state,
         organisations: [...state.organisations, action.organisation],
@@ -671,11 +747,6 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, organisations: state.organisations.map(org => org.id === action.organisationId ? { ...org, worldpay: { ...org.worldpay, ...action.updates } } : org) };
     case 'UPDATE_COMPLIANCE':
       return { ...state, complianceItems: state.complianceItems.map(item => item.id === action.itemId ? { ...item, status: action.status, evidence: action.evidence ?? item.evidence } : item) };
-    case 'SET_PATIENT_EMAIL':
-      return { ...state, patientEmail: action.email };
-    case 'LOGOUT_PATIENT':
-      return { ...state, patientEmail: null, portalMode: 'gateway' };
-
     // ---- Referrals ----
     case 'ADD_SUBMISSION': {
       if (state.submissions.some(s => s.organisationId === action.submission.organisationId && s.email.toLowerCase() === action.submission.email.toLowerCase())) {
@@ -865,28 +936,61 @@ function reducer(state: AppState, action: Action): AppState {
       const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status === 'HHH approved');
       const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
       if (!order || order.payment.status !== 'paid' || !patientApproved || !prescriptionReady) return state;
-      const invBase = state.nextIds.invoice;
-      let invCounter = 0;
       return {
         ...mapOrder(state, action.orderId, o => ({
           ...o,
           prescriptions: o.prescriptions.map(r => {
-            const inv = invBase + invCounter++;
             return {
               ...r,
               placed: true,
-              poRef: 'PO-' + (88010 + action.orderId) + '-' + r.id,
+              // Supplier references are populated only from the Rocky response or
+              // a later reconciliation. Never invent courier or invoice data.
+              poRef: null,
               status: 'awaiting-approval' as const,
-              invoiceRef: 'INV-' + inv,
+              invoiceRef: null,
               trackingNumber: null,
-              carrier: 'DPD',
+              carrier: null,
             };
           }),
         })),
-        nextIds: { ...state.nextIds, invoice: invBase + invCounter },
       };
     }
-    case 'RECEIVE_SHIPMENT': {
+    case 'RECORD_GOODS_RECEIPT': {
+      const nextState = mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => {
+        if (r.status !== 'dispatched' && r.status !== 'partially-received') return r;
+        const totals = new Map((r.receivedItems ?? []).map(line => [line.productId, line.quantityReceived]));
+        action.lines.forEach(line => {
+          const ordered = r.items.find(item => item.productId === line.productId)?.qty ?? 0;
+          const safeQuantity = Math.max(0, Math.min(ordered, Math.floor(line.quantityReceived)));
+          totals.set(line.productId, safeQuantity);
+        });
+        const receivedItems = r.items.map(item => ({
+          productId: item.productId,
+          quantityReceived: totals.get(item.productId) ?? 0,
+        }));
+        const complete = r.items.length > 0 && r.items.every(item =>
+          (totals.get(item.productId) ?? 0) >= item.qty
+        );
+        return {
+          ...r,
+          status: complete ? 'received' : 'partially-received',
+          receivedItems,
+          goodsInAt: new Date(),
+          goodsInBy: state.staffSession?.name ?? 'Pharmacy staff',
+          goodsInNote: action.note?.trim() || null,
+        };
+      }));
+      const receipt = action.lines.map(line => `${line.productId}: ${line.quantityReceived}`).join(', ');
+      nextState.toasts = [...nextState.toasts, {
+        id: Date.now().toString() + Math.random(),
+        message: `Goods-in saved for Rx #${action.rxId} (${receipt}). Collection messaging remains blocked until pharmacy checks are complete.`,
+        type: 'success' as const,
+      }];
+      return nextState;
+    }
+    case 'MARK_READY_FOR_COLLECTION': {
+      const current = findOrder(state, action.orderId)?.prescriptions.find(rx => rx.id === action.rxId);
+      if (!current || current.status !== 'received') return state;
       const nextState = mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
         ...r,
         status: 'ready',
@@ -895,8 +999,8 @@ function reducer(state: AppState, action: Action): AppState {
       const order = state.orders.find(o => o.id === action.orderId);
       const patientObj = order?.patientId ? state.crm.find(p => p.id === order.patientId) : null;
       const patientNameStr = patientObj?.name ?? 'Patient';
-      
-      const msg = `Goods-In: Confirmed arrival of Rx #${action.rxId}. SMS notification sent to ${patientNameStr}: "Your prescription has arrived and is ready for collection at ${PHARMACY.collectionPlace}."`;
+
+      const msg = `Dispensing checks completed for Rx #${action.rxId}. Collection notification queued for ${patientNameStr} at ${PHARMACY.collectionPlace}.`;
       const newToast = { id: Date.now().toString() + Math.random(), message: msg, type: 'success' as const };
       nextState.toasts = [...nextState.toasts, newToast];
       return nextState;
@@ -946,29 +1050,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => {
+    if (!usePrototypeState) return;
     if (state.staffSession) sessionStorage.setItem('hhh_staff_session', JSON.stringify(state.staffSession));
     else sessionStorage.removeItem('hhh_staff_session');
   }, [state.staffSession]);
 
   useEffect(() => {
-    if (!isApiConfigured || !state.staffSession) return;
+    if (!isApiConfigured || !state.staffSession || state.workspaceMode !== 'live') return;
     let cancelled = false;
     getCuraleafConnectionStatus().then(status => {
       if (cancelled) return;
-      const writeState = status.writeConfigured ? 'Write credential securely configured but not exercised by this check.' : 'Write credential is not configured.';
       dispatch({
         type: 'UPDATE_PLATFORM_INTEGRATION',
         integrationId: 'curaleaf',
         status: status.connected ? 'connected' : status.configured ? 'attention' : 'pending',
-        description: `${status.message} ${writeState}`,
+        description: status.message || (status.connected ? 'Curaleaf connection verified for this pharmacy.' : 'Curaleaf connection requires attention.'),
       });
     }).catch(error => console.warn('Curaleaf status check unavailable:', error));
     return () => { cancelled = true; };
-  }, [state.staffSession]);
+  }, [state.staffSession, state.workspaceMode]);
 
   // Cross-domain intake sync. In production, the access token comes from staff authentication.
   useEffect(() => {
-    if (!isApiConfigured) return;
+    if (!isApiConfigured || !state.staffSession || state.workspaceMode !== 'live') return;
     let cancelled = false;
     const sync = async () => {
       const organisations = state.portalMode === 'admin'
@@ -1015,47 +1119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void sync();
     const interval = window.setInterval(() => void sync(), 15000);
     return () => { cancelled = true; window.clearInterval(interval); };
-  }, [state.currentOrganisationId, state.organisations, state.portalMode]);
-
-  // Legacy same-origin eligibility form bridge. Real cross-domain intake uses the API above.
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'hhh_new_submission' && e.newValue) {
-        try {
-          const submission = JSON.parse(e.newValue);
-          submission.submittedAt = new Date(submission.submittedAt);
-          if (submission.calls) {
-            submission.calls = submission.calls.map((c: any) => ({ ts: new Date(c.ts) }));
-          }
-          dispatch({ type: 'ADD_SUBMISSION', submission });
-          dispatch({
-            type: 'ADD_TOAST',
-            message: `New Enquiry Received: ${submission.name} (${submission.condition})`,
-            toastType: 'info'
-          });
-          localStorage.removeItem('hhh_new_submission');
-        } catch (err) {
-          console.error('Error parsing localStorage submission:', err);
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, [dispatch]);
-
-  // Mirror state to localStorage for patient portal sync
-  useEffect(() => {
-    try {
-      localStorage.setItem('hhh_portal_state', JSON.stringify({
-        submissions: state.submissions,
-        orders: state.orders,
-        crm: state.crm
-      }));
-    } catch (e) {
-      console.error('Error writing portal state:', e);
-    }
-  }, [state.submissions, state.orders, state.crm]);
+  }, [state.currentOrganisationId, state.organisations, state.portalMode, state.staffSession, state.workspaceMode]);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

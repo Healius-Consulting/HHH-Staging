@@ -31,7 +31,7 @@ export default function AwaitingPayment() {
 
   const handlePlaceOrder = (orderId: number) => {
     dispatch({ type: 'PLACE_ORDER', orderId });
-    dispatch({ type: 'ADD_TOAST', message: 'HHH transmitted the approved, paid prescription order to Curaleaf.', toastType: 'success' });
+    dispatch({ type: 'ADD_TOAST', message: 'Curaleaf submission queued. The supplier reference will appear only after backend confirmation.', toastType: 'success' });
   };
 
   const updateManualForm = (orderId: number, patch: Partial<ManualPaymentForm>) => {
@@ -44,7 +44,7 @@ export default function AwaitingPayment() {
     dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
     dispatch({ type: 'PLACE_ORDER', orderId: order.id });
     const label = form.tender === 'epos-card' ? 'EPOS card' : form.tender === 'bank-transfer' ? 'bank transfer' : form.tender;
-    dispatch({ type: 'ADD_TOAST', message: `${money(order.payment.amount)} ${label} payment recorded. HHH transmitted the order to Curaleaf.`, toastType: 'success' });
+    dispatch({ type: 'ADD_TOAST', message: `${money(order.payment.amount)} ${label} payment recorded. Curaleaf submission queued for backend confirmation.`, toastType: 'success' });
   };
 
   const renderCard = (order: PatientOrder) => {
@@ -158,7 +158,7 @@ export default function AwaitingPayment() {
             {allPlaced ? (
               <div className="banner-green flex items-center gap-sm" style={{ margin: 0, padding: 8 }}>
                 <CheckCircle size={16} />
-                <span className="text-xs font-semibold">HHH transmitted all sub-orders to Curaleaf.</span>
+                <span className="text-xs font-semibold">All sub-orders are queued or confirmed with Curaleaf.</span>
               </div>
             ) : (
               <button

@@ -1,4 +1,6 @@
 import { useApp } from '../context/AppContext';
+import AccessibilityPanel from '../accessibility/AccessibilityPanel';
+import { Building2 } from 'lucide-react';
 
 const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   home: {
@@ -19,7 +21,7 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   },
   orders: {
     title: 'Supplier Orders Fulfilment',
-    subtitle: 'Track B2B orders sent to Curaleaf, view DPD shipping updates, and retrieve invoices.',
+    subtitle: 'Track B2B orders sent to Curaleaf, confirm pharmacy receipt, and retrieve invoices.',
   },
   patients: {
     title: 'Patients CRM Directory',
@@ -37,6 +39,8 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
 
 export default function Header() {
   const { state } = useApp();
+  const organisation = state.organisations.find((org) => org.id === state.currentOrganisationId) ?? state.organisations[0];
+  const environmentName = (import.meta.env.VITE_APP_ENV || import.meta.env.MODE || 'development').replace(/-/g, ' ');
   const info = SCREEN_HEADERS[state.screen] || {
     title: 'HHH Portal',
     subtitle: 'Ordering & Payments Interface',
@@ -47,6 +51,17 @@ export default function Header() {
       <div className="brand-text">
         <h1>{info.title}</h1>
         <p>{info.subtitle}</p>
+      </div>
+      <div className="app-header__actions">
+        <div className="header-context" aria-label={`Current pharmacy: ${organisation.tradingName}`}>
+          <Building2 size={15} aria-hidden="true" />
+          <span>{organisation.tradingName}</span>
+          <span className={`tenant-status tenant-status--${organisation.status}`}>{organisation.status}</span>
+        </div>
+        <span className="environment-indicator" title="Current application environment">
+          <span aria-hidden="true" /> {state.workspaceMode === 'training' ? 'training data' : environmentName}
+        </span>
+        <AccessibilityPanel />
       </div>
     </header>
   );

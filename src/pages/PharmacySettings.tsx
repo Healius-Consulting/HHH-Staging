@@ -18,7 +18,7 @@ const MODULE_LABELS: Record<TenantModule, { name: string; description: string }>
   intake: { name: 'Patient onboarding', description: 'Pharmacy-attributed eligibility submissions and HHH decisions' },
   rx: { name: 'Prescription workspace', description: 'Prescription verification and order preparation' },
   payments: { name: 'Payments', description: 'Worldpay checkout and pharmacy-managed payment records' },
-  supplierOrders: { name: 'Supplier orders', description: 'Curaleaf ordering, invoices and shipment tracking' },
+  supplierOrders: { name: 'Supplier orders', description: 'Curaleaf ordering, invoices, dispatch status and pharmacy goods-in' },
   patients: { name: 'Patient directory', description: 'Tenant-scoped patient records and activity history' },
   resources: { name: 'Form and content pack', description: 'Pharmacy link, QR code and developer assets' },
 };

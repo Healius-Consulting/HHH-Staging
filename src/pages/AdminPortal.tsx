@@ -11,6 +11,7 @@ import {
   Globe2,
   LayoutDashboard,
   Link2,
+  LockKeyhole,
   LogOut,
   MapPin,
   Plus,
@@ -33,6 +34,9 @@ import {
 } from '../context/AppContext';
 import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources';
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
+import { useAuth } from '../auth/useAuth';
+import AccessibilityPanel from '../accessibility/AccessibilityPanel';
+import { activateCuraleafPharmacy, createOrganisation } from '../shared/api';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'compliance' | 'integrations';
 
@@ -75,7 +79,7 @@ function slugify(value: string) {
 }
 
 function AdminHeader({ view, setView }: { view: AdminView; setView: (view: AdminView) => void }) {
-  const { dispatch } = useApp();
+  const { signOutStaff } = useAuth();
   const items: Array<{ id: AdminView; label: string; icon: React.ReactNode }> = [
     { id: 'overview', label: 'Clients', icon: <LayoutDashboard size={15} /> },
     { id: 'referrals', label: 'Onboarding', icon: <UserCheck size={15} /> },
@@ -89,7 +93,7 @@ function AdminHeader({ view, setView }: { view: AdminView; setView: (view: Admin
       <nav className="admin-nav" aria-label="Administration sections">
         {items.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}>{item.icon}{item.label}</button>)}
       </nav>
-      <button className="btn btn-sm" onClick={() => dispatch({ type: 'SIGN_OUT_STAFF' })}><LogOut size={14} /> Sign out</button>
+      <div className="admin-header-actions"><AccessibilityPanel /><button className="btn btn-sm" onClick={() => void signOutStaff()}><LogOut size={14} /> Sign out</button></div>
     </header>
   );
 }
@@ -103,38 +107,38 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
   const [address, setAddress] = useState('');
   const [domain, setDomain] = useState('');
   const [primary, setPrimary] = useState('#0f766e');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const onboardingTheme = deriveTenantTheme(primary);
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
+    setBusy(true);
+    setError(null);
     const slug = slugify(tradingName || name);
-    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `org-${Date.now()}`;
-    const organisation: PharmacyTenant = {
-      id,
-      slug,
-      referralToken: `${slug}-${Math.random().toString(36).slice(2, 8)}`,
-      name,
-      tradingName,
-      logoText: (tradingName || name).split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(),
-      gphcNumber,
-      superintendent,
-      address,
-      websiteDomains: domain ? [domain.replace(/^https?:\/\//, '').replace(/\/$/, '')] : [],
-      status: 'onboarding',
-      staffCount: 0,
-      platformFeeMonthly: null,
-      deliveryOptions: [
-        { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
-        { id: 'priority', label: 'Priority tracked delivery', description: 'Faster service where available from the supplier.', amount: 12.95, enabled: true },
-        { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
-      ],
-      brand: { primary, portalName: `${tradingName} Patient Services` },
-      modules: defaultModules,
-      worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
-    };
-    dispatch({ type: 'ADD_ORGANISATION', organisation });
-    dispatch({ type: 'ADD_TOAST', message: `${tradingName} onboarding record created.`, toastType: 'success' });
-    onCreated(id);
+    const logoText = (tradingName || name).split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
+    const websiteDomains = domain ? [domain.replace(/^https?:\/\//, '').replace(/\/$/, '')] : [];
+    try {
+      const created = await createOrganisation({ name, tradingName, gphcNumber, superintendent, address, websiteDomains, primaryColour: primary, logoText, status: 'onboarding' });
+      const organisation: PharmacyTenant = {
+        id: created.id, slug, referralToken: created.referralToken, name, tradingName, logoText, gphcNumber, superintendent, address, websiteDomains,
+        status: 'onboarding', staffCount: 0, platformFeeMonthly: null,
+        deliveryOptions: [
+          { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
+          { id: 'priority', label: 'Priority tracked delivery', description: 'Faster service where available from the supplier.', amount: 12.95, enabled: true },
+          { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
+        ],
+        brand: { primary, portalName: `${tradingName} Patient Services` }, modules: defaultModules,
+        worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+      };
+      dispatch({ type: 'ADD_ORGANISATION', organisation });
+      dispatch({ type: 'ADD_TOAST', message: `${tradingName} onboarding record created in Firebase.`, toastType: 'success' });
+      onCreated(created.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The onboarding record could not be created.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -153,7 +157,8 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
           <div className="brand-colour-field"><input type="color" value={primary} onChange={event => setPrimary(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primary.toUpperCase()} · secondary generated automatically</small></div><div className="onboarding-palette"><i style={{ background: onboardingTheme.primary }} /><i style={{ background: onboardingTheme.secondary }} /><i style={{ background: onboardingTheme.primarySoft }} /></div><div className="brand-preview-button" style={{ background: onboardingTheme.primary, color: onboardingTheme.onPrimary }}>Action</div></div>
 
           <div className="onboarding-callout"><ShieldCheck size={17} /><span>The tenant starts in onboarding status. It cannot be marked live until its mandatory compliance gates have evidence.</span></div>
-          <div className="drawer-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary"><Plus size={14} /> Create onboarding record</button></div>
+          {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
+          <div className="drawer-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={busy}><Plus size={14} /> {busy ? 'Creating securely…' : 'Create onboarding record'}</button></div>
         </form>
       </aside>
     </div>
@@ -167,6 +172,11 @@ export default function AdminPortal() {
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [complianceScope, setComplianceScope] = useState('all');
+  const [curaleafOrganisationId, setCuraleafOrganisationId] = useState(state.organisations[0]?.id ?? '');
+  const [curaleafCustomerId, setCuraleafCustomerId] = useState('');
+  const [curaleafPortalEmail, setCuraleafPortalEmail] = useState('');
+  const [curaleafBusy, setCuraleafBusy] = useState(false);
+  const [curaleafError, setCuraleafError] = useState<string | null>(null);
 
   const selectedOrganisation = state.organisations.find(org => org.id === selectedOrganisationId);
 
@@ -397,10 +407,43 @@ export default function AdminPortal() {
     </>
   );
 
+  const submitCuraleafActivation = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCuraleafBusy(true);
+    setCuraleafError(null);
+    try {
+      const status = await activateCuraleafPharmacy({
+        organisationId: curaleafOrganisationId,
+        customerId: curaleafCustomerId.trim(),
+        portalEmail: curaleafPortalEmail.trim(),
+      });
+      if (!status.connected) throw new Error(status.message || 'The credentials were stored but Curaleaf verification did not succeed.');
+      const pharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
+      dispatch({ type: 'ADD_TOAST', message: `${pharmacy?.tradingName ?? 'Pharmacy'} activated with Curaleaf ${status.maskedIdentifier ?? ''}.`, toastType: 'success' });
+      setCuraleafCustomerId('');
+      setCuraleafPortalEmail('');
+    } catch (error) {
+      setCuraleafError(error instanceof Error ? error.message : 'Curaleaf activation failed.');
+    } finally {
+      setCuraleafBusy(false);
+    }
+  };
+
   const renderIntegrations = () => (
     <>
       <div className="admin-title"><div><p className="section-label">Shared infrastructure</p><h1>Platform integrations</h1><p>Supplier, payment, intake and notification services configured for the HHH platform operated by Healius Consulting.</p></div><span className="pill pill-info"><ShieldCheck size={13} /> Platform-level access</span></div>
       <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Tenant payment boundary</strong><p>Each pharmacy owns its patient prices and approved Worldpay merchant relationship. Patient funds settle directly to that pharmacy. HHH charges a separate platform subscription fee and does not retain a percentage of prescription sales.</p></div></section>
+      <form className="card secure-integration-form" onSubmit={submitCuraleafActivation}>
+        <div className="admin-directory-head"><div><p className="section-label">HHH administrator only</p><h2>Activate a pharmacy’s Curaleaf account</h2><p>After Curaleaf returns its onboarding email and customer ID, connect them here. Until this succeeds, the pharmacy stays in a session-only training workspace.</p></div><LockKeyhole size={22} /></div>
+        <div className="form-grid-two">
+          <label>Pharmacy<select className="input" value={curaleafOrganisationId} onChange={event => setCuraleafOrganisationId(event.target.value)} required>{state.organisations.map(org => <option value={org.id} key={org.id}>{org.tradingName}</option>)}</select></label>
+          <label>Curaleaf portal email<input className="input" type="email" autoComplete="off" value={curaleafPortalEmail} onChange={event => setCuraleafPortalEmail(event.target.value)} required /></label>
+          <label>Curaleaf customer ID<input className="input" autoComplete="off" value={curaleafCustomerId} onChange={event => setCuraleafCustomerId(event.target.value)} required /></label>
+        </div>
+        <div className="setup-security-note"><ShieldCheck size={16} /><span>HHH’s single Curaleaf API key is held once as a Firebase Functions deployment secret. This form stores only this pharmacy’s customer ID and portal email in a Europe-hosted Secret Manager secret; Firestore receives a masked identifier only.</span></div>
+        {curaleafError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div>}
+        <div className="drawer-actions"><button className="btn btn-primary" type="submit" disabled={curaleafBusy || !curaleafOrganisationId}>{curaleafBusy ? 'Verifying securely…' : 'Verify and activate pharmacy'}</button></div>
+      </form>
       <div className="integration-cards">
         {state.platformIntegrations.map(integration => <section className="card integration-card" key={integration.id}><div className="integration-card-head"><div className="settings-card-icon">{integration.id === 'worldpay' ? <CreditCard size={18} /> : integration.id === 'eligibility-api' ? <Link2 size={18} /> : <Settings2 size={18} />}</div><span className={`pill ${integration.status === 'connected' ? 'pill-green' : integration.status === 'attention' ? 'pill-red' : 'pill-amber'}`}>{integration.status}</span></div><h2>{integration.name}</h2><p>{integration.description}</p><div className="integration-meta"><span>Scope</span><strong>{integration.id === 'worldpay' ? `${state.organisations.filter(org => org.worldpay.status === 'connected').length}/${state.organisations.length} merchants connected` : 'HHH platform'}</strong></div><button className="btn btn-sm" onClick={() => dispatch({ type: 'ADD_TOAST', message: `${integration.name} configuration requires live credentials and server-side setup.`, toastType: 'info' })}>View implementation status</button></section>)}
       </div>

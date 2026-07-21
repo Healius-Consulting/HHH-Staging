@@ -14,7 +14,7 @@ export default function Dashboard() {
 
   const inFulfilment = tenantOrders.filter(o =>
     o.payment.status === 'paid' &&
-    o.prescriptions.some(rx => rx.status !== 'ready')
+    o.prescriptions.some(rx => !['ready', 'collected'].includes(rx.status))
   ).length;
 
   const readyForCollection = tenantOrders.filter(o =>
@@ -90,65 +90,7 @@ export default function Dashboard() {
       days: Math.floor((Date.now() - new Date(s.submittedAt).getTime()) / (1000 * 60 * 60 * 24)),
     }));
 
-  // 5. Patient Portal Requests
-  const portalRequests = tenantPatients.flatMap(p => {
-    const alerts: {
-      type: 'repeat-req' | 'appointment-req';
-      id: string;
-      patientName: string;
-      patientId: string;
-      timeStr: string;
-      ts: Date;
-    }[] = [];
-
-    const interactions = p.interactions || [];
-
-    // Find latest Repeat Request
-    const repeatReqs = interactions.filter(i => i.type === 'Repeat Requested');
-    if (repeatReqs.length > 0) {
-      const latestReq = [...repeatReqs].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0];
-      const repeatResolves = interactions.filter(i => i.type === 'Repeat Rx Initiated' || i.type === 'Request Resolved');
-      const latestResolve = repeatResolves.length > 0 
-        ? [...repeatResolves].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0]
-        : null;
-
-      if (!latestResolve || new Date(latestReq.ts).getTime() > new Date(latestResolve.ts).getTime()) {
-        alerts.push({
-          type: 'repeat-req',
-          id: `repeat-req-${p.id}`,
-          patientName: p.name,
-          patientId: p.id,
-          timeStr: new Date(latestReq.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
-          ts: new Date(latestReq.ts),
-        });
-      }
-    }
-
-    // Find latest Appointment Request
-    const apptReqs = interactions.filter(i => i.type === 'Appointment Requested');
-    if (apptReqs.length > 0) {
-      const latestReq = [...apptReqs].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0];
-      const apptResolves = interactions.filter(i => i.type === 'Callback Scheduled' || i.type === 'Request Resolved');
-      const latestResolve = apptResolves.length > 0 
-        ? [...apptResolves].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0]
-        : null;
-
-      if (!latestResolve || new Date(latestReq.ts).getTime() > new Date(latestResolve.ts).getTime()) {
-        alerts.push({
-          type: 'appointment-req',
-          id: `appt-req-${p.id}`,
-          patientName: p.name,
-          patientId: p.id,
-          timeStr: new Date(latestReq.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
-          ts: new Date(latestReq.ts),
-        });
-      }
-    }
-
-    return alerts;
-  });
-
-  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length + portalRequests.length;
+  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length;
 
   /* ── Recent orders (last 5) ── */
   const recentOrders = [...tenantOrders]
@@ -315,65 +257,6 @@ export default function Dashboard() {
                   </div>
                 ))}
 
-                {portalRequests.filter(r => r.type === 'repeat-req').map(alert => (
-                  <div key={alert.id} className="alert-item alert-item--success">
-                    <div>
-                      <span className="alert-item__title">Portal: Repeat Prescription · {alert.patientName}</span>
-                      <span className="alert-item__desc">Requested via patient portal on {alert.timeStr}.</span>
-                    </div>
-                    <div className="flex gap-xs flex-wrap">
-                      <button
-                        className="btn btn-sm btn-success-solid"
-                        onClick={() => {
-                          dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Repeat Rx Initiated', detail: 'Repeat prescription from patient portal request.' });
-                          dispatch({ type: 'NEW_ORDER', patientId: alert.patientId });
-                          dispatch({ type: 'SET_SCREEN', screen: 'create' });
-                          dispatch({ type: 'ADD_TOAST', message: `Initiating repeat Rx for ${alert.patientName}.`, toastType: 'info' });
-                        }}
-                      >
-                        Create Repeat Rx
-                      </button>
-                      <button
-                        className="btn btn-sm"
-                        onClick={() => {
-                          dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Request Resolved', detail: 'Dismissed portal repeat request.' });
-                          dispatch({ type: 'ADD_TOAST', message: 'Request dismissed.', toastType: 'info' });
-                        }}
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {portalRequests.filter(r => r.type === 'appointment-req').map(alert => (
-                  <div key={alert.id} className="alert-item alert-item--info">
-                    <div>
-                      <span className="alert-item__title">Portal: Schedule Check-up · {alert.patientName}</span>
-                      <span className="alert-item__desc">Check-up requested via portal on {alert.timeStr}.</span>
-                    </div>
-                    <div className="flex gap-xs flex-wrap">
-                      <button
-                        className="btn btn-sm btn-primary"
-                        onClick={() => {
-                          dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Callback Scheduled', detail: 'Scheduled patient-requested check-up call.' });
-                          dispatch({ type: 'ADD_TOAST', message: `Callback scheduled for ${alert.patientName}.`, toastType: 'success' });
-                        }}
-                      >
-                        Log Callback
-                      </button>
-                      <button
-                        className="btn btn-sm"
-                        onClick={() => {
-                          dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Request Resolved', detail: 'Dismissed portal appointment request.' });
-                          dispatch({ type: 'ADD_TOAST', message: 'Request dismissed.', toastType: 'info' });
-                        }}
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
           )}

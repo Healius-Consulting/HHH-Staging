@@ -10,12 +10,14 @@ import {
   PHARMACY
 } from '../context/AppContext';
 
-const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Ready', 'Collected'] as const;
+const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Received', 'Ready', 'Collected'] as const;
 
 const STATUS_TABS: { key: RxStatus; label: string; shortLabel: string; icon: React.ReactNode }[] = [
   { key: 'awaiting-approval', label: 'Awaiting Approval', shortLabel: 'Awaiting', icon: <Clock size={14} /> },
   { key: 'approved',          label: 'Approved',          shortLabel: 'Approved', icon: <CheckCircle size={14} /> },
-  { key: 'dispatched',        label: 'In Transit',        shortLabel: 'In Transit', icon: <Truck size={14} /> },
+  { key: 'dispatched',        label: 'Dispatched to Pharmacy', shortLabel: 'Dispatched', icon: <Truck size={14} /> },
+  { key: 'partially-received', label: 'Partially Received', shortLabel: 'Partial', icon: <Package size={14} /> },
+  { key: 'received',          label: 'Received — Checks Required', shortLabel: 'Received', icon: <Package size={14} /> },
   { key: 'ready',             label: 'Ready for Collection', shortLabel: 'Ready', icon: <Package size={14} /> },
   { key: 'collected',         label: 'Collected',         shortLabel: 'Collected', icon: <CheckCircle size={14} /> },
 ];
@@ -25,8 +27,10 @@ function stepsCompleted(status: RxStatus): number {
     case 'awaiting-approval': return 0;
     case 'approved':          return 1;
     case 'dispatched':        return 2;
-    case 'ready':             return 3;
-    case 'collected':         return 4;
+    case 'partially-received': return 3;
+    case 'received':          return 3;
+    case 'ready':             return 4;
+    case 'collected':         return 5;
     default:                  return -1;
   }
 }
@@ -35,6 +39,8 @@ const STATUS_PILL: Record<string, string> = {
   'awaiting-approval': 'pill-info',
   approved:            'pill-info',
   dispatched:          'pill-amber',
+  'partially-received': 'pill-amber',
+  received:            'pill-info',
   ready:               'pill-green',
   collected:           'pill-neutral',
 };
@@ -52,8 +58,9 @@ export default function Orders() {
   const [activeTab, setActiveTab] = useState<RxStatus | 'all'>('awaiting-approval');
   const [printingRx, setPrintingRx] = useState<{ rx: any; patientName: string } | null>(null);
   const [exitingRxId, setExitingRxId] = useState<number | null>(null);
+  const [receiptDrafts, setReceiptDrafts] = useState<Record<string, Record<string, number>>>({});
 
-  const handleActionWithAnimation = (orderId: number, rxId: number, actionType: 'RECEIVE_SHIPMENT' | 'HANDOVER_TO_PATIENT') => {
+  const handleActionWithAnimation = (orderId: number, rxId: number, actionType: 'MARK_READY_FOR_COLLECTION' | 'HANDOVER_TO_PATIENT') => {
     setExitingRxId(rxId);
     setTimeout(() => {
       dispatch({ type: actionType, orderId, rxId });
@@ -95,7 +102,7 @@ export default function Orders() {
 
   const renderTrackBar = (status: RxStatus) => {
     const done = stepsCompleted(status);
-    const progressWidth = done >= 0 ? done * 25 : 0;
+    const progressWidth = done >= 0 ? done * 20 : 0;
     return (
       <div className="orders-timeline-container">
         <div className="orders-timeline">
@@ -105,7 +112,7 @@ export default function Orders() {
           />
           {TRACK_STEPS.map((label, i) => {
             let cls = 'timeline-step';
-            if (i < done || (status === 'collected' && i <= done)) cls += ' done';
+            if (i < done || (status === 'collected' && i <= done) || (status === 'received' && i === done)) cls += ' done';
             else if (i === done && status !== 'collected') cls += ' active';
             return (
               <div key={label} className={cls}>
@@ -124,6 +131,9 @@ export default function Orders() {
   const renderSubOrderCard = (so: FlatSubOrder) => {
     const { rx, patientName: pName, orderId, date, rxIdx } = so;
     const isExiting = exitingRxId === rx.id;
+    const receiptKey = `${orderId}-${rx.id}`;
+    const existingReceipt = Object.fromEntries((rx.receivedItems ?? []).map(line => [line.productId, line.quantityReceived]));
+    const receiptValues = receiptDrafts[receiptKey] ?? existingReceipt;
     const readyDays = rx.status === 'ready' && rx.readyAt
       ? Math.floor((Date.now() - new Date(rx.readyAt).getTime()) / (1000 * 60 * 60 * 24))
       : 0;
@@ -168,11 +178,11 @@ export default function Orders() {
             {rx.poRef || 'Pending approval'}
           </div>
 
-          {rx.trackingNumber && (
+          {rx.status === 'dispatched' && (
             <div className="detail-cell">
               <Truck size={13} className="text-muted" style={{ display: 'inline', marginRight: 6, verticalAlign: -2 }} />
-              <strong className="text-primary">Tracking:</strong>{' '}
-              {rx.trackingNumber} ({rx.carrier})
+              <strong className="text-primary">Courier visibility:</strong>{' '}
+              Dispatch confirmed; tracking is not supplied by Curaleaf.
             </div>
           )}
 
@@ -189,14 +199,65 @@ export default function Orders() {
           )}
         </div>
 
-        {(rx.status === 'dispatched' || rx.status === 'ready') && (
-          <div className="order-card__actions">
-            {rx.status === 'dispatched' && (
+        {(rx.status === 'dispatched' || rx.status === 'partially-received') && (
+          <div className="order-card__products" aria-label={`Goods-in for prescription ${rx.id}`}>
+            <span className="section-label">Goods-in quantities</span>
+            {rx.items.map(item => (
+              <label className="order-product-line" key={item.productId}>
+                <span className="text-secondary">{item.name} · ordered {item.qty}</span>
+                <input
+                  className="input"
+                  style={{ width: 82 }}
+                  type="number"
+                  min={0}
+                  max={item.qty}
+                  value={receiptValues[item.productId] ?? 0}
+                  aria-label={`Quantity received for ${item.name}`}
+                  onChange={event => setReceiptDrafts(current => ({
+                    ...current,
+                    [receiptKey]: {
+                      ...receiptValues,
+                      [item.productId]: Math.max(0, Math.min(item.qty, Number(event.target.value))),
+                    },
+                  }))}
+                />
+              </label>
+            ))}
+            <div className="order-card__actions">
+              <button
+                className="btn btn-sm"
+                onClick={() => dispatch({
+                  type: 'RECORD_GOODS_RECEIPT',
+                  orderId,
+                  rxId: rx.id,
+                  lines: rx.items.map(item => ({ productId: item.productId, quantityReceived: receiptValues[item.productId] ?? 0 })),
+                })}
+              >
+                Save partial receipt
+              </button>
               <button
                 className="btn btn-sm btn-primary"
-                onClick={() => handleActionWithAnimation(orderId, rx.id, 'RECEIVE_SHIPMENT')}
+                onClick={() => dispatch({
+                  type: 'RECORD_GOODS_RECEIPT',
+                  orderId,
+                  rxId: rx.id,
+                  lines: rx.items.map(item => ({ productId: item.productId, quantityReceived: item.qty })),
+                })}
               >
-                Confirm arrived (goods-in)
+                Receive all items
+              </button>
+            </div>
+          </div>
+        )}
+
+        {(rx.status === 'received' || rx.status === 'ready') && (
+          <div className="order-card__actions">
+            {rx.status === 'received' && (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => handleActionWithAnimation(orderId, rx.id, 'MARK_READY_FOR_COLLECTION')}
+              >
+                Checks complete — mark ready
               </button>
             )}
 
@@ -268,7 +329,7 @@ export default function Orders() {
           let iconColor = 'text-muted';
           if (activeTab === tab.key) {
             if (tab.key === 'ready') iconColor = 'text-green';
-            else if (tab.key === 'dispatched') iconColor = 'text-amber';
+            else if (tab.key === 'dispatched' || tab.key === 'partially-received') iconColor = 'text-amber';
             else iconColor = 'text-info';
           }
           return (

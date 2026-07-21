@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // The API issues short-lived, tenant-authorised signed URLs. Direct SDK
+    // access remains disabled even for authenticated browser clients.
+    match /{object=**} {
+      allow read, write: if false;
+    }
+  }
+}

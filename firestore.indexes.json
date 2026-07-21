@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "referralTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tokenHash", "order": "ASCENDING" },
+        { "fieldPath": "revokedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organisationId", "order": "ASCENDING" },
+        { "fieldPath": "transactionReference", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

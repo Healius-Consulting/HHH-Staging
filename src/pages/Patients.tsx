@@ -14,15 +14,17 @@ interface UnifiedPatient {
   orders: PatientOrder[];
 }
 
-const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Ready', 'Collected'] as const;
+const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Received', 'Ready', 'Collected'] as const;
 
 function stepsCompleted(status: string): number {
   switch (status) {
     case 'awaiting-approval': return 0;
     case 'approved':          return 1;
     case 'dispatched':        return 2;
-    case 'ready':             return 3;
-    case 'collected':         return 4;
+    case 'partially-received': return 3;
+    case 'received':          return 3;
+    case 'ready':             return 4;
+    case 'collected':         return 5;
     default:                  return -1;
   }
 }
@@ -203,7 +205,7 @@ export default function Patients() {
 
   const renderTrackBar = (status: string) => {
     const done = stepsCompleted(status);
-    const progressWidth = done >= 0 ? done * 25 : 0;
+    const progressWidth = done >= 0 ? done * 20 : 0;
     return (
       <div className="orders-timeline-container" style={{ margin: '8px 0' }}>
         <div className="orders-timeline" style={{ height: 16 }}>
@@ -213,7 +215,7 @@ export default function Patients() {
           />
           {TRACK_STEPS.map((label, i) => {
             let cls = 'timeline-step';
-            if (i < done || (status === 'collected' && i <= done)) cls += ' done';
+            if (i < done || (status === 'collected' && i <= done) || (status === 'received' && i === done)) cls += ' done';
             else if (i === done && status !== 'collected') cls += ' active';
             return (
               <div key={label} className={cls}>

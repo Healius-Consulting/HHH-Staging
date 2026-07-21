@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "workspaces": ["services/api"],
+  "workspaces": [
+    "services/api"
+  ],
   "scripts": {
     "dev": "vite",
     "dev:eligibility": "vite --config vite.eligibility.config.ts",
@@ -16,6 +18,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "firebase": "^12.16.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.22.0",
     "qrcode": "^1.5.4",
