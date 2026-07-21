@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import {
   AlertCircle,
   ArrowLeft,
@@ -35,6 +36,7 @@ import {
 import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources';
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { useAuth } from '../auth/useAuth';
+import { requireFirebaseAuth } from '../auth/firebase';
 import AccessibilityPanel from '../accessibility/AccessibilityPanel';
 import { activateCuraleafPharmacy, createOrganisation, createPharmacyStaffInvitation, getPharmacySetupStatus, getPharmacyStaff, updateOrganisation } from '../shared/api';
 import type { PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
@@ -230,6 +232,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [invitation, setInvitation] = useState<PharmacyStaffInvitation | null>(null);
+  const [emailDelivery, setEmailDelivery] = useState<'sent' | 'failed' | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -256,6 +259,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     setBusy(true);
     setError(null);
     setInvitation(null);
+    setEmailDelivery(null);
     try {
       const created = await createPharmacyStaffInvitation({ organisationId: organisation.id, displayName, email });
       const updated = [...staff, created];
@@ -264,7 +268,14 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
       setDisplayName('');
       setEmail('');
       onCountChange(updated.length);
-      dispatch({ type: 'ADD_TOAST', message: `${created.displayName} was added to ${organisation.tradingName}.`, toastType: 'success' });
+      try {
+        await sendPasswordResetEmail(requireFirebaseAuth(), created.email);
+        setEmailDelivery('sent');
+        dispatch({ type: 'ADD_TOAST', message: `${created.displayName} was added and Firebase sent their setup email.`, toastType: 'success' });
+      } catch {
+        setEmailDelivery('failed');
+        dispatch({ type: 'ADD_TOAST', message: 'Account created, but Firebase could not send the email. Copy the setup link instead.', toastType: 'warning' });
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The staff account could not be created.');
     } finally {
@@ -287,7 +298,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
         <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Add staff account'}</button>
       </form>
       {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
-      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>{invitation.contactRole === 'owner' ? 'Owner account created' : 'Staff account created'}</strong><span>Send this one-time Firebase setup link to {invitation.email}. They will choose a password and verify their email before entering the pharmacy workspace.</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
+      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>{invitation.contactRole === 'owner' ? 'Owner account created' : 'Staff account created'} · {emailDelivery === 'sent' ? 'Email sent' : emailDelivery === 'failed' ? 'Email not sent' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? `Firebase sent a password setup email to ${invitation.email}.` : `Send this one-time Firebase setup link to ${invitation.email}.`} They will choose a password and verify their email before entering the pharmacy workspace.</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
       <div className="admin-staff-list">
         {loading && <div className="empty-state">Loading staff accounts…</div>}
         {!loading && staff.length === 0 && <div className="empty-state">No pharmacy staff accounts yet. The first person added will be tagged Owner.</div>}

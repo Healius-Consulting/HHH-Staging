@@ -19,6 +19,11 @@ const idSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 const tokenSchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/);
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const timestamp = () => nowIso();
+const firebaseAuthErrorCode = (error: unknown) => {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = error as { code?: unknown; errorInfo?: { code?: unknown } };
+  return typeof candidate.code === 'string' ? candidate.code : typeof candidate.errorInfo?.code === 'string' ? candidate.errorInfo.code : null;
+};
 
 const tenantModulesSchema = z.object({
   intake: z.boolean(),
@@ -571,9 +576,26 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
     }).refine(value => value.role === 'hhh_admin' ? value.organisationId === null : Boolean(value.organisationId), { message: 'Pharmacy staff require exactly one organisation.' }).parse(request.body);
     if (input.organisationId) await getRecord('organisations', input.organisationId);
 
-    const user = await auth.createUser({ email: input.email, displayName: input.displayName, emailVerified: false, disabled: false });
+    let user;
+    let existingProfile: FirebaseFirestore.DocumentData | undefined;
+    try {
+      user = await auth.createUser({ email: input.email, displayName: input.displayName, emailVerified: false, disabled: false });
+    } catch (error) {
+      if (firebaseAuthErrorCode(error) !== 'auth/email-already-exists') throw error;
+      user = await auth.getUserByEmail(input.email);
+      const profileSnapshot = await firestore.collection('staffUsers').doc(user.uid).get();
+      existingProfile = profileSnapshot.data();
+      const existingRole = existingProfile?.role ?? user.customClaims?.role;
+      const existingOrganisationId = existingProfile?.organisationId ?? user.customClaims?.organisationId;
+      if (existingRole !== input.role || existingOrganisationId !== input.organisationId) {
+        throw new HttpError(409, 'This email address already belongs to a different HHH account.', 'EMAIL_ALREADY_IN_USE');
+      }
+      if (existingProfile?.status === 'active') {
+        throw new HttpError(409, 'This staff account is already active. Use password reset if they cannot sign in.', 'STAFF_ALREADY_ACTIVE');
+      }
+    }
     await auth.setCustomUserClaims(user.uid, { role: input.role, organisationId: input.organisationId });
-    const createdAt = timestamp();
+    const createdAt = String(existingProfile?.createdAt ?? timestamp());
     let contactRole: 'owner' | 'staff' | null = null;
 
     if (input.role === 'pharmacy_staff' && input.organisationId) {
@@ -604,7 +626,7 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
           preferences: preferencesSchema.parse({ theme: 'clinical-light' }),
           createdAt,
           updatedAt: createdAt,
-        });
+        }, { merge: true });
       });
     } else {
       await firestore.collection('staffUsers').doc(user.uid).set({
@@ -613,7 +635,9 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
       });
     }
 
-    const actionLink = await auth.generatePasswordResetLink(input.email, { url: allowedOrigins.values().next().value ?? 'http://localhost:5173' });
+    // The default Firebase action handler needs no authorised continue URL.
+    // The frontend also asks Firebase to email this setup action directly.
+    const actionLink = await auth.generatePasswordResetLink(input.email);
     await createRecord('notificationOutbox', { organisationId: input.organisationId, kind: 'staff_invitation', recipient: input.email, templateData: { displayName: input.displayName, actionLink, contactRole }, status: 'pending' });
     await audit(request, 'staff.invited', { organisationId: input.organisationId, staffUid: user.uid, role: input.role, contactRole });
     response.status(201).json({ uid: user.uid, email: input.email, displayName: input.displayName, role: input.role, organisationId: input.organisationId, contactRole, status: 'invited', createdAt, invitationQueued: true, actionLink });
