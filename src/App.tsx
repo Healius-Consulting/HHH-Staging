@@ -43,13 +43,13 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
     websiteDomains: record.websiteDomains ?? [],
     status: record.status,
     staffCount: 0,
-    platformFeeMonthly: null,
+    platformFeeMonthly: record.platformFeeMonthly ?? null,
     deliveryOptions: [
       { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
       { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
     ],
-    brand: { primary: record.primaryColour, portalName: `${record.tradingName} Patient Services` },
-    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
+    brand: { primary: record.primaryColour, portalName: record.portalName ?? `${record.tradingName} Patient Services` },
+    modules: record.modules ?? { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   };
 }

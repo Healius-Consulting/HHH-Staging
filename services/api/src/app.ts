@@ -20,6 +20,30 @@ const tokenSchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/);
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const timestamp = () => nowIso();
 
+const tenantModulesSchema = z.object({
+  intake: z.boolean(),
+  rx: z.boolean(),
+  payments: z.boolean(),
+  supplierOrders: z.boolean(),
+  patients: z.boolean(),
+  resources: z.boolean(),
+});
+
+const organisationDetailsSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  tradingName: z.string().trim().min(1).max(200),
+  gphcNumber: z.string().trim().min(1).max(50),
+  superintendent: z.string().trim().min(1).max(200),
+  address: z.string().trim().min(1).max(500),
+  primaryColour: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  logoText: z.string().trim().min(1).max(4),
+  websiteDomains: z.array(z.string().trim().min(1).max(253)).max(20),
+  status: z.enum(['onboarding', 'live', 'paused']),
+  platformFeeMonthly: z.number().nonnegative().max(100_000).nullable(),
+  portalName: z.string().trim().min(1).max(200),
+  modules: tenantModulesSchema,
+});
+
 const setupDefinitions = [
   { id: 'pharmacy_profile', title: 'Confirm pharmacy and registered premises', required: true },
   { id: 'curaleaf_account', title: 'Verify Curaleaf customer account', required: true },
@@ -475,10 +499,36 @@ app.post('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (requ
   try {
     const input = z.object({ name: z.string().min(1).max(200), tradingName: z.string().min(1).max(200), gphcNumber: z.string().min(1).max(50), superintendent: z.string().min(1).max(200), address: z.string().min(1).max(500), primaryColour: z.string().regex(/^#[0-9a-fA-F]{6}$/), logoText: z.string().min(1).max(4), websiteDomains: z.array(z.string().trim().min(1).max(253)).max(20).default([]), status: z.literal('onboarding').default('onboarding') }).parse(request.body);
     const rawReferralToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
-    const record = await createRecord('organisations', { ...input, curaleafActivated: false, referralToken: rawReferralToken });
+    const record = await createRecord('organisations', {
+      ...input,
+      platformFeeMonthly: null,
+      portalName: `${input.tradingName} Patient Services`,
+      modules: tenantModulesSchema.parse({ intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true }),
+      curaleafActivated: false,
+      referralToken: rawReferralToken,
+    });
     const referral = await createRecord('referralTokens', { organisationId: record.id, tokenHash: tokenHash(rawReferralToken), revokedAt: null, createdBy: identity(request).uid });
     await audit(request, 'organisation.created', { organisationId: record.id, referralTokenId: referral.id });
     response.status(201).json({ ...record, referralToken: rawReferralToken });
+  } catch (error) { next(error); }
+});
+
+app.patch('/v1/portal/admin/organisations/:id', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const organisationId = idSchema.parse(request.params.id);
+    await getRecord('organisations', organisationId);
+    const input = organisationDetailsSchema.partial()
+      .refine(value => Object.keys(value).length > 0, { message: 'At least one pharmacy detail must be supplied.' })
+      .parse(request.body);
+    const changedFields = Object.keys(input);
+    await firestore.collection('organisations').doc(organisationId).update({
+      ...input,
+      updatedAt: timestamp(),
+      updatedBy: identity(request).uid,
+    });
+    const record = await getRecord('organisations', organisationId);
+    await audit(request, 'organisation.updated', { organisationId, changedFields });
+    response.json(record);
   } catch (error) { next(error); }
 });
 

@@ -72,6 +72,30 @@ export interface CreateOrganisationInput {
   status: 'onboarding';
 }
 
+export interface OrganisationModules {
+  intake: boolean;
+  rx: boolean;
+  payments: boolean;
+  supplierOrders: boolean;
+  patients: boolean;
+  resources: boolean;
+}
+
+export interface UpdateOrganisationInput {
+  name?: string;
+  tradingName?: string;
+  gphcNumber?: string;
+  superintendent?: string;
+  address?: string;
+  primaryColour?: string;
+  logoText?: string;
+  websiteDomains?: string[];
+  status?: 'onboarding' | 'live' | 'paused';
+  platformFeeMonthly?: number | null;
+  portalName?: string;
+  modules?: OrganisationModules;
+}
+
 export interface CreatedOrganisation extends CreateOrganisationInput {
   id: string;
   referralToken: string;
@@ -130,6 +154,9 @@ export interface PortalOrganisation {
   primaryColour: string;
   status: 'onboarding' | 'live' | 'paused';
   referralToken?: string;
+  platformFeeMonthly?: number | null;
+  portalName?: string;
+  modules?: OrganisationModules;
 }
 
 export interface PortalSession {

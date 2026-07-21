@@ -14,6 +14,7 @@ import {
   LockKeyhole,
   LogOut,
   MapPin,
+  Pencil,
   Plus,
   PhoneCall,
   Search,
@@ -34,8 +35,8 @@ import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources'
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { useAuth } from '../auth/useAuth';
 import AccessibilityPanel from '../accessibility/AccessibilityPanel';
-import { activateCuraleafPharmacy, createOrganisation, getPharmacySetupStatus } from '../shared/api';
-import type { PharmacySetupStatus } from '../shared/contracts';
+import { activateCuraleafPharmacy, createOrganisation, getPharmacySetupStatus, updateOrganisation } from '../shared/api';
+import type { PharmacySetupStatus, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'compliance' | 'integrations';
@@ -149,12 +150,86 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
   );
 }
 
+function EditPharmacy({ organisation, onClose, onSaved }: { organisation: PharmacyTenant; onClose: () => void; onSaved: (updates: Partial<PharmacyTenant>) => void }) {
+  const [name, setName] = useState(organisation.name);
+  const [tradingName, setTradingName] = useState(organisation.tradingName);
+  const [gphcNumber, setGphcNumber] = useState(organisation.gphcNumber);
+  const [superintendent, setSuperintendent] = useState(organisation.superintendent);
+  const [address, setAddress] = useState(organisation.address);
+  const [domains, setDomains] = useState(organisation.websiteDomains.join('\n'));
+  const [status, setStatus] = useState(organisation.status);
+  const [logoText, setLogoText] = useState(organisation.logoText);
+  const [primaryColour, setPrimaryColour] = useState(organisation.brand.primary);
+  const [portalName, setPortalName] = useState(organisation.brand.portalName);
+  const [platformFee, setPlatformFee] = useState(organisation.platformFeeMonthly?.toString() ?? '');
+  const [modules, setModules] = useState({ ...organisation.modules });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const editTheme = deriveTenantTheme(primaryColour);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    const websiteDomains = [...new Set(domains.split(/[\n,]+/).map(value => value.trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase()).filter(Boolean))];
+    const input: UpdateOrganisationInput = {
+      name, tradingName, gphcNumber, superintendent, address, websiteDomains, status, logoText: logoText.toUpperCase(),
+      primaryColour, portalName, platformFeeMonthly: platformFee === '' ? null : Number(platformFee), modules,
+    };
+    try {
+      await updateOrganisation(organisation.id, input);
+      onSaved({
+        name: name.trim(), tradingName: tradingName.trim(), gphcNumber: gphcNumber.trim(), superintendent: superintendent.trim(), address: address.trim(),
+        websiteDomains, status, logoText: logoText.trim().toUpperCase(), platformFeeMonthly: input.platformFeeMonthly,
+        brand: { primary: primaryColour, portalName: portalName.trim() }, modules,
+        slug: slugify(tradingName || name),
+      });
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The pharmacy details could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
+      <aside className="drawer admin-onboarding-drawer" role="dialog" aria-modal="true" aria-labelledby="edit-pharmacy-title">
+        <div className="drawer-header"><div><p className="section-label">HHH administrator</p><h2 id="edit-pharmacy-title">Edit pharmacy details</h2></div><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
+        <form className="drawer-body onboarding-form" onSubmit={submit}>
+          <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Corrections are saved to Firebase and added to the audit trail.</small></div></div>
+          <label>Registered pharmacy name<input className="input" value={name} onChange={event => setName(event.target.value)} required /></label>
+          <label>Trading name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
+          <div className="form-grid-two"><label>GPhC number<input className="input" value={gphcNumber} onChange={event => setGphcNumber(event.target.value)} required /></label><label>Superintendent pharmacist<input className="input" value={superintendent} onChange={event => setSuperintendent(event.target.value)} required /></label></div>
+          <label>Registered premises address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
+          <label>Approved website domains<textarea className="input" value={domains} onChange={event => setDomains(event.target.value)} placeholder={'pharmacy.co.uk\nanother-domain.co.uk'} /><small>Enter one domain per line. Protocols and page paths are removed automatically.</small></label>
+          <div className="form-grid-two"><label>Account status<select className="input" value={status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option><option value="live">Live</option><option value="paused">Paused</option></select></label><label>Monthly HHH platform fee (£)<input className="input" type="number" min="0" max="100000" step="0.01" value={platformFee} onChange={event => setPlatformFee(event.target.value)} placeholder="Not set" /></label></div>
+
+          <div className="form-section-heading"><span>02</span><div><strong>Brand and portal identity</strong><small>These details appear in the pharmacy workspace and eligibility form.</small></div></div>
+          <div className="form-grid-two"><label>Portal name<input className="input" value={portalName} onChange={event => setPortalName(event.target.value)} required /></label><label>Logo initials<input className="input" value={logoText} onChange={event => setLogoText(event.target.value.slice(0, 4))} minLength={1} maxLength={4} required /></label></div>
+          <div className="brand-colour-field"><input type="color" value={primaryColour} onChange={event => setPrimaryColour(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primaryColour.toUpperCase()} · accessible palette generated automatically</small></div><div className="onboarding-palette"><i style={{ background: editTheme.primary }} /><i style={{ background: editTheme.secondary }} /><i style={{ background: editTheme.primarySoft }} /></div></div>
+
+          <div className="form-section-heading"><span>03</span><div><strong>Available modules</strong><small>Choose the areas pharmacy staff can access.</small></div></div>
+          <div className="admin-module-list edit-pharmacy-modules">
+            {(Object.keys(MODULE_LABELS) as TenantModule[]).map(module => <label key={module}><span><strong>{MODULE_LABELS[module]}</strong><small>{modules[module] ? 'Available to pharmacy staff' : 'Hidden from navigation'}</small></span><input type="checkbox" checked={modules[module]} onChange={() => setModules(current => ({ ...current, [module]: !current[module] }))} /></label>)}
+          </div>
+
+          <div className="setup-security-note"><ShieldCheck size={16} /><span>Curaleaf customer IDs and integration credentials are not changed here. Use the secure Integrations workflow to update those values.</span></div>
+          {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
+          <div className="drawer-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={busy}><Pencil size={14} /> {busy ? 'Saving securely…' : 'Save all changes'}</button></div>
+        </form>
+      </aside>
+    </div>
+  );
+}
+
 export default function AdminPortal() {
   const { state, dispatch } = useApp();
   const [view, setView] = useState<AdminView>('overview');
   const [query, setQuery] = useState('');
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
   const [setupByOrganisation, setSetupByOrganisation] = useState<Record<string, PharmacySetupStatus>>({});
   const [setupError, setSetupError] = useState<string | null>(null);
   const [curaleafOrganisationId, setCuraleafOrganisationId] = useState(state.organisations[0]?.id ?? '');
@@ -233,8 +308,6 @@ export default function AdminPortal() {
     const readiness = tenantReadiness(selectedOrganisation.id);
     const formUrl = eligibilityUrl(selectedOrganisation);
     const tenantTheme = deriveTenantTheme(selectedOrganisation.brand.primary);
-    const updateBrand = (updates: Partial<PharmacyTenant['brand']>) => dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisation.id, updates: { brand: { ...selectedOrganisation.brand, ...updates } } });
-    const updateModule = (module: TenantModule) => dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisation.id, updates: { modules: { ...selectedOrganisation.modules, [module]: !selectedOrganisation.modules[module] } } });
 
     return (
       <main className="admin-shell">
@@ -244,7 +317,7 @@ export default function AdminPortal() {
 
           <section className="admin-client-heading">
             <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Client account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
-            <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><strong>{readiness.percent}% setup complete</strong></div>
+            <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><strong>{readiness.percent}% setup complete</strong><button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
           </section>
 
           <div className="stats-grid admin-detail-stats">
@@ -263,15 +336,15 @@ export default function AdminPortal() {
                 <div><span>Superintendent</span><strong>{selectedOrganisation.superintendent}</strong></div>
                 <div><span>Address</span><strong><MapPin size={13} /> {selectedOrganisation.address}</strong></div>
                 <div><span>Approved domains</span><strong><Globe2 size={13} /> {selectedOrganisation.websiteDomains.join(', ') || 'Not supplied'}</strong></div>
-                <div><span>Monthly HHH platform fee</span><label className="tenant-platform-fee"><span>£</span><input type="number" min="0" step="0.01" value={selectedOrganisation.platformFeeMonthly ?? ''} onChange={event => dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisation.id, updates: { platformFeeMonthly: event.target.value === '' ? null : Math.max(0, Number(event.target.value)) } })} placeholder="Not set" /></label></div>
+                <div><span>Monthly HHH platform fee</span><strong>{selectedOrganisation.platformFeeMonthly == null ? 'Not set' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`}</strong></div>
               </div>
             </section>
 
             <section className="card admin-detail-card tenant-brand-editor">
               <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Brand and portal identity</h2></div>
-              <label>Portal name<input className="input" value={selectedOrganisation.brand.portalName} onChange={event => updateBrand({ portalName: event.target.value })} /></label>
+              <label>Portal name<input className="input" value={selectedOrganisation.brand.portalName} readOnly /></label>
               <div className="brand-editor-row">
-                <label>Primary colour<span><input type="color" value={selectedOrganisation.brand.primary} onChange={event => updateBrand({ primary: event.target.value })} /><code>{selectedOrganisation.brand.primary}</code></span></label>
+                <label>Primary colour<span><input type="color" value={selectedOrganisation.brand.primary} disabled /><code>{selectedOrganisation.brand.primary}</code></span></label>
                 <label>Automatic secondary<span className="derived-colour"><i style={{ background: tenantTheme.secondary }} /><code>{tenantTheme.secondary}</code><small>Derived from primary</small></span></label>
               </div>
               <div className="generated-palette" aria-label="Automatically generated tenant palette"><span style={{ background: tenantTheme.primary }} title="Primary" /><span style={{ background: tenantTheme.secondary }} title="Secondary" /><span style={{ background: tenantTheme.primaryMuted }} title="Muted brand" /><span style={{ background: tenantTheme.primarySoft }} title="Soft surface" /><span style={{ background: tenantTheme.sidebar }} title="Navigation" /></div>
@@ -285,7 +358,7 @@ export default function AdminPortal() {
               <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Tenant modules</h2></div>
               <p className="admin-card-intro">Enable only the capabilities included in this pharmacy’s service.</p>
               <div className="admin-module-list">
-                {(Object.keys(MODULE_LABELS) as TenantModule[]).map(module => <label key={module}><span><strong>{MODULE_LABELS[module]}</strong><small>{selectedOrganisation.modules[module] ? 'Available to pharmacy staff' : 'Hidden from navigation'}</small></span><input type="checkbox" checked={selectedOrganisation.modules[module]} onChange={() => updateModule(module)} /></label>)}
+                {(Object.keys(MODULE_LABELS) as TenantModule[]).map(module => <label key={module}><span><strong>{MODULE_LABELS[module]}</strong><small>{selectedOrganisation.modules[module] ? 'Available to pharmacy staff' : 'Hidden from navigation'}</small></span><input type="checkbox" checked={selectedOrganisation.modules[module]} disabled /></label>)}
               </div>
             </section>
 
@@ -302,6 +375,11 @@ export default function AdminPortal() {
             {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
             <div className="compliance-table table-wrap"><table><thead><tr><th>Setup step</th><th>Evidence</th><th>Status</th></tr></thead><tbody>{SETUP_TASKS.map(definition => { const task = setupStatus?.tasks.find(item => item.id === definition.id); return <tr key={definition.id}><td><strong>{definition.title}</strong><small>{definition.description}</small></td><td>{task?.evidence || 'Not supplied yet'}</td><td><span className={`pill ${task?.completed ? 'pill-green' : 'pill-amber'}`}>{task?.completed ? 'Complete' : 'Waiting'}</span></td></tr>; })}</tbody></table></div>
           </section>
+
+          {showPharmacyEditor && <EditPharmacy key={selectedOrganisation.id} organisation={selectedOrganisation} onClose={() => setShowPharmacyEditor(false)} onSaved={updates => {
+            dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisation.id, updates });
+            dispatch({ type: 'ADD_TOAST', message: `${updates.tradingName ?? selectedOrganisation.tradingName} details saved to Firebase.`, toastType: 'success' });
+          }} />}
 
           <section className="card admin-patient-table">
             <div className="admin-directory-head"><div><h2>Patients attributed to this pharmacy</h2><p>Attribution is derived from the pharmacy token and retained on the patient record.</p></div></div>

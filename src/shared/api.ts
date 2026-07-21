@@ -13,6 +13,7 @@ import type {
   StaffAccessibilityPreferences,
   PortalSession,
   UpdatePharmacySetupTaskInput,
+  UpdateOrganisationInput,
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -75,6 +76,13 @@ export function createOrganisation(input: CreateOrganisationInput) {
 
 export function getAdminOrganisations() {
   return apiRequest<PortalOrganisation[]>('/v1/portal/admin/organisations');
+}
+
+export function updateOrganisation(organisationId: string, input: UpdateOrganisationInput) {
+  return apiRequest<PortalOrganisation>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
 }
 
 export function getPharmacySetupStatus(organisationId: string) {
