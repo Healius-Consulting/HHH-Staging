@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portal Gateway — Holistic Health Hub</title>
+<style>
+  :root {
+    --bg-root: #070A13;
+    --bg-surface: #0C101F;
+    --bg-card: #121829;
+    --border: #1E293B;
+    --text-primary: #F8FAFC;
+    --text-secondary: #94A3B8;
+    --text-tertiary: #64748B;
+    --color-primary: #10B981;
+    --color-primary-glow: rgba(16, 185, 129, 0.15);
+    --color-blue: #3B82F6;
+    --color-blue-glow: rgba(59, 130, 246, 0.15);
+    --radius-lg: 16px;
+    --radius-md: 10px;
+    --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  * { box-sizing: border-box; }
+  
+  body {
+    margin: 0;
+    background: var(--bg-root);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--text-primary);
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  .gateway-wrapper {
+    width: 100%;
+    max-width: 900px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+
+  .header {
+    text-align: center;
+  }
+
+  .logo {
+    width: 58px;
+    height: 58px;
+    border-radius: 14px;
+    background: var(--color-primary-glow);
+    border: 1.5px dashed var(--color-primary);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 22px;
+    margin: 0 auto 16px;
+  }
+
+  h1 { font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+  .subtitle { font-size: 14px; color: var(--text-secondary); margin: 6px 0 0; }
+
+  /* Portal Selector Cards */
+  .portal-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  @media (max-width: 680px) {
+    .portal-grid { grid-template-columns: 1fr; }
+  }
+
+  .portal-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 32px 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-start;
+    transition: var(--transition);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .portal-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    transition: var(--transition);
+  }
+
+  .portal-card.clinician::before { background: var(--color-blue); }
+  .portal-card.patient::before { background: var(--color-primary); }
+
+  .portal-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--text-tertiary);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  .portal-card.clinician:hover { border-color: var(--color-blue); }
+  .portal-card.patient:hover { border-color: var(--color-primary); }
+
+  .portal-icon {
+    font-size: 32px;
+    margin-bottom: 20px;
+    display: inline-block;
+    padding: 8px;
+    border-radius: var(--radius-md);
+  }
+
+  .clinician .portal-icon { background: var(--color-blue-glow); color: var(--color-blue); }
+  .patient .portal-icon { background: var(--color-primary-glow); color: var(--color-primary); }
+
+  h2 { font-size: 20px; font-weight: 600; margin: 0 0 10px; }
+  .desc { font-size: 13.5px; color: var(--text-secondary); margin: 0 0 24px; }
+
+  .btn {
+    width: 100%;
+    border: none;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 14.5px;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+    transition: var(--transition);
+  }
+
+  .clinician .btn { background: var(--color-blue); color: #fff; }
+  .clinician .btn:hover { background: #2563EB; box-shadow: 0 4px 12px var(--color-blue-glow); }
+
+  .patient .btn { background: var(--color-primary); color: #fff; }
+  .patient .btn:hover { background: #059669; box-shadow: 0 4px 12px var(--color-primary-glow); }
+
+  /* Eligibility widget card */
+  .eligibility-cta {
+    background: linear-gradient(135deg, #111827 0%, #0F172A 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: justify;
+    gap: 20px;
+  }
+
+  @media (max-width: 600px) {
+    .eligibility-cta { flex-direction: column; text-align: center; }
+  }
+
+  .eligibility-info { flex: 1; }
+  .eligibility-info h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  .eligibility-info p { margin: 0; font-size: 13px; color: var(--text-secondary); }
+
+  .eligibility-btn {
+    background: var(--color-primary-glow);
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary);
+    padding: 12px 24px;
+    border-radius: var(--radius-md);
+    font-weight: 700;
+    font-size: 14px;
+    text-decoration: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition);
+  }
+
+  .eligibility-btn:hover {
+    background: var(--color-primary);
+    color: #fff;
+    box-shadow: 0 0 16px var(--color-primary-glow);
+  }
+</style>
+</head>
+<body>
+
+<div class="gateway-wrapper">
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">HH</div>
+    <h1>Holistic Health Hub</h1>
+    <p class="subtitle">B2B2C Prescription Management Portal Gateway</p>
+  </div>
+
+  <!-- Main Selector Cards -->
+  <div class="portal-grid">
+    <!-- Clinician Portal -->
+    <div class="portal-card clinician" onclick="location.href='/'">
+      <div>
+        <div class="portal-icon">🩺</div>
+        <h2>Clinician &amp; Pharmacy Portal</h2>
+        <p class="desc">For pharmacy staff, prescribing practitioners, and clinic administrators to manage referrals, construct prescriptions, log Worldpay transactions, and handle goods check-in.</p>
+      </div>
+      <a href="/" class="btn">Enter Clinician Portal</a>
+    </div>
+
+    <!-- Patient Portal -->
+    <div class="portal-card patient" onclick="location.href='/specs/HHH-Patient-Portal.html'">
+      <div>
+        <div class="portal-icon">👤</div>
+        <h2>Patient Portal</h2>
+        <p class="desc">For candidates and patients to track doctor referral progress, check records audit history, pay Worldpay invoices securely, and download dispensing collection barcodes.</p>
+      </div>
+      <a href="/specs/HHH-Patient-Portal.html" class="btn">Enter Patient Portal</a>
+    </div>
+  </div>
+
+  <!-- Eligibility Pre-Screening CTA -->
+  <div class="eligibility-cta">
+    <div class="eligibility-info">
+      <h3>Prescription Service Inquiry</h3>
+      <p>Not a registered candidate yet? Complete our 2-minute pre-screening eligibility check to see if you qualify for specialist medical cannabis referral via your pharmacy.</p>
+    </div>
+    <a href="/specs/HHH-Eligibility-Form.html" class="eligibility-btn">Am I Eligible?</a>
+  </div>
+</div>
+
+<script>
+  (function() {
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token');
+    const hasToken = token === 'demo-token';
+    
+    if (hasToken) {
+      // 1. Update Header Logo & Title
+      document.querySelector('.logo').textContent = 'EM';
+      document.querySelector('h1').textContent = 'East Midlands Pharmacy';
+      document.querySelector('.subtitle').textContent = 'Whitelabeled Prescription & Intake Gateway';
+      
+      // 2. Update Clinician Card click & href
+      const clinicianCard = document.querySelector('.portal-card.clinician');
+      clinicianCard.setAttribute('onclick', "location.href='/?token=demo-token'");
+      clinicianCard.querySelector('a').setAttribute('href', '/?token=demo-token');
+      clinicianCard.querySelector('h2').textContent = 'Staff Portal';
+      clinicianCard.querySelector('.desc').textContent = 'For East Midlands Pharmacy Lincoln staff to process referrals, OCR scans, construct Rx builders, print thermal dispensing tags, and manage shipments.';
+      
+      // 3. Update Patient Card click & href
+      const patientCard = document.querySelector('.portal-card.patient');
+      patientCard.setAttribute('onclick', "location.href='/specs/HHH-Patient-Portal.html?token=demo-token'");
+      patientCard.querySelector('a').setAttribute('href', '/specs/HHH-Patient-Portal.html?token=demo-token');
+      patientCard.querySelector('h2').textContent = 'Patient Treatment Portal';
+      patientCard.querySelector('.desc').textContent = 'For your patients to securely check eligibility audit milestones, pay Worldpay invoices, and get their barcode check-in collection pass.';
+      
+      // 4. Update Eligibility CTA Button
+      const eligBtn = document.querySelector('.eligibility-btn');
+      eligBtn.setAttribute('href', '/specs/HHH-Eligibility-Form.html?token=demo-token');
+    }
+  })();
+</script>
+</body>
+</html>
