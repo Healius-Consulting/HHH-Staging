@@ -4,7 +4,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://europe-west2-hhh26-4ebd2.cloudfunctions.net/api/:path*" },
+    { "source": "/api/:path*", "destination": "https://us-central1-hhh26-4ebd2.cloudfunctions.net/api/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

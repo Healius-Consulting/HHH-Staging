@@ -140,7 +140,7 @@ app.use(express.json({ limit: '256kb', verify(request, _response, buffer) { (req
 app.get('/health', async (_request, response, next) => {
   try {
     await firestore.collection('_health').limit(1).get();
-    response.json({ status: 'ok', storage: 'firestore', region: 'europe-west2', checkedAt: timestamp() });
+    response.json({ status: 'ok', storage: 'firestore', region: 'us-central1', checkedAt: timestamp() });
   } catch (error) { next(error); }
 });
 

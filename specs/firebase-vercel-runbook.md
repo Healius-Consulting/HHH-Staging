@@ -4,7 +4,7 @@ This repository supports three independently configured surfaces:
 
 1. **Staff portal** — Vercel project using `vercel.json`, output `dist`.
 2. **Public eligibility form** — a second Vercel project using `vercel.eligibility.json`, output `dist-eligibility`.
-3. **Authenticated API** — Firebase Functions in `europe-west2`, with Firestore, Storage, App Check and Secret Manager.
+3. **Authenticated API** — Firebase Functions in `us-central1` for the temporary low-cost staging environment, with Firestore, App Check and Secret Manager. Production must return patient-data processing to an approved UK region before real use.
 
 For the temporary staging setup, the staff portal and public eligibility form share `https://hhh.thinktimeless.co.uk`. Eligibility links use `?mode=eligibility`, and Vercel proxies `/api/*` to the Firebase Function so the browser sees one public domain.
 

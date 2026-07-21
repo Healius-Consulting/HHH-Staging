@@ -30,7 +30,7 @@ export async function writeIntegrationSecret(organisationId: string, integration
     await client.createSecret({
       parent,
       secretId: secretId(organisationId, integration),
-      secret: { replication: { userManaged: { replicas: [{ location: 'europe-west2' }] } }, labels: { application: 'hhh', integration } },
+      secret: { replication: { userManaged: { replicas: [{ location: 'us-central1' }] } }, labels: { application: 'hhh', integration } },
     });
   }
 
