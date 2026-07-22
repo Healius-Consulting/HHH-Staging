@@ -2,12 +2,16 @@ import { useState, type FormEvent } from 'react';
 import { AlertCircle, CheckCircle2, KeyRound, LoaderCircle, LockKeyhole, LogIn, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
 import { firebaseConfiguration, mfaRequired } from './firebase';
 import { useAuth } from './useAuth';
+import HhhBrandMark from '../components/HhhBrandMark';
 
 function AuthShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="staff-login-page auth-page">
       <section className="staff-login-brand">
-        <img className="staff-login-wordmark" src="/holistic-health-hub-logo.png" alt="Holistic Health Hub" />
+        <div className="staff-login-lockup" aria-label="Holistic Health Hub">
+          <HhhBrandMark />
+          <span>Holistic<br />Health Hub</span>
+        </div>
         <p className="section-label">Secure staff platform</p>
         <h1>One secure sign-in.<br />The right workspace.</h1>
         <p>HHH administrators and pharmacy staff use verified, role-controlled access. Patient accounts are not supported in this staff application.</p>

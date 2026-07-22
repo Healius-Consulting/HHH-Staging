@@ -881,7 +881,16 @@ function reducer(state: AppState, action: Action): AppState {
         ...o, prescriptions: o.prescriptions.filter(r => r.id !== action.rxId),
       }));
     case 'CLEAR_ORDER':
-      return { ...state, orders: state.orders.filter(o => o.id !== action.orderId), activeOrderId: state.orders.length > 1 ? state.orders.find(o => o.id !== action.orderId)?.id ?? null : null };
+    {
+      const removedOrder = state.orders.find(order => order.id === action.orderId);
+      const orders = state.orders.filter(order => order.id !== action.orderId);
+      const nextDraft = orders.find(order => order.organisationId === removedOrder?.organisationId && order.payment.status === 'none');
+      return {
+        ...state,
+        orders,
+        activeOrderId: state.activeOrderId === action.orderId ? nextDraft?.id ?? null : state.activeOrderId,
+      };
+    }
 
     // ---- Payment ----
     case 'SEND_PAYMENT_LINK': {

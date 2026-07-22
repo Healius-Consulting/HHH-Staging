@@ -43,6 +43,7 @@ import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
 import WorkspaceNavigation, { type WorkspaceNavGroup } from '../components/WorkspaceNavigation';
+import HhhBrandMark from '../components/HhhBrandMark';
 import WorkspacePageHeader from '../components/WorkspacePageHeader';
 import CommandPalette, { type CommandDefinition } from '../components/CommandPalette';
 import SummaryTiles from '../components/SummaryTiles';
@@ -93,7 +94,7 @@ function AdminHeader({ view, setView, pending = 0, readiness = 0 }: { view: Admi
     groups={groups}
     mobilePrimaryKeys={['overview', 'referrals', 'patients', 'compliance']}
     onNavigate={setView}
-    brand={{ title: 'Holistic Health Hub', subtitle: 'Operations console', logoText: 'HHH' }}
+    brand={{ title: 'Holistic Health Hub', subtitle: 'Operations console', logo: <HhhBrandMark /> }}
     user={{ initials: staffName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase(), name: staffName, role: 'HHH administrator' }}
     exitAction={{ label: 'Sign out', icon: <LogOut size={14} />, onClick: () => void signOutStaff() }}
     moreTitle="More administration tools"

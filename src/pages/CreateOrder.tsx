@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileText, Minus, Plus, Search, Send, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileText, Minus, Pencil, Plus, Search, Send, Trash2, Upload } from 'lucide-react';
 import {
   useApp,
   money,
@@ -32,6 +32,8 @@ export default function CreateOrder() {
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogTypeFilter, setCatalogTypeFilter] = useState<string>('All');
   const [selectedPaymentRoute, setSelectedPaymentRoute] = useState<Exclude<PaymentRoute, null>>(canUseWorldpay ? 'worldpay' : 'pharmacy');
+  const [changingPatient, setChangingPatient] = useState(false);
+  const [confirmingDraftDelete, setConfirmingDraftDelete] = useState(false);
 
   useEffect(() => {
     if (!activeOrder?.prescriptions.length) return setSelectedRxId(null);
@@ -40,6 +42,8 @@ export default function CreateOrder() {
 
   useEffect(() => {
     setSelectedPaymentRoute(canUseWorldpay ? 'worldpay' : 'pharmacy');
+    setChangingPatient(false);
+    setConfirmingDraftDelete(false);
   }, [activeOrder?.id, canUseWorldpay]);
 
   useEffect(() => {
@@ -103,6 +107,23 @@ export default function CreateOrder() {
     dispatch({ type: 'SET_SCREEN', screen: 'review' });
   };
 
+  const changePatient = (patientId: string) => {
+    if (!activeOrder || !patientId || patientId === activeOrder.patientId) return;
+    const linkedPatient = tenantPatients.find(candidate => candidate.id === patientId);
+    if (!linkedPatient) return;
+    dispatch({ type: 'SET_ORDER_PATIENT', orderId: activeOrder.id, patientId });
+    dispatch({ type: 'ADD_TOAST', message: `Draft reassigned to ${linkedPatient.name}.`, toastType: 'success' });
+    setChangingPatient(false);
+  };
+
+  const deleteDraft = () => {
+    if (!activeOrder) return;
+    const deletedOrderId = activeOrder.id;
+    dispatch({ type: 'CLEAR_ORDER', orderId: deletedOrderId });
+    dispatch({ type: 'ADD_TOAST', message: `Draft order ${deletedOrderId} deleted.`, toastType: 'info' });
+    setConfirmingDraftDelete(false);
+  };
+
   return (
     <div className="page-body rx-workbench">
       <section className="rx-draft-bar" aria-label="Prescription draft sessions">
@@ -130,7 +151,17 @@ export default function CreateOrder() {
             <div className="rx-patient-band__identity">
               <span className="rx-step-number">01</span>
               {patient ? (
-                <><span className="avatar">{initials(patient.name)}</span><span><small>Approved patient</small><strong>{patient.name}</strong><em>{patient.email} · {patient.mobile}</em></span><span className="pill pill-green"><CheckCircle size={11} /> Linked</span></>
+                changingPatient ? (
+                  <div className="rx-patient-change">
+                    <label htmlFor={`rx-patient-${activeOrder.id}`}><small>Change linked patient</small><strong>Choose the correct approved patient</strong></label>
+                    <select id={`rx-patient-${activeOrder.id}`} className="input select" value={patient.id} onChange={event => changePatient(event.target.value)}>
+                      {tenantPatients.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.email}</option>)}
+                    </select>
+                    <button type="button" className="btn btn-sm" onClick={() => setChangingPatient(false)}>Cancel</button>
+                  </div>
+                ) : (
+                  <><span className="avatar">{initials(patient.name)}</span><span className="rx-patient-identity-copy"><small>Approved patient</small><strong>{patient.name}</strong><em>{patient.email} · {patient.mobile}</em></span><span className="pill pill-green"><CheckCircle size={11} /> Linked</span><div className="rx-patient-actions"><button type="button" className="btn btn-sm" onClick={() => setChangingPatient(true)}><Pencil size={12} /> Change patient</button><button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDelete(true)}><Trash2 size={14} /></button></div></>
+                )
               ) : (
                 <label className="rx-patient-picker">
                   <span><small>Start here</small><strong>Link an approved patient</strong></span>
@@ -146,6 +177,12 @@ export default function CreateOrder() {
             <div className="rx-readiness-summary" aria-label="Prescription readiness">
               {readiness.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}
             </div>
+            {confirmingDraftDelete && (
+              <div className="rx-draft-delete-confirm" role="alert">
+                <span><Trash2 size={16} /><span><strong>Delete this draft?</strong><small>The linked patient and every unfinished prescription record in this draft will be removed.</small></span></span>
+                <div><button type="button" className="btn btn-sm" onClick={() => setConfirmingDraftDelete(false)}>Keep draft</button><button type="button" className="btn btn-sm btn-danger" onClick={deleteDraft}>Delete draft</button></div>
+              </div>
+            )}
           </section>
 
           <div className="rx-workbench-layout">

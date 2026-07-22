@@ -1,6 +1,7 @@
 import { ArrowUpRight, Clock, FilePlus, Home, LogOut, Package, QrCode, Settings, Tags, UserSearch, Users } from 'lucide-react';
 import { useAuth } from '../auth/useAuth';
 import { useApp, type Screen } from '../context/AppContext';
+import HhhBrandMark from './HhhBrandMark';
 import WorkspaceNavigation, { type WorkspaceNavGroup } from './WorkspaceNavigation';
 
 export default function Navigation() {
@@ -47,7 +48,7 @@ export default function Navigation() {
       groups={groups}
       mobilePrimaryKeys={['home', 'referrals', 'create', 'review']}
       onNavigate={screen => dispatch({ type: 'SET_SCREEN', screen })}
-      brand={{ title: organisation.tradingName, subtitle: 'Pharmacy operations', logoText: organisation.logoText }}
+      brand={{ title: 'Holistic Health Hub', subtitle: 'Pharmacy operations', partner: organisation.tradingName, logo: <HhhBrandMark /> }}
       user={{ initials: staffInitials, name: staffName, role: isAdminViewingClient ? 'HHH administrator' : `Pharmacy staff · ${organisation.status}` }}
       exitAction={{
         label: isAdminViewingClient ? 'Return to administration' : 'Sign out',

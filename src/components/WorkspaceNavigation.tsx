@@ -21,7 +21,7 @@ interface WorkspaceNavigationProps<Key extends string> {
   groups: WorkspaceNavGroup<Key>[];
   mobilePrimaryKeys: Key[];
   onNavigate: (key: Key) => void;
-  brand: { title: string; subtitle: string; logoText?: string; logoSrc?: string };
+  brand: { title: string; subtitle: string; partner?: string; logoText?: string; logoSrc?: string; logo?: ReactNode };
   user: { initials: string; name: string; role: string };
   exitAction: { label: string; icon: ReactNode; onClick: () => void };
   moreTitle?: string;
@@ -78,15 +78,23 @@ export default function WorkspaceNavigation<Key extends string>({
       <aside className="sidebar workspace-sidebar" aria-label={ariaLabel}>
         <div className="sidebar-header">
           <div className="sidebar-brand" title={brand.title}>
-            {brand.logoSrc
-              ? <img className="workspace-sidebar-wordmark" src={brand.logoSrc} alt="" />
-              : <div className="sidebar-logo" aria-hidden="true">{brand.logoText}</div>}
-            <span><strong>{brand.title}</strong><small>{brand.subtitle}</small></span>
+            {brand.logo
+              ? <div className="workspace-sidebar-brand-mark">{brand.logo}</div>
+              : brand.logoSrc
+                ? <img className="workspace-sidebar-wordmark" src={brand.logoSrc} alt="" />
+                : <div className="sidebar-logo" aria-hidden="true">{brand.logoText}</div>}
+            <span className={brand.partner ? 'sidebar-brand-copy sidebar-brand-copy--cobrand' : 'sidebar-brand-copy'}>
+              <strong>{brand.title}</strong>
+              {brand.partner
+                ? <><i className="sidebar-brand-joiner" aria-hidden="true">×</i><small>{brand.partner}</small></>
+                : <small>{brand.subtitle}</small>}
+            </span>
           </div>
         </div>
         <nav className="sidebar-menu" aria-label={`${ariaLabel} navigation`}>
           {groups.map((group, index) => (
             <div className="workspace-nav-group" key={group.label}>
+              {index > 0 ? <span className="sidebar-section-separator" aria-hidden="true" /> : null}
               <span className={`sidebar-menu-label${index ? ' sidebar-menu-label--spaced' : ''}`}>{group.label}</span>
               {group.items.map(renderDesktopItem)}
             </div>
@@ -97,7 +105,7 @@ export default function WorkspaceNavigation<Key extends string>({
             <div className="user-profile-avatar" aria-hidden="true">{user.initials}</div>
             <div className="user-profile-info"><span className="user-profile-name">{user.name}</span><span className="user-profile-role">{user.role}</span></div>
           </div>
-          <button type="button" className="btn btn-sm sidebar-exit" onClick={exitAction.onClick}>{exitAction.icon}{exitAction.label}</button>
+          <button type="button" className="btn btn-sm sidebar-exit" title={exitAction.label} aria-label={exitAction.label} onClick={exitAction.onClick}>{exitAction.icon}<span>{exitAction.label}</span></button>
         </div>
       </aside>
 
