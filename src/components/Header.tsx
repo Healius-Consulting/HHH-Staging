@@ -1,38 +1,41 @@
 import { useApp } from '../context/AppContext';
-import AccessibilityPanel from '../accessibility/AccessibilityPanel';
-import { Building2 } from 'lucide-react';
+import WorkspacePageHeader from './WorkspacePageHeader';
 
 const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   home: {
-    title: 'Pharmacy Dashboard',
-    subtitle: 'Overview of HHH-approved patients, prescription preparation, payment requests and supply-chain status.',
+    title: 'Good morning',
+    subtitle: 'Your operational position and the work that needs attention today.',
   },
   referrals: {
-    title: 'HHH Patient Onboarding',
+    title: 'Patient onboarding',
     subtitle: 'Track patients attributed to your pharmacy while Holistic Health Hub completes its review and onboarding decision.',
   },
+  formulary: {
+    title: 'Formulary and pricing',
+    subtitle: 'Review Curaleaf WX and control the PX used by this pharmacy.',
+  },
   create: {
-    title: 'Rx Builder Workspace',
+    title: 'Prescription workspace',
     subtitle: 'Select an HHH-approved patient, verify the doctor’s prescription, and prepare the Curaleaf order.',
   },
   review: {
-    title: 'Payments & Billing',
+    title: 'Payments and billing',
     subtitle: 'Track active Worldpay payment requests and review cleared transaction logs.',
   },
   orders: {
-    title: 'Supplier Orders Fulfilment',
+    title: 'Supplier order fulfilment',
     subtitle: 'Track B2B orders sent to Curaleaf, confirm pharmacy receipt, and retrieve invoices.',
   },
   patients: {
-    title: 'Patients CRM Directory',
+    title: 'Patient directory',
     subtitle: 'Search the patient index and view order histories, clinical files, and logged activities.',
   },
   resources: {
-    title: 'Eligibility Form & Content Pack',
+    title: 'Forms and resources',
     subtitle: 'Copy the pharmacy-specific patient link, save its QR code, or hand a website pack to developers.',
   },
   settings: {
-    title: 'Organisation Settings',
+    title: 'Organisation',
     subtitle: 'Review your Worldpay connection, pharmacy pricing, enabled modules and go-live requirements.',
   },
 };
@@ -40,29 +43,16 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
 export default function Header() {
   const { state } = useApp();
   const organisation = state.organisations.find((org) => org.id === state.currentOrganisationId) ?? state.organisations[0];
-  const environmentName = (import.meta.env.VITE_APP_ENV || import.meta.env.MODE || 'development').replace(/-/g, ' ');
   const info = SCREEN_HEADERS[state.screen] || {
     title: 'HHH Portal',
     subtitle: 'Ordering & Payments Interface',
   };
 
-  return (
-    <header className="app-header">
-      <div className="brand-text">
-        <h1>{info.title}</h1>
-        <p>{info.subtitle}</p>
-      </div>
-      <div className="app-header__actions">
-        <div className="header-context" aria-label={`Current pharmacy: ${organisation.tradingName}`}>
-          <Building2 size={15} aria-hidden="true" />
-          <span>{organisation.tradingName}</span>
-          <span className={`tenant-status tenant-status--${organisation.status}`}>{organisation.status}</span>
-        </div>
-        <span className="environment-indicator" title="Current application environment">
-          <span aria-hidden="true" /> {state.workspaceMode === 'training' ? 'training data' : environmentName}
-        </span>
-        <AccessibilityPanel />
-      </div>
-    </header>
-  );
+  return <WorkspacePageHeader
+    section="Workspace"
+    context={organisation.tradingName}
+    title={info.title}
+    subtitle={info.subtitle}
+    contextControl={<div className="header-context" aria-label={`Current pharmacy status: ${organisation.status}`}><span>Account</span><span className={`tenant-status tenant-status--${organisation.status}`}>{organisation.status}</span></div>}
+  />;
 }

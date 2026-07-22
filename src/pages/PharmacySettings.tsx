@@ -8,10 +8,11 @@ import {
   RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
-  Truck,
+  Tags,
 } from 'lucide-react';
-import { useApp, type DeliveryOption, type TenantModule } from '../context/AppContext';
+import { useApp, type TenantModule } from '../context/AppContext';
 import { brandSwatchStyle } from '../utils/tenantTheme';
+import { isApiConfigured, updatePaymentSettings } from '../shared/api';
 
 const MODULE_LABELS: Record<TenantModule, { name: string; description: string }> = {
   intake: { name: 'Patient onboarding', description: 'Pharmacy-attributed eligibility submissions and HHH decisions' },
@@ -33,6 +34,16 @@ export default function PharmacySettings() {
   const { state, dispatch } = useApp();
   const [showConnectionDetails, setShowConnectionDetails] = useState(false);
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
+  const toggleWorldpay = async (enabled: boolean) => {
+    dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled } });
+    try {
+      if (state.workspaceMode === 'live' && isApiConfigured) await updatePaymentSettings(organisation.id, enabled);
+      dispatch({ type: 'ADD_TOAST', message: enabled ? 'Worldpay has been enabled as a payment option. Link the pharmacy merchant account before using it.' : 'Worldpay has been removed from the prescription checkout. The existing account link has not been deleted.', toastType: 'success' });
+    } catch (error) {
+      dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled: !enabled } });
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Payment settings could not be saved.', toastType: 'error' });
+    }
+  };
   const startWorldpayOnboarding = () => {
     dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { status: 'onboarding' } });
     dispatch({ type: 'ADD_TOAST', message: 'Worldpay onboarding started. Continue in the secure Worldpay window when platform access is configured.', toastType: 'info' });
@@ -41,10 +52,6 @@ export default function PharmacySettings() {
   const syncWorldpay = () => {
     dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { lastSyncedAt: new Date() } });
     dispatch({ type: 'ADD_TOAST', message: 'Worldpay account status refreshed.', toastType: 'success' });
-  };
-
-  const updateDeliveryOption = (optionId: string, updates: Partial<DeliveryOption>) => {
-    dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { deliveryOptions: organisation.deliveryOptions.map(option => option.id === optionId ? { ...option, ...updates } : option) } });
   };
 
   return (
@@ -64,19 +71,24 @@ export default function PharmacySettings() {
           <div className="settings-card-head">
             <div className="settings-card-icon"><CreditCard size={18} /></div>
             <div><p className="section-label">Payment provider</p><h2>Your Worldpay connection</h2></div>
-            <span className={`pill ${organisation.worldpay.status === 'connected' ? 'pill-green' : organisation.worldpay.status === 'action-required' ? 'pill-red' : 'pill-amber'}`}>{statusLabel[organisation.worldpay.status]}</span>
+            <span className={`pill ${!organisation.worldpay.enabled ? '' : organisation.worldpay.status === 'connected' ? 'pill-green' : organisation.worldpay.status === 'action-required' ? 'pill-red' : 'pill-amber'}`}>{organisation.worldpay.enabled ? statusLabel[organisation.worldpay.status] : 'Disabled'}</span>
           </div>
 
-          <div className="connection-summary">
+          <label className="payment-provider-toggle">
+            <input type="checkbox" checked={organisation.worldpay.enabled} onChange={event => void toggleWorldpay(event.target.checked)} />
+            <span><strong>Offer Worldpay checkout</strong><small>Staff can select Worldpay while reviewing a prescription. The linked merchant account receives patient funds directly.</small></span>
+          </label>
+
+          {organisation.worldpay.enabled && <div className="connection-summary">
             <div><span>Environment</span><strong>{organisation.worldpay.environment === 'live' ? 'Live' : 'Sandbox'}</strong></div>
             <div><span>Merchant</span><strong>{organisation.worldpay.merchantName ?? 'Not assigned'}</strong></div>
             <div><span>Merchant ID</span><strong>{organisation.worldpay.merchantId ?? 'Pending onboarding'}</strong></div>
             <div><span>Monthly HHH fee</span><strong>{organisation.platformFeeMonthly == null ? 'To be agreed' : `£${organisation.platformFeeMonthly.toFixed(2)}`}</strong></div>
-          </div>
+          </div>}
 
-          <div className="settings-note"><ShieldCheck size={16} /><span>Patient funds settle directly to your pharmacy. HHH does not retain a percentage of prescription sales; your separate platform subscription is shown above.</span></div>
+          <div className="settings-note"><ShieldCheck size={16} /><span>{organisation.worldpay.enabled ? 'Patient funds settle directly to your pharmacy. HHH does not retain a percentage of prescription sales; your separate platform subscription is shown above.' : 'Pharmacy-managed payment remains available. Enabling Worldpay does not send an order or move funds until the pharmacy links its merchant account and staff create a payment request.'}</span></div>
 
-          <div className="flex gap-sm flex-wrap">
+          {organisation.worldpay.enabled && <div className="flex gap-sm flex-wrap">
             {organisation.worldpay.status === 'connected' ? (
               <>
                 <button className="btn btn-primary" onClick={syncWorldpay}><RefreshCw size={14} /> Sync status</button>
@@ -85,7 +97,7 @@ export default function PharmacySettings() {
             ) : (
               <button className="btn btn-primary" onClick={startWorldpayOnboarding}><ExternalLink size={14} /> Connect Worldpay</button>
             )}
-          </div>
+          </div>}
 
           {showConnectionDetails && (
             <div className="connection-actions">
@@ -111,19 +123,10 @@ export default function PharmacySettings() {
 
       <section className="card settings-card pharmacy-pricing-card">
         <div className="settings-card-head">
-          <div className="settings-card-icon"><Truck size={18} /></div>
-          <div><p className="section-label">Pharmacy-controlled pricing</p><h2>Prescription and delivery charges</h2><p>Your team sets each prescription item’s patient price in the Rx Builder. Configure the delivery choices shown during order preparation here.</p></div>
+          <div className="settings-card-icon"><Tags size={18} /></div>
+          <div><p className="section-label">Pharmacy-controlled pricing</p><h2>Formulary and dispensing charges</h2><p>Curaleaf WX is read-only. Your team controls PX in the formulary and can add an optional dispensing charge while building an order.</p></div>
         </div>
-        <div className="pharmacy-delivery-list">
-          {organisation.deliveryOptions.map(option => (
-            <div className="pharmacy-delivery-row" key={option.id}>
-              <label className="delivery-enabled"><input type="checkbox" checked={option.enabled} onChange={event => updateDeliveryOption(option.id, { enabled: event.target.checked })} /><span>{option.enabled ? 'Enabled' : 'Disabled'}</span></label>
-              <label>Delivery option<input className="input" value={option.label} onChange={event => updateDeliveryOption(option.id, { label: event.target.value })} /></label>
-              <label>Description<input className="input" value={option.description} onChange={event => updateDeliveryOption(option.id, { description: event.target.value })} /></label>
-              <label>Patient charge<span className="money-input"><span>£</span><input type="number" min="0" step="0.01" value={option.amount} onChange={event => updateDeliveryOption(option.id, { amount: Math.max(0, Number(event.target.value)) })} /></span></label>
-            </div>
-          ))}
-        </div>
+        <div className="settings-pricing-summary"><div><strong>Fulfilment</strong><span>Patient collection from the pharmacy</span></div><div><strong>Dispensing charge</strong><span>Optional, set per prescription order</span></div><button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'formulary' })}>Open formulary pricing</button></div>
       </section>
 
       <section className="card settings-card modules-card">

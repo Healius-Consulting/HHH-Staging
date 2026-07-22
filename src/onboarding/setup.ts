@@ -6,7 +6,6 @@ export interface SetupTaskDefinition {
   description: string;
   evidenceLabel: string;
   placeholder: string;
-  options?: Array<{ value: string; label: string }>;
 }
 
 export const SETUP_TASKS: SetupTaskDefinition[] = [
@@ -28,20 +27,15 @@ export const SETUP_TASKS: SetupTaskDefinition[] = [
     id: 'payment_route',
     title: 'Choose a payment route',
     description: 'Worldpay is optional, but every pharmacy must choose how patient payment will be confirmed.',
-    evidenceLabel: 'Payment route',
+    evidenceLabel: 'Payment routes',
     placeholder: '',
-    options: [
-      { value: 'manual', label: 'Manual pharmacy payments' },
-      { value: 'worldpay-sandbox', label: 'Worldpay sandbox' },
-      { value: 'worldpay-live', label: 'Worldpay live merchant' },
-    ],
   },
   {
     id: 'pricing',
     title: 'Confirm charges',
-    description: 'Review medicine prices, dispensing fees and the pharmacy’s collection or delivery charges.',
+    description: 'Review medicine prices and the optional dispensing charge used for pharmacy collection orders.',
     evidenceLabel: 'Pricing confirmation',
-    placeholder: 'e.g. Delivery and dispensing charges approved',
+    placeholder: 'e.g. Formulary prices and dispensing charge approved',
   },
   {
     id: 'notifications',

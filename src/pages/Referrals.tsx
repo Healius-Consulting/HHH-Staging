@@ -1,6 +1,8 @@
-import { CheckCircle2, Clock3, FileText, LinkIcon, PhoneCall, ShieldCheck, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Check, CheckCircle2, Clock3, Copy, LinkIcon, PhoneCall, ShieldCheck, XCircle } from 'lucide-react';
 import { useApp, type SubmissionStatus } from '../context/AppContext';
 import { eligibilityUrl } from '../utils/pharmacyResources';
+import SummaryTiles from '../components/SummaryTiles';
 
 const STATUS_META: Record<SubmissionStatus, { label: string; pill: string; icon: React.ReactNode }> = {
   New: { label: 'Received by HHH', pill: 'pill-info', icon: <Clock3 size={13} /> },
@@ -10,33 +12,49 @@ const STATUS_META: Record<SubmissionStatus, { label: string; pill: string; icon:
 };
 
 export default function Referrals() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
+  const [copied, setCopied] = useState(false);
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
+  const attributedLink = eligibilityUrl(organisation);
   const submissions = state.submissions
     .filter(submission => submission.organisationId === organisation.id)
     .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
   const pending = submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review').length;
   const approved = submissions.filter(submission => submission.status === 'Approved').length;
 
+  const copyAttributedLink = async () => {
+    try {
+      await navigator.clipboard.writeText(attributedLink);
+      setCopied(true);
+      dispatch({ type: 'ADD_TOAST', message: `${organisation.tradingName} eligibility link copied.`, toastType: 'success' });
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      dispatch({ type: 'ADD_TOAST', message: 'The eligibility link could not be copied. Use Forms & resources instead.', toastType: 'warning' });
+    }
+  };
+
   return (
     <div className="page-body">
       <section className="card intake-banner">
         <div className="intake-banner__inner">
-          <div className="flex items-center gap-sm text-sm"><LinkIcon size={14} className="text-green" /><span className="text-muted">Your attributed eligibility link:</span><a href={eligibilityUrl(organisation)} target="_blank" rel="noopener noreferrer" className="intake-banner__link">Open {organisation.tradingName} form</a></div>
-          <span className="text-xs text-tertiary">Every submission made through this link remains linked to your pharmacy.</span>
+          <div className="intake-banner__copy"><LinkIcon size={16} aria-hidden="true" /><div><strong>Pharmacy eligibility link</strong><span>Every submission through this link is attributed to {organisation.tradingName}.</span></div></div>
+          <button type="button" className="btn btn-sm intake-copy-button" onClick={() => void copyAttributedLink()} aria-live="polite">
+            {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+            {copied ? 'Copied' : 'Copy pharmacy link'}
+          </button>
         </div>
       </section>
 
       <section className="integration-boundary card pharmacy-referral-boundary">
         <ShieldCheck size={20} />
-        <div><strong>Holistic Health Hub controls programme onboarding</strong><p>Shaylen reviews the enquiry and calls the patient. Once HHH approves onboarding, the patient appears in your CRM and can be selected in the Rx Builder. Your pharmacy still needs a valid doctor’s prescription before taking payment or placing a Curaleaf order.</p></div>
+        <div><strong>Holistic Health Hub controls programme onboarding</strong><p>The HHH team reviews the enquiry and calls the patient. Once HHH approves onboarding, the patient appears in your CRM and can be selected in the Rx Builder. Your pharmacy still needs a valid doctor’s prescription before taking payment or placing a Curaleaf order.</p></div>
       </section>
 
-      <div className="stats-grid referral-summary-grid">
-        <div className="stat-card"><FileText size={18} /><strong>{submissions.length}</strong><span>Attributed enquiries</span></div>
-        <div className="stat-card"><Clock3 size={18} /><strong>{pending}</strong><span>With HHH for review</span></div>
-        <div className="stat-card"><CheckCircle2 size={18} /><strong>{approved}</strong><span>Approved patients</span></div>
-      </div>
+      <SummaryTiles className="summary-tiles--compact summary-tiles--three" label="Onboarding totals" items={[
+        { label: 'Received', value: submissions.length, detail: 'attributed enquiries' },
+        { label: 'In review', value: pending, detail: 'with HHH' },
+        { label: 'Released', value: approved, detail: 'approved patients' },
+      ]} />
 
       <section className="card admin-patient-table pharmacy-referral-register">
         <div className="admin-directory-head"><div><h2>Onboarding status</h2><p>This is a read-only pharmacy view. HHH records the telephone review and final onboarding decision.</p></div></div>

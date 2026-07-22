@@ -157,6 +157,13 @@ export interface PortalOrganisation {
   platformFeeMonthly?: number | null;
   portalName?: string;
   modules?: OrganisationModules;
+  worldpayEnabled?: boolean;
+}
+
+export interface PaymentSettings {
+  organisationId: string;
+  worldpayEnabled: boolean;
+  updatedAt: string;
 }
 
 export interface PortalSession {
@@ -188,4 +195,15 @@ export interface CreatePharmacyStaffInput {
 export interface PharmacyStaffInvitation extends PharmacyStaffAccount {
   invitationQueued: boolean;
   actionLink: string;
+}
+
+export interface FormularyPriceRecord {
+  productId: string;
+  patientPricePence: number | null;
+  updatedAt: string;
+}
+
+export interface UpdateFormularyPriceInput {
+  productId: string;
+  patientPricePence: number | null;
 }

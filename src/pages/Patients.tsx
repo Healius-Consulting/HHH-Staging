@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Search, ChevronRight, Plus, X, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
 import { useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
+import { useModalFocus } from '../accessibility/useModalFocus';
 
 /* ── Unified patient row model ── */
 interface UnifiedPatient {
@@ -110,6 +111,7 @@ export default function Patients() {
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+  const patientDrawerRef = useModalFocus<HTMLDivElement>(Boolean(selectedPatientId), () => setSelectedPatientId(null));
 
   /* ── Build merged patient list ── */
   const patients = useMemo(() => {
@@ -239,38 +241,38 @@ export default function Patients() {
     <div className="page-body" style={{ position: 'relative' }}>
       
       {/* ══ Metrics Grid / Tab Switchers ══ */}
-      <div className="filter-grid">
-        <div className={`card card-surface filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
+      <div className="filter-grid" role="group" aria-label="Filter patient directory">
+        <button type="button" aria-pressed={activeTab === 'all'} className={`card card-surface filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
           <div className="filter-card__head">
             <span>All Patients</span>
             <Users size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} />
           </div>
           <span className="filter-card__value">{patients.length}</span>
-        </div>
+        </button>
 
-        <div className={`card card-surface filter-card ${activeTab === 'enquiries' ? 'active' : ''}`} onClick={() => setActiveTab('enquiries')}>
+        <button type="button" aria-pressed={activeTab === 'enquiries'} className={`card card-surface filter-card ${activeTab === 'enquiries' ? 'active' : ''}`} onClick={() => setActiveTab('enquiries')}>
           <div className="filter-card__head">
             <span>Enquiries</span>
             <Clipboard size={14} className={activeTab === 'enquiries' ? 'text-red' : 'text-muted'} />
           </div>
           <span className="filter-card__value">{activeEnquiries}</span>
-        </div>
+        </button>
 
-        <div className={`card card-surface filter-card ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
+        <button type="button" aria-pressed={activeTab === 'active'} className={`card card-surface filter-card ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
           <div className="filter-card__head">
             <span>Active Treatments</span>
             <CheckCircle size={14} className={activeTab === 'active' ? 'text-green' : 'text-muted'} />
           </div>
           <span className="filter-card__value">{totalCRM}</span>
-        </div>
+        </button>
 
-        <div className={`card card-surface filter-card ${activeTab === 'on-order' ? 'active' : ''}`} onClick={() => setActiveTab('on-order')}>
+        <button type="button" aria-pressed={activeTab === 'on-order'} className={`card card-surface filter-card ${activeTab === 'on-order' ? 'active' : ''}`} onClick={() => setActiveTab('on-order')}>
           <div className="filter-card__head">
             <span>On Order</span>
             <Package size={14} className={activeTab === 'on-order' ? 'text-amber' : 'text-muted'} />
           </div>
           <span className="filter-card__value">{onOrderCount}</span>
-        </div>
+        </button>
       </div>
 
       <div className="toolbar-row">
@@ -279,6 +281,7 @@ export default function Patients() {
           <input
             className="input"
             placeholder="Search CRM directory by name, email, or mobile..."
+            aria-label="Search patient directory"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -288,6 +291,7 @@ export default function Patients() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
           <span className="text-muted font-semibold">Sort by:</span>
           <select 
+            aria-label="Sort patient directory"
             value={sortKey} 
             onChange={e => setSortKey(e.target.value as SortKey)}
             style={{
@@ -339,11 +343,7 @@ export default function Patients() {
                   })
                 );
                 return (
-                  <tr
-                    key={p.id}
-                    onClick={() => setSelectedPatientId(p.id)}
-                    style={{ cursor: 'pointer' }}
-                  >
+                  <tr key={p.id}>
                     <td className="font-semibold">
                       <div className="flex items-center gap-sm">
                         <div className="avatar" style={{ width: 28, height: 28, fontSize: 12 }}>{initials(p.name)}</div>
@@ -384,13 +384,13 @@ export default function Patients() {
       {/* ══ Right Slide-over Detail Drawer ══ */}
       {selectedPatient && (
         <>
-          <div className="drawer-backdrop" onClick={() => setSelectedPatientId(null)} />
-          <div className="drawer">
+          <div className="drawer-backdrop" aria-hidden="true" onClick={() => setSelectedPatientId(null)} />
+          <div ref={patientDrawerRef} className="drawer" role="dialog" aria-modal="true" aria-labelledby="patient-drawer-title" tabIndex={-1}>
             <div className="drawer-header">
               <div className="flex items-center gap-md">
                 <div className="avatar" style={{ width: 50, height: 50, fontSize: 18 }}>{initials(selectedPatient.name)}</div>
                 <div>
-                  <h3 className="font-bold" style={{ fontSize: 18, color: 'var(--text-primary)' }}>{selectedPatient.name}</h3>
+                  <h3 id="patient-drawer-title" className="font-bold" style={{ fontSize: 18, color: 'var(--text-primary)' }}>{selectedPatient.name}</h3>
                   <span className={`pill ${deriveStatus(selectedPatient).pill}`} style={{ fontSize: 12, marginTop: 4 }}>
                     {deriveStatus(selectedPatient).label}
                   </span>
@@ -405,7 +405,9 @@ export default function Patients() {
                   <Plus size={12} /> Create Order
                 </button>
                 <button
+                  type="button"
                   className="toast-close"
+                  aria-label="Close patient details"
                   onClick={() => setSelectedPatientId(null)}
                   style={{ background: 'rgba(255,255,255,0.06)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
@@ -593,7 +595,7 @@ export default function Patients() {
                               {rx.items.map((item, itemIdx) => (
                                 <div key={itemIdx} className="flex justify-between text-xs text-muted" style={{ fontSize: 11 }}>
                                   <span>{item.name} &times; {item.qty}</span>
-                                  <span>{money(item.retail * item.qty + (item.fee || 0))}</span>
+                                  <span>{money(item.retail * item.qty)}</span>
                                 </div>
                               ))}
                             </div>

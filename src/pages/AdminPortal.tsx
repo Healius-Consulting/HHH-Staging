@@ -21,7 +21,6 @@ import {
   Search,
   Settings2,
   ShieldCheck,
-  UserRound,
   UserPlus,
   UserCheck,
   UserX,
@@ -37,10 +36,15 @@ import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources'
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
-import AccessibilityPanel from '../accessibility/AccessibilityPanel';
 import { activateCuraleafPharmacy, createOrganisation, createPharmacyStaffInvitation, getPharmacySetupStatus, getPharmacyStaff, updateOrganisation } from '../shared/api';
 import type { PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
+import { useModalFocus } from '../accessibility/useModalFocus';
+import WorkspaceNavigation, { type WorkspaceNavGroup } from '../components/WorkspaceNavigation';
+import WorkspacePageHeader from '../components/WorkspacePageHeader';
+import CommandPalette, { type CommandDefinition } from '../components/CommandPalette';
+import SummaryTiles from '../components/SummaryTiles';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'compliance' | 'integrations';
 
@@ -66,24 +70,32 @@ function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
 }
 
-function AdminHeader({ view, setView }: { view: AdminView; setView: (view: AdminView) => void }) {
+function AdminHeader({ view, setView, pending = 0, readiness = 0 }: { view: AdminView; setView: (view: AdminView) => void; pending?: number; readiness?: number }) {
   const { signOutStaff } = useAuth();
-  const items: Array<{ id: AdminView; label: string; icon: React.ReactNode }> = [
-    { id: 'overview', label: 'Clients', icon: <LayoutDashboard size={15} /> },
-    { id: 'referrals', label: 'Onboarding', icon: <UserCheck size={15} /> },
-    { id: 'patients', label: 'Patients', icon: <Users size={15} /> },
-    { id: 'compliance', label: 'Readiness', icon: <ClipboardCheck size={15} /> },
-    { id: 'integrations', label: 'Integrations', icon: <Settings2 size={15} /> },
+  const { state } = useApp();
+  const staffName = state.staffSession?.name || 'HHH Administrator';
+  const groups: WorkspaceNavGroup<AdminView>[] = [
+    { label: 'Administration', items: [
+      { key: 'overview', label: 'Clients', icon: <LayoutDashboard size={17} /> },
+      { key: 'referrals', label: 'Onboarding', icon: <UserCheck size={17} />, count: pending },
+      { key: 'patients', label: 'Patients', icon: <Users size={17} /> },
+    ] },
+    { label: 'Platform', items: [
+      { key: 'compliance', label: 'Readiness', icon: <ClipboardCheck size={17} />, count: readiness },
+      { key: 'integrations', label: 'Integrations', icon: <Settings2 size={17} /> },
+    ] },
   ];
-  return (
-    <header className="admin-header">
-      <div className="admin-header-brand"><img className="hhh-wordmark" src="/holistic-health-hub-logo.png" alt="Holistic Health Hub" /><span><small>Healius Consulting · Administration</small></span></div>
-      <nav className="admin-nav" aria-label="Administration sections">
-        {items.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}>{item.icon}{item.label}</button>)}
-      </nav>
-      <div className="admin-header-actions"><AccessibilityPanel /><button className="btn btn-sm" onClick={() => void signOutStaff()}><LogOut size={14} /> Sign out</button></div>
-    </header>
-  );
+  return <WorkspaceNavigation
+    ariaLabel="HHH administration"
+    activeKey={view}
+    groups={groups}
+    mobilePrimaryKeys={['overview', 'referrals', 'patients', 'compliance']}
+    onNavigate={setView}
+    brand={{ title: 'Holistic Health Hub', subtitle: 'Operations console', logoText: 'HHH' }}
+    user={{ initials: staffName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase(), name: staffName, role: 'HHH administrator' }}
+    exitAction={{ label: 'Sign out', icon: <LogOut size={14} />, onClick: () => void signOutStaff() }}
+    moreTitle="More administration tools"
+  />;
 }
 
 function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
@@ -98,6 +110,7 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const onboardingTheme = deriveTenantTheme(primary);
+  const onboardingDialogRef = useModalFocus<HTMLElement>(true, onClose);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -111,13 +124,8 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
       const organisation: PharmacyTenant = {
         id: created.id, slug, referralToken: created.referralToken, name, tradingName, logoText, gphcNumber, superintendent, address, websiteDomains,
         status: 'onboarding', staffCount: 0, platformFeeMonthly: null,
-        deliveryOptions: [
-          { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
-          { id: 'priority', label: 'Priority tracked delivery', description: 'Faster service where available from the supplier.', amount: 12.95, enabled: true },
-          { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
-        ],
         brand: { primary, portalName: `${tradingName} Patient Services` }, modules: defaultModules,
-        worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+        worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
       };
       dispatch({ type: 'ADD_ORGANISATION', organisation });
       dispatch({ type: 'ADD_TOAST', message: `${tradingName} onboarding record created in Firebase.`, toastType: 'success' });
@@ -131,7 +139,7 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
 
   return (
     <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
-      <aside className="drawer admin-onboarding-drawer" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
+      <aside ref={onboardingDialogRef} className="drawer admin-onboarding-drawer" role="dialog" aria-modal="true" aria-labelledby="onboard-title" tabIndex={-1}>
         <div className="drawer-header"><div><p className="section-label">New client</p><h2 id="onboard-title">Onboard a pharmacy</h2></div><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
         <form className="drawer-body onboarding-form" onSubmit={submit}>
           <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Legal and GPhC identity used for compliance evidence.</small></div></div>
@@ -169,6 +177,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editTheme = deriveTenantTheme(primaryColour);
+  const editDialogRef = useModalFocus<HTMLElement>(true, onClose);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -197,7 +206,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
 
   return (
     <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
-      <aside className="drawer admin-onboarding-drawer" role="dialog" aria-modal="true" aria-labelledby="edit-pharmacy-title">
+      <aside ref={editDialogRef} className="drawer admin-onboarding-drawer" role="dialog" aria-modal="true" aria-labelledby="edit-pharmacy-title" tabIndex={-1}>
         <div className="drawer-header"><div><p className="section-label">HHH administrator</p><h2 id="edit-pharmacy-title">Edit pharmacy details</h2></div><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
         <form className="drawer-body onboarding-form" onSubmit={submit}>
           <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Corrections are saved to Firebase and added to the audit trail.</small></div></div>
@@ -241,6 +250,16 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     let cancelled = false;
     setLoading(true);
     setError(null);
+    if (isLocalPortalPreview) {
+      const records: PharmacyStaffAccount[] = [
+        { uid: `${organisation.id}-owner`, email: 'owner@pharmacy.example', displayName: 'Alex Morgan', role: 'pharmacy_staff', organisationId: organisation.id, contactRole: 'owner', status: 'active', createdAt: new Date().toISOString() },
+        { uid: `${organisation.id}-staff`, email: 'dispensary@pharmacy.example', displayName: 'Sam Reed', role: 'pharmacy_staff', organisationId: organisation.id, contactRole: 'staff', status: 'active', createdAt: new Date().toISOString() },
+      ];
+      setStaff(records);
+      onCountChange(records.length);
+      setLoading(false);
+      return;
+    }
     void getPharmacyStaff(organisation.id)
       .then(records => {
         if (cancelled) return;
@@ -261,7 +280,9 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     setInvitation(null);
     setEmailDelivery(null);
     try {
-      const created = await createPharmacyStaffInvitation({ organisationId: organisation.id, displayName, email });
+      const created = isLocalPortalPreview
+        ? { uid: `preview-${Date.now()}`, organisationId: organisation.id, displayName, email, role: 'pharmacy_staff' as const, contactRole: staff.length ? 'staff' as const : 'owner' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: true, actionLink: '#local-preview' }
+        : await createPharmacyStaffInvitation({ organisationId: organisation.id, displayName, email });
       const updated = [...staff, created];
       setStaff(updated);
       setInvitation(created);
@@ -269,6 +290,11 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
       setEmail('');
       onCountChange(updated.length);
       try {
+        if (isLocalPortalPreview) {
+          setEmailDelivery('sent');
+          dispatch({ type: 'ADD_TOAST', message: 'Local preview account created. No email was sent.', toastType: 'success' });
+          return;
+        }
         await sendPasswordResetEmail(requireFirebaseAuth(), created.email);
         setEmailDelivery('sent');
         dispatch({ type: 'ADD_TOAST', message: `${created.displayName} was added and Firebase sent their setup email.`, toastType: 'success' });
@@ -329,7 +355,7 @@ export default function AdminPortal() {
   }, [dispatch, selectedOrganisationId]);
 
   useEffect(() => {
-    document.querySelector<HTMLElement>('.admin-shell')?.scrollTo({ top: 0 });
+    document.getElementById('admin-main-content')?.scrollTo({ top: 0 });
   }, [view, selectedOrganisationId]);
 
   useEffect(() => {
@@ -339,6 +365,21 @@ export default function AdminPortal() {
     }
     let cancelled = false;
     setSetupError(null);
+    if (isLocalPortalPreview) {
+      const statuses = state.organisations.map((organisation, organisationIndex): PharmacySetupStatus => {
+        const completedCount = organisationIndex === 0 ? 4 : 2;
+        return {
+          organisationId: organisation.id,
+          completed: completedCount === SETUP_TASKS.length,
+          completedCount,
+          requiredCount: SETUP_TASKS.length,
+          updatedAt: new Date().toISOString(),
+          tasks: SETUP_TASKS.map((task, taskIndex) => ({ id: task.id, completed: taskIndex < completedCount, completedAt: taskIndex < completedCount ? new Date().toISOString() : null, completedBy: taskIndex < completedCount ? 'Preview staff' : null, evidence: taskIndex < completedCount ? 'Preview evidence recorded' : null })),
+        };
+      });
+      setSetupByOrganisation(Object.fromEntries(statuses.map(status => [status.organisationId, status])));
+      return;
+    }
     void Promise.all(state.organisations.map(organisation => getPharmacySetupStatus(organisation.id)))
       .then(statuses => {
         if (!cancelled) setSetupByOrganisation(Object.fromEntries(statuses.map(status => [status.organisationId, status])));
@@ -381,6 +422,15 @@ export default function AdminPortal() {
   });
   const liveCount = state.organisations.filter(org => org.status === 'live').length;
   const remainingSetupSteps = Object.values(setupByOrganisation).reduce((total, status) => total + status.requiredCount - status.completedCount, 0);
+  const pendingAdminDecisions = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review').length;
+  const adminCommands: CommandDefinition[] = [
+    { label: 'Open clients', detail: 'Manage pharmacy organisations', icon: <LayoutDashboard size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); } },
+    { label: 'Review onboarding', detail: 'Record patient calls and decisions', icon: <UserCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('referrals'); } },
+    { label: 'Search patients', detail: 'Open the cross-client patient register', icon: <Users size={16} />, run: () => { setSelectedOrganisationId(null); setView('patients'); } },
+    { label: 'Review readiness', detail: 'Inspect pharmacy setup progress', icon: <ClipboardCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('compliance'); } },
+    { label: 'Open integrations', detail: 'Curaleaf and platform connections', icon: <Settings2 size={16} />, run: () => { setSelectedOrganisationId(null); setView('integrations'); } },
+    { label: 'Onboard pharmacy', detail: 'Create a new client workspace', icon: <Plus size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); setShowOnboarding(true); } },
+  ];
 
   const tenantReadiness = (organisationId: string) => {
     const status = setupByOrganisation[organisationId];
@@ -398,9 +448,12 @@ export default function AdminPortal() {
     const tenantTheme = deriveTenantTheme(selectedOrganisation.brand.primary);
 
     return (
-      <main className="admin-shell">
-        <AdminHeader view={view} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
-        <div className="admin-content">
+      <div className="app-shell admin-shell unified-admin-shell">
+        <a className="skip-link" href="#admin-main-content">Skip to main content</a>
+        <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
+        <div className="app-main">
+          <WorkspacePageHeader section="Client workspace" context="HHH administration" title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} contextControl={<div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div>} />
+          <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
           <button className="btn btn-sm admin-detail-back" onClick={() => setSelectedOrganisationId(null)}><ArrowLeft size={14} /> Back to client directory</button>
 
           <section className="admin-client-heading">
@@ -408,12 +461,12 @@ export default function AdminPortal() {
             <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><strong>{readiness.percent}% setup complete</strong><button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
           </section>
 
-          <div className="stats-grid admin-detail-stats">
-            <div className="stat-card"><Users size={18} /><strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong><span>Attributed patients</span></div>
-            <div className="stat-card"><UserRound size={18} /><strong>{selectedOrganisation.staffCount}</strong><span>Staff accounts</span></div>
-            <div className="stat-card"><ClipboardCheck size={18} /><strong>{readiness.ready}/{readiness.total}</strong><span>Setup steps complete</span></div>
-            <div className="stat-card"><CreditCard size={18} /><strong>{selectedOrganisation.platformFeeMonthly == null ? 'Not set' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`}</strong><span>Monthly platform fee</span></div>
-          </div>
+          <SummaryTiles className="summary-tiles--compact" label="Client account summary" items={[
+            { label: 'Patients', value: new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size, detail: 'attributed records' },
+            { label: 'Access', value: selectedOrganisation.staffCount, detail: 'staff accounts' },
+            { label: 'Readiness', value: `${readiness.ready}/${readiness.total}`, detail: 'steps complete' },
+            { label: 'Platform fee', value: selectedOrganisation.platformFeeMonthly == null ? '—' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`, detail: 'per month' },
+          ]} />
 
           <PharmacyStaffManager key={selectedOrganisation.id} organisation={selectedOrganisation} onCountChange={updateSelectedStaffCount} />
 
@@ -475,20 +528,22 @@ export default function AdminPortal() {
             <div className="admin-directory-head"><div><h2>Patients attributed to this pharmacy</h2><p>Attribution is derived from the pharmacy token and retained on the patient record.</p></div></div>
             {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Condition</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><strong>{sub.name}</strong><small>{sub.email}</small></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td>{sub.condition}</td><td>{sub.source}</td><td><span className="pill pill-info">{sub.status}</span></td></tr>)}</tbody></table></div>}
           </section>
+          </div>
         </div>
-      </main>
+        <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a client, register or platform action…" />
+      </div>
     );
   }
 
   const renderOverview = () => (
     <>
-      <div className="admin-title"><div><p className="section-label">Multi-pharmacy operations</p><h1>Client administration</h1><p>Provision tenant workspaces, monitor attribution and control each pharmacy’s go-live gate.</p></div><button className="btn btn-primary" onClick={() => setShowOnboarding(true)}><Plus size={15} /> Onboard pharmacy</button></div>
-      <div className="stats-grid admin-overview-stats">
-        <div className="stat-card"><Building2 size={18} /><strong>{state.organisations.length}</strong><span>Pharmacy clients</span></div>
-        <div className="stat-card"><ShieldCheck size={18} /><strong>{liveCount}</strong><span>Live tenants</span></div>
-        <div className="stat-card"><Users size={18} /><strong>{allPatients.length}</strong><span>Attributed patients</span></div>
-        <div className="stat-card"><AlertCircle size={18} /><strong>{remainingSetupSteps}</strong><span>Setup steps remaining</span></div>
-      </div>
+      <div className="admin-workspace-toolbar"><span><p className="section-label">Portfolio position</p><strong>Multi-pharmacy operations</strong><small>Provision workspaces and control each go-live gate.</small></span><button className="btn btn-primary" onClick={() => setShowOnboarding(true)}><Plus size={15} /> Onboard pharmacy</button></div>
+      <SummaryTiles label="Portfolio summary" items={[
+        { label: 'Portfolio', value: state.organisations.length, detail: 'pharmacy clients' },
+        { label: 'Operating', value: liveCount, detail: 'live tenants' },
+        { label: 'Patient reach', value: allPatients.length, detail: 'attributed records' },
+        { label: 'Readiness', value: remainingSetupSteps, detail: 'steps outstanding' },
+      ]} />
 
       {remainingSetupSteps > 0 && <section className="card admin-attention-strip">
         <div><AlertCircle size={18} /><span><strong>Some pharmacy setup is still incomplete</strong><small>{remainingSetupSteps} step{remainingSetupSteps === 1 ? '' : 's'} remain across the current pharmacy clients.</small></span></div>
@@ -529,11 +584,11 @@ export default function AdminPortal() {
           <td><strong>{submission.name}</strong><small>{submission.email} · {submission.mobile}</small></td>
           <td><strong>{organisation?.tradingName ?? submission.pharmacyName}</strong><small>Token-attributed pharmacy</small></td>
           <td><strong>{submission.condition}</strong><small>{submission.tried2 ? 'Two treatments reported' : 'Treatment history requires review'} · {submission.psychExclusion ? 'Exclusion flagged' : 'No psychosis exclusion reported'}</small></td>
-          <td><strong>{submission.calls.length}</strong><small>{hasCall ? `Last call ${new Date(submission.calls.at(-1)!.ts).toLocaleDateString('en-GB')}` : 'Shaylen call required before decision'}</small></td>
+          <td><strong>{submission.calls.length}</strong><small>{hasCall ? `Last call ${new Date(submission.calls.at(-1)!.ts).toLocaleDateString('en-GB')}` : 'Patient call required before decision'}</small></td>
           <td><span className={`pill ${statusClass(submission.status)}`}>{submission.status}</span>{submission.reviewedBy && <small>{submission.reviewedBy} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</td>
           <td>
             {submission.status === 'New' || submission.status === 'Under HHH review' ? <div className="admin-referral-actions">
-              <button className="btn btn-sm" onClick={() => dispatch({ type: 'LOG_CALL', subId: submission.id })}><PhoneCall size={13} /> Log Shaylen call</button>
+              <button className="btn btn-sm" onClick={() => { dispatch({ type: 'LOG_CALL', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `Patient call recorded for ${submission.name}.`, toastType: 'success' }); }}><PhoneCall size={13} /> Patient Called</button>
               <button className="btn btn-sm btn-primary" disabled={!hasCall} onClick={() => { dispatch({ type: 'APPROVE_ONBOARDING', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `${submission.name} approved for HHH programme onboarding and released to ${organisation?.tradingName ?? 'the pharmacy'}.`, toastType: 'success' }); }}><UserCheck size={13} /> Approve</button>
               <button className="btn btn-sm" disabled={!hasCall} onClick={() => { dispatch({ type: 'DECLINE_ONBOARDING', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `${submission.name} was not approved for programme onboarding.`, toastType: 'warning' }); }}><UserX size={13} /> Decline</button>
             </div> : <small>{submission.decisionNote}</small>}
@@ -543,15 +598,15 @@ export default function AdminPortal() {
     };
     return (
       <>
-        <div className="admin-title"><div><p className="section-label">HHH programme gate</p><h1>Patient onboarding decisions</h1><p>Eligibility links attribute patients to a pharmacy. Shaylen reviews and calls each patient; only HHH-approved patients are released into that pharmacy’s ordering CRM.</p></div><span className="pill pill-amber"><PhoneCall size={13} /> {pending.length} awaiting decision</span></div>
+        <div className="admin-workspace-toolbar"><span><p className="section-label">Programme gate</p><strong>Decision queue</strong><small>A recorded patient call is required before approval or decline.</small></span><span className="pill pill-amber"><PhoneCall size={13} /> {pending.length} awaiting decision</span></div>
         <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Approval boundary</strong><p>HHH approval authorises programme onboarding only. It does not diagnose, prescribe, replace a doctor’s prescription, or replace the pharmacy’s legal and professional checks before dispensing.</p></div></section>
         <section className="card admin-patient-table admin-referral-register">
-          <div className="admin-directory-head"><div><h2>Awaiting HHH review</h2><p>A logged patient call is required before an approval or decline decision can be recorded.</p></div></div>
-          {pending.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>HHH calls</th><th>Status</th><th>Decision</th></tr></thead><tbody>{pending.map(row)}</tbody></table></div> : <div className="empty-state">No onboarding decisions are waiting.</div>}
+          <div className="admin-directory-head"><div><h2>Awaiting HHH review</h2><p>A patient call is required before an approval or decline decision can be recorded.</p></div></div>
+          {pending.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>Patient calls</th><th>Status</th><th>Decision</th></tr></thead><tbody>{pending.map(row)}</tbody></table></div> : <div className="empty-state">No onboarding decisions are waiting.</div>}
         </section>
         <section className="card admin-patient-table admin-referral-register">
           <div className="admin-directory-head"><div><h2>Decision history</h2><p>Approved patients become available only inside their attributed pharmacy workspace.</p></div></div>
-          {reviewed.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>HHH calls</th><th>Status</th><th>Decision record</th></tr></thead><tbody>{reviewed.map(row)}</tbody></table></div> : <div className="empty-state">No decisions have been recorded.</div>}
+          {reviewed.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>Patient calls</th><th>Status</th><th>Decision record</th></tr></thead><tbody>{reviewed.map(row)}</tbody></table></div> : <div className="empty-state">No decisions have been recorded.</div>}
         </section>
       </>
     );
@@ -559,7 +614,7 @@ export default function AdminPortal() {
 
   const renderPatients = () => (
     <>
-      <div className="admin-title"><div><p className="section-label">Cross-client register</p><h1>Patients and pharmacy attribution</h1><p>Authorised Healius Consulting administrators can see which pharmacy every patient reached and use this view to support client feedback.</p></div><span className="pill pill-info"><Users size={13} /> {allPatients.length} unique records</span></div>
+      <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-client register</p><strong>Patient index</strong><small>Operational oversight of pharmacy attribution.</small></span><span className="pill pill-info"><Users size={13} /> {allPatients.length} unique records</span></div>
       <section className="card admin-patient-table admin-master-patients">
         <div className="admin-directory-head"><div><h2>Patient register</h2><p>Operational oversight only. Every access must be authenticated and audited in production.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient or pharmacy" /></label></div>
         <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Acquisition source</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><strong>{patient.name}</strong><small>{patient.email} · {patient.mobile}</small></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown tenant'}</button><small>{org?.gphcNumber}</small></td><td><span className="pill pill-info">{patient.stage}</span></td><td>{patient.source}</td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB') : '—'}</td></tr>; })}</tbody></table></div>
@@ -569,13 +624,13 @@ export default function AdminPortal() {
 
   const renderCompliance = () => (
     <>
-      <div className="admin-title"><div><p className="section-label">Operational setup</p><h1>Pharmacy readiness</h1><p>A concise view of the six steps each pharmacy must complete before live processing.</p></div><span className="pill pill-info"><ClipboardCheck size={13} /> Six-step checklist</span></div>
-      <section className="compliance-summary-grid">
-        <div className="card"><span>Pharmacies</span><strong>{state.organisations.length}</strong><small>Current client accounts</small></div>
-        <div className="card"><span>Fully ready</span><strong>{Object.values(setupByOrganisation).filter(status => status.completed).length}</strong><small>All six steps complete</small></div>
-        <div className="card"><span>Steps complete</span><strong>{Object.values(setupByOrganisation).reduce((total, status) => total + status.completedCount, 0)}</strong><small>Across all pharmacies</small></div>
-        <div className="card"><span>Still waiting</span><strong>{remainingSetupSteps}</strong><small>Steps requiring action</small></div>
-      </section>
+      <div className="admin-workspace-toolbar"><span><p className="section-label">Operational setup</p><strong>Go-live position</strong><small>Six required steps per pharmacy.</small></span><span className="pill pill-info"><ClipboardCheck size={13} /> Six-step checklist</span></div>
+      <SummaryTiles label="Readiness summary" items={[
+        { label: 'Pharmacies', value: state.organisations.length, detail: 'client accounts' },
+        { label: 'Fully ready', value: Object.values(setupByOrganisation).filter(status => status.completed).length, detail: 'all steps complete' },
+        { label: 'Completed', value: Object.values(setupByOrganisation).reduce((total, status) => total + status.completedCount, 0), detail: 'steps recorded' },
+        { label: 'Waiting', value: remainingSetupSteps, detail: 'actions remaining' },
+      ]} />
       <section className="card admin-patient-table compliance-register">
         <div className="admin-directory-head"><div><h2>Client setup progress</h2><p>Open a client to see its evidence. Pharmacy staff update their own steps; Curaleaf activation remains HHH-admin only.</p></div></div>
         {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
@@ -610,8 +665,8 @@ export default function AdminPortal() {
 
   const renderIntegrations = () => (
     <>
-      <div className="admin-title"><div><p className="section-label">Shared infrastructure</p><h1>Platform integrations</h1><p>Supplier, payment, intake and notification services configured for the HHH platform operated by Healius Consulting.</p></div><span className="pill pill-info"><ShieldCheck size={13} /> Platform-level access</span></div>
-      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Tenant payment boundary</strong><p>Each pharmacy owns its patient prices and approved Worldpay merchant relationship. Patient funds settle directly to that pharmacy. HHH charges a separate platform subscription fee and does not retain a percentage of prescription sales.</p></div></section>
+      <div className="admin-workspace-toolbar"><span><p className="section-label">Shared infrastructure</p><strong>Connection controls</strong><small>Supplier, payment, intake and notification services.</small></span><span className="pill pill-info"><ShieldCheck size={13} /> Platform-level access</span></div>
+      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Tenant payment boundary</strong><p>Each pharmacy owns its PX and approved Worldpay merchant relationship. Patient funds settle directly to that pharmacy. HHH charges a separate platform subscription fee and does not retain a percentage of prescription sales.</p></div></section>
       <form className="card secure-integration-form" onSubmit={submitCuraleafActivation}>
         <div className="admin-directory-head"><div><p className="section-label">HHH administrator only</p><h2>Activate a pharmacy’s Curaleaf account</h2><p>After Curaleaf returns its onboarding email and customer ID, connect them here. Until this succeeds, the pharmacy stays in a session-only training workspace.</p></div><LockKeyhole size={22} /></div>
         <div className="form-grid-two">
@@ -629,17 +684,30 @@ export default function AdminPortal() {
     </>
   );
 
+  const pageMeta: Record<AdminView, { title: string; subtitle: string }> = {
+    overview: { title: 'Client administration', subtitle: 'Provision tenant workspaces, monitor attribution and control each pharmacy’s go-live gate.' },
+    referrals: { title: 'Patient onboarding decisions', subtitle: 'Record patient calls and release approved patients to their attributed pharmacy.' },
+    patients: { title: 'Patients and pharmacy attribution', subtitle: 'Review the cross-client patient index and its pharmacy ownership.' },
+    compliance: { title: 'Pharmacy readiness', subtitle: 'Track the six setup steps required before each pharmacy begins live processing.' },
+    integrations: { title: 'Platform integrations', subtitle: 'Manage Curaleaf activation and shared HHH infrastructure.' },
+  };
+
   return (
-    <main className="admin-shell">
-      <AdminHeader view={view} setView={next => { setView(next); setQuery(''); }} />
-      <div className="admin-content">
-        {view === 'overview' && renderOverview()}
-        {view === 'referrals' && renderReferrals()}
-        {view === 'patients' && renderPatients()}
-        {view === 'compliance' && renderCompliance()}
-        {view === 'integrations' && renderIntegrations()}
+    <div className="app-shell admin-shell unified-admin-shell">
+      <a className="skip-link" href="#admin-main-content">Skip to main content</a>
+      <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setView(next); setQuery(''); }} />
+      <div className="app-main">
+        <WorkspacePageHeader section="HHH operations" context="Administration" title={pageMeta[view].title} subtitle={pageMeta[view].subtitle} contextControl={<div className="header-context"><span>Access</span><span className="tenant-status tenant-status--live">Admin</span></div>} />
+        <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
+          {view === 'overview' && renderOverview()}
+          {view === 'referrals' && renderReferrals()}
+          {view === 'patients' && renderPatients()}
+          {view === 'compliance' && renderCompliance()}
+          {view === 'integrations' && renderIntegrations()}
+        </div>
       </div>
       {showOnboarding && <OnboardPharmacy onClose={() => setShowOnboarding(false)} onCreated={id => { setShowOnboarding(false); setSelectedOrganisationId(id); }} />}
-    </main>
+      <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a client, register or platform action…" />
+    </div>
   );
 }

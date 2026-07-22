@@ -1,5 +1,6 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
-import { getCuraleafConnectionStatus, getPortalEligibilitySubmissions, isApiConfigured } from '../shared/api';
+import { getCuraleafConnectionStatus, getFormularyPrices, getPortalEligibilitySubmissions, isApiConfigured } from '../shared/api';
+import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -8,18 +9,10 @@ import { getCuraleafConnectionStatus, getPortalEligibilitySubmissions, isApiConf
 export interface CatalogueItem {
   id: string;
   name: string;
-  cost: number;      // wholesale
-  retail: number;     // patient price
+  cost: number;      // WX
+  retail: number;     // PX
   stock: 'in' | 'low' | 'out';
   type: 'oil' | 'flos' | 'capsule' | 'lozenge' | 'vape';
-}
-
-export interface DeliveryOption {
-  id: string;
-  label: string;
-  description: string;
-  amount: number;
-  enabled: boolean;
 }
 
 export interface CRMPatient {
@@ -39,7 +32,6 @@ export interface LineItem {
   qty: number;
   cost: number;
   retail: number;
-  fee: number;       // dispensing fee
 }
 
 export type RxStatus =
@@ -84,9 +76,7 @@ export interface PatientOrder {
   organisationId: string;
   patientId: string | null;
   date: Date;
-  deliveryOptionId: string | null;
-  deliveryLabel: string | null;
-  feeExtra: number;
+  dispensingFee: number;
   payment: {
     status: PaymentStatus;
     route: PaymentRoute;
@@ -144,13 +134,13 @@ export interface PharmacyTenant {
   status: 'live' | 'onboarding' | 'paused';
   staffCount: number;
   platformFeeMonthly: number | null;
-  deliveryOptions: DeliveryOption[];
   brand: {
     primary: string;
     portalName: string;
   };
   modules: Record<TenantModule, boolean>;
   worldpay: {
+    enabled: boolean;
     status: 'not-connected' | 'onboarding' | 'connected' | 'action-required';
     environment: 'sandbox' | 'live';
     merchantId: string | null;
@@ -215,6 +205,7 @@ export interface Toast {
 export interface AppState {
   screen: Screen;
   catalogue: CatalogueItem[];
+  formularyPrices: Record<string, Record<string, number>>;
   crm: CRMPatient[];
   submissions: EligibilitySubmission[];
   orders: PatientOrder[];
@@ -251,12 +242,6 @@ export const CATALOGUE: CatalogueItem[] = [
   { id: 'P008', name: 'Curaleaf 510 Vape Cartridge 0.5g', cost: 34,   retail: 64,   stock: 'in',  type: 'vape' },
 ];
 
-const DEFAULT_DELIVERY_OPTIONS: DeliveryOption[] = [
-  { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
-  { id: 'priority', label: 'Priority tracked delivery', description: 'Faster service where available from the supplier.', amount: 12.95, enabled: true },
-  { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
-];
-
 export const ORGANISATIONS: PharmacyTenant[] = [
   {
     id: '11111111-1111-4111-8111-111111111111', slug: 'hhh-leeds', referralToken: 'hhh-leeds-7x4p9k',
@@ -265,10 +250,9 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['hhh.health'],
     status: 'onboarding', staffCount: 4,
     platformFeeMonthly: null,
-    deliveryOptions: DEFAULT_DELIVERY_OPTIONS.map(option => ({ ...option })),
     brand: { primary: '#0f766e', portalName: 'HHH Leeds Patient Services' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
-    worldpay: { status: 'connected', environment: 'sandbox', merchantId: 'WP-DEMO-LEEDS', merchantName: 'HHH Leeds', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
+    worldpay: { enabled: true, status: 'connected', environment: 'sandbox', merchantId: 'WP-DEMO-LEEDS', merchantName: 'HHH Leeds', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
   },
   {
     id: '22222222-2222-4222-8222-222222222222', slug: 'east-midlands-lincoln', referralToken: 'emp-lincoln-3m8q2v',
@@ -277,10 +261,9 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     address: 'Lincoln, Lincolnshire, United Kingdom', websiteDomains: ['eastmidlandspharmacy.co.uk'],
     status: 'onboarding', staffCount: 2,
     platformFeeMonthly: null,
-    deliveryOptions: DEFAULT_DELIVERY_OPTIONS.map(option => ({ ...option })),
     brand: { primary: '#315b7d', portalName: 'EMP Lincoln Patient Services' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: false, patients: true, resources: true },
-    worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+    worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
 ];
 
@@ -312,7 +295,7 @@ const SEED_CRM: CRMPatient[] = [
 export const money = (n: number) => '£' + n.toFixed(2);
 export const marginPct = (cost: number, retail: number) => retail > 0 ? Math.round((1 - cost / retail) * 100) : 0;
 
-export const lineRevenue = (item: LineItem) => item.retail * item.qty + (item.fee || 0);
+export const lineRevenue = (item: LineItem) => item.retail * item.qty;
 export const lineCost = (item: LineItem) => item.cost * item.qty;
 export const lineMargin = (item: LineItem) => {
   const rev = lineRevenue(item);
@@ -321,7 +304,7 @@ export const lineMargin = (item: LineItem) => {
 
 export const rxRevenue = (rx: Prescription) => rx.items.reduce((t, i) => t + lineRevenue(i), 0);
 export const rxCost = (rx: Prescription) => rx.items.reduce((t, i) => t + lineCost(i), 0);
-export const orderRevenue = (o: PatientOrder) => o.prescriptions.reduce((t, r) => t + rxRevenue(r), 0) + (o.feeExtra || 0);
+export const orderRevenue = (o: PatientOrder) => o.prescriptions.reduce((t, r) => t + rxRevenue(r), 0) + (o.dispensingFee || 0);
 export const orderCost = (o: PatientOrder) => o.prescriptions.reduce((t, r) => t + rxCost(r), 0);
 
 export const TYPE_LABELS: Record<string, string> = {
@@ -373,6 +356,8 @@ export type Action =
   | { type: 'UPDATE_COMPLIANCE'; itemId: string; status: ComplianceStatus; evidence?: string }
   | { type: 'UPDATE_PLATFORM_INTEGRATION'; integrationId: PlatformIntegration['id']; status: PlatformIntegration['status']; description?: string }
   | { type: 'SET_SCREEN'; screen: Screen }
+  | { type: 'SET_FORMULARY_PRICES'; organisationId: string; prices: Record<string, number> }
+  | { type: 'SET_FORMULARY_PRICE'; organisationId: string; productId: string; retail: number | null }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
   | { type: 'ADD_SUBMISSION'; submission: EligibilitySubmission }
@@ -384,7 +369,7 @@ export type Action =
   | { type: 'NEW_ORDER'; patientId?: string }
   | { type: 'SET_ACTIVE_ORDER'; orderId: number }
   | { type: 'SET_ORDER_PATIENT'; orderId: number; patientId: string }
-  | { type: 'SET_ORDER_DELIVERY'; orderId: number; optionId: string }
+  | { type: 'SET_ORDER_DISPENSING_FEE'; orderId: number; amount: number }
   | { type: 'ADD_RX'; orderId: number }
   | { type: 'SET_RX_PRESCRIBER'; orderId: number; rxId: number; prescriber: string }
   | { type: 'SET_RX_COPY'; orderId: number; rxId: number; fileName: string }
@@ -392,7 +377,6 @@ export type Action =
   | { type: 'REMOVE_ITEM_FROM_RX'; orderId: number; rxId: number; productId: string }
   | { type: 'UPDATE_ITEM_QTY'; orderId: number; rxId: number; productId: string; qty: number }
   | { type: 'SET_ITEM_RETAIL'; orderId: number; rxId: number; productId: string; retail: number }
-  | { type: 'SET_ITEM_FEE'; orderId: number; rxId: number; productId: string; fee: number }
   | { type: 'REMOVE_RX'; orderId: number; rxId: number }
   | { type: 'CLEAR_ORDER'; orderId: number }
   // Payment
@@ -423,7 +407,7 @@ function blankRx(id: number): Prescription {
 
 function blankOrder(id: number, patientId: string | null, organisationId: string): PatientOrder {
   return {
-    id, organisationId, patientId, date: new Date(), deliveryOptionId: null, deliveryLabel: null, feeExtra: 0,
+    id, organisationId, patientId, date: new Date(), dispensingFee: 0,
     payment: { status: 'none', route: null, amount: 0, ref: null, sentAt: null, paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions: [blankRx(1)],
   };
@@ -461,20 +445,20 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   const rx1: Prescription = {
     id: 1, prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_1.pdf',
     items: [
-      { productId: 'P001', name: 'Adven 20/1 THC Oil 30ml', qty: 2, cost: 42, retail: 79, fee: 0 },
-      { productId: 'P002', name: 'Curaleaf CBD 50 Oil 50ml', qty: 1, cost: 30, retail: 59, fee: 0 },
+      { productId: 'P001', name: 'Adven 20/1 THC Oil 30ml', qty: 2, cost: 42, retail: 79 },
+      { productId: 'P002', name: 'Curaleaf CBD 50 Oil 50ml', qty: 1, cost: 30, retail: 59 },
     ],
     placed: false, poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
   };
   const rx2: Prescription = {
     id: 2, prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_2.pdf',
     items: [
-      { productId: 'P003', name: 'Khiron 20/1 Oil 30ml', qty: 1, cost: 40, retail: 75, fee: 0 },
+      { productId: 'P003', name: 'Khiron 20/1 Oil 30ml', qty: 1, cost: 40, retail: 75 },
     ],
     placed: false, poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
   };
   const o1: PatientOrder = {
-    id: 1, organisationId: ORGANISATIONS[0].id, patientId: 'P-1001', date: new Date(), deliveryOptionId: 'standard', deliveryLabel: 'Standard tracked delivery', feeExtra: 6.95,
+    id: 1, organisationId: ORGANISATIONS[0].id, patientId: 'P-1001', date: new Date(), dispensingFee: 0,
     payment: { status: 'none', route: null, amount: 0, ref: null, sentAt: null, paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions: [rx1, rx2],
   };
@@ -482,14 +466,14 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   const rx3: Prescription = {
     id: 3, prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_asmith.pdf',
     items: [
-      { productId: 'P004', name: 'Noidecs T10:C10 Flos 10g', qty: 1, cost: 38.5, retail: 48, fee: 0 },
+      { productId: 'P004', name: 'Noidecs T10:C10 Flos 10g', qty: 1, cost: 38.5, retail: 48 },
     ],
     placed: true, poRef: 'PO-9002', status: 'ready', invoiceRef: 'INV-4071', trackingNumber: null, carrier: null,
     receivedItems: [{ productId: 'P004', quantityReceived: 1 }], goodsInAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), goodsInBy: 'S. Patel',
     readyAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), // 12 days ago
   };
   const o2: PatientOrder = {
-    id: 2, organisationId: ORGANISATIONS[0].id, patientId: 'P-1002', date: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000), deliveryOptionId: 'collection', deliveryLabel: 'No delivery charge', feeExtra: 0,
+    id: 2, organisationId: ORGANISATIONS[0].id, patientId: 'P-1002', date: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000), dispensingFee: 0,
     payment: { status: 'paid', route: 'worldpay', amount: 48, ref: 'WP-8812', sentAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), paidAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions: [rx3],
   };
@@ -497,12 +481,12 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   const rx4: Prescription = {
     id: 4, prescriber: 'Dr. S. Patel', copyFileName: 'prescription_jdoe_overdue.pdf',
     items: [
-      { productId: 'P001', name: 'Adven 20/1 THC Oil 30ml', qty: 1, cost: 42, retail: 79, fee: 0 },
+      { productId: 'P001', name: 'Adven 20/1 THC Oil 30ml', qty: 1, cost: 42, retail: 79 },
     ],
     placed: true, poRef: 'PO-9003', status: 'approved', invoiceRef: 'INV-4073', trackingNumber: null, carrier: null,
   };
   const o3: PatientOrder = {
-    id: 3, organisationId: ORGANISATIONS[0].id, patientId: 'P-1003', date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), deliveryOptionId: 'collection', deliveryLabel: 'No delivery charge', feeExtra: 0,
+    id: 3, organisationId: ORGANISATIONS[0].id, patientId: 'P-1003', date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), dispensingFee: 0,
     payment: {
       status: 'sent',
       route: 'worldpay',
@@ -517,12 +501,12 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   const rx5: Prescription = {
     id: 5, prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_sbennett.pdf',
     items: [
-      { productId: 'P006', name: 'Adven THC 10mg Capsules ×30', qty: 1, cost: 36, retail: 69, fee: 0 },
+      { productId: 'P006', name: 'Adven THC 10mg Capsules ×30', qty: 1, cost: 36, retail: 69 },
     ],
     placed: true, poRef: 'PO-9004', status: 'collected', invoiceRef: 'INV-4074', trackingNumber: null, carrier: null,
   };
   const o4: PatientOrder = {
-    id: 4, organisationId: ORGANISATIONS[0].id, patientId: 'P-1004', date: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), deliveryOptionId: 'collection', deliveryLabel: 'No delivery charge', feeExtra: 0, // 45 days ago
+    id: 4, organisationId: ORGANISATIONS[0].id, patientId: 'P-1004', date: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), dispensingFee: 0, // 45 days ago
     payment: {
       status: 'paid',
       route: 'pharmacy',
@@ -583,20 +567,21 @@ function buildComplianceItems(): ComplianceItem[] {
 }
 
 const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-const usePrototypeState = import.meta.env.DEV && !import.meta.env.VITE_FIREBASE_API_KEY;
+const usePrototypeState = import.meta.env.DEV && (!import.meta.env.VITE_FIREBASE_API_KEY || isLocalPortalPreview);
 let storedStaffSession: StaffSession | null = null;
 try {
   storedStaffSession = usePrototypeState
     ? JSON.parse(sessionStorage.getItem('hhh_staff_session') || 'null') as StaffSession | null
     : null;
 } catch { storedStaffSession = null; }
-const initialPortalMode: PortalMode = storedStaffSession?.role === 'admin' ? 'admin' : storedStaffSession?.role === 'pharmacy' ? 'clinician' : 'gateway';
+const initialPortalMode: PortalMode = localPortalPreview === 'admin' ? 'admin' : localPortalPreview === 'pharmacy' ? 'clinician' : storedStaffSession?.role === 'admin' ? 'admin' : storedStaffSession?.role === 'pharmacy' ? 'clinician' : 'gateway';
 const initialToken = urlParams?.get('token');
 const initialOrganisation = ORGANISATIONS.find(org => org.referralToken === initialToken || org.id === storedStaffSession?.organisationId) ?? ORGANISATIONS[0];
 
 const initialState: AppState = {
   screen: 'home',
   catalogue: usePrototypeState ? CATALOGUE : [],
+  formularyPrices: {},
   crm: usePrototypeState ? [...SEED_CRM] : [],
   submissions: usePrototypeState ? buildSeedSubmissions() : [],
   orders: usePrototypeState ? seed.orders : [],
@@ -647,6 +632,39 @@ function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_SCREEN':
       return { ...state, screen: action.screen };
+    case 'SET_FORMULARY_PRICES': {
+      const prices = Object.fromEntries(Object.entries(action.prices).map(([productId, retail]) => [productId, Math.max(0, retail)]));
+      return {
+        ...state,
+        formularyPrices: { ...state.formularyPrices, [action.organisationId]: prices },
+        orders: state.orders.map(order => order.organisationId !== action.organisationId || order.payment.status !== 'none' ? order : ({
+          ...order,
+          prescriptions: order.prescriptions.map(rx => ({
+            ...rx,
+            items: rx.items.map(item => prices[item.productId] === undefined ? item : { ...item, retail: prices[item.productId] }),
+          })),
+        })),
+      };
+    }
+    case 'SET_FORMULARY_PRICE': {
+      if (!state.catalogue.some(item => item.id === action.productId)) return state;
+      const current = state.formularyPrices[action.organisationId] ?? {};
+      const next = { ...current };
+      if (action.retail === null) delete next[action.productId];
+      else next[action.productId] = Math.max(0, action.retail);
+      const effectiveRetail = next[action.productId] ?? state.catalogue.find(item => item.id === action.productId)?.retail;
+      return {
+        ...state,
+        formularyPrices: { ...state.formularyPrices, [action.organisationId]: next },
+        orders: state.orders.map(order => order.organisationId !== action.organisationId || order.payment.status !== 'none' ? order : ({
+          ...order,
+          prescriptions: order.prescriptions.map(rx => ({
+            ...rx,
+            items: rx.items.map(item => item.productId === action.productId && effectiveRetail !== undefined ? { ...item, retail: effectiveRetail } : item),
+          })),
+        })),
+      };
+    }
     case 'LOG_INTERACTION': {
       return {
         ...state,
@@ -675,6 +693,7 @@ function reducer(state: AppState, action: Action): AppState {
           workspaceMode: 'training',
           screen: 'home',
           catalogue: CATALOGUE,
+          formularyPrices: {},
           crm: training.crm,
           submissions: training.submissions,
           orders: training.orders,
@@ -688,6 +707,7 @@ function reducer(state: AppState, action: Action): AppState {
         workspaceMode: 'live',
         screen: 'home',
         catalogue: [],
+        formularyPrices: {},
         crm: [],
         submissions: [],
         orders: [],
@@ -710,6 +730,7 @@ function reducer(state: AppState, action: Action): AppState {
         workspaceMode: 'training',
         screen: 'home',
         catalogue: usePrototypeState ? CATALOGUE : [],
+        formularyPrices: {},
         crm: usePrototypeState ? [...SEED_CRM] : [],
         submissions: usePrototypeState ? buildSeedSubmissions() : [],
         orders: usePrototypeState ? trainingSeed.orders : [],
@@ -813,11 +834,6 @@ function reducer(state: AppState, action: Action): AppState {
       const id = state.nextIds.order;
       const rxId = state.nextIds.rx;
       const newOrder = blankOrder(id, action.patientId || null, state.currentOrganisationId);
-      const organisation = state.organisations.find(item => item.id === state.currentOrganisationId);
-      const delivery = organisation?.deliveryOptions.find(option => option.enabled) ?? null;
-      newOrder.deliveryOptionId = delivery?.id ?? null;
-      newOrder.deliveryLabel = delivery?.label ?? null;
-      newOrder.feeExtra = delivery?.amount ?? 0;
       newOrder.prescriptions = [blankRx(rxId)];
       return {
         ...state,
@@ -833,13 +849,8 @@ function reducer(state: AppState, action: Action): AppState {
       const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && item.status === 'HHH approved');
       return patient ? mapOrder(state, action.orderId, o => ({ ...o, patientId: patient.id })) : state;
     }
-    case 'SET_ORDER_DELIVERY': {
-      const order = state.orders.find(item => item.id === action.orderId);
-      const organisation = state.organisations.find(item => item.id === order?.organisationId);
-      const delivery = organisation?.deliveryOptions.find(option => option.id === action.optionId && option.enabled);
-      if (!delivery) return state;
-      return mapOrder(state, action.orderId, o => ({ ...o, deliveryOptionId: delivery.id, deliveryLabel: delivery.label, feeExtra: delivery.amount }));
-    }
+    case 'SET_ORDER_DISPENSING_FEE':
+      return mapOrder(state, action.orderId, order => ({ ...order, dispensingFee: Math.max(0, action.amount) }));
     case 'ADD_RX': {
       const rxId = state.nextIds.rx;
       return {
@@ -864,10 +875,6 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_ITEM_RETAIL':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
         ...r, items: r.items.map(i => i.productId === action.productId ? { ...i, retail: Math.max(0, action.retail) } : i),
-      })));
-    case 'SET_ITEM_FEE':
-      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
-        ...r, items: r.items.map(i => i.productId === action.productId ? { ...i, fee: action.fee } : i),
       })));
     case 'REMOVE_RX':
       return mapOrder(state, action.orderId, o => ({
@@ -1051,7 +1058,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.staffSession]);
 
   useEffect(() => {
-    if (!isApiConfigured || !state.staffSession || state.workspaceMode !== 'live') return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.workspaceMode !== 'live') return;
     let cancelled = false;
     getCuraleafConnectionStatus().then(status => {
       if (cancelled) return;
@@ -1065,9 +1072,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [state.staffSession, state.workspaceMode]);
 
+  useEffect(() => {
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.workspaceMode !== 'live' || !state.currentOrganisationId) return;
+    let cancelled = false;
+    getFormularyPrices(state.currentOrganisationId).then(records => {
+      if (cancelled) return;
+      const prices = Object.fromEntries(records
+        .filter(record => record.patientPricePence !== null)
+        .map(record => [record.productId, record.patientPricePence! / 100]));
+      dispatch({ type: 'SET_FORMULARY_PRICES', organisationId: state.currentOrganisationId, prices });
+    }).catch(error => console.warn('Formulary pricing sync unavailable:', error));
+    return () => { cancelled = true; };
+  }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
+
   // Cross-domain intake sync. In production, the access token comes from staff authentication.
   useEffect(() => {
-    if (!isApiConfigured || !state.staffSession || (state.portalMode !== 'admin' && state.workspaceMode !== 'live')) return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || (state.portalMode !== 'admin' && state.workspaceMode !== 'live')) return;
     let cancelled = false;
     const sync = async () => {
       const organisations = state.portalMode === 'admin'

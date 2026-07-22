@@ -10,7 +10,8 @@ import { allowedOrigins, config } from './config.js';
 import { CuraleafRequestError, curaleafConnectionStatus, curaleafRequest, submitBarcodePrescription, submitManualPrescription } from './curaleaf.js';
 import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
-import { createRecord, getRecord, getTenantRecord, listTenantRecords, updateTenantRecord } from './repository.js';
+import { cached, invalidateCache } from './cache.js';
+import { createRecord, getRecord, getTenantRecord, invalidateCollectionCache, listTenantRecords, updateTenantRecord } from './repository.js';
 import { readIntegrationSecret, writeIntegrationSecret } from './secrets.js';
 import type { FulfilmentStatus, IntegrationName, PaymentStatus } from './types.js';
 import { createHostedPaymentSession, reconcileWorldpayPayment, type WorldpayCredential, verifyWorldpaySignature } from './worldpay.js';
@@ -47,6 +48,7 @@ const organisationDetailsSchema = z.object({
   platformFeeMonthly: z.number().nonnegative().max(100_000).nullable(),
   portalName: z.string().trim().min(1).max(200),
   modules: tenantModulesSchema,
+  worldpayEnabled: z.boolean(),
 });
 
 const setupDefinitions = [
@@ -83,7 +85,20 @@ const preferencesSchema = z.object({
   underlineLinks: z.boolean().default(false),
 });
 
-const publicLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
+const formularyPriceSchema = z.object({
+  productId: idSchema,
+  patientPricePence: z.number().int().nonnegative().max(10_000_000).nullable(),
+});
+
+const limitResponse = { code: 'RATE_LIMITED', message: 'Too many requests. Wait briefly before trying again.' };
+const publicReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
+const publicSubmissionLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false, message: { ...limitResponse, message: 'Too many form submissions from this connection. Try again later.' } });
+const webhookLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
+const healthLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
+const portalKey = (request: Request) => identity(request).uid;
+const portalReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 120, keyGenerator: portalKey, skip: request => request.method !== 'GET', standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
+const portalWriteLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, keyGenerator: portalKey, skip: request => ['GET', 'HEAD', 'OPTIONS'].includes(request.method), standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
+const externalProviderLimit = rateLimit({ windowMs: 60 * 1000, limit: 10, keyGenerator: portalKey, standardHeaders: 'draft-8', legacyHeaders: false, message: { ...limitResponse, message: 'Supplier or payment requests are temporarily rate limited. Wait a minute before retrying.' } });
 
 async function requirePublicAppCheck(request: Request, _response: Response, next: NextFunction) {
   if (config.REQUIRE_APP_CHECK !== 'true') return next();
@@ -98,22 +113,27 @@ async function requirePublicAppCheck(request: Request, _response: Response, next
 }
 
 async function resolveReferralToken(rawToken: string) {
-  const tokens = await firestore.collection('referralTokens').where('tokenHash', '==', tokenHash(rawToken)).where('revokedAt', '==', null).limit(1).get();
-  const token = tokens.docs[0]?.data();
-  if (!token) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
-  const organisation = await getRecord('organisations', token.organisationId as string);
-  if (!['live', 'onboarding'].includes(String(organisation.status))) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
-  return { token, organisation };
+  const hash = tokenHash(rawToken);
+  return cached(`referral:${hash}`, 60_000, async () => {
+    const tokens = await firestore.collection('referralTokens').where('tokenHash', '==', hash).where('revokedAt', '==', null).limit(1).get();
+    const token = tokens.docs[0]?.data();
+    if (!token) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
+    const organisation = await getRecord('organisations', token.organisationId as string);
+    if (!['live', 'onboarding'].includes(String(organisation.status))) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
+    return { token, organisation };
+  });
 }
 
 async function setupStatus(organisationId: string) {
-  const records = await firestore.collection('setupTasks').where('organisationId', '==', organisationId).get();
-  const byId = new Map(records.docs.map(document => [document.data().taskId as string, document.data()]));
-  const tasks = setupDefinitions.map(definition => ({ ...definition, completed: byId.get(definition.id)?.completed === true, evidence: byId.get(definition.id)?.evidence ?? null, completedAt: byId.get(definition.id)?.completedAt ?? null, completedBy: byId.get(definition.id)?.completedBy ?? null }));
-  const requiredCount = tasks.filter(task => task.required).length;
-  const completedCount = tasks.filter(task => task.required && task.completed).length;
-  const updatedAt = records.docs.map(document => String(document.data().updatedAt ?? '')).filter(Boolean).sort().at(-1) ?? timestamp();
-  return { organisationId, completed: completedCount === requiredCount, completedCount, requiredCount, tasks, updatedAt };
+  return cached(`setup:${organisationId}`, 15_000, async () => {
+    const records = await firestore.collection('setupTasks').where('organisationId', '==', organisationId).get();
+    const byId = new Map(records.docs.map(document => [document.data().taskId as string, document.data()]));
+    const tasks = setupDefinitions.map(definition => ({ ...definition, completed: byId.get(definition.id)?.completed === true, evidence: byId.get(definition.id)?.evidence ?? null, completedAt: byId.get(definition.id)?.completedAt ?? null, completedBy: byId.get(definition.id)?.completedBy ?? null }));
+    const requiredCount = tasks.filter(task => task.required).length;
+    const completedCount = tasks.filter(task => task.required && task.completed).length;
+    const updatedAt = records.docs.map(document => String(document.data().updatedAt ?? '')).filter(Boolean).sort().at(-1) ?? timestamp();
+    return { organisationId, completed: completedCount === requiredCount, completedCount, requiredCount, tasks, updatedAt };
+  });
 }
 
 async function requireSetupComplete(organisationId: string) {
@@ -143,6 +163,7 @@ async function uploadedFile(organisationId: string, fileId: string) {
   if (metadata.size && Number(metadata.size) > 10 * 1024 * 1024) throw new HttpError(400, 'Prescription files must be 10 MB or smaller.', 'FILE_TOO_LARGE');
   const [bytes] = await object.download();
   await firestore.collection('prescriptionFiles').doc(fileId).update({ status: 'uploaded', updatedAt: timestamp() });
+  invalidateCollectionCache('prescriptionFiles', fileId);
   return { bytes, contentType: record.contentType as string, filename: record.filename as string };
 }
 
@@ -166,21 +187,24 @@ app.use(helmet());
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.has(origin)) return callback(null, true); callback(new HttpError(403, 'Origin is not permitted.', 'ORIGIN_DENIED')); }, methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'] }));
 app.use(express.json({ limit: '256kb', verify(request, _response, buffer) { (request as Request).rawBody = Buffer.from(buffer); } }));
 
-app.get('/health', async (_request, response, next) => {
+app.get('/health', healthLimit, async (_request, response, next) => {
   try {
-    await firestore.collection('_health').limit(1).get();
+    await cached('health:firestore', 10_000, async () => {
+      await firestore.collection('_health').limit(1).get();
+      return true;
+    });
     response.json({ status: 'ok', storage: 'firestore', region: 'us-central1', checkedAt: timestamp() });
   } catch (error) { next(error); }
 });
 
-app.get('/v1/public/pharmacies/by-token/:token', publicLimit, requirePublicAppCheck, async (request, response, next) => {
+app.get('/v1/public/pharmacies/by-token/:token', publicReadLimit, requirePublicAppCheck, async (request, response, next) => {
   try {
     const { organisation } = await resolveReferralToken(tokenSchema.parse(request.params.token));
     response.json({ id: organisation.id, name: organisation.name, tradingName: organisation.tradingName, logoText: organisation.logoText, gphcNumber: organisation.gphcNumber, superintendent: organisation.superintendent, address: organisation.address, primaryColour: organisation.primaryColour });
   } catch (error) { next(error); }
 });
 
-app.post('/v1/public/eligibility-submissions', publicLimit, requirePublicAppCheck, async (request, response, next) => {
+app.post('/v1/public/eligibility-submissions', publicSubmissionLimit, requirePublicAppCheck, async (request, response, next) => {
   try {
     const input = eligibilitySchema.parse(request.body);
     const { token, organisation } = await resolveReferralToken(input.referralToken);
@@ -210,7 +234,7 @@ app.post('/v1/public/eligibility-submissions', publicLimit, requirePublicAppChec
   } catch (error) { next(error); }
 });
 
-app.post('/v1/public/worldpay/webhooks/:organisationId', publicLimit, async (request, response, next) => {
+app.post('/v1/public/worldpay/webhooks/:organisationId', webhookLimit, async (request, response, next) => {
   try {
     const organisationId = idSchema.parse(request.params.organisationId);
     const credential = await readIntegrationSecret<WorldpayCredential>(organisationId, 'worldpay');
@@ -237,13 +261,18 @@ app.post('/v1/public/worldpay/webhooks/:organisationId', publicLimit, async (req
     const verified = ['authorised', 'authorized', 'settled', 'success'].includes(providerStatus) && providerAmount === expected.amountPence;
     const status: PaymentStatus = verified ? 'paid' : 'reconciliation_required';
     await paymentDoc.ref.update({ status, providerResponse: provider, reconciledAt: timestamp(), updatedAt: timestamp() });
-    if (verified) await firestore.collection('orders').doc(expected.orderId as string).update({ paymentStatus: 'paid', updatedAt: timestamp() });
+    if (verified) {
+      await firestore.collection('orders').doc(expected.orderId as string).update({ paymentStatus: 'paid', updatedAt: timestamp() });
+      invalidateCollectionCache('orders', expected.orderId as string);
+    }
     await eventRef.update({ status, updatedAt: timestamp() });
     response.status(202).json({ accepted: true, reconciled: verified });
   } catch (error) { next(error); }
 });
 
 app.use('/v1/portal', requireStaff);
+app.use('/v1/portal', portalReadLimit, portalWriteLimit);
+app.use('/v1/portal/integrations', externalProviderLimit);
 
 app.get('/v1/portal/session', async (request, response, next) => {
   try {
@@ -256,8 +285,8 @@ app.get('/v1/portal/session', async (request, response, next) => {
     if (profile?.status === 'invited') {
       await staffSnapshot.ref.set({ status: 'active', activatedAt: timestamp(), updatedAt: timestamp() }, { merge: true });
       profile.status = 'active';
+      if (actor.organisationId) invalidateCache(`admin:staff:${actor.organisationId}`);
     }
-    await audit(request, 'session.verified');
     response.json({ uid: actor.uid, email: actor.email, role: actor.role, organisationId: actor.organisationId, profile, organisation });
   } catch (error) { next(error); }
 });
@@ -271,8 +300,20 @@ app.patch('/v1/portal/preferences', async (request, response, next) => {
   try {
     const preferences = preferencesSchema.parse(request.body);
     await firestore.collection('staffUsers').doc(identity(request).uid).set({ preferences, updatedAt: timestamp() }, { merge: true });
-    await audit(request, 'preferences.updated');
     response.json(preferences);
+  } catch (error) { next(error); }
+});
+
+app.put('/v1/portal/payment-settings', async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), worldpayEnabled: z.boolean() }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const updatedAt = timestamp();
+    await firestore.collection('organisations').doc(organisationId).set({ worldpayEnabled: input.worldpayEnabled, updatedAt }, { merge: true });
+    invalidateCollectionCache('organisations', organisationId);
+    invalidateCache('admin:organisations');
+    await audit(request, 'payment.settings_updated', { organisationId, worldpayEnabled: input.worldpayEnabled });
+    response.json({ organisationId, worldpayEnabled: input.worldpayEnabled, updatedAt });
   } catch (error) { next(error); }
 });
 
@@ -289,8 +330,47 @@ app.patch('/v1/portal/setup/:taskId', async (request, response, next) => {
     const organisationId = tenantFor(request, input.organisationId);
     const docId = `${organisationId}--${taskId}`;
     await firestore.collection('setupTasks').doc(docId).set({ id: docId, schemaVersion: 1, organisationId, taskId, completed: input.completed, evidence: input.evidence ?? null, completedAt: input.completed ? timestamp() : null, completedBy: input.completed ? identity(request).uid : null, updatedAt: timestamp() }, { merge: true });
+    invalidateCache(`setup:${organisationId}`);
     await audit(request, 'setup.task_updated', { organisationId, taskId, completed: input.completed });
     response.json(await setupStatus(organisationId));
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/portal/formulary-pricing', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    const records = await listTenantRecords('formularyPricing', organisationId, 500);
+    response.json(records.map(record => ({
+      productId: record.productId,
+      patientPricePence: record.patientPricePence ?? null,
+      updatedAt: record.updatedAt,
+    })));
+  } catch (error) { next(error); }
+});
+
+app.put('/v1/portal/formulary-pricing', async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), prices: z.array(formularyPriceSchema).min(1).max(500) }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const updatedAt = timestamp();
+    const updatedBy = identity(request).uid;
+    const batch = firestore.batch();
+    input.prices.forEach(price => {
+      const id = createHash('sha256').update(`${organisationId}:${price.productId}`).digest('hex');
+      batch.set(firestore.collection('formularyPricing').doc(id), {
+        id,
+        schemaVersion: 1,
+        organisationId,
+        productId: price.productId,
+        patientPricePence: price.patientPricePence,
+        updatedAt,
+        updatedBy,
+      }, { merge: true });
+    });
+    await batch.commit();
+    invalidateCollectionCache('formularyPricing');
+    await audit(request, 'formulary.prices_updated', { organisationId, productIds: input.prices.map(price => price.productId) });
+    response.json(input.prices.map(price => ({ ...price, updatedAt })));
   } catch (error) { next(error); }
 });
 
@@ -299,7 +379,6 @@ app.get('/v1/portal/eligibility-submissions', async (request, response, next) =>
     const organisationId = tenantFor(request, request.query.organisationId);
     const [records, organisation] = await Promise.all([listTenantRecords('eligibilitySubmissions', organisationId, 500), getRecord('organisations', organisationId)]);
     const statusLabels: Record<string, string> = { new: 'New', reviewing: 'Under HHH review', approved: 'Approved', declined: 'Declined' };
-    await audit(request, 'eligibility.list_viewed', { organisationId, recordCount: records.length });
     response.json(records.map(record => ({
       id: record.id, organisationId, pharmacyName: organisation.name,
       firstName: record.firstName, surname: record.surname, dob: record.dob, mobile: record.mobile, email: record.email,
@@ -324,7 +403,7 @@ app.patch('/v1/portal/eligibility-submissions/:id', async (request, response, ne
 });
 
 const patientSchema = z.object({ firstName: z.string().trim().min(1).max(100), surname: z.string().trim().min(1).max(100), dob: z.iso.date(), email: z.email(), mobile: z.string().trim().min(7).max(30), address: z.string().trim().max(500), postcode: z.string().trim().max(16), status: z.enum(['active', 'inactive']).default('active') });
-app.get('/v1/portal/patients', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('patients', organisationId); await audit(request, 'patient.list_viewed', { organisationId, recordCount: records.length }); response.json(records); } catch (error) { next(error); } });
+app.get('/v1/portal/patients', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('patients', organisationId); response.json(records); } catch (error) { next(error); } });
 app.post('/v1/portal/patients', async (request, response, next) => {
   try { const organisationId = tenantFor(request, request.body.organisationId); const record = await createRecord('patients', { ...patientSchema.parse(request.body), organisationId }); await audit(request, 'patient.created', { organisationId, recordId: record.id }); response.status(201).json(record); } catch (error) { next(error); }
 });
@@ -333,10 +412,10 @@ app.patch('/v1/portal/patients/:id', async (request, response, next) => {
 });
 
 const lineItemSchema = z.object({ productId: z.string().min(1).max(128), formulaId: z.string().min(1).max(128), packId: z.string().min(1).max(128), name: z.string().min(1).max(200), quantity: z.number().int().positive().max(100), unitPricePence: z.number().int().nonnegative() });
-const orderSchema = z.object({ patientId: idSchema, lineItems: z.array(lineItemSchema).min(1).max(50), totalPence: z.number().int().positive(), currency: z.literal('GBP').default('GBP'), paymentRoute: z.enum(['manual', 'worldpay']) });
-app.get('/v1/portal/orders', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('orders', organisationId); await audit(request, 'order.list_viewed', { organisationId, recordCount: records.length }); response.json(records); } catch (error) { next(error); } });
+const orderSchema = z.object({ patientId: idSchema, lineItems: z.array(lineItemSchema).min(1).max(50), dispensingFeePence: z.number().int().nonnegative().max(1_000_000).default(0), totalPence: z.number().int().positive(), currency: z.literal('GBP').default('GBP'), paymentRoute: z.enum(['manual', 'worldpay']) });
+app.get('/v1/portal/orders', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('orders', organisationId); response.json(records); } catch (error) { next(error); } });
 app.post('/v1/portal/orders', async (request, response, next) => {
-  try { const organisationId = tenantFor(request, request.body.organisationId); const input = orderSchema.parse(request.body); await getTenantRecord('patients', input.patientId, organisationId); const sum = input.lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, 0); if (sum !== input.totalPence) throw new HttpError(400, 'Order total does not match its line items.', 'AMOUNT_MISMATCH'); const record = await createRecord('orders', { ...input, organisationId, paymentStatus: 'pending', fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus }); await audit(request, 'order.created', { organisationId, recordId: record.id }); response.status(201).json(record); } catch (error) { next(error); }
+  try { const organisationId = tenantFor(request, request.body.organisationId); const input = orderSchema.parse(request.body); await getTenantRecord('patients', input.patientId, organisationId); const sum = input.lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, 0) + input.dispensingFeePence; if (sum !== input.totalPence) throw new HttpError(400, 'Order total does not match its products and dispensing charge.', 'AMOUNT_MISMATCH'); const record = await createRecord('orders', { ...input, organisationId, fulfilmentMethod: 'patient_collection', paymentStatus: 'pending', fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus }); await audit(request, 'order.created', { organisationId, recordId: record.id }); response.status(201).json(record); } catch (error) { next(error); }
 });
 
 app.post('/v1/portal/prescription-files/upload-url', async (request, response, next) => {
@@ -392,6 +471,7 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
         completedBy: status.connected ? identity(request).uid : null,
         updatedAt: timestamp(),
       }, { merge: true });
+      invalidateCache(`setup:${organisationId}`);
       await firestore.collection('integrationConnections').doc(id).set({ status: status.connected ? 'connected' : 'attention', updatedAt: timestamp() }, { merge: true });
     }
     await audit(request, 'integration.credentials_rotated', { organisationId, integration });
@@ -428,7 +508,7 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
   try {
     const input = manualPrescriptionSchema.parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const order = await getTenantRecord('orders', input.orderId, organisationId); if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Payment must be confirmed before Curaleaf submission.', 'PAYMENT_REQUIRED');
     operation = await startOperation(organisationId, input.orderId, 'manual'); const file = await uploadedFile(organisationId, input.fileId); const result = await submitManualPrescription(organisationId, { ...input, customerReference: operation.reference, file });
-    await operation.document.update({ status: 'completed', result, updatedAt: timestamp() }); await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, fulfilmentStatus: 'supplier_processing', updatedAt: timestamp() }); await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id }); response.status(201).json(result);
+    await operation.document.update({ status: 'completed', result, updatedAt: timestamp() }); await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, fulfilmentStatus: 'supplier_processing', updatedAt: timestamp() }); invalidateCollectionCache('orders', input.orderId); await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id }); response.status(201).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
 });
 
@@ -440,6 +520,7 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
     const reconciliationRequired = result.status === 'reconciliation_required';
     await operation.document.update({ status: reconciliationRequired ? 'reconciliation_required' : 'completed', result, updatedAt: timestamp() });
     await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, integrationStatus: reconciliationRequired ? 'reconciliation_required' : 'submitted', fulfilmentStatus: reconciliationRequired ? 'supplier_pending' : 'supplier_processing', updatedAt: timestamp() });
+    invalidateCollectionCache('orders', input.orderId);
     await audit(request, reconciliationRequired ? 'curaleaf.barcode_reconciliation_required' : 'curaleaf.barcode_submitted', { organisationId, orderId: input.orderId, operationId: operation.id });
     response.status(reconciliationRequired ? 202 : 201).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
@@ -448,17 +529,17 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
 app.post('/v1/portal/orders/:id/payments/manual', async (request, response, next) => {
   try {
     const input = z.object({ organisationId: idSchema.optional(), amountPence: z.number().int().positive(), tender: z.enum(['cash', 'epos', 'bank_transfer', 'other']), reference: z.string().trim().min(1).max(200), notes: z.string().trim().max(1000).optional() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if (input.amountPence !== order.totalPence) throw new HttpError(400, 'Payment amount must match the order total.', 'AMOUNT_MISMATCH');
-    const payment = await createRecord('payments', { organisationId, orderId, route: 'manual', status: 'paid' satisfies PaymentStatus, amountPence: input.amountPence, currency: 'GBP', tender: input.tender, reference: input.reference, notes: input.notes ?? null, confirmedBy: identity(request).uid, confirmedAt: timestamp() }); await firestore.collection('orders').doc(orderId).update({ paymentStatus: 'paid', paymentId: payment.id, updatedAt: timestamp() }); await audit(request, 'payment.manual_confirmed', { organisationId, orderId, paymentId: payment.id, amountPence: input.amountPence }); response.status(201).json(payment);
+    const payment = await createRecord('payments', { organisationId, orderId, route: 'manual', status: 'paid' satisfies PaymentStatus, amountPence: input.amountPence, currency: 'GBP', tender: input.tender, reference: input.reference, notes: input.notes ?? null, confirmedBy: identity(request).uid, confirmedAt: timestamp() }); await firestore.collection('orders').doc(orderId).update({ paymentStatus: 'paid', paymentId: payment.id, updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.manual_confirmed', { organisationId, orderId, paymentId: payment.id, amountPence: input.amountPence }); response.status(201).json(payment);
   } catch (error) { next(error); }
 });
 
-app.post('/v1/portal/orders/:id/payments/worldpay-session', async (request, response, next) => {
+app.post('/v1/portal/orders/:id/payments/worldpay-session', externalProviderLimit, async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID'); const transactionReference = `HHH-${orderId}-${randomUUID().slice(0, 8)}`; const provider = await createHostedPaymentSession(organisationId, { transactionReference, amountPence: order.totalPence as number, currency: 'GBP', successUrl: input.successUrl, cancelUrl: input.cancelUrl }); const payment = await createRecord('payments', { organisationId, orderId, route: 'worldpay', status: 'pending' satisfies PaymentStatus, amountPence: order.totalPence, currency: 'GBP', transactionReference, providerSession: provider }); await firestore.collection('orders').doc(orderId).update({ paymentId: payment.id, paymentStatus: 'pending', updatedAt: timestamp() }); await audit(request, 'payment.worldpay_session_created', { organisationId, orderId, paymentId: payment.id }); response.status(201).json({ paymentId: payment.id, transactionReference, provider });
+    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID'); const transactionReference = `HHH-${orderId}-${randomUUID().slice(0, 8)}`; const provider = await createHostedPaymentSession(organisationId, { transactionReference, amountPence: order.totalPence as number, currency: 'GBP', successUrl: input.successUrl, cancelUrl: input.cancelUrl }); const payment = await createRecord('payments', { organisationId, orderId, route: 'worldpay', status: 'pending' satisfies PaymentStatus, amountPence: order.totalPence, currency: 'GBP', transactionReference, providerSession: provider }); await firestore.collection('orders').doc(orderId).update({ paymentId: payment.id, paymentStatus: 'pending', updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.worldpay_session_created', { organisationId, orderId, paymentId: payment.id }); response.status(201).json({ paymentId: payment.id, transactionReference, provider });
   } catch (error) { next(error); }
 });
 
-app.get('/v1/portal/shipments', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('shipments', organisationId); await audit(request, 'shipment.list_viewed', { organisationId, recordCount: records.length }); response.json(records); } catch (error) { next(error); } });
+app.get('/v1/portal/shipments', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('shipments', organisationId); response.json(records); } catch (error) { next(error); } });
 app.post('/v1/portal/shipments/sync', async (request, response, next) => {
   try {
     const input = z.object({ organisationId: idSchema.optional(), pageSize: z.number().int().min(1).max(500).default(100), pageNumber: z.number().int().min(0).default(0) }).parse(request.body);
@@ -479,6 +560,7 @@ app.post('/v1/portal/shipments/sync', async (request, response, next) => {
       }, { merge: true });
       synced.push(id);
     }
+    invalidateCollectionCache('shipments');
     await audit(request, 'shipment.synchronised', { organisationId, recordCount: synced.length });
     response.json({ syncedCount: synced.length, totalRecordCount: supplierPage.totalRecordCount, shipmentIds: synced });
   } catch (error) { next(error); }
@@ -486,7 +568,7 @@ app.post('/v1/portal/shipments/sync', async (request, response, next) => {
 
 app.post('/v1/portal/shipments/:id/goods-receipts', async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), items: z.array(z.object({ productId: idSchema, expectedQuantity: z.number().int().nonnegative(), receivedQuantity: z.number().int().nonnegative(), batchNumber: z.string().max(100).nullable().optional(), expiryDate: z.iso.date().nullable().optional(), issue: z.enum(['short', 'damaged', 'incorrect', 'none']).default('none'), notes: z.string().max(500).optional() })).min(1), checksComplete: z.boolean().default(false) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); const shipmentId = idSchema.parse(request.params.id); await getTenantRecord('shipments', shipmentId, organisationId); const full = input.items.every(item => item.receivedQuantity >= item.expectedQuantity && item.issue === 'none'); const anyReceived = input.items.some(item => item.receivedQuantity > 0); const status: FulfilmentStatus = full ? (input.checksComplete ? 'ready_for_collection' : 'received') : anyReceived ? 'partially_received' : 'exception'; const receipt = await createRecord('goodsReceipts', { organisationId, shipmentId, items: input.items, checksComplete: input.checksComplete, status, receivedBy: identity(request).uid, receivedAt: timestamp() }); await firestore.collection('shipments').doc(shipmentId).update({ status, latestGoodsReceiptId: receipt.id, updatedAt: timestamp() }); await audit(request, 'shipment.goods_received', { organisationId, shipmentId, receiptId: receipt.id, status }); response.status(201).json(receipt);
+    const input = z.object({ organisationId: idSchema.optional(), items: z.array(z.object({ productId: idSchema, expectedQuantity: z.number().int().nonnegative(), receivedQuantity: z.number().int().nonnegative(), batchNumber: z.string().max(100).nullable().optional(), expiryDate: z.iso.date().nullable().optional(), issue: z.enum(['short', 'damaged', 'incorrect', 'none']).default('none'), notes: z.string().max(500).optional() })).min(1), checksComplete: z.boolean().default(false) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); const shipmentId = idSchema.parse(request.params.id); await getTenantRecord('shipments', shipmentId, organisationId); const full = input.items.every(item => item.receivedQuantity >= item.expectedQuantity && item.issue === 'none'); const anyReceived = input.items.some(item => item.receivedQuantity > 0); const status: FulfilmentStatus = full ? (input.checksComplete ? 'ready_for_collection' : 'received') : anyReceived ? 'partially_received' : 'exception'; const receipt = await createRecord('goodsReceipts', { organisationId, shipmentId, items: input.items, checksComplete: input.checksComplete, status, receivedBy: identity(request).uid, receivedAt: timestamp() }); await firestore.collection('shipments').doc(shipmentId).update({ status, latestGoodsReceiptId: receipt.id, updatedAt: timestamp() }); invalidateCollectionCache('shipments', shipmentId); await audit(request, 'shipment.goods_received', { organisationId, shipmentId, receiptId: receipt.id, status }); response.status(201).json(receipt);
   } catch (error) { next(error); }
 });
 
@@ -496,11 +578,12 @@ app.patch('/v1/portal/shipments/:id/status', async (request, response, next) => 
 
 app.get('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (request, response, next) => {
   try {
-    const snapshot = await firestore.collection('organisations').limit(500).get();
-    const organisations = snapshot.docs
-      .map(document => document.data())
-      .sort((a, b) => String(a.tradingName ?? a.name).localeCompare(String(b.tradingName ?? b.name)));
-    await audit(request, 'organisation.list_viewed', { recordCount: organisations.length });
+    const organisations = await cached('admin:organisations', 15_000, async () => {
+      const snapshot = await firestore.collection('organisations').limit(500).get();
+      return snapshot.docs
+        .map(document => document.data())
+        .sort((a, b) => String(a.tradingName ?? a.name).localeCompare(String(b.tradingName ?? b.name)));
+    });
     response.json(organisations);
   } catch (error) { next(error); }
 });
@@ -514,10 +597,12 @@ app.post('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (requ
       platformFeeMonthly: null,
       portalName: `${input.tradingName} Patient Services`,
       modules: tenantModulesSchema.parse({ intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true }),
+      worldpayEnabled: false,
       curaleafActivated: false,
       referralToken: rawReferralToken,
     });
     const referral = await createRecord('referralTokens', { organisationId: record.id, tokenHash: tokenHash(rawReferralToken), revokedAt: null, createdBy: identity(request).uid });
+    invalidateCache('admin:organisations');
     await audit(request, 'organisation.created', { organisationId: record.id, referralTokenId: referral.id });
     response.status(201).json({ ...record, referralToken: rawReferralToken });
   } catch (error) { next(error); }
@@ -536,6 +621,8 @@ app.patch('/v1/portal/admin/organisations/:id', requireRole('hhh_admin'), async 
       updatedAt: timestamp(),
       updatedBy: identity(request).uid,
     });
+    invalidateCollectionCache('organisations', organisationId);
+    invalidateCache('admin:organisations', 'referral:');
     const record = await getRecord('organisations', organisationId);
     await audit(request, 'organisation.updated', { organisationId, changedFields });
     response.json(record);
@@ -546,23 +633,25 @@ app.get('/v1/portal/admin/staff', requireRole('hhh_admin'), async (request, resp
   try {
     const organisationId = idSchema.parse(request.query.organisationId);
     await getRecord('organisations', organisationId);
-    const snapshot = await firestore.collection('staffUsers').where('organisationId', '==', organisationId).limit(500).get();
-    const records = snapshot.docs
-      .map(document => document.data())
-      .filter(record => record.role === 'pharmacy_staff')
-      .sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')));
-    const ownerUid = records.find(record => record.contactRole === 'owner')?.id ?? records[0]?.id;
-    await audit(request, 'staff.list_viewed', { organisationId, recordCount: records.length });
-    response.json(records.map(record => ({
-      uid: record.id,
-      email: record.email,
-      displayName: record.displayName,
-      role: 'pharmacy_staff',
-      organisationId,
-      contactRole: record.id === ownerUid ? 'owner' : 'staff',
-      status: record.status ?? 'invited',
-      createdAt: record.createdAt,
-    })));
+    const records = await cached(`admin:staff:${organisationId}`, 10_000, async () => {
+      const snapshot = await firestore.collection('staffUsers').where('organisationId', '==', organisationId).limit(500).get();
+      const staff = snapshot.docs
+        .map(document => document.data())
+        .filter(record => record.role === 'pharmacy_staff')
+        .sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')));
+      const ownerUid = staff.find(record => record.contactRole === 'owner')?.id ?? staff[0]?.id;
+      return staff.map(record => ({
+        uid: record.id,
+        email: record.email,
+        displayName: record.displayName,
+        role: 'pharmacy_staff',
+        organisationId,
+        contactRole: record.id === ownerUid ? 'owner' : 'staff',
+        status: record.status ?? 'invited',
+        createdAt: record.createdAt,
+      }));
+    });
+    response.json(records);
   } catch (error) { next(error); }
 });
 
@@ -633,6 +722,12 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
         id: user.uid, schemaVersion: 1, email: input.email, displayName: input.displayName, role: input.role,
         organisationId: input.organisationId, contactRole, status: 'invited', preferences: preferencesSchema.parse({ theme: 'clinical-light' }), createdAt, updatedAt: createdAt,
       });
+    }
+
+    if (input.organisationId) {
+      invalidateCache(`admin:staff:${input.organisationId}`);
+      invalidateCollectionCache('organisations', input.organisationId);
+      invalidateCache('admin:organisations');
     }
 
     // The default Firebase action handler needs no authorised continue URL.

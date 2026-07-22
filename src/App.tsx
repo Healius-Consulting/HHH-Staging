@@ -8,6 +8,7 @@ import Referrals from './pages/Referrals';
 import CreateOrder from './pages/CreateOrder';
 import AwaitingPayment from './pages/AwaitingPayment';
 import Orders from './pages/Orders';
+import FormularyPricing from './pages/FormularyPricing';
 import Patients from './pages/Patients';
 import AdminPortal from './pages/AdminPortal';
 import PharmacyResources from './pages/PharmacyResources';
@@ -28,6 +29,9 @@ import { SetupRequired } from './onboarding/SetupRequired';
 import { usePharmacySetup } from './onboarding/usePharmacySetup';
 import { getAdminOrganisations, getPortalSession } from './shared/api';
 import type { PortalOrganisation } from './shared/contracts';
+import { isLocalPortalPreview } from './dev/localPortalPreview';
+import LocalPortalSwitcher from './dev/LocalPortalSwitcher';
+import CommandPalette from './components/CommandPalette';
 
 function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
   return {
@@ -44,13 +48,9 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
     status: record.status,
     staffCount: 0,
     platformFeeMonthly: record.platformFeeMonthly ?? null,
-    deliveryOptions: [
-      { id: 'standard', label: 'Standard tracked delivery', description: 'Tracked delivery to the pharmacy.', amount: 6.95, enabled: true },
-      { id: 'collection', label: 'No delivery charge', description: 'Use where no delivery charge is payable.', amount: 0, enabled: true },
-    ],
     brand: { primary: record.primaryColour, portalName: record.portalName ?? `${record.tradingName} Patient Services` },
     modules: record.modules ?? { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
-    worldpay: { status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+    worldpay: { enabled: record.worldpayEnabled ?? true, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   };
 }
 
@@ -97,7 +97,7 @@ function AuthSessionBridge() {
         organisationId: authState.staff.organisationId,
       };
       if (!state.staffSession) {
-        if (linkedSession.current) {
+        if (linkedSession.current && !isLocalPortalPreview) {
           void signOutStaff();
           return;
         }
@@ -119,6 +119,7 @@ function AuthSessionBridge() {
 
   useEffect(() => {
     if (authState.phase !== 'authenticated' || !authState.staff) return;
+    if (isLocalPortalPreview) return;
     let cancelled = false;
     const loadOrganisations = authState.staff.role === 'hhh_admin'
       ? getAdminOrganisations().then(records => {
@@ -151,17 +152,21 @@ function StaffWorkspace() {
     dispatch({ type: 'SET_WORKSPACE_MODE', mode: curaleafActivated ? 'live' : 'training', organisationId: authState.staff.organisationId });
   }, [authState.staff, curaleafActivated, dispatch, setup.status]);
 
+  useEffect(() => {
+    document.getElementById('pharmacy-main-content')?.scrollTo({ top: 0 });
+  }, [state.screen]);
+
   if (!state.staffSession || !authState.staff) return <AuthLoading />;
 
   if (state.portalMode === 'admin') {
     if (authState.staff.role !== 'hhh_admin') return <StaffLogin />;
-    return <><AdminPortal /><ToastContainer /></>;
+    return <><AdminPortal />{isLocalPortalPreview && <LocalPortalSwitcher />}<ToastContainer /></>;
   }
 
   if (!organisation) return <AuthLoading />;
 
   const setupComplete = Boolean(setup.status?.completed);
-  const unrestrictedScreens = new Set(['home', 'resources', 'settings']);
+  const unrestrictedScreens = new Set(['home', 'formulary', 'resources', 'settings']);
   const isRestricted = curaleafActivated && !setupComplete && !unrestrictedScreens.has(state.screen);
 
   const renderScreen = () => {
@@ -169,6 +174,7 @@ function StaffWorkspace() {
     switch (state.screen) {
       case 'home': return <Dashboard />;
       case 'referrals': return <Referrals />;
+      case 'formulary': return <FormularyPricing />;
       case 'create': return <CreateOrder />;
       case 'review': return <AwaitingPayment />;
       case 'orders': return <Orders />;
@@ -181,6 +187,7 @@ function StaffWorkspace() {
 
   return (
     <div className="app-shell" style={tenantStyle}>
+      <a className="skip-link" href="#pharmacy-main-content">Skip to main content</a>
       <Navigation />
       <div className="app-main">
         <Header />
@@ -190,8 +197,10 @@ function StaffWorkspace() {
             <span>Curaleaf has not activated this pharmacy yet. Patient, prescription, payment and order changes are temporary and reset when this page refreshes or the session ends.</span>
           </div>
         )}
-        <div className="page-container">{renderScreen()}</div>
+        <div id="pharmacy-main-content" className="page-container" tabIndex={-1}>{renderScreen()}</div>
       </div>
+      {isLocalPortalPreview && <LocalPortalSwitcher />}
+      <CommandPalette />
       <ToastContainer />
     </div>
   );

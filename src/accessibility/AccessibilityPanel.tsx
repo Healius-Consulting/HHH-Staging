@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Accessibility,
   Check,
   Contrast,
   Eye,
   Link as LinkIcon,
   Moon,
   RotateCcw,
+  SlidersHorizontal,
   SunMedium,
   X,
 } from 'lucide-react';
 import {
   type AccessibilityTheme,
   type TextScale,
+  DEFAULT_ACCESSIBILITY_PREFERENCES,
   useAccessibilityPreferences,
 } from './preferences';
 
@@ -56,7 +57,7 @@ function PreferenceToggle({ checked, description, label, onChange }: PreferenceT
 
 export default function AccessibilityPanel() {
   const [isOpen, setIsOpen] = useState(false);
-  const { preferences, updatePreferences, resetPreferences } = useAccessibilityPreferences();
+  const { preferences, updatePreferences } = useAccessibilityPreferences();
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -66,22 +67,35 @@ export default function AccessibilityPanel() {
     closeRef.current?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      setIsOpen(false);
-      triggerRef.current?.focus();
-    };
-    const handlePointerDown = (event: PointerEvent) => {
-      if (panelRef.current?.contains(event.target as Node) || triggerRef.current?.contains(event.target as Node)) return;
-      setIsOpen(false);
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+        window.requestAnimationFrame(() => triggerRef.current?.focus());
+        return;
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return;
+      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
 
     document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('pointerdown', handlePointerDown);
-    };
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
+
+  const closePanel = () => {
+    setIsOpen(false);
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
 
   return (
     <div className="accessibility-control">
@@ -89,37 +103,38 @@ export default function AccessibilityPanel() {
         ref={triggerRef}
         type="button"
         className="header-icon-button"
-        aria-label="Open accessibility preferences"
+        aria-label="Open display settings"
         aria-expanded={isOpen}
         aria-controls="accessibility-preferences"
         onClick={() => setIsOpen((open) => !open)}
       >
-        <Accessibility size={18} aria-hidden="true" />
-        <span>Accessibility</span>
+        <SlidersHorizontal size={17} aria-hidden="true" />
+        <span>Display</span>
       </button>
 
       {isOpen && (
-        <div
-          ref={panelRef}
-          id="accessibility-preferences"
-          className="accessibility-panel"
-          role="dialog"
-          aria-labelledby="accessibility-panel-title"
-        >
+        <>
+          <div className="accessibility-backdrop" aria-hidden="true" onMouseDown={closePanel} />
+          <div
+            ref={panelRef}
+            id="accessibility-preferences"
+            className="accessibility-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="accessibility-panel-title"
+            aria-describedby="accessibility-panel-note"
+          >
           <div className="accessibility-panel__header">
             <div>
-              <p className="section-label">Display preferences</p>
-              <h2 id="accessibility-panel-title">Accessibility</h2>
+              <p className="section-label">Personalise your workspace</p>
+              <h2 id="accessibility-panel-title">Display settings</h2>
             </div>
             <button
               ref={closeRef}
               type="button"
               className="icon-button"
-              aria-label="Close accessibility preferences"
-              onClick={() => {
-                setIsOpen(false);
-                triggerRef.current?.focus();
-              }}
+              aria-label="Close display settings"
+              onClick={closePanel}
             >
               <X size={17} aria-hidden="true" />
             </button>
@@ -191,11 +206,12 @@ export default function AccessibilityPanel() {
             />
           </div>
 
-          <button type="button" className="btn btn-sm accessibility-reset" onClick={resetPreferences}>
+          <button type="button" className="btn btn-sm accessibility-reset" onClick={() => updatePreferences(DEFAULT_ACCESSIBILITY_PREFERENCES)}>
             <RotateCcw size={14} aria-hidden="true" /> Reset preferences
           </button>
-          <p className="accessibility-panel__note"><LinkIcon size={12} aria-hidden="true" /> Saved on this device. Account syncing can be enabled after authentication.</p>
-        </div>
+          <p id="accessibility-panel-note" className="accessibility-panel__note" aria-live="polite"><LinkIcon size={12} aria-hidden="true" /> {THEME_OPTIONS.find(option => option.value === preferences.theme)?.label}, {TEXT_SCALE_OPTIONS.find(option => option.value === preferences.textScale)?.label} text. Saved automatically.</p>
+          </div>
+        </>
       )}
     </div>
   );

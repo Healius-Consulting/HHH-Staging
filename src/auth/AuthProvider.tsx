@@ -23,6 +23,7 @@ import { configureAccessibilitySync, saveAccessibilityPreferences } from '../acc
 import { firebaseConfiguration, mfaRequired, readAppCheckToken, requireFirebaseAuth } from './firebase';
 import { AuthContext, type AuthContextValue } from './AuthContext';
 import type { AuthState, AuthenticatedStaff, StaffRole } from './types';
+import { isLocalPortalPreview, localPreviewStaff } from '../dev/localPortalPreview';
 
 const IDLE_LIMIT_MS = 15 * 60 * 1000;
 const ABSOLUTE_LIMIT_MS = 8 * 60 * 60 * 1000;
@@ -69,9 +70,11 @@ async function staffFromUser(user: User): Promise<AuthenticatedStaff> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>(() => firebaseConfiguration.configured
-    ? { phase: 'loading', staff: null, error: null, notice: null }
-    : { phase: 'unconfigured', staff: null, error: null, notice: null });
+  const [state, setState] = useState<AuthState>(() => isLocalPortalPreview
+    ? { phase: 'authenticated', staff: localPreviewStaff, error: null, notice: null }
+    : firebaseConfiguration.configured
+      ? { phase: 'loading', staff: null, error: null, notice: null }
+      : { phase: 'unconfigured', staff: null, error: null, notice: null });
   const mfaResolver = useRef<MultiFactorResolver | null>(null);
   const totpSecret = useRef<TotpSecret | null>(null);
   const sessionNotice = useRef<string | null>(null);
@@ -79,6 +82,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const absoluteExpiry = useRef<number | null>(null);
 
   const signOutStaff = useCallback(async (reason?: string) => {
+    if (isLocalPortalPreview) {
+      window.location.assign(window.location.pathname);
+      return;
+    }
     if (!firebaseConfiguration.configured) return;
     sessionNotice.current = reason || 'You have signed out.';
     mfaResolver.current = null;
@@ -87,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isLocalPortalPreview) return;
     if (!firebaseConfiguration.configured) return;
     const auth = requireFirebaseAuth();
     void setPersistence(auth, browserSessionPersistence);
@@ -119,6 +127,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isLocalPortalPreview) {
+      setApiSecurityTokenProvider(null);
+      return;
+    }
     setApiSecurityTokenProvider(async () => {
       if (!firebaseConfiguration.configured) return {};
       const user = requireFirebaseAuth().currentUser;
@@ -134,19 +146,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    let preferenceSaveTimer: number | null = null;
+    let pendingPreferences: Parameters<typeof updateStaffAccessibilityPreferences>[0] | null = null;
+    let lastPersistedPreferences = '';
+    let saveQueue = Promise.resolve();
     configureAccessibilitySync(null);
+    if (isLocalPortalPreview) return () => { active = false; };
     if (state.phase !== 'authenticated') return () => { active = false; };
+
+    const flushPreferenceSave = () => {
+      if (!active || !pendingPreferences) return;
+      const preferences = pendingPreferences;
+      const serialised = JSON.stringify(preferences);
+      pendingPreferences = null;
+      preferenceSaveTimer = null;
+      if (serialised === lastPersistedPreferences) return;
+      saveQueue = saveQueue
+        .then(() => updateStaffAccessibilityPreferences(preferences))
+        .then(() => { lastPersistedPreferences = serialised; })
+        .catch(error => console.warn('Accessibility preferences could not be synchronised:', error));
+    };
 
     const enableSync = () => {
       if (!active) return;
-      configureAccessibilitySync(async preferences => {
-        await updateStaffAccessibilityPreferences(preferences);
+      configureAccessibilitySync(preferences => {
+        pendingPreferences = preferences;
+        if (preferenceSaveTimer !== null) window.clearTimeout(preferenceSaveTimer);
+        preferenceSaveTimer = window.setTimeout(flushPreferenceSave, 900);
       });
     };
 
     void getStaffAccessibilityPreferences()
       .then(preferences => {
         if (!active) return;
+        lastPersistedPreferences = JSON.stringify(preferences);
         saveAccessibilityPreferences(preferences);
         enableSync();
       })
@@ -154,11 +187,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      if (preferenceSaveTimer !== null) window.clearTimeout(preferenceSaveTimer);
       configureAccessibilitySync(null);
     };
   }, [state.phase]);
 
   useEffect(() => {
+    if (isLocalPortalPreview) return;
     if (state.phase !== 'authenticated') return;
     const recordActivity = () => { lastActivity.current = Date.now(); };
     const events: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'focus'];

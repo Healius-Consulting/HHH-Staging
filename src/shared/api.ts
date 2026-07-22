@@ -17,6 +17,9 @@ import type {
   PortalSession,
   UpdatePharmacySetupTaskInput,
   UpdateOrganisationInput,
+  FormularyPriceRecord,
+  UpdateFormularyPriceInput,
+  PaymentSettings,
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -26,12 +29,23 @@ export const isApiConfigured = Boolean(API_BASE_URL);
 
 type ApiSecurityTokenProvider = () => Promise<Record<string, string>>;
 let securityTokenProvider: ApiSecurityTokenProvider | null = null;
+const GET_CACHE_TTL_MS = 10_000;
+const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
+const inFlightGets = new Map<string, { generation: number; request: Promise<unknown> }>();
+let cacheGeneration = 0;
+
+function invalidateResponseCache() {
+  cacheGeneration += 1;
+  responseCache.clear();
+  inFlightGets.clear();
+}
 
 export function setApiSecurityTokenProvider(provider: ApiSecurityTokenProvider | null) {
   securityTokenProvider = provider;
+  invalidateResponseCache();
 }
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+async function performApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!API_BASE_URL) throw new Error('VITE_API_BASE_URL is not configured.');
   const securityHeaders = securityTokenProvider ? await securityTokenProvider() : {};
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -40,9 +54,42 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { message?: string } | null;
-    throw new Error(body?.message || `Request failed with status ${response.status}.`);
+    const retryAfter = response.headers.get('retry-after');
+    const rateMessage = response.status === 429
+      ? `Too many requests. Try again${retryAfter ? ` in ${retryAfter} seconds` : ' shortly'}.`
+      : null;
+    throw new Error(body?.message || rateMessage || `Request failed with status ${response.status}.`);
   }
   return response.json() as Promise<T>;
+}
+
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    invalidateResponseCache();
+    return performApiRequest<T>(path, init);
+  }
+
+  const cached = responseCache.get(path);
+  if (cached && cached.expiresAt > Date.now()) return cached.value as T;
+  if (cached) responseCache.delete(path);
+
+  const generation = cacheGeneration;
+  const existing = inFlightGets.get(path);
+  if (existing?.generation === generation) return existing.request as Promise<T>;
+
+  const request = performApiRequest<T>(path, init)
+    .then(value => {
+      if (cacheGeneration === generation) {
+        responseCache.set(path, { value, expiresAt: Date.now() + GET_CACHE_TTL_MS });
+      }
+      return value;
+    })
+    .finally(() => {
+      if (inFlightGets.get(path)?.request === request) inFlightGets.delete(path);
+    });
+  inFlightGets.set(path, { generation, request });
+  return request;
 }
 
 export function getPublicPharmacy(referralToken: string) {
@@ -122,5 +169,23 @@ export function updateStaffAccessibilityPreferences(preferences: StaffAccessibil
   return apiRequest<StaffAccessibilityPreferences>('/v1/portal/preferences', {
     method: 'PATCH',
     body: JSON.stringify(preferences),
+  });
+}
+
+export function getFormularyPrices(organisationId: string) {
+  return apiRequest<FormularyPriceRecord[]>(`/v1/portal/formulary-pricing?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+export function updateFormularyPrices(organisationId: string, prices: UpdateFormularyPriceInput[]) {
+  return apiRequest<FormularyPriceRecord[]>('/v1/portal/formulary-pricing', {
+    method: 'PUT',
+    body: JSON.stringify({ organisationId, prices }),
+  });
+}
+
+export function updatePaymentSettings(organisationId: string, worldpayEnabled: boolean) {
+  return apiRequest<PaymentSettings>('/v1/portal/payment-settings', {
+    method: 'PUT',
+    body: JSON.stringify({ organisationId, worldpayEnabled }),
   });
 }

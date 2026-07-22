@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getPharmacySetupStatus, isApiConfigured, updatePharmacySetupTask } from '../shared/api';
 import type { PharmacySetupStatus, SetupTaskId } from '../shared/contracts';
 import { SETUP_TASKS } from './setup';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
 
 function emptyStatus(organisationId: string): PharmacySetupStatus {
   return {
@@ -76,9 +77,12 @@ export function usePharmacySetup(organisationId: string | undefined) {
     setLoading(true);
     setError(null);
     const load = async () => {
-      if (!isApiConfigured) {
+      if (!isApiConfigured || isLocalPortalPreview) {
         const local = readDevelopmentStatus(organisationId);
-        if (!cancelled) setStatus(local || emptyStatus(organisationId));
+        if (!cancelled) {
+          setStatus(local || emptyStatus(organisationId));
+          setLoading(false);
+        }
         return;
       }
       try {
@@ -120,7 +124,7 @@ export function usePharmacySetup(organisationId: string | undefined) {
     setError(null);
 
     try {
-      if (!isApiConfigured) {
+      if (!isApiConfigured || isLocalPortalPreview) {
         writeDevelopmentStatus(optimistic);
         return;
       }
