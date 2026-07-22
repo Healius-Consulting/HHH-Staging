@@ -64,8 +64,8 @@ export default function AwaitingPayment() {
       <section className="operations-brief payment-brief">
         <div className="operations-brief__lead">
           <p className="section-label">Payment position</p>
-          <h2>{awaitingOrders.length ? `${awaitingOrders.length} payment${awaitingOrders.length === 1 ? ' needs' : 's need'} attention` : 'The payment queue is clear'}</h2>
-          <p>{money(outstandingValue)} outstanding · {money(clearedValue)} cleared in this workspace.</p>
+          <h2>Review and reconcile patient payments</h2>
+          <p>{awaitingOrders.length ? `${awaitingOrders.length} payment${awaitingOrders.length === 1 ? ' needs' : 's need'} attention · ` : ''}{money(outstandingValue)} outstanding · {money(clearedValue)} cleared.</p>
         </div>
         <label className="workspace-filter-field payment-brief__filter"><span>Show</span><select className="input select" value={activeFilter} onChange={event => setActiveFilter(event.target.value as PaymentFilter)}>{filterOptions.map(option => <option value={option.key} key={option.key}>{option.label} ({option.count})</option>)}</select></label>
       </section>
@@ -84,7 +84,7 @@ export default function AwaitingPayment() {
                   <button type="button" key={order.id} className={`payment-ledger-row${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={() => setSelectedOrderId(order.id)} style={{ '--stagger-index': index } as CSSProperties}>
                     <span className={`payment-ledger-row__icon ${isPaid ? 'paid' : 'pending'}`}>{order.payment.route === 'worldpay' ? <CreditCard size={16} /> : <Banknote size={16} />}</span>
                     <span className="payment-ledger-row__identity"><strong title={patientName(order.patientId)}>{compactPatientName(patientName(order.patientId))}</strong><small>Order {order.id} · {order.prescriptions.length} Rx</small></span>
-                    <span className="payment-ledger-row__amount"><strong>{money(order.payment.amount)}</strong><small>{isPaid ? 'Cleared' : order.payment.route === 'worldpay' ? 'Link active' : 'Confirm receipt'}</small></span>
+                    <span className="payment-ledger-row__amount"><strong>{money(order.payment.amount)}</strong><span className={`payment-queue-state ${isPaid ? 'paid' : 'pending'}`}>{isPaid ? <CheckCircle size={11} /> : <Clock size={11} />}{isPaid ? 'Cleared' : order.payment.route === 'worldpay' ? 'Awaiting patient' : 'Needs confirmation'}</span></span>
                     <ArrowRight size={14} aria-hidden="true" />
                   </button>
                 );

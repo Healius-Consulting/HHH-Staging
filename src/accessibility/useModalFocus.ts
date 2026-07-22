@@ -17,6 +17,7 @@ export function useModalFocus<T extends HTMLElement>(open: boolean, onClose: () 
 
   useEffect(() => {
     if (!open) return;
+    document.documentElement.classList.add('modal-open');
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     const focusFirstControl = () => {
@@ -51,6 +52,7 @@ export function useModalFocus<T extends HTMLElement>(open: boolean, onClose: () 
 
     document.addEventListener('keydown', handleKeyDown);
     return () => {
+      document.documentElement.classList.remove('modal-open');
       window.cancelAnimationFrame(animationFrame);
       document.removeEventListener('keydown', handleKeyDown);
       window.requestAnimationFrame(() => returnFocusRef.current?.focus());

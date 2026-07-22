@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react';
-import { Search, ChevronRight, Plus, X, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
+import { Activity, AlertTriangle, Building2, FileText, Hash, Link2, Mail, MapPin, Phone, Search, ChevronRight, Plus, X, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
 import { useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
+import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
+import { compactPatientName } from '../utils/patientName';
 
 /* ── Unified patient row model ── */
 interface UnifiedPatient {
@@ -20,18 +22,18 @@ const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Received', 'Ready',
 function stepsCompleted(status: string): number {
   switch (status) {
     case 'awaiting-approval': return 0;
-    case 'approved':          return 1;
-    case 'dispatched':        return 2;
+    case 'approved': return 1;
+    case 'dispatched': return 2;
     case 'partially-received': return 3;
-    case 'received':          return 3;
-    case 'ready':             return 4;
-    case 'collected':         return 5;
-    default:                  return -1;
+    case 'received': return 3;
+    case 'ready': return 4;
+    case 'collected': return 5;
+    default: return -1;
   }
 }
 
 /* ── Status derivation ── */
-function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
+function deriveStatus(p: UnifiedPatient): { label: string; compactLabel: string; pill: string } {
   if (p.orders.length > 0) {
     if (
       p.orders.some(
@@ -40,7 +42,7 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
           o.prescriptions.some(rx => rx.status === 'ready'),
       )
     )
-      return { label: 'Ready for collection', pill: 'pill-green' };
+      return { label: 'Ready for collection', compactLabel: 'Ready', pill: 'pill-green' };
 
     if (
       p.orders.some(
@@ -49,7 +51,7 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
           o.prescriptions.some(rx => rx.status !== 'ready' && rx.status !== 'collected'),
       )
     )
-      return { label: 'In fulfilment', pill: 'pill-info' };
+      return { label: 'In fulfilment', compactLabel: 'Fulfilment', pill: 'pill-info' };
 
     if (
       p.orders.some(
@@ -58,10 +60,10 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
           o.prescriptions.every(rx => rx.status === 'collected')
       )
     )
-      return { label: 'Collected by patient', pill: 'pill-neutral' };
+      return { label: 'Collected', compactLabel: 'Collected', pill: 'pill-neutral' };
 
     if (p.orders.some(o => o.payment.status === 'sent'))
-      return { label: 'Awaiting payment', pill: 'pill-amber' };
+      return { label: 'Awaiting payment', compactLabel: 'Awaiting payment', pill: 'pill-amber' };
 
     if (
       p.orders.some(
@@ -70,25 +72,28 @@ function deriveStatus(p: UnifiedPatient): { label: string; pill: string } {
           o.prescriptions.some(rx => rx.items.length > 0),
       )
     )
-      return { label: 'Order in progress', pill: 'pill-info' };
+      return { label: 'Order in progress', compactLabel: 'In progress', pill: 'pill-info' };
   }
 
   if (p.submission) {
     switch (p.submission.status) {
       case 'Under HHH review':
-        return { label: 'Under HHH review', pill: 'pill-amber' };
+        return { label: onboardingStatusLabel(p.submission.status), compactLabel: 'Review', pill: onboardingStatusPillClass(p.submission.status) };
       case 'New':
-        return { label: 'New enquiry', pill: 'pill-red' };
+        return { label: onboardingStatusLabel(p.submission.status), compactLabel: 'New', pill: onboardingStatusPillClass(p.submission.status) };
       case 'Approved':
-        return { label: 'HHH approved', pill: 'pill-green' };
+        return { label: onboardingStatusLabel(p.submission.status), compactLabel: 'Onboarded', pill: onboardingStatusPillClass(p.submission.status) };
       case 'Declined':
-        return { label: 'Not onboarded', pill: 'pill-red' };
+        return { label: onboardingStatusLabel(p.submission.status), compactLabel: 'Declined', pill: onboardingStatusPillClass(p.submission.status) };
     }
   }
 
-  if (p.crmPatient) return { label: p.crmPatient.status, pill: p.crmPatient.status === 'HHH approved' ? 'pill-green' : 'pill-red' };
+  if (p.crmPatient) {
+    const label = onboardingStatusLabel(p.crmPatient.status);
+    return { label, compactLabel: label, pill: onboardingStatusPillClass(p.crmPatient.status) };
+  }
 
-  return { label: '—', pill: 'pill-neutral' };
+  return { label: '—', compactLabel: '—', pill: 'pill-neutral' };
 }
 
 function initials(name: string): string {
@@ -174,8 +179,8 @@ export default function Patients() {
     } else if (activeTab === 'active') {
       list = list.filter(p => p.crmPatient !== null);
     } else if (activeTab === 'on-order') {
-      list = list.filter(p => 
-        p.crmPatient && 
+      list = list.filter(p =>
+        p.crmPatient &&
         p.orders.some(o => o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))
       );
     }
@@ -207,27 +212,23 @@ export default function Patients() {
 
   const renderTrackBar = (status: string) => {
     const done = stepsCompleted(status);
-    const progressWidth = done >= 0 ? done * 20 : 0;
+    const progressWidth = done >= 0
+      ? (done / (TRACK_STEPS.length - 1)) * (100 - (100 / TRACK_STEPS.length))
+      : 0;
     return (
-      <div className="orders-timeline-container" style={{ margin: '8px 0' }}>
-        <div className="orders-timeline" style={{ height: 16 }}>
-          <div 
-            className="orders-timeline-progress" 
-            style={{ width: `${progressWidth}%` }} 
-          />
-          {TRACK_STEPS.map((label, i) => {
-            let cls = 'timeline-step';
-            if (i < done || (status === 'collected' && i <= done) || (status === 'received' && i === done)) cls += ' done';
-            else if (i === done && status !== 'collected') cls += ' active';
-            return (
-              <div key={label} className={cls}>
-                <div className="timeline-dot" style={{ width: 14, height: 14, fontSize: 8 }}>
-                  {i + 1}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      <div className="patient-order-progress" aria-label={`Supplier progress: ${RX_STATUS_LABELS[status as keyof typeof RX_STATUS_LABELS] ?? status}`}>
+        <div className="orders-timeline-progress" style={{ width: `${progressWidth}%` }} />
+        {TRACK_STEPS.map((label, i) => {
+          let cls = 'patient-order-progress__step';
+          if (i < done || (status === 'collected' && i <= done) || (status === 'received' && i === done)) cls += ' done';
+          else if (i === done && status !== 'collected') cls += ' active';
+          return (
+            <div key={label} className={cls} title={label}>
+              <span>{i + 1}</span>
+              <small>{label}</small>
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -239,7 +240,7 @@ export default function Patients() {
 
   return (
     <div className="page-body" style={{ position: 'relative' }}>
-      
+
       {/* ══ Metrics Grid / Tab Switchers ══ */}
       <div className="filter-grid" role="group" aria-label="Filter patient directory">
         <button type="button" aria-pressed={activeTab === 'all'} className={`card card-surface filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
@@ -290,9 +291,9 @@ export default function Patients() {
         {/* Sort selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
           <span className="text-muted font-semibold">Sort by:</span>
-          <select 
+          <select
             aria-label="Sort patient directory"
-            value={sortKey} 
+            value={sortKey}
             onChange={e => setSortKey(e.target.value as SortKey)}
             style={{
               padding: '6px 12px',
@@ -313,7 +314,7 @@ export default function Patients() {
 
       {/* ══ Patients directory list ══ */}
       <div className="table-wrap">
-        <table>
+        <table className="patient-directory-table">
           <thead>
             <tr>
               <th>Patient</th>
@@ -347,23 +348,26 @@ export default function Patients() {
                     <td className="font-semibold">
                       <div className="flex items-center gap-sm">
                         <div className="avatar" style={{ width: 28, height: 28, fontSize: 12 }}>{initials(p.name)}</div>
-                        <span>{p.name}</span>
+                        <span className="compact-patient-name" title={p.name} aria-label={p.name}>{compactPatientName(p.name)}</span>
                       </div>
                     </td>
-                    <td>{p.email}</td>
-                    <td>{p.mobile}</td>
+                    <td><span className="compact-email" title={p.email}>{p.email}</span></td>
+                    <td><span className="compact-mobile">{p.mobile}</span></td>
                     <td>
                       <div className="flex items-center gap-xs">
-                        <span className={`pill ${status.pill}`}>{status.label}</span>
+                        <span className={`pill crm-status-pill ${status.pill}`} aria-label={status.label} title={status.label}>
+                          <span className="crm-status-pill__full">{status.label}</span>
+                          <span className="crm-status-pill__compact" aria-hidden="true">{status.compactLabel}</span>
+                        </span>
                         {hasUncollectedWarning && (
-                          <span className="pill pill-red" style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px' }}>
-                            ⚠️ 10d+ Overdue
+                          <span className="pill crm-status-warning pill-red" aria-label="Collection overdue by at least 10 days">
+                            <AlertTriangle size={11} aria-hidden="true" /> 10d+
                           </span>
                         )}
                       </div>
                     </td>
                     <td className="text-right">
-                      <button 
+                      <button
                         className="btn btn-sm"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -385,38 +389,41 @@ export default function Patients() {
       {selectedPatient && (
         <>
           <div className="drawer-backdrop" aria-hidden="true" onClick={() => setSelectedPatientId(null)} />
-          <div ref={patientDrawerRef} className="drawer" role="dialog" aria-modal="true" aria-labelledby="patient-drawer-title" tabIndex={-1}>
-            <div className="drawer-header">
-              <div className="flex items-center gap-md">
-                <div className="avatar" style={{ width: 50, height: 50, fontSize: 18 }}>{initials(selectedPatient.name)}</div>
+          <div ref={patientDrawerRef} className="drawer patient-record-drawer" role="dialog" aria-modal="true" aria-labelledby="patient-drawer-title" tabIndex={-1}>
+            <div className="drawer-header patient-record-drawer__header">
+              <div className="patient-record-drawer__identity">
+                <div className="avatar patient-record-drawer__avatar">{initials(selectedPatient.name)}</div>
                 <div>
-                  <h3 id="patient-drawer-title" className="font-bold" style={{ fontSize: 18, color: 'var(--text-primary)' }}>{selectedPatient.name}</h3>
-                  <span className={`pill ${deriveStatus(selectedPatient).pill}`} style={{ fontSize: 12, marginTop: 4 }}>
+                  <span className="section-label">Patient record</span>
+                  <h3 id="patient-drawer-title">{selectedPatient.name}</h3>
+                  <span className={`pill patient-record-drawer__status ${deriveStatus(selectedPatient).pill}`}>
                     {deriveStatus(selectedPatient).label}
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-sm">
+              <div className="patient-record-drawer__actions">
                 <button
                   className="btn btn-primary btn-sm"
                   disabled={selectedPatient.crmPatient?.status !== 'HHH approved'}
+                  title={selectedPatient.crmPatient?.status === 'HHH approved'
+                    ? 'Create a new prescription order'
+                    : 'HHH onboarding approval is required before creating an order'}
                   onClick={() => handleCreateOrder(selectedPatient)}
                 >
-                  <Plus size={12} /> Create Order
+                  <Plus size={12} /> New order
                 </button>
                 <button
                   type="button"
-                  className="toast-close"
+                  className="icon-button patient-record-drawer__close"
                   aria-label="Close patient details"
                   onClick={() => setSelectedPatientId(null)}
-                  style={{ background: 'rgba(255,255,255,0.06)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
                   <X size={16} />
                 </button>
               </div>
             </div>
 
-            <div className="drawer-body">
+            <div className="drawer-body patient-record-drawer__body">
               {/* Check for uncollected warnings */}
               {(() => {
                 const hasWarning = selectedPatient.orders.some(o =>
@@ -430,90 +437,72 @@ export default function Patients() {
                 );
                 if (!hasWarning) return null;
                 return (
-                  <div className="card" style={{ margin: 0, padding: 14, background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#f87171', fontSize: '14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <span className="font-bold text-sm" style={{ textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      ⚠️ 10-DAY COLLECTION WARNING
-                    </span>
-                    <span>This patient has a prescription that has remained uncollected for 10 or more days. Please follow up.</span>
+                  <div className="patient-record-alert" role="alert">
+                    <AlertTriangle size={18} aria-hidden="true" />
+                    <span><strong>Collection follow-up overdue</strong><small>A prescription has remained uncollected for at least 10 days. Contact the patient.</small></span>
                   </div>
                 );
               })()}
 
-              {/* Contact info card */}
-              <div className="card card-surface" style={{ margin: 0, padding: 14 }}>
-                <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 8 }}>Contact &amp; Address</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
-                  <div><strong className="text-secondary">Email:</strong> {selectedPatient.email}</div>
-                  <div><strong className="text-secondary">Mobile:</strong> {selectedPatient.mobile}</div>
-                  {selectedPatient.crmPatient?.address && (
-                    <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
-                      <strong className="text-secondary" style={{ whiteSpace: 'nowrap' }}>Address:</strong>
-                      <span>{selectedPatient.crmPatient.address}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <div className="patient-record-facts">
+                <section className="patient-record-panel" aria-labelledby="patient-contact-title">
+                  <header><Mail size={15} aria-hidden="true" /><h4 id="patient-contact-title">Contact</h4></header>
+                  <dl>
+                    <div><dt><Mail size={13} /> Email</dt><dd title={selectedPatient.email}>{selectedPatient.email}</dd></div>
+                    <div><dt><Phone size={13} /> Mobile</dt><dd className="compact-mobile">{selectedPatient.mobile}</dd></div>
+                    {selectedPatient.crmPatient?.address && <div><dt><MapPin size={13} /> Address</dt><dd>{selectedPatient.crmPatient.address}</dd></div>}
+                  </dl>
+                </section>
 
-              {/* Whitelabel Affiliation Info Card */}
-              <div className="card card-surface" style={{ margin: 0, padding: 14, borderLeft: '3px solid var(--accent-info)' }}>
-                <span className="text-xs font-bold text-info uppercase" style={{ display: 'block', marginBottom: 8 }}>Pharmacy Account Details</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
-                  <div><strong className="text-secondary">Primary Pharmacy:</strong> {PHARMACY.name}</div>
-                  <div><strong className="text-secondary">Whitelabel Site:</strong> <span className="text-info">{PHARMACY.formUrl}</span></div>
-                  <div><strong className="text-secondary">System ID:</strong> <code style={{ fontSize: 11, background: 'rgba(255,255,255,0.05)', padding: '2px 4px', borderRadius: 4 }}>{selectedPatient.id}</code></div>
-                </div>
+                <section className="patient-record-panel" aria-labelledby="patient-account-title">
+                  <header><Building2 size={15} aria-hidden="true" /><h4 id="patient-account-title">Account</h4></header>
+                  <dl>
+                    <div><dt><Building2 size={13} /> Pharmacy</dt><dd>{PHARMACY.name}</dd></div>
+                    <div><dt><Link2 size={13} /> Eligibility link</dt><dd className="patient-record-ellipsis" title={PHARMACY.formUrl}>{PHARMACY.formUrl}</dd></div>
+                    <div><dt><Hash size={13} /> System ID</dt><dd><code>{selectedPatient.id}</code></dd></div>
+                  </dl>
+                </section>
               </div>
 
               {/* Interaction Audit History Log */}
-              <div className="card card-surface" style={{ margin: 0, padding: 14 }}>
-                <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 10 }}>Audit &amp; Interaction Log</span>
+              <section className="patient-record-panel patient-record-audit" aria-labelledby="patient-audit-title">
+                <header><Activity size={15} aria-hidden="true" /><h4 id="patient-audit-title">Activity</h4><span>{selectedPatient.crmPatient?.interactions?.length ?? 0} events</span></header>
                 {(!selectedPatient.crmPatient?.interactions || selectedPatient.crmPatient.interactions.length === 0) ? (
-                  <div className="text-xs text-muted text-center" style={{ padding: '8px 0' }}>No interactions logged yet for this patient.</div>
+                  <div className="patient-record-empty">No interactions logged yet.</div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, position: 'relative', paddingLeft: 14, borderLeft: '1px solid var(--border)' }}>
+                  <div className="patient-audit-list">
                     {selectedPatient.crmPatient.interactions.map((log, idx) => (
-                      <div key={idx} style={{ position: 'relative', fontSize: 12 }}>
-                        <div style={{
-                          position: 'absolute',
-                          left: -18,
-                          top: 4,
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          background: 
+                      <div className="patient-audit-item" key={idx}>
+                        <i style={{ background:
                             log.type.includes('Reminder') || log.type.includes('Resent') ? '#f59e0b' :
-                            log.type.includes('Collected') || log.type.includes('Cleared') ? '#10b981' :
-                            '#3b82f6'
+                              log.type.includes('Collected') || log.type.includes('Cleared') ? '#10b981' :
+                              '#3b82f6'
                         }} />
-                        <div className="flex justify-between" style={{ fontWeight: '600', marginBottom: 2 }}>
-                          <span className="text-primary">{log.type}</span>
-                          <span className="text-tertiary" style={{ fontSize: 10 }}>
+                        <div><strong>{log.type}</strong><time dateTime={new Date(log.ts).toISOString()}>
                             {new Date(log.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} &middot; {new Date(log.ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <div className="text-muted text-xs">{log.detail}</div>
+                          </time><p>{log.detail}</p></div>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+              </section>
 
               {/* Referral records details */}
               {selectedPatient.submission ? (
-                <div className="card" style={{ margin: 0, padding: 14 }}>
-                  <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 10 }}>Eligibility Intake File</span>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                <section className="patient-record-panel patient-eligibility-panel" aria-labelledby="patient-eligibility-title">
+                  <header><FileText size={15} aria-hidden="true" /><h4 id="patient-eligibility-title">Eligibility intake</h4><span>{onboardingStatusLabel(selectedPatient.submission.status)}</span></header>
+
+                  <div className="patient-eligibility-grid">
                     <div className="kv-line">
                       <span className="text-secondary">Target Condition:</span>
                       <span className="font-semibold text-primary">{selectedPatient.submission.condition}</span>
                     </div>
                     <div className="kv-line">
                       <span className="text-secondary">HHH onboarding decision:</span>
-                      <span className="font-semibold text-info">{selectedPatient.submission.status}</span>
+                      <span className="font-semibold text-info">{onboardingStatusLabel(selectedPatient.submission.status)}</span>
                     </div>
                     {selectedPatient.submission.reviewedBy && <div className="kv-line"><span className="text-secondary">Reviewed by:</span><span className="font-semibold text-primary">{selectedPatient.submission.reviewedBy}</span></div>}
-                    
+
                     <div className="divider" style={{ margin: '4px 0' }} />
 
                     <div className="kv-line">
@@ -530,92 +519,68 @@ export default function Patients() {
                     </div>
 
                     {selectedPatient.submission.calls.length > 0 && (
-                      <div style={{ marginTop: 8 }}>
-                        <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 4 }}>Call Log history</span>
-                        <div style={{ background: 'var(--bg-root)', padding: 8, borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div className="patient-call-history">
+                        <span>Patient calls</span>
+                        <div>
                           {selectedPatient.submission.calls.map((call, idx) => (
-                            <div key={idx} className="text-xs text-muted">
-                              📞 Call logged &middot; {fmtDate(call.ts)}
+                            <div key={idx}>
+                              <Phone size={12} aria-hidden="true" /> Call logged &middot; {fmtDate(call.ts)}
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
                   </div>
-                </div>
+                </section>
               ) : (
-                <div className="card text-muted text-xs text-center" style={{ margin: 0, padding: '16px 10px' }}>
-                  💡 Added directly via CRM. No eligibility submission history exists.
+                <div className="patient-record-note">
+                  <FileText size={15} aria-hidden="true" /><span><strong>Direct CRM record</strong><small>No eligibility submission history is attached.</small></span>
                 </div>
               )}
 
-              {/* Order history */}
-              <div>
-                <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 8 }}>Prescription Orders History ({selectedPatient.orders.length})</span>
+              <section className="patient-order-history" aria-labelledby="patient-orders-title">
+                <header className="patient-order-history__header"><span><small>Prescription activity</small><h4 id="patient-orders-title">Order history</h4></span><strong>{selectedPatient.orders.length}</strong></header>
                 {selectedPatient.orders.length === 0 ? (
-                  <div className="card text-muted text-xs text-center" style={{ padding: '24px 12px', margin: 0 }}>
-                    No sessions or orders placed yet.
-                  </div>
+                  <div className="patient-record-empty">No prescription sessions or orders yet.</div>
                 ) : (
                   [...selectedPatient.orders]
                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                    .map(order => (
-                      <div className="card" key={order.id} style={{ marginBottom: 12, padding: 12 }}>
-                        <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
-                          <span className="font-semibold text-sm">Order Session #{order.id}</span>
-                          <span className="text-xs text-muted">{fmtDate(order.date)}</span>
-                        </div>
-
-                        <div className="kv-line text-xs">
-                          <span className="text-secondary">Worldpay Payment:</span>
-                          <span className={`pill ${
-                            order.payment.status === 'paid' ? 'pill-green' : 
-                            order.payment.status === 'sent' ? 'pill-amber' : 'pill-neutral'
-                          }`} style={{ fontSize: 9, padding: '2px 6px' }}>
-                            {order.payment.status === 'paid' ? 'Paid' : 
-                             order.payment.status === 'sent' ? 'Sent' : 'Draft'}
-                          </span>
-                        </div>
-
-                        <div className="kv-line text-xs" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 6, marginBottom: 6 }}>
-                          <span className="text-secondary">Amount Cleared:</span>
-                          <span className="font-semibold text-primary">{money(orderRevenue(order))}</span>
-                        </div>
-
-                        {/* Rxs list inside this order */}
-                        {order.prescriptions.map((rx, idx) => (
-                          <div key={rx.id} style={{ background: 'var(--bg-root)', padding: 10, borderRadius: 8, marginTop: 6 }}>
-                            <div className="flex justify-between text-xs" style={{ marginBottom: 4 }}>
-                              <span className="font-semibold text-green">Rx #{idx + 1} &mdash; {rx.prescriber || 'No prescriber'}</span>
-                              {rx.poRef && <span className="text-tertiary">{rx.poRef}</span>}
-                            </div>
-
-                            {/* Products inside this Rx */}
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 6 }}>
-                              {rx.items.map((item, itemIdx) => (
-                                <div key={itemIdx} className="flex justify-between text-xs text-muted" style={{ fontSize: 11 }}>
-                                  <span>{item.name} &times; {item.qty}</span>
-                                  <span>{money(item.retail * item.qty)}</span>
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* DPD progress bar inside the drawer */}
-                            {rx.placed && (
-                              <div style={{ marginTop: 8 }}>
-                                <div className="flex justify-between text-xs" style={{ marginBottom: 4 }}>
-                                  <span className="text-muted" style={{ fontSize: 10 }}>Supplier Status:</span>
-                                  <span className="font-semibold text-primary" style={{ fontSize: 10 }}>{RX_STATUS_LABELS[rx.status]}</span>
-                                </div>
-                                {renderTrackBar(rx.status)}
-                              </div>
-                            )}
+                    .map(order => {
+                      const paymentLabel = order.payment.status === 'paid' ? 'Paid' : order.payment.status === 'sent' ? 'Awaiting payment' : 'Draft';
+                      const paymentRoute = order.payment.route === 'worldpay' ? 'Worldpay' : order.payment.route === 'pharmacy' ? 'Pharmacy payment' : 'Not selected';
+                      return (
+                        <article className="patient-order-card" key={order.id}>
+                          <header>
+                            <span><small>Order {order.id}</small><strong>{fmtDate(order.date)}</strong></span>
+                            <span className={`pill ${order.payment.status === 'paid' ? 'pill-green' : order.payment.status === 'sent' ? 'pill-amber' : 'pill-neutral'}`}>{paymentLabel}</span>
+                          </header>
+                          <div className="patient-order-summary">
+                            <div><span>Order total</span><strong>{money(orderRevenue(order))}</strong></div>
+                            <div><span>Payment route</span><strong>{paymentRoute}</strong></div>
+                            <div><span>Prescriptions</span><strong>{order.prescriptions.length}</strong></div>
                           </div>
-                        ))}
-                      </div>
-                    ))
+
+                          <div className="patient-order-rx-list">
+                            {order.prescriptions.map((rx, idx) => (
+                              <article className="patient-order-rx" key={rx.id}>
+                                <header><span><small>Prescription {String(idx + 1).padStart(2, '0')}</small><strong>{rx.prescriber || 'Prescriber pending'}</strong></span>{rx.poRef && <code>{rx.poRef}</code>}</header>
+                                <div className="patient-order-products">
+                                  {rx.items.length ? rx.items.map((item, itemIdx) => (
+                                    <div key={itemIdx}><span><strong>{item.name}</strong><small>Quantity {item.qty}</small></span><strong>{money(item.retail * item.qty)}</strong></div>
+                                  )) : <div className="patient-record-empty">No prescribed products recorded.</div>}
+                                </div>
+                                <footer>
+                                  <span><small>Fulfilment</small><strong>{rx.placed ? RX_STATUS_LABELS[rx.status] : 'Not submitted'}</strong></span>
+                                  {rx.placed && renderTrackBar(rx.status)}
+                                </footer>
+                              </article>
+                            ))}
+                          </div>
+                        </article>
+                      );
+                    })
                 )}
-              </div>
+              </section>
             </div>
           </div>
         </>

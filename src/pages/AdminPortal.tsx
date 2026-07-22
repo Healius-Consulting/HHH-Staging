@@ -34,6 +34,7 @@ import {
 } from '../context/AppContext';
 import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources';
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
+import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { activateCuraleafPharmacy, createOrganisation, createPharmacyStaffInvitation, getPharmacySetupStatus, getPharmacyStaff, updateOrganisation } from '../shared/api';
@@ -45,6 +46,7 @@ import WorkspaceNavigation, { type WorkspaceNavGroup } from '../components/Works
 import WorkspacePageHeader from '../components/WorkspacePageHeader';
 import CommandPalette, { type CommandDefinition } from '../components/CommandPalette';
 import SummaryTiles from '../components/SummaryTiles';
+import CompactPatientCell from '../components/CompactPatientCell';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'compliance' | 'integrations';
 
@@ -526,7 +528,7 @@ export default function AdminPortal() {
 
           <section className="card admin-patient-table">
             <div className="admin-directory-head"><div><h2>Patients attributed to this pharmacy</h2><p>Attribution is derived from the pharmacy token and retained on the patient record.</p></div></div>
-            {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Condition</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><strong>{sub.name}</strong><small>{sub.email}</small></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td>{sub.condition}</td><td>{sub.source}</td><td><span className="pill pill-info">{sub.status}</span></td></tr>)}</tbody></table></div>}
+            {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Condition</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><CompactPatientCell name={sub.name} email={sub.email} /></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td>{sub.condition}</td><td>{sub.source}</td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(sub.status)}`}>{onboardingStatusLabel(sub.status)}</span></td></tr>)}</tbody></table></div>}
           </section>
           </div>
         </div>
@@ -575,20 +577,19 @@ export default function AdminPortal() {
   const renderReferrals = () => {
     const pending = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review');
     const reviewed = state.submissions.filter(submission => submission.status === 'Approved' || submission.status === 'Declined');
-    const statusClass = (status: string) => status === 'Approved' ? 'pill-green' : status === 'Declined' ? 'pill-red' : status === 'Under HHH review' ? 'pill-amber' : 'pill-info';
     const row = (submission: typeof state.submissions[number]) => {
       const organisation = state.organisations.find(org => org.id === submission.organisationId);
       const hasCall = submission.calls.length > 0;
       return (
         <tr key={submission.id}>
-          <td><strong>{submission.name}</strong><small>{submission.email} · {submission.mobile}</small></td>
+          <td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} /></td>
           <td><strong>{organisation?.tradingName ?? submission.pharmacyName}</strong><small>Token-attributed pharmacy</small></td>
           <td><strong>{submission.condition}</strong><small>{submission.tried2 ? 'Two treatments reported' : 'Treatment history requires review'} · {submission.psychExclusion ? 'Exclusion flagged' : 'No psychosis exclusion reported'}</small></td>
           <td><strong>{submission.calls.length}</strong><small>{hasCall ? `Last call ${new Date(submission.calls.at(-1)!.ts).toLocaleDateString('en-GB')}` : 'Patient call required before decision'}</small></td>
-          <td><span className={`pill ${statusClass(submission.status)}`}>{submission.status}</span>{submission.reviewedBy && <small>{submission.reviewedBy} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</td>
+          <td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(submission.status)}`}>{onboardingStatusLabel(submission.status)}</span>{submission.reviewedBy && <small>{submission.reviewedBy} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</div></td>
           <td>
             {submission.status === 'New' || submission.status === 'Under HHH review' ? <div className="admin-referral-actions">
-              <button className="btn btn-sm" onClick={() => { dispatch({ type: 'LOG_CALL', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `Patient call recorded for ${submission.name}.`, toastType: 'success' }); }}><PhoneCall size={13} /> Patient Called</button>
+              <button className="btn btn-sm" onClick={() => { dispatch({ type: 'LOG_CALL', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `Patient call recorded for ${submission.name}.`, toastType: 'success' }); }}><PhoneCall size={13} /> Log call</button>
               <button className="btn btn-sm btn-primary" disabled={!hasCall} onClick={() => { dispatch({ type: 'APPROVE_ONBOARDING', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `${submission.name} approved for HHH programme onboarding and released to ${organisation?.tradingName ?? 'the pharmacy'}.`, toastType: 'success' }); }}><UserCheck size={13} /> Approve</button>
               <button className="btn btn-sm" disabled={!hasCall} onClick={() => { dispatch({ type: 'DECLINE_ONBOARDING', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `${submission.name} was not approved for programme onboarding.`, toastType: 'warning' }); }}><UserX size={13} /> Decline</button>
             </div> : <small>{submission.decisionNote}</small>}
@@ -617,7 +618,7 @@ export default function AdminPortal() {
       <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-client register</p><strong>Patient index</strong><small>Operational oversight of pharmacy attribution.</small></span><span className="pill pill-info"><Users size={13} /> {allPatients.length} unique records</span></div>
       <section className="card admin-patient-table admin-master-patients">
         <div className="admin-directory-head"><div><h2>Patient register</h2><p>Operational oversight only. Every access must be authenticated and audited in production.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient or pharmacy" /></label></div>
-        <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Acquisition source</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><strong>{patient.name}</strong><small>{patient.email} · {patient.mobile}</small></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown tenant'}</button><small>{org?.gphcNumber}</small></td><td><span className="pill pill-info">{patient.stage}</span></td><td>{patient.source}</td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB') : '—'}</td></tr>; })}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Acquisition source</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown tenant'}</button><small>{org?.gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.source}</td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB') : '—'}</td></tr>; })}</tbody></table></div>
       </section>
     </>
   );

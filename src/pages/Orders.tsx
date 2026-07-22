@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type RefObject } from 'react';
 import { CheckCircle, Clock, Download, FileText, Package, Printer, Search, Truck, X } from 'lucide-react';
 import { PHARMACY, RX_STATUS_LABELS, lineRevenue, money, useApp, type Prescription, type RxStatus } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
+import { compactPatientName } from '../utils/patientName';
 
 const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Received', 'Ready', 'Collected'] as const;
 const STATUS_TABS: Array<{ key: RxStatus | 'all'; label: string; shortLabel: string }> = [
@@ -78,14 +79,13 @@ export default function Orders() {
   return (
     <div className="page-body supplier-workbench">
       <section className="operations-brief supplier-brief">
-        <div className="operations-brief__lead"><p className="section-label">Supply position</p><h2>{allSubOrders.length} prescription order{allSubOrders.length === 1 ? '' : 's'} in the supply ledger</h2><p>Follow every Curaleaf order from submission through pharmacy collection.</p></div>
+        <div className="operations-brief__lead"><p className="section-label">Supplier fulfilment</p><h2>Track orders through receipt and collection</h2><p>{allSubOrders.length} prescription order{allSubOrders.length === 1 ? '' : 's'} currently in the ledger. Follow each Curaleaf order from submission to patient handover.</p></div>
       </section>
 
       <section className="supplier-filter-bar" aria-label="Filter supplier orders">
         <label className="supplier-search"><Search size={15} /><input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, order or supplier reference" aria-label="Search supplier orders" /></label>
         <label className="workspace-filter-field"><span>Stage</span><select className="input select" value={statusFilter} onChange={event => setStatusFilter(event.target.value as RxStatus | 'all')}>{STATUS_TABS.map(option => <option value={option.key} key={option.key}>{option.label}</option>)}</select></label>
         <label className="workspace-filter-field"><span>Sort</span><select className="input select" value={sortOrder} onChange={event => setSortOrder(event.target.value as 'newest' | 'oldest')}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
-        <span className="supplier-filter-result"><strong>{filtered.length}</strong><small>shown</small></span>
       </section>
 
       {filtered.length === 0 ? <div className="empty-state"><div className="empty-icon"><Package size={28} /></div><h3>No matching supplier orders</h3><p className="empty-desc">Clear the search or choose another stage.</p></div> : (
@@ -97,7 +97,7 @@ export default function Orders() {
                 const progress = item.rx.status === 'collected' ? 100 : Math.round((completedStep(item.rx.status) / (TRACK_STEPS.length - 1)) * 100);
                 return <button type="button" key={item.key} className={`supplier-queue-row${selected?.key === item.key ? ' selected' : ''}`} aria-pressed={selected?.key === item.key} onClick={() => setSelectedKey(item.key)}>
                   <span className="supplier-queue-row__icon">{item.rx.status === 'dispatched' ? <Truck size={16} /> : item.rx.status === 'ready' || item.rx.status === 'collected' ? <CheckCircle size={16} /> : <Package size={16} />}</span>
-                  <span className="supplier-queue-row__identity"><strong title={item.patientName}>{item.patientName}</strong><small>Order {item.orderId} · Rx {item.rxIdx}</small></span>
+                  <span className="supplier-queue-row__identity"><strong title={item.patientName} aria-label={item.patientName}>{compactPatientName(item.patientName)}</strong><small>Order {item.orderId} · Rx {item.rxIdx}</small></span>
                   <span className="supplier-queue-row__meta"><strong>{money(rxTotal(item.rx))}</strong><small>{fmtDate(item.date)}</small></span>
                   <span className="supplier-queue-row__timeline" aria-label={`${RX_STATUS_LABELS[item.rx.status]}, ${progress}% complete`}><span><i style={{ width: `${progress}%` }} /></span><small>{RX_STATUS_LABELS[item.rx.status]}</small></span>
                 </button>;

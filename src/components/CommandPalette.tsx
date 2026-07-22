@@ -48,6 +48,7 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
 
   useEffect(() => {
     const show = () => {
+      if (document.querySelector('[aria-modal="true"]')) return;
       returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setOpen(true);
       setQuery('');

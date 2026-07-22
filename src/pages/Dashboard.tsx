@@ -1,6 +1,7 @@
 import { Activity, ArrowRight, ListTodo, History, FileText, Plus } from 'lucide-react';
 import { orderRevenue, useApp } from '../context/AppContext';
 import SummaryTiles from '../components/SummaryTiles';
+import { compactPatientName } from '../utils/patientName';
 
 export default function Dashboard() {
   const { state, dispatch } = useApp();
@@ -115,9 +116,9 @@ export default function Dashboard() {
     <div className="page-body operations-dashboard">
       <section className="operations-brief">
         <div className="operations-brief__lead">
-          <p className="section-label">Today’s position</p>
-          <h2>{totalUrgent > 0 ? `${totalUrgent} item${totalUrgent === 1 ? '' : 's'} need a decision` : 'The queue is under control'}</h2>
-          <p>{totalUrgent > 0 ? 'Start with the priority queue, then continue with prescriptions waiting in the normal workflow.' : 'There are no overdue clinical, payment or collection actions at the moment.'}</p>
+          <p className="section-label">Operations overview</p>
+          <h2>Manage today’s pharmacy workload</h2>
+          <p>{totalUrgent > 0 ? `${totalUrgent} item${totalUrgent === 1 ? '' : 's'} require attention. Start with the priority queue, then continue through the normal workflow.` : 'There are no overdue clinical, payment or collection actions at the moment.'}</p>
         </div>
         <button className="btn btn-primary operations-brief__action" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'create' })}>
           <Plus size={15} /> Start prescription
@@ -135,91 +136,95 @@ export default function Dashboard() {
           
           {totalUrgent > 0 && (
             <section className="card card-urgent priority-queue">
-              <div className="section-heading"><div><p className="section-label">Priority queue</p><h3><Activity size={17} /> Resolve before routine work</h3></div><span>{totalUrgent} open</span></div>
+              <div className="section-heading"><div><p className="section-label">Attention required</p><h3><Activity size={17} /> Priority work queue</h3></div><span>{totalUrgent} open</span></div>
               <div className="alert-list">
                 {intakeAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--danger">
-                    <div>
-                      <span className="alert-item__title">Pending Eligibility Intake · {alert.patientName}</span>
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Eligibility review</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
                       <span className="alert-item__desc">
                         Submitted <strong className="text-red">{alert.days} days ago</strong> for{' '}
                         <strong className="text-primary">{alert.condition}</strong>. Review is pending.
                       </span>
                     </div>
-                    <button className="btn btn-sm btn-danger-solid" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'referrals' })}>
-                      Review Records
+                    <button className="priority-action" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'referrals' })}>
+                      Review patient <ArrowRight size={14} />
                     </button>
                   </div>
                 ))}
 
                 {uncollectedAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--danger">
-                    <div>
-                      <span className="alert-item__title">Uncollected Medication · {alert.patientName}</span>
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Collection follow-up</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
                       <span className="alert-item__desc">
                         Ready for collection for <strong className="text-red">{alert.days} days</strong>. Contact: {alert.patientMobile}
                       </span>
                     </div>
                     <button
-                      className="btn btn-sm btn-danger-solid"
+                      className="priority-action"
                       onClick={() => {
                         dispatch({ type: 'ADD_TOAST', message: `SMS reminder resent to ${alert.patientName} (${alert.patientMobile}).`, toastType: 'success' });
                         dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'SMS Reminder', detail: `Resent counter pickup notification SMS to ${alert.patientMobile}.` });
                       }}
                     >
-                      Resend SMS
+                      Send reminder <ArrowRight size={14} />
                     </button>
                   </div>
                 ))}
 
                 {overduePaymentAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--warning">
-                    <div>
-                      <span className="alert-item__title">Overdue Payment · {alert.patientName}</span>
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Overdue payment</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
                       <span className="alert-item__desc">
                         <strong className="text-primary">£{alert.amount.toFixed(2)}</strong> outstanding for{' '}
                         <strong className="text-amber">{alert.days} days</strong>. {alert.patientEmail}
                       </span>
                     </div>
                     <button
-                      className="btn btn-sm btn-warning-outline"
+                      className="priority-action"
                       onClick={() => {
                         dispatch({ type: 'ADD_TOAST', message: `Worldpay billing link resent to ${alert.patientName} at ${alert.patientEmail}.`, toastType: 'info' });
                         dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Payment Link Resent', detail: `Resent Worldpay invoice link for £${alert.amount.toFixed(2)} to ${alert.patientEmail}.` });
                       }}
                     >
-                      Resend Link
+                      Resend link <ArrowRight size={14} />
                     </button>
                   </div>
                 ))}
 
                 {repeatAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--info">
-                    <div>
-                      <span className="alert-item__title">Repeat Rx Overdue · {alert.patientName}</span>
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Repeat prescription</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
                       <span className="alert-item__desc">
                         Last order <strong className="text-info">{alert.days} days ago</strong>. Treatment gap exceeds guidelines.
                       </span>
                     </div>
-                    <div className="flex gap-xs flex-wrap">
+                    <div className="priority-action-group">
                       <button
-                        className="btn btn-sm"
+                        className="priority-action priority-action--quiet"
                         onClick={() => {
                           dispatch({ type: 'ADD_TOAST', message: `Follow-up logged for ${alert.patientName}.`, toastType: 'success' });
                           dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Callback Scheduled', detail: 'Scheduled repeat prescription assessment call.' });
                         }}
                       >
-                        Log Callback
+                        Log follow-up
                       </button>
                       <button
-                        className="btn btn-sm btn-primary"
+                        className="priority-action"
                         onClick={() => {
                           dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Repeat Rx Initiated', detail: 'Created new repeat prescription order session from dashboard.' });
                           dispatch({ type: 'NEW_ORDER', patientId: alert.patientId });
                           dispatch({ type: 'SET_SCREEN', screen: 'create' });
                         }}
                       >
-                        Create Repeat Rx
+                        Create repeat <ArrowRight size={14} />
                       </button>
                     </div>
                   </div>
@@ -251,7 +256,7 @@ export default function Dashboard() {
                         <span>{sessionDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</span>
                       </time>
                       <div className="session-ledger__patient">
-                        <button type="button" onClick={openSession}>{patientName(order.patientId)}</button>
+                        <button type="button" onClick={openSession} title={patientName(order.patientId)}>{compactPatientName(patientName(order.patientId))}</button>
                         <span>{order.prescriptions.length} prescription{order.prescriptions.length === 1 ? '' : 's'} · {sessionDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       <div className="session-ledger__status"><small>Payment</small>{paymentPill(order.payment.status)}</div>

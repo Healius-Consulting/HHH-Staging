@@ -1,5 +1,5 @@
 import { MoreHorizontal, X } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useModalFocus } from '../accessibility/useModalFocus';
 
 export interface WorkspaceNavItem<Key extends string = string> {
@@ -44,6 +44,15 @@ export default function WorkspaceNavigation<Key extends string>({
   const mobilePrimary = mobilePrimaryKeys.map(key => items.find(item => item.key === key)).filter((item): item is WorkspaceNavItem<Key> => Boolean(item));
   const mobileMore = items.filter(item => !mobilePrimaryKeys.includes(item.key));
   const mobileMoreActive = mobileMore.some(item => item.key === activeKey);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 760px)');
+    const closeDesktopSheet = (event: MediaQueryListEvent) => {
+      if (!event.matches) setMobileMenuOpen(false);
+    };
+    media.addEventListener('change', closeDesktopSheet);
+    return () => media.removeEventListener('change', closeDesktopSheet);
+  }, []);
 
   const navigate = (key: Key) => {
     onNavigate(key);

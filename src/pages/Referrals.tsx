@@ -2,13 +2,15 @@ import { useState } from 'react';
 import { Check, CheckCircle2, Clock3, Copy, LinkIcon, PhoneCall, ShieldCheck, XCircle } from 'lucide-react';
 import { useApp, type SubmissionStatus } from '../context/AppContext';
 import { eligibilityUrl } from '../utils/pharmacyResources';
+import { onboardingStatusLabel } from '../utils/onboardingStatus';
 import SummaryTiles from '../components/SummaryTiles';
+import CompactPatientCell from '../components/CompactPatientCell';
 
 const STATUS_META: Record<SubmissionStatus, { label: string; pill: string; icon: React.ReactNode }> = {
-  New: { label: 'Received by HHH', pill: 'pill-info', icon: <Clock3 size={13} /> },
-  'Under HHH review': { label: 'HHH review in progress', pill: 'pill-amber', icon: <PhoneCall size={13} /> },
-  Approved: { label: 'Approved for onboarding', pill: 'pill-green', icon: <CheckCircle2 size={13} /> },
-  Declined: { label: 'Not onboarded', pill: 'pill-red', icon: <XCircle size={13} /> },
+  New: { label: onboardingStatusLabel('New'), pill: 'pill-info', icon: <Clock3 size={13} /> },
+  'Under HHH review': { label: onboardingStatusLabel('Under HHH review'), pill: 'pill-amber', icon: <PhoneCall size={13} /> },
+  Approved: { label: onboardingStatusLabel('Approved'), pill: 'pill-green', icon: <CheckCircle2 size={13} /> },
+  Declined: { label: onboardingStatusLabel('Declined'), pill: 'pill-red', icon: <XCircle size={13} /> },
 };
 
 export default function Referrals() {
@@ -60,7 +62,7 @@ export default function Referrals() {
         <div className="admin-directory-head"><div><h2>Onboarding status</h2><p>This is a read-only pharmacy view. HHH records the telephone review and final onboarding decision.</p></div></div>
         {submissions.length === 0 ? <div className="empty-state">No patient enquiries have used this pharmacy link yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Screening information</th><th>HHH contact</th><th>Decision</th></tr></thead><tbody>{submissions.map(submission => {
           const meta = STATUS_META[submission.status];
-          return <tr key={submission.id}><td><strong>{submission.name}</strong><small>{submission.email} · {submission.mobile}</small></td><td>{new Date(submission.submittedAt).toLocaleDateString('en-GB')}<small>Source: {submission.source}</small></td><td><strong>{submission.condition}</strong><small>{submission.recordsUploaded ? 'Records noted' : 'Records not yet noted'}</small></td><td><strong>{submission.calls.length ? `${submission.calls.length} call${submission.calls.length === 1 ? '' : 's'} logged` : 'Awaiting call'}</strong><small>{submission.reviewedBy ? `Reviewed by ${submission.reviewedBy}` : 'HHH review team'}</small></td><td><span className={`pill ${meta.pill}`}>{meta.icon}{meta.label}</span>{submission.decisionNote && <small>{submission.decisionNote}</small>}</td></tr>;
+          return <tr key={submission.id}><td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} /></td><td>{new Date(submission.submittedAt).toLocaleDateString('en-GB')}<small>Source: {submission.source}</small></td><td><strong>{submission.condition}</strong><small>{submission.recordsUploaded ? 'Records noted' : 'Records not yet noted'}</small></td><td><strong>{submission.calls.length ? `${submission.calls.length} call${submission.calls.length === 1 ? '' : 's'} logged` : 'Awaiting call'}</strong><small>{submission.reviewedBy ? `Reviewed by ${submission.reviewedBy}` : 'HHH review team'}</small></td><td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${meta.pill}`}>{meta.icon}{meta.label}</span></div></td></tr>;
         })}</tbody></table></div>}
       </section>
     </div>
