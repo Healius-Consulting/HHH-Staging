@@ -21,6 +21,7 @@ export interface CRMPatient {
   name: string;
   email: string;
   mobile: string;
+  dob?: string;
   address?: string;
   status: 'HHH approved' | 'Suspended';
   interactions?: { ts: Date | string; type: string; detail: string }[];
@@ -268,24 +269,24 @@ export const ORGANISATIONS: PharmacyTenant[] = [
 ];
 
 const SEED_CRM: CRMPatient[] = [
-  { id: 'P-1001', organisationId: ORGANISATIONS[0].id, name: 'James Doe',        email: 'j.doe@email.com',      mobile: '07700 900111', address: '12 High St, Leeds LS1 4AB',     status: 'HHH approved' },
-  { id: 'P-1002', organisationId: ORGANISATIONS[0].id, name: 'Aisha Smith',      email: 'a.smith@email.com',    mobile: '07700 900222', address: '4 Oak Rd, Leeds LS2 8PQ',       status: 'HHH approved',
+  { id: 'P-1001', organisationId: ORGANISATIONS[0].id, name: 'James Doe',        email: 'j.doe@email.com',      mobile: '07700 900111', dob: '1988-06-14', address: '12 High St, Leeds LS1 4AB',     status: 'HHH approved' },
+  { id: 'P-1002', organisationId: ORGANISATIONS[0].id, name: 'Aisha Smith',      email: 'a.smith@email.com',    mobile: '07700 900222', dob: '1992-09-03', address: '4 Oak Rd, Leeds LS2 8PQ',       status: 'HHH approved',
     interactions: [
       { ts: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), type: 'Invoice Dispatched', detail: 'Sent Worldpay invoice link for £48.00.' },
       { ts: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), type: 'Prescription Ready', detail: 'Meds received from wholesaler. Sent counter collection alert SMS.' }
     ]
   },
-  { id: 'P-1003', organisationId: ORGANISATIONS[0].id, name: 'Mohammed Khan',    email: 'm.khan@email.com',     mobile: '07700 900333', address: '9 Park Ave, Leeds LS6 1RT',     status: 'HHH approved' },
-  { id: 'P-1004', organisationId: ORGANISATIONS[0].id, name: 'Sophie Bennett',   email: 's.bennett@email.com',  mobile: '07700 900444', address: '27 Cardigan Rd, Leeds LS6 3AA', status: 'HHH approved',
+  { id: 'P-1003', organisationId: ORGANISATIONS[0].id, name: 'Mohammed Khan',    email: 'm.khan@email.com',     mobile: '07700 900333', dob: '1979-12-21', address: '9 Park Ave, Leeds LS6 1RT',     status: 'HHH approved' },
+  { id: 'P-1004', organisationId: ORGANISATIONS[0].id, name: 'Sophie Bennett',   email: 's.bennett@email.com',  mobile: '07700 900444', dob: '1987-04-11', address: '27 Cardigan Rd, Leeds LS6 3AA', status: 'HHH approved',
     interactions: [
       { ts: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), type: 'Meds Collected', detail: 'Dispensed 10g Noidecs CD to patient at counter.' }
     ]
   },
-  { id: 'P-1005', organisationId: ORGANISATIONS[0].id, name: "Daniel O'Connor",  email: 'd.oconnor@email.com',  mobile: '07700 900555', address: '8 Burley St, Leeds LS3 1JX',    status: 'HHH approved' },
-  { id: 'P-1006', organisationId: ORGANISATIONS[0].id, name: 'Priya Patel',      email: 'p.patel@email.com',    mobile: '07700 900666', address: '15 Roundhay Rd, Leeds LS8 5AQ', status: 'HHH approved' },
-  { id: 'P-1007', organisationId: ORGANISATIONS[0].id, name: 'Liam Murphy',      email: 'l.murphy@email.com',   mobile: '07700 900777', address: '3 Kirkstall Ln, Leeds LS5 3BW', status: 'HHH approved' },
-  { id: 'P-1008', organisationId: ORGANISATIONS[0].id, name: 'Grace Thompson',   email: 'g.thompson@email.com', mobile: '07700 900888', address: '41 Otley Rd, Leeds LS16 5JT',   status: 'HHH approved' },
-  { id: 'P-1009', organisationId: ORGANISATIONS[1].id, name: 'Daniel Price',     email: 'd.price@email.com',    mobile: '07700 900503', address: 'LS2 7DR',                       status: 'HHH approved' },
+  { id: 'P-1005', organisationId: ORGANISATIONS[0].id, name: "Daniel O'Connor",  email: 'd.oconnor@email.com',  mobile: '07700 900555', dob: '1991-01-30', address: '8 Burley St, Leeds LS3 1JX',    status: 'HHH approved' },
+  { id: 'P-1006', organisationId: ORGANISATIONS[0].id, name: 'Priya Patel',      email: 'p.patel@email.com',    mobile: '07700 900666', dob: '1984-08-16', address: '15 Roundhay Rd, Leeds LS8 5AQ', status: 'HHH approved' },
+  { id: 'P-1007', organisationId: ORGANISATIONS[0].id, name: 'Liam Murphy',      email: 'l.murphy@email.com',   mobile: '07700 900777', dob: '1975-05-24', address: '3 Kirkstall Ln, Leeds LS5 3BW', status: 'HHH approved' },
+  { id: 'P-1008', organisationId: ORGANISATIONS[0].id, name: 'Grace Thompson',   email: 'g.thompson@email.com', mobile: '07700 900888', dob: '1996-10-08', address: '41 Otley Rd, Leeds LS16 5JT',   status: 'HHH approved' },
+  { id: 'P-1009', organisationId: ORGANISATIONS[1].id, name: 'Daniel Price',     email: 'd.price@email.com',    mobile: '07700 900503', dob: '1977-07-23', address: 'LS2 7DR',                       status: 'HHH approved' },
 ];
 
 /* ═══════════════════════════════════════════════════════════
@@ -800,12 +801,13 @@ function reducer(state: AppState, action: Action): AppState {
       const approvedAt = new Date();
       return {
         ...state,
-        crm: existing ? state.crm.map(patient => patient.id === existing.id ? { ...patient, status: 'HHH approved' as const } : patient) : [...state.crm, {
+        crm: existing ? state.crm.map(patient => patient.id === existing.id ? { ...patient, dob: sub.dob, status: 'HHH approved' as const } : patient) : [...state.crm, {
           id: patientId,
           organisationId: sub.organisationId,
           name: sub.name,
           email: sub.email,
           mobile: sub.mobile,
+          dob: sub.dob,
           address: sub.postcode,
           status: 'HHH approved' as const,
           interactions: [{ ts: approvedAt, type: 'HHH onboarding approved', detail: `${approvedBy} approved programme onboarding after patient review.` }],

@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react';
-import { Activity, AlertTriangle, Building2, FileText, Hash, Link2, Mail, MapPin, Phone, Search, ChevronRight, Plus, X, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
+import { Activity, AlertTriangle, Building2, CalendarDays, FileText, Hash, Link2, Mail, MapPin, Phone, Search, ChevronRight, Plus, X, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
 import { useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { compactPatientName } from '../utils/patientName';
+import { formatPatientDob } from '../utils/patientDob';
 
 /* ── Unified patient row model ── */
 interface UnifiedPatient {
@@ -12,6 +13,7 @@ interface UnifiedPatient {
   name: string;
   email: string;
   mobile: string;
+  dob: string;
   crmPatient: CRMPatient | null;
   submission: EligibilitySubmission | null;
   orders: PatientOrder[];
@@ -130,6 +132,7 @@ export default function Patients() {
         name: crm.name,
         email: crm.email,
         mobile: crm.mobile,
+        dob: crm.dob ?? '',
         crmPatient: crm,
         submission: null,
         orders: state.orders.filter(o => o.patientId === crm.id),
@@ -142,12 +145,14 @@ export default function Patients() {
       const existing = map.get(key);
       if (existing) {
         existing.submission = sub;
+        if (!existing.dob) existing.dob = sub.dob;
       } else {
         map.set(key, {
           id: `sub-${sub.id}`,
           name: sub.name,
           email: sub.email,
           mobile: sub.mobile,
+          dob: sub.dob,
           crmPatient: null,
           submission: sub,
           orders: [],
@@ -169,7 +174,9 @@ export default function Patients() {
         p =>
           p.name.toLowerCase().includes(q) ||
           p.email.toLowerCase().includes(q) ||
-          p.mobile.includes(q)
+          p.mobile.includes(q) ||
+          p.dob.toLowerCase().includes(q) ||
+          formatPatientDob(p.dob).toLowerCase().includes(q)
       );
     }
 
@@ -281,7 +288,7 @@ export default function Patients() {
           <Search size={16} />
           <input
             className="input"
-            placeholder="Search CRM directory by name, email, or mobile..."
+            placeholder="Search by name, DOB, email, or mobile..."
             aria-label="Search patient directory"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -318,6 +325,7 @@ export default function Patients() {
           <thead>
             <tr>
               <th>Patient</th>
+              <th>DOB</th>
               <th>Email</th>
               <th>Mobile</th>
               <th>CRM status</th>
@@ -327,7 +335,7 @@ export default function Patients() {
           <tbody>
             {processedPatients.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="empty-state">No matching patient records found in this category.</div>
                 </td>
               </tr>
@@ -351,6 +359,7 @@ export default function Patients() {
                         <span className="compact-patient-name" title={p.name} aria-label={p.name}>{compactPatientName(p.name)}</span>
                       </div>
                     </td>
+                    <td><span className="compact-mobile">{formatPatientDob(p.dob)}</span></td>
                     <td><span className="compact-email" title={p.email}>{p.email}</span></td>
                     <td><span className="compact-mobile">{p.mobile}</span></td>
                     <td>
@@ -449,6 +458,7 @@ export default function Patients() {
                   <header><Mail size={15} aria-hidden="true" /><h4 id="patient-contact-title">Contact</h4></header>
                   <dl>
                     <div><dt><Mail size={13} /> Email</dt><dd title={selectedPatient.email}>{selectedPatient.email}</dd></div>
+                    <div><dt><CalendarDays size={13} /> Date of birth</dt><dd className="compact-mobile">{formatPatientDob(selectedPatient.dob)}</dd></div>
                     <div><dt><Phone size={13} /> Mobile</dt><dd className="compact-mobile">{selectedPatient.mobile}</dd></div>
                     {selectedPatient.crmPatient?.address && <div><dt><MapPin size={13} /> Address</dt><dd>{selectedPatient.crmPatient.address}</dd></div>}
                   </dl>

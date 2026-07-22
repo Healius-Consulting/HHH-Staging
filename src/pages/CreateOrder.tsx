@@ -15,6 +15,7 @@ import {
   type CatalogueItem,
   type PaymentRoute,
 } from '../context/AppContext';
+import { formatPatientDob } from '../utils/patientDob';
 
 const TYPE_FILTERS = ['All', 'oil', 'flos', 'capsule', 'lozenge', 'vape'] as const;
 
@@ -33,6 +34,9 @@ export default function CreateOrder() {
   const [catalogTypeFilter, setCatalogTypeFilter] = useState<string>('All');
   const [selectedPaymentRoute, setSelectedPaymentRoute] = useState<Exclude<PaymentRoute, null>>(canUseWorldpay ? 'worldpay' : 'pharmacy');
   const [changingPatient, setChangingPatient] = useState(false);
+  const [patientQuery, setPatientQuery] = useState('');
+  const [patientSearchOpen, setPatientSearchOpen] = useState(false);
+  const [patientActiveIndex, setPatientActiveIndex] = useState(0);
   const [confirmingDraftDelete, setConfirmingDraftDelete] = useState(false);
 
   useEffect(() => {
@@ -43,6 +47,9 @@ export default function CreateOrder() {
   useEffect(() => {
     setSelectedPaymentRoute(canUseWorldpay ? 'worldpay' : 'pharmacy');
     setChangingPatient(false);
+    setPatientQuery('');
+    setPatientSearchOpen(false);
+    setPatientActiveIndex(0);
     setConfirmingDraftDelete(false);
   }, [activeOrder?.id, canUseWorldpay]);
 
@@ -64,6 +71,11 @@ export default function CreateOrder() {
     const matchesQuery = !catalogQuery.trim() || item.name.toLowerCase().includes(catalogQuery.toLowerCase());
     return matchesQuery && (catalogTypeFilter === 'All' || item.type === catalogTypeFilter);
   }), [catalogQuery, catalogTypeFilter, state.catalogue]);
+
+  const matchingPatients = useMemo(() => {
+    const query = patientQuery.trim().toLowerCase();
+    return tenantPatients.filter(candidate => !query || [candidate.name, candidate.email, candidate.mobile, candidate.dob ?? '', formatPatientDob(candidate.dob)].some(value => value.toLowerCase().includes(query))).slice(0, 7);
+  }, [patientQuery, tenantPatients]);
 
   const selectedRx = activeOrder?.prescriptions.find(rx => rx.id === selectedRxId) ?? null;
   const selectedRxIndex = activeOrder && selectedRx ? activeOrder.prescriptions.findIndex(rx => rx.id === selectedRx.id) : -1;
@@ -107,13 +119,95 @@ export default function CreateOrder() {
     dispatch({ type: 'SET_SCREEN', screen: 'review' });
   };
 
-  const changePatient = (patientId: string) => {
-    if (!activeOrder || !patientId || patientId === activeOrder.patientId) return;
+  const selectPatient = (patientId: string) => {
+    if (!activeOrder || !patientId) return;
+    if (patientId === activeOrder.patientId) {
+      setChangingPatient(false);
+      setPatientQuery('');
+      setPatientSearchOpen(false);
+      return;
+    }
     const linkedPatient = tenantPatients.find(candidate => candidate.id === patientId);
     if (!linkedPatient) return;
+    const replacingPatient = Boolean(activeOrder.patientId);
     dispatch({ type: 'SET_ORDER_PATIENT', orderId: activeOrder.id, patientId });
-    dispatch({ type: 'ADD_TOAST', message: `Draft reassigned to ${linkedPatient.name}.`, toastType: 'success' });
+    dispatch({ type: 'ADD_TOAST', message: replacingPatient ? `Draft reassigned to ${linkedPatient.name}.` : `Linked patient “${linkedPatient.name}”.`, toastType: 'success' });
     setChangingPatient(false);
+    setPatientQuery('');
+    setPatientSearchOpen(false);
+  };
+
+  const beginPatientChange = () => {
+    setPatientQuery('');
+    setPatientActiveIndex(0);
+    setPatientSearchOpen(true);
+    setChangingPatient(true);
+  };
+
+  const cancelPatientChange = () => {
+    setChangingPatient(false);
+    setPatientQuery('');
+    setPatientSearchOpen(false);
+    setPatientActiveIndex(0);
+  };
+
+  const renderPatientSearch = (mode: 'link' | 'change') => {
+    if (!activeOrder) return null;
+    return (
+      <div className={`rx-patient-change${mode === 'link' ? ' is-linking' : ''}`}>
+        <label className="rx-patient-change__heading" htmlFor={`rx-patient-${activeOrder.id}`}>
+          <small>{mode === 'change' ? 'Change linked patient' : 'Link patient'}</small>
+          <strong>{mode === 'change' ? 'Search approved patients' : 'Find an approved patient'}</strong>
+          <span>Type a name, email address or mobile number.</span>
+        </label>
+        <div className="rx-patient-combobox" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPatientSearchOpen(false); }}>
+          <div className="rx-patient-combobox__field">
+            <Search size={15} aria-hidden="true" />
+            <input
+              id={`rx-patient-${activeOrder.id}`}
+              className="input"
+              value={patientQuery}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={patientSearchOpen}
+              aria-controls={`rx-patient-results-${activeOrder.id}`}
+              aria-activedescendant={patientSearchOpen && matchingPatients[patientActiveIndex] ? `rx-patient-option-${matchingPatients[patientActiveIndex].id}` : undefined}
+              placeholder="Search approved patients…"
+              autoComplete="off"
+              onFocus={() => setPatientSearchOpen(true)}
+              onChange={event => { setPatientQuery(event.target.value); setPatientActiveIndex(0); setPatientSearchOpen(true); }}
+              onKeyDown={event => {
+                if (event.key === 'ArrowDown' && matchingPatients.length) { event.preventDefault(); setPatientSearchOpen(true); setPatientActiveIndex(index => Math.min(index + 1, matchingPatients.length - 1)); }
+                if (event.key === 'ArrowUp' && matchingPatients.length) { event.preventDefault(); setPatientActiveIndex(index => Math.max(index - 1, 0)); }
+                if (event.key === 'Enter' && patientSearchOpen && matchingPatients[patientActiveIndex]) { event.preventDefault(); selectPatient(matchingPatients[patientActiveIndex].id); }
+                if (event.key === 'Escape') { event.preventDefault(); setPatientSearchOpen(false); }
+              }}
+            />
+          </div>
+          {patientSearchOpen && (
+            <div id={`rx-patient-results-${activeOrder.id}`} className="rx-patient-results" role="listbox" aria-label="Matching approved patients">
+              {matchingPatients.length ? matchingPatients.map((candidate, index) => (
+                <button
+                  id={`rx-patient-option-${candidate.id}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === patientActiveIndex}
+                  className={index === patientActiveIndex ? 'active' : ''}
+                  key={candidate.id}
+                  onMouseEnter={() => setPatientActiveIndex(index)}
+                  onClick={() => selectPatient(candidate.id)}
+                >
+                  <span className="rx-patient-result__avatar" aria-hidden="true">{initials(candidate.name)}</span>
+                  <span><strong>{candidate.name}</strong><small className="rx-patient-result__dob">DOB {formatPatientDob(candidate.dob)}</small><small>{candidate.email} · {candidate.mobile}</small></span>
+                  {candidate.id === patient?.id ? <em>Current</em> : null}
+                </button>
+              )) : <span className="rx-patient-results__empty">No approved patients match “{patientQuery.trim()}”.</span>}
+            </div>
+          )}
+        </div>
+        {mode === 'change' ? <button type="button" className="btn btn-sm rx-patient-change__cancel" onClick={cancelPatientChange}>Cancel</button> : null}
+      </div>
+    );
   };
 
   const deleteDraft = () => {
@@ -147,31 +241,17 @@ export default function CreateOrder() {
         <div className="empty-state"><div className="empty-icon"><FileText size={32} /></div><h3>No active prescription</h3><p className="empty-desc">Start a prescription, link an approved patient and add the supplied prescription records.</p></div>
       ) : (
         <>
-          <section className="rx-patient-band">
+          <section className={`rx-patient-band${changingPatient || !patient ? ' is-changing-patient' : ''}`}>
             <div className="rx-patient-band__identity">
               <span className="rx-step-number">01</span>
               {patient ? (
                 changingPatient ? (
-                  <div className="rx-patient-change">
-                    <label htmlFor={`rx-patient-${activeOrder.id}`}><small>Change linked patient</small><strong>Choose the correct approved patient</strong></label>
-                    <select id={`rx-patient-${activeOrder.id}`} className="input select" value={patient.id} onChange={event => changePatient(event.target.value)}>
-                      {tenantPatients.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.email}</option>)}
-                    </select>
-                    <button type="button" className="btn btn-sm" onClick={() => setChangingPatient(false)}>Cancel</button>
-                  </div>
+                  renderPatientSearch('change')
                 ) : (
-                  <><span className="avatar">{initials(patient.name)}</span><span className="rx-patient-identity-copy"><small>Approved patient</small><strong>{patient.name}</strong><em>{patient.email} · {patient.mobile}</em></span><span className="pill pill-green"><CheckCircle size={11} /> Linked</span><div className="rx-patient-actions"><button type="button" className="btn btn-sm" onClick={() => setChangingPatient(true)}><Pencil size={12} /> Change patient</button><button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDelete(true)}><Trash2 size={14} /></button></div></>
+                  <><span className="avatar">{initials(patient.name)}</span><span className="rx-patient-identity-copy"><small>Approved patient</small><strong>{patient.name}</strong><em>DOB {formatPatientDob(patient.dob)} · {patient.email} · {patient.mobile}</em></span><span className="pill pill-green"><CheckCircle size={11} /> Linked</span><div className="rx-patient-actions"><button type="button" className="btn btn-sm" onClick={beginPatientChange}><Pencil size={12} /> Change patient</button><button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDelete(true)}><Trash2 size={14} /></button></div></>
                 )
               ) : (
-                <label className="rx-patient-picker">
-                  <span><small>Start here</small><strong>Link an approved patient</strong></span>
-                  <select className="input select" value="" onChange={event => {
-                    if (!event.target.value) return;
-                    const linkedPatient = tenantPatients.find(candidate => candidate.id === event.target.value);
-                    dispatch({ type: 'SET_ORDER_PATIENT', orderId: activeOrder.id, patientId: event.target.value });
-                    if (linkedPatient) dispatch({ type: 'ADD_TOAST', message: `Linked patient “${linkedPatient.name}”.`, toastType: 'success' });
-                  }}><option value="">Choose patient…</option>{tenantPatients.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.email}</option>)}</select>
-                </label>
+                renderPatientSearch('link')
               )}
             </div>
             <div className="rx-readiness-summary" aria-label="Prescription readiness">

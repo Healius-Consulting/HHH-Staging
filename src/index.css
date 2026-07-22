@@ -4886,9 +4886,34 @@ textarea { background: var(--bg-surface); }
 .rx-patient-identity-copy { min-width: 0; }
 .rx-patient-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .rx-patient-actions .btn { white-space: nowrap; }
-.rx-patient-change { display: grid; width: 100%; grid-template-columns: minmax(150px, .7fr) minmax(220px, 1fr) auto; align-items: end; gap: 10px; }
-.rx-patient-change label small, .rx-patient-change label strong { display: block; }
-.rx-patient-change label strong { margin-top: 3px; font-size: 11px; }
+.rx-patient-band.is-changing-patient { position: relative; z-index: 20; grid-template-columns: minmax(520px, 1.25fr) minmax(350px, .75fr); align-items: stretch; }
+.rx-patient-band.is-changing-patient .rx-patient-band__identity { align-items: flex-start; }
+.rx-patient-band.is-changing-patient .rx-step-number { margin-top: 4px; }
+.rx-patient-change { display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(260px, 1fr) auto; align-items: end; gap: 10px; }
+.rx-patient-change.is-linking .rx-patient-combobox { grid-column: 1 / -1; }
+.rx-patient-change__heading { grid-column: 1 / -1; }
+.rx-patient-change__heading small, .rx-patient-change__heading strong, .rx-patient-change__heading span { display: block; }
+.rx-patient-change__heading strong { margin-top: 3px; font-size: 12px; }
+.rx-patient-change__heading span { margin-top: 3px; color: var(--text-tertiary); font-size: 9px; font-weight: 500; }
+.rx-patient-combobox { position: relative; min-width: 0; }
+.rx-patient-combobox__field { position: relative; }
+.rx-patient-combobox__field > svg { position: absolute; z-index: 1; top: 50%; left: 12px; color: var(--text-tertiary); pointer-events: none; transform: translateY(-50%); }
+.rx-patient-combobox__field .input { width: 100%; padding-left: 36px; }
+.rx-patient-combobox:focus-within .rx-patient-combobox__field > svg { color: var(--tenant-primary-strong); }
+.rx-patient-results { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; left: 0; display: grid; max-height: 280px; overflow-y: auto; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-surface); box-shadow: 0 18px 42px rgba(13, 29, 26, .16); }
+.rx-patient-results > button { display: grid; min-width: 0; min-height: 64px; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border); color: var(--text-primary); background: transparent; cursor: pointer; font: inherit; text-align: left; }
+.rx-patient-results > button:last-of-type { border-bottom: 0; }
+.rx-patient-results > button:hover, .rx-patient-results > button.active { background: var(--tenant-primary-soft); }
+.rx-patient-results > button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--tenant-primary); outline-offset: -2px; }
+.rx-patient-result__avatar { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 6px; color: var(--tenant-primary-strong); background: color-mix(in srgb, var(--tenant-primary) 12%, var(--bg-surface)); font-size: 9px; font-weight: 760; }
+.rx-patient-results > button > span:nth-child(2) { min-width: 0; }
+.rx-patient-results strong, .rx-patient-results small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rx-patient-results strong { font-size: 10px; }
+.rx-patient-results small { margin-top: 2px; color: var(--text-tertiary); font-size: 8px; }
+.rx-patient-results .rx-patient-result__dob { color: var(--text-secondary); font-weight: 700; font-variant-numeric: tabular-nums; }
+.rx-patient-results em { padding: 3px 6px; border-radius: 4px; color: var(--tenant-primary-strong); background: var(--tenant-primary-soft); font-size: 8px; font-style: normal; font-weight: 700; text-transform: uppercase; }
+.rx-patient-results__empty { padding: 16px; color: var(--text-secondary); font-size: 10px; text-align: center; }
+.rx-patient-change__cancel { white-space: nowrap; }
 .rx-draft-delete-confirm { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 18px; padding: 11px 16px; border-top: 1px solid color-mix(in srgb, var(--color-danger) 28%, var(--border)); color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 7%, var(--bg-surface)); }
 .rx-draft-delete-confirm > span { display: flex; align-items: center; gap: 9px; }
 .rx-draft-delete-confirm > span > span { display: grid; gap: 1px; }
@@ -5150,6 +5175,11 @@ textarea { background: var(--bg-surface); }
   .rx-checkout-blocker { grid-column: 2; }
 }
 
+@media (max-width: 1180px) {
+  .rx-patient-band.is-changing-patient { grid-template-columns: 1fr; }
+  .rx-patient-band.is-changing-patient .rx-patient-band__identity { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+
 @media (max-width: 900px) {
   .rx-draft-bar { grid-template-columns: 1fr auto; }
   .rx-draft-tabs { grid-column: 1 / -1; grid-row: 2; }
@@ -5176,7 +5206,7 @@ textarea { background: var(--bg-surface); }
   .rx-patient-identity-copy { flex: 1 1 calc(100% - 82px); }
   .rx-patient-actions { width: 100%; margin-left: 38px; }
   .rx-patient-change { grid-template-columns: 1fr; }
-  .rx-patient-change .btn { justify-self: start; }
+  .rx-patient-change__cancel { justify-self: start; }
   .rx-draft-delete-confirm { align-items: stretch; flex-direction: column; }
   .rx-draft-delete-confirm > div { justify-content: flex-end; }
   .rx-readiness-summary { grid-template-columns: 1fr; }
@@ -6202,15 +6232,18 @@ html[data-reduced-motion='true'] :is(.summary-tile, .supplier-queue-row, .rx-pre
    attribute and in the patient detail view. */
 .compact-patient-cell,
 .compact-patient-name,
+.compact-patient-dob,
 .compact-patient-contact,
 .compact-email { min-width: 0; }
 .compact-patient-name,
+.compact-patient-dob,
 .compact-email {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.compact-patient-dob { margin-top: 2px; color: var(--text-secondary); font-size: 8px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .compact-patient-contact {
   display: flex !important;
   max-width: 100%;
@@ -6227,14 +6260,15 @@ html[data-reduced-motion='true'] :is(.summary-tile, .supplier-queue-row, .rx-pre
 }
 .patient-directory-table {
   width: 100%;
-  min-width: 790px;
+  min-width: 900px;
   table-layout: fixed;
 }
-.patient-directory-table th:nth-child(1) { width: 22%; }
-.patient-directory-table th:nth-child(2) { width: 22%; }
-.patient-directory-table th:nth-child(3) { width: 16%; }
-.patient-directory-table th:nth-child(4) { width: auto; }
-.patient-directory-table th:nth-child(5) { width: 112px; }
+.patient-directory-table th:nth-child(1) { width: 20%; }
+.patient-directory-table th:nth-child(2) { width: 13%; }
+.patient-directory-table th:nth-child(3) { width: 20%; }
+.patient-directory-table th:nth-child(4) { width: 16%; }
+.patient-directory-table th:nth-child(5) { width: auto; }
+.patient-directory-table th:nth-child(6) { width: 112px; }
 .patient-directory-table td { min-width: 0; overflow: hidden; }
 .patient-directory-table td:last-child { overflow: visible; }
 .admin-referral-register table,

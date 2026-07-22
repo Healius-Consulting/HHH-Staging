@@ -48,6 +48,7 @@ import WorkspacePageHeader from '../components/WorkspacePageHeader';
 import CommandPalette, { type CommandDefinition } from '../components/CommandPalette';
 import SummaryTiles from '../components/SummaryTiles';
 import CompactPatientCell from '../components/CompactPatientCell';
+import { formatPatientDob } from '../utils/patientDob';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'compliance' | 'integrations';
 
@@ -408,12 +409,12 @@ export default function AdminPortal() {
   );
 
   const allPatients = useMemo(() => {
-    const records = new Map<string, { id: string; name: string; email: string; mobile: string; organisationId: string; stage: string; source: string; date: Date | string | null }>();
-    state.crm.forEach(patient => records.set(`${patient.organisationId}:${patient.email.toLowerCase()}`, { id: patient.id, name: patient.name, email: patient.email, mobile: patient.mobile, organisationId: patient.organisationId, stage: patient.status, source: 'Patient record', date: patient.interactions?.at(-1)?.ts ?? null }));
+    const records = new Map<string, { id: string; name: string; email: string; mobile: string; dob: string; organisationId: string; stage: string; source: string; date: Date | string | null }>();
+    state.crm.forEach(patient => records.set(`${patient.organisationId}:${patient.email.toLowerCase()}`, { id: patient.id, name: patient.name, email: patient.email, mobile: patient.mobile, dob: patient.dob ?? '', organisationId: patient.organisationId, stage: patient.status, source: 'Patient record', date: patient.interactions?.at(-1)?.ts ?? null }));
     state.submissions.forEach(submission => {
       const key = `${submission.organisationId}:${submission.email.toLowerCase()}`;
       const existing = records.get(key);
-      records.set(key, { id: existing?.id ?? `sub-${submission.id}`, name: submission.name, email: submission.email, mobile: submission.mobile, organisationId: submission.organisationId, stage: submission.status, source: submission.source, date: submission.submittedAt });
+      records.set(key, { id: existing?.id ?? `sub-${submission.id}`, name: submission.name, email: submission.email, mobile: submission.mobile, dob: submission.dob || existing?.dob || '', organisationId: submission.organisationId, stage: submission.status, source: submission.source, date: submission.submittedAt });
     });
     return [...records.values()];
   }, [state.crm, state.submissions]);
@@ -421,7 +422,7 @@ export default function AdminPortal() {
   const filteredOrganisations = state.organisations.filter(org => `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase()));
   const filteredPatients = allPatients.filter(patient => {
     const org = state.organisations.find(item => item.id === patient.organisationId);
-    return `${patient.name} ${patient.email} ${patient.mobile} ${org?.name ?? ''}`.toLowerCase().includes(query.toLowerCase());
+    return `${patient.name} ${patient.email} ${patient.mobile} ${patient.dob} ${formatPatientDob(patient.dob)} ${org?.name ?? ''}`.toLowerCase().includes(query.toLowerCase());
   });
   const liveCount = state.organisations.filter(org => org.status === 'live').length;
   const remainingSetupSteps = Object.values(setupByOrganisation).reduce((total, status) => total + status.requiredCount - status.completedCount, 0);
@@ -529,7 +530,7 @@ export default function AdminPortal() {
 
           <section className="card admin-patient-table">
             <div className="admin-directory-head"><div><h2>Patients attributed to this pharmacy</h2><p>Attribution is derived from the pharmacy token and retained on the patient record.</p></div></div>
-            {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Condition</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><CompactPatientCell name={sub.name} email={sub.email} /></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td>{sub.condition}</td><td>{sub.source}</td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(sub.status)}`}>{onboardingStatusLabel(sub.status)}</span></td></tr>)}</tbody></table></div>}
+            {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Condition</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><CompactPatientCell name={sub.name} email={sub.email} dob={sub.dob} /></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td>{sub.condition}</td><td>{sub.source}</td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(sub.status)}`}>{onboardingStatusLabel(sub.status)}</span></td></tr>)}</tbody></table></div>}
           </section>
           </div>
         </div>
@@ -583,7 +584,7 @@ export default function AdminPortal() {
       const hasCall = submission.calls.length > 0;
       return (
         <tr key={submission.id}>
-          <td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} /></td>
+          <td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} /></td>
           <td><strong>{organisation?.tradingName ?? submission.pharmacyName}</strong><small>Token-attributed pharmacy</small></td>
           <td><strong>{submission.condition}</strong><small>{submission.tried2 ? 'Two treatments reported' : 'Treatment history requires review'} · {submission.psychExclusion ? 'Exclusion flagged' : 'No psychosis exclusion reported'}</small></td>
           <td><strong>{submission.calls.length}</strong><small>{hasCall ? `Last call ${new Date(submission.calls.at(-1)!.ts).toLocaleDateString('en-GB')}` : 'Patient call required before decision'}</small></td>
@@ -618,8 +619,8 @@ export default function AdminPortal() {
     <>
       <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-client register</p><strong>Patient index</strong><small>Operational oversight of pharmacy attribution.</small></span><span className="pill pill-info"><Users size={13} /> {allPatients.length} unique records</span></div>
       <section className="card admin-patient-table admin-master-patients">
-        <div className="admin-directory-head"><div><h2>Patient register</h2><p>Operational oversight only. Every access must be authenticated and audited in production.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient or pharmacy" /></label></div>
-        <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Acquisition source</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown tenant'}</button><small>{org?.gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.source}</td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB') : '—'}</td></tr>; })}</tbody></table></div>
+        <div className="admin-directory-head"><div><h2>Patient register</h2><p>Operational oversight only. Every access must be authenticated and audited in production.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB or pharmacy" /></label></div>
+        <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Acquisition source</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown tenant'}</button><small>{org?.gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.source}</td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB') : '—'}</td></tr>; })}</tbody></table></div>
       </section>
     </>
   );

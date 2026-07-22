@@ -3,6 +3,7 @@ import { CheckCircle, Clock, Download, FileText, Package, Printer, Search, Truck
 import { PHARMACY, RX_STATUS_LABELS, lineRevenue, money, useApp, type Prescription, type RxStatus } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
 import { compactPatientName } from '../utils/patientName';
+import { formatPatientDob } from '../utils/patientDob';
 
 const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Received', 'Ready', 'Collected'] as const;
 const STATUS_TABS: Array<{ key: RxStatus | 'all'; label: string; shortLabel: string }> = [
@@ -26,6 +27,7 @@ interface FlatSubOrder {
   key: string;
   orderId: number;
   patientName: string;
+  patientDob: string;
   date: Date;
   rxIdx: number;
   rx: Prescription;
@@ -48,8 +50,10 @@ export default function Orders() {
   const allSubOrders = useMemo(() => {
     const list: FlatSubOrder[] = [];
     state.orders.filter(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'paid').forEach(order => {
-      const patientName = order.patientId ? state.crm.find(patient => patient.organisationId === state.currentOrganisationId && patient.id === order.patientId)?.name ?? 'Unknown patient' : 'Unassigned';
-      order.prescriptions.forEach((rx, index) => list.push({ key: `${order.id}-${rx.id}`, orderId: order.id, patientName, date: order.date, rxIdx: index + 1, rx }));
+      const patient = order.patientId ? state.crm.find(candidate => candidate.organisationId === state.currentOrganisationId && candidate.id === order.patientId) : null;
+      const patientName = patient?.name ?? (order.patientId ? 'Unknown patient' : 'Unassigned');
+      const patientDob = patient?.dob ?? '';
+      order.prescriptions.forEach((rx, index) => list.push({ key: `${order.id}-${rx.id}`, orderId: order.id, patientName, patientDob, date: order.date, rxIdx: index + 1, rx }));
     });
     return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [state.crm, state.currentOrganisationId, state.orders]);
@@ -58,7 +62,7 @@ export default function Orders() {
     const needle = query.trim().toLowerCase();
     return allSubOrders
       .filter(item => statusFilter === 'all' || item.rx.status === statusFilter)
-      .filter(item => !needle || `${item.patientName} ${item.orderId} ${item.rx.poRef ?? ''} ${RX_STATUS_LABELS[item.rx.status]}`.toLowerCase().includes(needle))
+      .filter(item => !needle || `${item.patientName} ${item.patientDob} ${formatPatientDob(item.patientDob)} ${item.orderId} ${item.rx.poRef ?? ''} ${RX_STATUS_LABELS[item.rx.status]}`.toLowerCase().includes(needle))
       .sort((a, b) => (sortOrder === 'newest' ? 1 : -1) * (new Date(b.date).getTime() - new Date(a.date).getTime()));
   }, [allSubOrders, query, sortOrder, statusFilter]);
 
@@ -83,7 +87,7 @@ export default function Orders() {
       </section>
 
       <section className="supplier-filter-bar" aria-label="Filter supplier orders">
-        <label className="supplier-search"><Search size={15} /><input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, order or supplier reference" aria-label="Search supplier orders" /></label>
+        <label className="supplier-search"><Search size={15} /><input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB, order or supplier reference" aria-label="Search supplier orders" /></label>
         <label className="workspace-filter-field"><span>Stage</span><select className="input select" value={statusFilter} onChange={event => setStatusFilter(event.target.value as RxStatus | 'all')}>{STATUS_TABS.map(option => <option value={option.key} key={option.key}>{option.label}</option>)}</select></label>
         <label className="workspace-filter-field"><span>Sort</span><select className="input select" value={sortOrder} onChange={event => setSortOrder(event.target.value as 'newest' | 'oldest')}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
       </section>
@@ -97,7 +101,7 @@ export default function Orders() {
                 const progress = item.rx.status === 'collected' ? 100 : Math.round((completedStep(item.rx.status) / (TRACK_STEPS.length - 1)) * 100);
                 return <button type="button" key={item.key} className={`supplier-queue-row${selected?.key === item.key ? ' selected' : ''}`} aria-pressed={selected?.key === item.key} onClick={() => setSelectedKey(item.key)}>
                   <span className="supplier-queue-row__icon">{item.rx.status === 'dispatched' ? <Truck size={16} /> : item.rx.status === 'ready' || item.rx.status === 'collected' ? <CheckCircle size={16} /> : <Package size={16} />}</span>
-                  <span className="supplier-queue-row__identity"><strong title={item.patientName} aria-label={item.patientName}>{compactPatientName(item.patientName)}</strong><small>Order {item.orderId} · Rx {item.rxIdx}</small></span>
+                  <span className="supplier-queue-row__identity"><strong title={item.patientName} aria-label={item.patientName}>{compactPatientName(item.patientName)}</strong><small>DOB {formatPatientDob(item.patientDob)} · Order {item.orderId} · Rx {item.rxIdx}</small></span>
                   <span className="supplier-queue-row__meta"><strong>{money(rxTotal(item.rx))}</strong><small>{fmtDate(item.date)}</small></span>
                   <span className="supplier-queue-row__timeline" aria-label={`${RX_STATUS_LABELS[item.rx.status]}, ${progress}% complete`}><span><i style={{ width: `${progress}%` }} /></span><small>{RX_STATUS_LABELS[item.rx.status]}</small></span>
                 </button>;
@@ -138,7 +142,7 @@ function SupplierOrderDetail({ item, values, onQuantity, onRecordReceipt, onPrin
 
   return <article className="supplier-detail" aria-label={`Supplier order for ${item.patientName}`}>
     <header className="supplier-detail__header">
-      <span><small>Order {item.orderId} · Rx {item.rxIdx}</small><strong>{item.patientName}</strong><em>Prescriber: {rx.prescriber || 'Pending'}</em></span>
+      <span><small>Order {item.orderId} · Rx {item.rxIdx}</small><strong>{item.patientName}</strong><em>DOB {formatPatientDob(item.patientDob)} · Prescriber: {rx.prescriber || 'Pending'}</em></span>
       <span><strong>{money(rx.items.reduce((total, line) => total + lineRevenue(line), 0))}</strong><span className={`pill ${STATUS_PILL[rx.status]}`}>{RX_STATUS_LABELS[rx.status]}</span></span>
     </header>
 
