@@ -749,13 +749,17 @@ function reducer(state: AppState, action: Action): AppState {
         const organisationId = action.organisationId ?? state.currentOrganisationId;
         if (state.workspaceMode === 'training' && state.orders.length > 0 && state.orders.every(order => order.organisationId === organisationId)) return state;
         const training = buildTenantTrainingData(organisationId);
+        const patients = new Map(training.crm.map(patient => [patient.id, patient]));
+        state.crm
+          .filter(patient => patient.organisationId === organisationId)
+          .forEach(patient => patients.set(patient.id, patient));
         return {
           ...state,
           workspaceMode: 'training',
           screen: 'home',
           catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
           catalogueSource: state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
-          crm: training.crm,
+          crm: [...patients.values()],
           submissions: training.submissions,
           orders: training.orders,
           activeOrderId: 1,
