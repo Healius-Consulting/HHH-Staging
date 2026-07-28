@@ -465,7 +465,7 @@ function blankOrder(id: number, patientId: string | null, organisationId: string
 }
 
 function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder {
-  const orderId = 1_000 + index;
+  const orderId = index + 1;
   const rxStatus: RxStatus = record.fulfilmentStatus === 'supplier_pending'
     ? 'awaiting-approval'
     : record.fulfilmentStatus === 'supplier_processing'
