@@ -5,10 +5,16 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { config } from './config.js';
 
+const projectId = config.FIREBASE_PROJECT_ID
+  ?? process.env.GCLOUD_PROJECT
+  ?? process.env.GOOGLE_CLOUD_PROJECT;
+const storageBucket = config.FIREBASE_STORAGE_BUCKET
+  ?? (projectId ? `${projectId}.firebasestorage.app` : undefined);
+
 const firebaseApp = getApps()[0] ?? initializeApp({
   credential: applicationDefault(),
-  projectId: config.FIREBASE_PROJECT_ID,
-  storageBucket: config.FIREBASE_STORAGE_BUCKET,
+  projectId,
+  storageBucket,
 });
 
 export const auth = getAuth(firebaseApp);
