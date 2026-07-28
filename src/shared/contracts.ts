@@ -227,10 +227,11 @@ export interface PortalOrderRecord {
   fulfilmentStatus: string;
   paymentId?: string;
   curaleaf?: {
-    status: 'prescription_pending' | 'purchase_order_submitted';
+    status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'purchase_order_submitted';
     prescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
-    prescriptionId: string;
-    prescriberId: string;
+    prescriptionId?: string;
+    prescriberId?: string;
+    prescriberName?: string;
     customerReference: string;
     purchaseOrderId?: string | null;
     purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
@@ -278,14 +279,23 @@ export interface CuraleafManualPrescriptionInput {
 }
 
 export interface CuraleafSubmissionResult {
-  status: 'prescription_pending' | 'purchase_order_submitted';
-  prescriptionState: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
-  prescriptionId: string;
-  prescriberId: string;
+  status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'purchase_order_submitted';
+  prescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
+  prescriptionId?: string;
+  prescriberId?: string;
+  prescriberName?: string;
   customerReference: string;
   purchaseOrderId?: string | null;
   purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
   quote: CuraleafQuote;
+}
+
+export interface CuraleafClinicPrescriptionInput {
+  organisationId: string;
+  orderId: string;
+  subOrderId?: string;
+  fileId: string;
+  serialNumber: string;
 }
 
 export interface CuraleafActivationInput {

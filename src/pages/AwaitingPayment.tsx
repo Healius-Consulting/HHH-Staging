@@ -3,7 +3,7 @@ import { ArrowRight, Banknote, CheckCircle, Clock, CreditCard, ReceiptText, Send
 import { useApp, money, rxRevenue, type ManualTender, type PatientOrder } from '../context/AppContext';
 import { compactPatientName } from '../utils/patientName';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { recordPortalManualPayment, submitCuraleafManualPrescription } from '../shared/api';
+import { recordPortalManualPayment, submitCuraleafClinicPrescription } from '../shared/api';
 
 type PaymentFilter = 'all' | 'awaiting' | 'paid';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
@@ -48,30 +48,14 @@ export default function AwaitingPayment() {
     for (const rx of order.prescriptions.filter(prescription => !prescription.placed)) {
       if (!rx.fileId || !rx.serialNumber || !rx.issueDate || !rx.prescriberPin) throw new Error(`Rx ${rx.id} is missing its uploaded file or Curaleaf prescription details.`);
       if (rx.items.some(item => !item.formulaId || !item.unitsNeededCount)) throw new Error(`Rx ${rx.id} has a product without a formula ID or prescribed-unit count.`);
-      const initials = rx.prescriber.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 20).toUpperCase() || 'NA';
-      const gmcNumber = rx.prescriberGmcNumber?.trim() ? Number(rx.prescriberGmcNumber) : null;
-      const result = await submitCuraleafManualPrescription({
+      const result = await submitCuraleafClinicPrescription({
         organisationId: state.currentOrganisationId,
         orderId: order.backendId,
         subOrderId: String(rx.id),
         fileId: rx.fileId,
         serialNumber: rx.serialNumber,
-        issueDate: rx.issueDate,
-        prescriber: {
-          pin: rx.prescriberPin,
-          gmcNumber: gmcNumber && Number.isInteger(gmcNumber) && gmcNumber > 0 ? gmcNumber : null,
-          gphcNumber: rx.prescriberGphcNumber?.trim() || null,
-          name: rx.prescriber,
-          initials,
-        },
-        items: rx.items.map(item => ({
-          formulaId: item.formulaId!,
-          unitsNeededCount: item.unitsNeededCount!,
-          packId: item.productId,
-          quantity: item.qty,
-        })),
       });
-      if (result.status === 'prescription_pending') pendingAcceptance += 1;
+      if (result.status !== 'purchase_order_submitted') pendingAcceptance += 1;
       dispatch({ type: 'CONFIRM_CURALEAF_SUBMISSION', orderId: order.id, rxId: rx.id, customerReference: result.customerReference });
     }
     return pendingAcceptance;

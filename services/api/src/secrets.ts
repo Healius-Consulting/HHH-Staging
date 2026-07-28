@@ -4,6 +4,7 @@ import { HttpError } from './http.js';
 import type { IntegrationName } from './types.js';
 
 const client = new SecretManagerServiceClient();
+const SECRET_REGION = 'europe-west2';
 
 function projectId() {
   const value = config.FIREBASE_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
@@ -13,7 +14,7 @@ function projectId() {
 
 function secretId(organisationId: string, integration: IntegrationName) {
   const safeId = organisationId.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 180);
-  return `hhh-${integration}-${safeId}`;
+  return `hhh-${integration}-${safeId}-${SECRET_REGION}`;
 }
 
 function secretPath(organisationId: string, integration: IntegrationName) {
@@ -30,7 +31,7 @@ export async function writeIntegrationSecret(organisationId: string, integration
     await client.createSecret({
       parent,
       secretId: secretId(organisationId, integration),
-      secret: { replication: { userManaged: { replicas: [{ location: 'us-central1' }] } }, labels: { application: 'hhh', integration } },
+      secret: { replication: { userManaged: { replicas: [{ location: SECRET_REGION }] } }, labels: { application: 'hhh', integration, region: SECRET_REGION } },
     });
   }
 
@@ -53,7 +54,13 @@ export async function readIntegrationSecret<T extends Record<string, string>>(or
   }
 }
 
-export type CuraleafPlatformSecretId = 'CURALEAF_READ_API_KEY' | 'CURALEAF_WRITE_API_KEY' | 'CURALEAF_API_KEY';
+export type CuraleafPlatformSecretId =
+  | 'CURALEAF_READ_API_KEY_EUROPE_WEST2'
+  | 'CURALEAF_WRITE_API_KEY_EUROPE_WEST2'
+  | 'CURALEAF_API_KEY_EUROPE_WEST2'
+  | 'CURALEAF_READ_API_KEY'
+  | 'CURALEAF_WRITE_API_KEY'
+  | 'CURALEAF_API_KEY';
 
 export async function readPlatformSecret(secretIds: readonly CuraleafPlatformSecretId[]): Promise<string> {
   for (const secretId of secretIds) {

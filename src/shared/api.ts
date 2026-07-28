@@ -28,6 +28,7 @@ import type {
   PortalOrderRecord,
   PrescriptionUploadRequest,
   PrescriptionUploadTarget,
+  CuraleafClinicPrescriptionInput,
   CuraleafManualPrescriptionInput,
   CuraleafSubmissionResult,
 } from './contracts';
@@ -209,6 +210,13 @@ export function recordPortalManualPayment(orderId: string, input: {
 
 export function submitCuraleafManualPrescription(input: CuraleafManualPrescriptionInput) {
   return apiRequest<CuraleafSubmissionResult>('/v1/portal/integrations/curaleaf/prescriptions/manual', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function submitCuraleafClinicPrescription(input: CuraleafClinicPrescriptionInput) {
+  return apiRequest<CuraleafSubmissionResult>('/v1/portal/integrations/curaleaf/prescriptions/barcode', {
     method: 'POST',
     body: JSON.stringify(input),
   });

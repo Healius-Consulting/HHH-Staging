@@ -494,7 +494,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
   const prescriptions: Prescription[] = record.prescriptions?.length
     ? record.prescriptions.map((prescription, rxIndex) => ({
         id: orderId * 100 + rxIndex + 1,
-        prescriber: prescription.prescriber.name,
+        prescriber: record.curaleaf?.prescriberName ?? prescription.prescriber.name,
         prescriberPin: prescription.prescriber.pin,
         prescriberGmcNumber: prescription.prescriber.gmcNumber?.toString(),
         prescriberGphcNumber: prescription.prescriber.gphcNumber ?? undefined,

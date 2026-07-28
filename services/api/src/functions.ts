@@ -3,17 +3,17 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { app } from './app.js';
 import { reconcilePendingCuraleafOrders } from './curaleaf-reconciliation.js';
 
-export const api = onRequest({
-  region: 'us-central1',
+export const apiLondon = onRequest({
+  region: 'europe-west2',
   timeoutSeconds: 60,
   memory: '256MiB',
   maxInstances: 2,
 }, app);
 
-export const reconcileCuraleafOrders = onSchedule({
+export const reconcileCuraleafOrdersLondon = onSchedule({
   schedule: 'every 5 minutes',
   timeZone: 'Europe/London',
-  region: 'us-central1',
+  region: 'europe-west2',
   timeoutSeconds: 120,
   memory: '256MiB',
   maxInstances: 1,

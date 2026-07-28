@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { audit } from './audit.js';
 import { identity, requireRole, requireStaff, tenantFor } from './auth.js';
 import { allowedOrigins, config } from './config.js';
-import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, submitBarcodePrescription, submitManualPrescription } from './curaleaf.js';
+import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, submitClinicPrescription, submitManualPrescription } from './curaleaf.js';
 import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
 import { cached, invalidateCache } from './cache.js';
@@ -219,7 +219,7 @@ app.get('/health', healthLimit, async (_request, response, next) => {
       await firestore.collection('_health').limit(1).get();
       return true;
     });
-    response.json({ status: 'ok', storage: 'firestore', region: 'us-central1', checkedAt: timestamp() });
+    response.json({ status: 'ok', storage: 'firestore', region: 'europe-west2', checkedAt: timestamp() });
   } catch (error) { next(error); }
 });
 
@@ -701,14 +701,47 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
 app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (request, response, next) => {
   let operation: Awaited<ReturnType<typeof startOperation>> | undefined;
   try {
-    const input = z.object({ organisationId: idSchema.optional(), orderId: idSchema, subOrderId: idSchema.optional(), fileId: idSchema, quoteItems: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const order = await getTenantRecord('orders', input.orderId, organisationId); if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Payment must be confirmed before Curaleaf submission.', 'PAYMENT_REQUIRED');
-    operation = await startOperation(organisationId, input.orderId, 'barcode', input.subOrderId); const file = await uploadedFile(organisationId, input.fileId); const result = await submitBarcodePrescription(organisationId, { customerReference: operation.reference, file, quoteItems: input.quoteItems });
-    const reconciliationRequired = result.status === 'reconciliation_required';
-    await operation.document.update({ status: reconciliationRequired ? 'reconciliation_required' : 'completed', result, updatedAt: timestamp() });
-    await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, integrationStatus: reconciliationRequired ? 'reconciliation_required' : 'submitted', fulfilmentStatus: reconciliationRequired ? 'supplier_pending' : 'supplier_processing', updatedAt: timestamp() });
+    const input = z.object({ organisationId: idSchema.optional(), orderId: idSchema, subOrderId: idSchema.optional(), fileId: idSchema, serialNumber: z.string().min(1).max(200) }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    await requireSetupComplete(organisationId);
+    const order = await getTenantRecord('orders', input.orderId, organisationId);
+    if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Payment must be confirmed before Curaleaf submission.', 'PAYMENT_REQUIRED');
+    const storedPrescriptions = z.array(orderPrescriptionSchema).parse(order.prescriptions);
+    const storedPrescription = storedPrescriptions.find(prescription => prescription.fileId === input.fileId || prescription.serialNumber === input.serialNumber);
+    if (!storedPrescription) throw new HttpError(409, 'The submitted Clinic prescription is not part of this saved order.', 'ORDER_PRESCRIPTION_MISMATCH');
+    operation = await startOperation(organisationId, input.orderId, 'barcode', input.subOrderId);
+    const file = await uploadedFile(organisationId, storedPrescription.fileId);
+    const result = await submitClinicPrescription(organisationId, {
+      serialNumber: storedPrescription.serialNumber,
+      expectedPrescriberPin: storedPrescription.prescriber.pin,
+      expectedItems: storedPrescription.items.map(({ formulaId, unitsNeededCount }) => ({ formulaId, unitsNeededCount })),
+      customerReference: operation.reference,
+      quoteItems: storedPrescription.items.map(({ packId, quantity }) => ({ packId, quantity })),
+      file,
+    });
+    const needsAttention = ['prescription_mismatch', 'reconciliation_required', 'prescription_closed'].includes(result.status);
+    const awaitingSupplier = ['prescription_processing', 'prescription_pending'].includes(result.status);
+    const operationStatus = needsAttention ? 'reconciliation_required' : awaitingSupplier ? 'awaiting_clinic_prescription' : 'purchase_order_submitted';
+    await operation.document.update({
+      status: operationStatus,
+      result,
+      prescriptionId: 'prescriptionId' in result ? result.prescriptionId : null,
+      prescriptionState: 'prescriptionState' in result ? result.prescriptionState : null,
+      prescriptionSerialNumber: storedPrescription.serialNumber,
+      prescriberPin: storedPrescription.prescriber.pin,
+      prescriptionItems: storedPrescription.items.map(({ formulaId, unitsNeededCount }) => ({ formulaId, unitsNeededCount })),
+      items: storedPrescription.items.map(({ packId, quantity }) => ({ packId, quantity })),
+      updatedAt: timestamp(),
+    });
+    await firestore.collection('orders').doc(input.orderId).update({
+      curaleaf: result,
+      integrationStatus: operationStatus,
+      fulfilmentStatus: needsAttention ? 'exception' satisfies FulfilmentStatus : awaitingSupplier ? 'supplier_pending' satisfies FulfilmentStatus : 'supplier_processing' satisfies FulfilmentStatus,
+      updatedAt: timestamp(),
+    });
     invalidateCollectionCache('orders', input.orderId);
-    await audit(request, reconciliationRequired ? 'curaleaf.barcode_reconciliation_required' : 'curaleaf.barcode_submitted', { organisationId, orderId: input.orderId, operationId: operation.id });
-    response.status(reconciliationRequired ? 202 : 201).json(result);
+    await audit(request, needsAttention ? 'curaleaf.clinic_attention_required' : 'curaleaf.clinic_submitted', { organisationId, orderId: input.orderId, operationId: operation.id });
+    response.status(needsAttention || awaitingSupplier ? 202 : 201).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
 });
 
