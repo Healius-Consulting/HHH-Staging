@@ -456,6 +456,16 @@ const orderPrescriptionSchema = z.object({
 });
 const orderSchema = z.object({ patientId: idSchema, lineItems: z.array(orderLineItemSchema).min(1).max(50), prescriptions: z.array(orderPrescriptionSchema).max(20).default([]), dispensingFeePence: z.number().int().nonnegative().max(10_000).default(0), currency: z.literal('GBP').default('GBP'), paymentRoute: z.enum(['manual', 'worldpay']) });
 
+function packQuantities(items: Array<{ packId: string; quantity: number }>) {
+  const quantities = new Map<string, number>();
+  items.forEach(item => quantities.set(item.packId, (quantities.get(item.packId) ?? 0) + item.quantity));
+  return quantities;
+}
+
+function samePackQuantities(left: Map<string, number>, right: Map<string, number>) {
+  return left.size === right.size && [...left].every(([packId, quantity]) => right.get(packId) === quantity);
+}
+
 function curaleafPricePence(value: unknown) {
   const price = String(value ?? '').trim();
   const match = /^(\d+)(?:\.(\d+))?$/.exec(price);
@@ -471,12 +481,19 @@ app.post('/v1/portal/orders', async (request, response, next) => {
     const organisationId = tenantFor(request, request.body.organisationId);
     const input = orderSchema.parse(request.body);
     await getTenantRecord('patients', input.patientId, organisationId);
+    const prescribedItems = input.prescriptions.flatMap(prescription => prescription.items);
+    if (prescribedItems.length && !samePackQuantities(packQuantities(input.lineItems), packQuantities(prescribedItems))) {
+      throw new HttpError(400, 'The order lines must exactly match the products and quantities assigned to its prescriptions.', 'ORDER_ITEM_MISMATCH');
+    }
     const productPage = await curaleafList<{ id: string; formulaId: string; formulaName: string; patientPackPrice: string; state: string }>(organisationId, '/v1/products/', 'products');
     const products = new Map(productPage.records.map(product => [product.id, product]));
     const lineItems = input.lineItems.map(item => {
       const product = products.get(item.packId);
       if (!product) throw new HttpError(409, 'A selected Curaleaf product is no longer available. Refresh the catalogue and review the order.', 'PRODUCT_NOT_AVAILABLE');
       if (product.state !== 'ACTIVE') throw new HttpError(409, `${product.formulaName} is no longer an active Curaleaf product.`, 'PRODUCT_NOT_AVAILABLE');
+      if (prescribedItems.some(prescribed => prescribed.packId === item.packId && prescribed.formulaId !== product.formulaId)) {
+        throw new HttpError(409, `${product.formulaName} no longer matches the selected Curaleaf formula. Refresh the catalogue and review the prescription.`, 'FORMULA_MISMATCH');
+      }
       return {
         productId: product.id,
         formulaId: product.formulaId,
@@ -643,8 +660,29 @@ const manualPrescriptionSchema = z.object({
 app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request, response, next) => {
   let operation: Awaited<ReturnType<typeof startOperation>> | undefined;
   try {
-    const input = manualPrescriptionSchema.parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const order = await getTenantRecord('orders', input.orderId, organisationId); if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Payment must be confirmed before Curaleaf submission.', 'PAYMENT_REQUIRED');
-    operation = await startOperation(organisationId, input.orderId, 'manual', input.subOrderId); const file = await uploadedFile(organisationId, input.fileId); const result = await submitManualPrescription(organisationId, { ...input, customerReference: operation.reference, file });
+    const input = manualPrescriptionSchema.parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    await requireSetupComplete(organisationId);
+    const order = await getTenantRecord('orders', input.orderId, organisationId);
+    if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Payment must be confirmed before Curaleaf submission.', 'PAYMENT_REQUIRED');
+    const storedPrescriptions = z.array(orderPrescriptionSchema).safeParse(order.prescriptions);
+    const storedPrescription = storedPrescriptions.success && storedPrescriptions.data.length
+      ? storedPrescriptions.data.find(prescription => prescription.fileId === input.fileId || prescription.serialNumber === input.serialNumber)
+      : undefined;
+    if (storedPrescriptions.success && storedPrescriptions.data.length && !storedPrescription) {
+      throw new HttpError(409, 'The submitted prescription is not part of this saved order.', 'ORDER_PRESCRIPTION_MISMATCH');
+    }
+    const authoritativeInput = storedPrescription ? {
+      ...input,
+      fileId: storedPrescription.fileId,
+      serialNumber: storedPrescription.serialNumber,
+      issueDate: storedPrescription.issueDate,
+      prescriber: storedPrescription.prescriber,
+      items: storedPrescription.items,
+    } : input;
+    operation = await startOperation(organisationId, input.orderId, 'manual', input.subOrderId);
+    const file = await uploadedFile(organisationId, authoritativeInput.fileId);
+    const result = await submitManualPrescription(organisationId, { ...authoritativeInput, customerReference: operation.reference, file });
     const fulfilmentStatus: FulfilmentStatus = result.status === 'prescription_pending' ? 'supplier_pending' : 'supplier_processing';
     await operation.document.update({ status: 'completed', result, updatedAt: timestamp() }); await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, fulfilmentStatus, updatedAt: timestamp() }); invalidateCollectionCache('orders', input.orderId); await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id }); response.status(201).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
