@@ -204,7 +204,11 @@ export default function CreateOrder() {
         : state.workspaceMode === 'live'
           ? await getCuraleafQuote(state.currentOrganisationId, currentQuoteItems)
           : await getCuraleafTrainingQuote(state.currentOrganisationId, currentQuoteItems);
-      if (!quote.items.length) throw new Error('Curaleaf has not returned quote prices yet. Your draft is unchanged; wait and try again, or contact your HHH administrator if this continues.');
+      if (!quote.items.length) {
+        throw new Error(state.workspaceMode === 'training'
+          ? 'The Curaleaf test environment did not return quote lines for these packs. You can continue the training workflow; no supplier order will be sent.'
+          : 'Curaleaf has not returned quote prices yet. Your draft is unchanged; wait and try again, or contact your HHH administrator if this continues.');
+      }
       dispatch({
         type: 'APPLY_CURALEAF_QUOTE',
         items: quote.items.map(item => ({
@@ -444,7 +448,7 @@ export default function CreateOrder() {
               </section>
 
               <section className="rx-surface rx-formulary">
-                <header className="rx-surface__header"><div><span className="rx-step-number">03</span><span><small>{state.catalogueSource === 'curaleaf' ? 'Live Curaleaf formulary' : 'Training formulary'}</small><strong>Add products to Rx {selectedRxIndex + 1}</strong></span></div><span className="rx-formulary-result">{filteredProducts.length} products</span></header>
+                <header className="rx-surface__header"><div><span className="rx-step-number">03</span><span><small>{state.workspaceMode === 'training' ? 'Curaleaf test formulary' : 'Live Curaleaf formulary'}</small><strong>Add products to Rx {selectedRxIndex + 1}</strong></span></div><span className="rx-formulary-result">{filteredProducts.length} products</span></header>
                 {state.catalogueLoading ? <ProviderStatusNotice state="loading" title="Refreshing Curaleaf products" detail="The latest patient prices and pack information are being retrieved." /> : null}
                 {state.catalogueError ? <ProviderStatusNotice title="Curaleaf information is temporarily delayed" detail="Wait and try again later. If this continues, contact your HHH administrator; pharmacy staff do not need to change the connection." /> : null}
                 <div className="rx-formulary-tools"><label className="rx-search"><Search size={15} /><input className="input" placeholder="Search product or strength" aria-label="Search Curaleaf formulary" value={catalogQuery} onChange={event => setCatalogQuery(event.target.value)} /></label><div className="rx-type-filter" role="group" aria-label="Filter formulary by type">{TYPE_FILTERS.map(type => <button type="button" key={type} aria-pressed={catalogTypeFilter === type} onClick={() => setCatalogTypeFilter(type)}>{type === 'All' ? 'All' : TYPE_LABELS[type] || type}</button>)}</div></div>
@@ -463,10 +467,10 @@ export default function CreateOrder() {
             <aside className="rx-checkout-rail">
               <section className="rx-checkout-panel" id="rx-order-review">
                 <header><small>Order {activeOrder.id}</small><strong>Review and request payment</strong></header>
-                <dl className="rx-order-totals"><div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div><div><dt>Wholesale total</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : 'Quote required'}</dd></div><div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div><div><dt>Product margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${orderMargin}%`}</dd></div></dl>
+                <dl className="rx-order-totals"><div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div><div><dt>Wholesale total</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div><div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div><div><dt>Product margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${orderMargin}%`}</dd></div></dl>
                 <div className={`rx-checkout-readiness${quoteError ? ' has-error' : ''}`}>
-                  <span className="section-label">Live Curaleaf quote</span>
-                  <span className={quoteCurrent ? 'complete' : ''}>{quoteCurrent ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{quoteCurrent ? 'Wholesale and stock verified' : 'Required for current quantities'}</span>
+                  <span className="section-label">{state.workspaceMode === 'training' ? 'Curaleaf test quote' : 'Live Curaleaf quote'}</span>
+                  <span className={quoteCurrent ? 'complete' : ''}>{quoteCurrent ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{quoteCurrent ? 'Wholesale and stock verified' : state.workspaceMode === 'training' ? 'Optional availability and wholesale check' : 'Required for current quantities'}</span>
                   {quoteSummary && quoteCurrent ? <span className="complete"><CheckCircle size={13} /> Shipping {money(quoteSummary.shippingPrice)} · tax {quoteSummary.taxRate}%</span> : null}
                   {quoteError ? <ProviderStatusNotice title="Quote not available yet" detail={quoteError} /> : null}
                   <button type="button" className="btn btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Requesting quote…' : quoteCurrent ? 'Refresh Curaleaf quote' : 'Get Curaleaf quote'}</button>
