@@ -1,5 +1,6 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
-import { getCuraleafConnectionStatus, getFormularyPrices, getPortalEligibilitySubmissions, isApiConfigured } from '../shared/api';
+import { getCuraleafCatalogue, getCuraleafConnectionStatus, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, isApiConfigured } from '../shared/api';
+import type { CuraleafCatalogue } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 
 /* ═══════════════════════════════════════════════════════════
@@ -8,11 +9,16 @@ import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPrev
 
 export interface CatalogueItem {
   id: string;
+  formulaId?: string;
   name: string;
-  cost: number;      // WX
-  retail: number;     // PX
-  stock: 'in' | 'low' | 'out';
-  type: 'oil' | 'flos' | 'capsule' | 'lozenge' | 'vape';
+  cost: number | null; // Order-specific wholesale price from a Curaleaf quote.
+  retail: number;      // Curaleaf's authoritative patient pack price.
+  availability: 'unknown' | 'in' | 'out';
+  type: 'oil' | 'flos' | 'capsule' | 'lozenge' | 'vape' | 'other';
+  unit?: string;
+  packSize?: number;
+  source?: 'curaleaf' | 'training';
+  supplierState?: string;
 }
 
 export interface CRMPatient {
@@ -29,9 +35,11 @@ export interface CRMPatient {
 
 export interface LineItem {
   productId: string;
+  formulaId?: string;
   name: string;
   qty: number;
-  cost: number;
+  unitsNeededCount?: number;
+  cost: number | null;
   retail: number;
 }
 
@@ -53,7 +61,13 @@ export interface GoodsReceiptLine {
 export interface Prescription {
   id: number;
   prescriber: string;
+  prescriberPin?: string;
+  prescriberGmcNumber?: string;
+  prescriberGphcNumber?: string;
+  serialNumber?: string;
+  issueDate?: string;
   copyFileName: string | null;
+  fileId?: string | null;
   items: LineItem[];
   placed: boolean;
   poRef: string | null;
@@ -74,6 +88,7 @@ export type ManualTender = 'epos-card' | 'cash' | 'bank-transfer' | 'other';
 
 export interface PatientOrder {
   id: number;
+  backendId?: string;
   organisationId: string;
   patientId: string | null;
   date: Date;
@@ -206,7 +221,10 @@ export interface Toast {
 export interface AppState {
   screen: Screen;
   catalogue: CatalogueItem[];
-  formularyPrices: Record<string, Record<string, number>>;
+  catalogueSource: 'curaleaf' | 'training' | 'unavailable';
+  catalogueLoading: boolean;
+  catalogueError: string | null;
+  catalogueUpdatedAt: string | null;
   crm: CRMPatient[];
   submissions: EligibilitySubmission[];
   orders: PatientOrder[];
@@ -231,17 +249,6 @@ export interface AppState {
 /* ═══════════════════════════════════════════════════════════
    Seed Data
    ═══════════════════════════════════════════════════════════ */
-
-export const CATALOGUE: CatalogueItem[] = [
-  { id: 'P001', name: 'Adven 20/1 THC Oil 30ml',         cost: 42,   retail: 79,   stock: 'in',  type: 'oil' },
-  { id: 'P002', name: 'Curaleaf CBD 50 Oil 50ml',         cost: 30,   retail: 59,   stock: 'in',  type: 'oil' },
-  { id: 'P003', name: 'Khiron 20/1 Oil 30ml',             cost: 40,   retail: 75,   stock: 'in',  type: 'oil' },
-  { id: 'P004', name: 'Noidecs T10:C10 Flos 10g',         cost: 38.5, retail: 48,   stock: 'low', type: 'flos' },
-  { id: 'P005', name: 'Adven Cura-22 Flos 10g',           cost: 44,   retail: 82,   stock: 'out', type: 'flos' },
-  { id: 'P006', name: 'Adven THC 10mg Capsules ×30',      cost: 36,   retail: 69,   stock: 'in',  type: 'capsule' },
-  { id: 'P007', name: 'Noidecs CBD Lozenge 25mg ×30',     cost: 28,   retail: 55,   stock: 'low', type: 'lozenge' },
-  { id: 'P008', name: 'Curaleaf 510 Vape Cartridge 0.5g', cost: 34,   retail: 64,   stock: 'in',  type: 'vape' },
-];
 
 export const ORGANISATIONS: PharmacyTenant[] = [
   {
@@ -279,7 +286,7 @@ const SEED_CRM: CRMPatient[] = [
   { id: 'P-1003', organisationId: ORGANISATIONS[0].id, name: 'Mohammed Khan',    email: 'm.khan@email.com',     mobile: '07700 900333', dob: '1979-12-21', address: '9 Park Ave, Leeds LS6 1RT',     status: 'HHH approved' },
   { id: 'P-1004', organisationId: ORGANISATIONS[0].id, name: 'Sophie Bennett',   email: 's.bennett@email.com',  mobile: '07700 900444', dob: '1987-04-11', address: '27 Cardigan Rd, Leeds LS6 3AA', status: 'HHH approved',
     interactions: [
-      { ts: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), type: 'Meds Collected', detail: 'Dispensed 10g Noidecs CD to patient at counter.' }
+      { ts: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), type: 'Meds Collected', detail: 'Training record: medicine collected at the pharmacy counter.' }
     ]
   },
   { id: 'P-1005', organisationId: ORGANISATIONS[0].id, name: "Daniel O'Connor",  email: 'd.oconnor@email.com',  mobile: '07700 900555', dob: '1991-01-30', address: '8 Burley St, Leeds LS3 1JX',    status: 'HHH approved' },
@@ -294,11 +301,12 @@ const SEED_CRM: CRMPatient[] = [
    ═══════════════════════════════════════════════════════════ */
 
 export const money = (n: number) => '£' + n.toFixed(2);
-export const marginPct = (cost: number, retail: number) => retail > 0 ? Math.round((1 - cost / retail) * 100) : 0;
+export const marginPct = (cost: number | null, retail: number) => cost !== null && retail > 0 ? Math.round((1 - cost / retail) * 100) : null;
 
 export const lineRevenue = (item: LineItem) => item.retail * item.qty;
-export const lineCost = (item: LineItem) => item.cost * item.qty;
+export const lineCost = (item: LineItem) => (item.cost ?? 0) * item.qty;
 export const lineMargin = (item: LineItem) => {
+  if (item.cost === null) return null;
   const rev = lineRevenue(item);
   return rev > 0 ? Math.round((rev - lineCost(item)) / rev * 100) : 0;
 };
@@ -309,12 +317,45 @@ export const orderRevenue = (o: PatientOrder) => o.prescriptions.reduce((t, r) =
 export const orderCost = (o: PatientOrder) => o.prescriptions.reduce((t, r) => t + rxCost(r), 0);
 
 export const TYPE_LABELS: Record<string, string> = {
-  flos: 'Flower (Flos)', oil: 'Oil', capsule: 'Capsule', lozenge: 'Lozenge', vape: 'Vape',
+  flos: 'Flower (Flos)', oil: 'Oil', capsule: 'Capsule', lozenge: 'Lozenge / Pastille', vape: 'Vape', other: 'Other',
 };
 
-export const STOCK_LABELS: Record<string, string> = {
-  in: 'In stock', low: 'Low stock / On order', out: 'Out of stock',
-};
+function catalogueType(form: string | undefined): CatalogueItem['type'] {
+  if (form === 'FLOS' || form === 'GRANULATE' || form === 'SHAKE' || form === 'PRE_ROLL') return 'flos';
+  if (form === 'OIL' || form === 'ORAL_DROPS' || form === 'ORAL_SPRAY') return 'oil';
+  if (form === 'CAPSULE') return 'capsule';
+  if (form === 'LOZENGE' || form === 'PASTILLE') return 'lozenge';
+  if (form === 'VAPE_CARTRIDGE' || form === 'DEVICE') return 'vape';
+  return 'other';
+}
+
+function mapCuraleafCatalogue(catalogue: CuraleafCatalogue): CatalogueItem[] {
+  const formulaById = new Map(catalogue.formulas.map(formula => [formula.id, formula]));
+  return catalogue.products
+    .filter(product => {
+      const name = product.formulaName || formulaById.get(product.formulaId)?.printedName || '';
+      return !/(?:BPTEST|onerror\s*=|<(?:script|img|a|b)\b)/i.test(name);
+    })
+    .map(product => {
+      const formula = formulaById.get(product.formulaId);
+      const packSize = Math.max(0, Number(product.quantity) || 0);
+      const patientPackPrice = Math.max(0, Number(product.patientPackPrice) || 0);
+      return {
+        id: product.id,
+        formulaId: product.formulaId,
+        name: product.formulaName || formula?.printedName || product.id,
+        cost: null,
+        retail: patientPackPrice,
+        availability: 'unknown' as const,
+        type: catalogueType(formula?.formulaForm),
+        unit: product.formulaUnit || formula?.unit,
+        packSize,
+        source: 'curaleaf' as const,
+        supplierState: product.state,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
 
 export const RX_STATUS_LABELS: Record<RxStatus, string> = {
   draft: 'Draft',
@@ -357,8 +398,10 @@ export type Action =
   | { type: 'UPDATE_COMPLIANCE'; itemId: string; status: ComplianceStatus; evidence?: string }
   | { type: 'UPDATE_PLATFORM_INTEGRATION'; integrationId: PlatformIntegration['id']; status: PlatformIntegration['status']; description?: string }
   | { type: 'SET_SCREEN'; screen: Screen }
-  | { type: 'SET_FORMULARY_PRICES'; organisationId: string; prices: Record<string, number> }
-  | { type: 'SET_FORMULARY_PRICE'; organisationId: string; productId: string; retail: number | null }
+  | { type: 'SET_CATALOGUE_LOADING' }
+  | { type: 'SET_CATALOGUE'; catalogue: CatalogueItem[]; updatedAt: string }
+  | { type: 'SET_CATALOGUE_ERROR'; message: string }
+  | { type: 'APPLY_CURALEAF_QUOTE'; items: Array<{ productId: string; wholesalePrice: number; patientPrice: number; inStock: boolean }> }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
   | { type: 'ADD_SUBMISSION'; submission: EligibilitySubmission }
@@ -373,11 +416,16 @@ export type Action =
   | { type: 'SET_ORDER_DISPENSING_FEE'; orderId: number; amount: number }
   | { type: 'ADD_RX'; orderId: number }
   | { type: 'SET_RX_PRESCRIBER'; orderId: number; rxId: number; prescriber: string }
+  | { type: 'SET_RX_METADATA'; orderId: number; rxId: number; updates: Partial<Pick<Prescription, 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber' | 'serialNumber' | 'issueDate'>> }
   | { type: 'SET_RX_COPY'; orderId: number; rxId: number; fileName: string }
+  | { type: 'SET_RX_FILE'; orderId: number; rxId: number; fileName: string; fileId: string | null }
+  | { type: 'SET_ORDER_BACKEND_ID'; orderId: number; backendId: string }
+  | { type: 'SYNC_ORDER_PATIENT_PRICES'; orderId: number; items: Array<{ productId: string; patientPrice: number }> }
+  | { type: 'CONFIRM_CURALEAF_SUBMISSION'; orderId: number; rxId: number; customerReference: string }
   | { type: 'ADD_ITEM_TO_RX'; orderId: number; rxId: number; item: LineItem }
   | { type: 'REMOVE_ITEM_FROM_RX'; orderId: number; rxId: number; productId: string }
   | { type: 'UPDATE_ITEM_QTY'; orderId: number; rxId: number; productId: string; qty: number }
-  | { type: 'SET_ITEM_RETAIL'; orderId: number; rxId: number; productId: string; retail: number }
+  | { type: 'UPDATE_ITEM_UNITS'; orderId: number; rxId: number; productId: string; unitsNeededCount: number }
   | { type: 'REMOVE_RX'; orderId: number; rxId: number }
   | { type: 'CLEAR_ORDER'; orderId: number }
   // Payment
@@ -385,7 +433,7 @@ export type Action =
   | { type: 'START_MANUAL_PAYMENT'; orderId: number }
   | { type: 'CONFIRM_PAYMENT'; orderId: number }
   | { type: 'RECORD_MANUAL_PAYMENT'; orderId: number; tender: ManualTender; reference?: string; notes?: string }
-  // Submission to Curaleaf (adapter pending live Rocky credentials)
+  // Submission to Curaleaf.
   | { type: 'PLACE_ORDER'; orderId: number }
   | { type: 'RECORD_GOODS_RECEIPT'; orderId: number; rxId: number; lines: GoodsReceiptLine[]; note?: string }
   | { type: 'MARK_READY_FOR_COLLECTION'; orderId: number; rxId: number }
@@ -445,17 +493,12 @@ function buildSeedSubmissions(): EligibilitySubmission[] {
 function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   const rx1: Prescription = {
     id: 1, prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_1.pdf',
-    items: [
-      { productId: 'P001', name: 'Adven 20/1 THC Oil 30ml', qty: 2, cost: 42, retail: 79 },
-      { productId: 'P002', name: 'Curaleaf CBD 50 Oil 50ml', qty: 1, cost: 30, retail: 59 },
-    ],
+    items: [],
     placed: false, poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
   };
   const rx2: Prescription = {
     id: 2, prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_2.pdf',
-    items: [
-      { productId: 'P003', name: 'Khiron 20/1 Oil 30ml', qty: 1, cost: 40, retail: 75 },
-    ],
+    items: [],
     placed: false, poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
   };
   const o1: PatientOrder = {
@@ -466,11 +509,9 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
 
   const rx3: Prescription = {
     id: 3, prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_asmith.pdf',
-    items: [
-      { productId: 'P004', name: 'Noidecs T10:C10 Flos 10g', qty: 1, cost: 38.5, retail: 48 },
-    ],
+    items: [],
     placed: true, poRef: 'PO-9002', status: 'ready', invoiceRef: 'INV-4071', trackingNumber: null, carrier: null,
-    receivedItems: [{ productId: 'P004', quantityReceived: 1 }], goodsInAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), goodsInBy: 'S. Patel',
+    receivedItems: [], goodsInAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), goodsInBy: 'S. Patel',
     readyAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), // 12 days ago
   };
   const o2: PatientOrder = {
@@ -481,9 +522,7 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
 
   const rx4: Prescription = {
     id: 4, prescriber: 'Dr. S. Patel', copyFileName: 'prescription_jdoe_overdue.pdf',
-    items: [
-      { productId: 'P001', name: 'Adven 20/1 THC Oil 30ml', qty: 1, cost: 42, retail: 79 },
-    ],
+    items: [],
     placed: true, poRef: 'PO-9003', status: 'approved', invoiceRef: 'INV-4073', trackingNumber: null, carrier: null,
   };
   const o3: PatientOrder = {
@@ -501,9 +540,7 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
 
   const rx5: Prescription = {
     id: 5, prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_sbennett.pdf',
-    items: [
-      { productId: 'P006', name: 'Adven THC 10mg Capsules ×30', qty: 1, cost: 36, retail: 69 },
-    ],
+    items: [],
     placed: true, poRef: 'PO-9004', status: 'collected', invoiceRef: 'INV-4074', trackingNumber: null, carrier: null,
   };
   const o4: PatientOrder = {
@@ -581,8 +618,11 @@ const initialOrganisation = ORGANISATIONS.find(org => org.referralToken === init
 
 const initialState: AppState = {
   screen: 'home',
-  catalogue: usePrototypeState ? CATALOGUE : [],
-  formularyPrices: {},
+  catalogue: [],
+  catalogueSource: 'unavailable',
+  catalogueLoading: isLocalPortalPreview,
+  catalogueError: null,
+  catalogueUpdatedAt: null,
   crm: usePrototypeState ? [...SEED_CRM] : [],
   submissions: usePrototypeState ? buildSeedSubmissions() : [],
   orders: usePrototypeState ? seed.orders : [],
@@ -596,7 +636,7 @@ const initialState: AppState = {
   staffSession: storedStaffSession,
   platformIntegrations: [
     { id: 'eligibility-api', name: 'HHH Eligibility API', description: 'Token routing and patient intake', status: 'connected' },
-    { id: 'curaleaf', name: 'Curaleaf Rocky', description: 'Product, prescription and supplier ordering', status: 'pending' },
+    { id: 'curaleaf', name: 'Curaleaf', description: 'Product, prescription and supplier ordering', status: 'pending' },
     { id: 'worldpay', name: 'Worldpay', description: 'Pharmacy-owned hosted checkout, payment webhooks and direct settlement', status: 'pending' },
     { id: 'notifications', name: 'Patient notifications', description: 'Ready-for-collection SMS and email', status: 'pending' },
   ],
@@ -633,35 +673,46 @@ function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_SCREEN':
       return { ...state, screen: action.screen };
-    case 'SET_FORMULARY_PRICES': {
-      const prices = Object.fromEntries(Object.entries(action.prices).map(([productId, retail]) => [productId, Math.max(0, retail)]));
+    case 'SET_CATALOGUE_LOADING':
+      return { ...state, catalogueLoading: true, catalogueError: null };
+    case 'SET_CATALOGUE':
       return {
         ...state,
-        formularyPrices: { ...state.formularyPrices, [action.organisationId]: prices },
-        orders: state.orders.map(order => order.organisationId !== action.organisationId || order.payment.status !== 'none' ? order : ({
-          ...order,
-          prescriptions: order.prescriptions.map(rx => ({
-            ...rx,
-            items: rx.items.map(item => prices[item.productId] === undefined ? item : { ...item, retail: prices[item.productId] }),
-          })),
-        })),
+        catalogue: action.catalogue,
+        catalogueSource: 'curaleaf',
+        catalogueLoading: false,
+        catalogueError: null,
+        catalogueUpdatedAt: action.updatedAt,
+        platformIntegrations: state.platformIntegrations.map(integration => integration.id === 'curaleaf'
+          ? { ...integration, status: 'connected', description: `${action.catalogue.length} Curaleaf products loaded from the connected environment.` }
+          : integration),
       };
-    }
-    case 'SET_FORMULARY_PRICE': {
-      if (!state.catalogue.some(item => item.id === action.productId)) return state;
-      const current = state.formularyPrices[action.organisationId] ?? {};
-      const next = { ...current };
-      if (action.retail === null) delete next[action.productId];
-      else next[action.productId] = Math.max(0, action.retail);
-      const effectiveRetail = next[action.productId] ?? state.catalogue.find(item => item.id === action.productId)?.retail;
+    case 'SET_CATALOGUE_ERROR':
       return {
         ...state,
-        formularyPrices: { ...state.formularyPrices, [action.organisationId]: next },
-        orders: state.orders.map(order => order.organisationId !== action.organisationId || order.payment.status !== 'none' ? order : ({
+        catalogueLoading: false,
+        catalogueError: action.message,
+        catalogueSource: state.catalogue.length ? state.catalogueSource : 'unavailable',
+        platformIntegrations: state.platformIntegrations.map(integration => integration.id === 'curaleaf'
+          ? { ...integration, status: 'attention', description: action.message }
+          : integration),
+      };
+    case 'APPLY_CURALEAF_QUOTE': {
+      const quoted = new Map(action.items.map(item => [item.productId, item]));
+      return {
+        ...state,
+        catalogue: state.catalogue.map(product => {
+          const item = quoted.get(product.id);
+          return item ? { ...product, retail: item.patientPrice, availability: item.inStock ? 'in' : 'out' } : product;
+        }),
+        orders: state.orders.map(order => order.payment.status !== 'none' ? order : ({
           ...order,
           prescriptions: order.prescriptions.map(rx => ({
             ...rx,
-            items: rx.items.map(item => item.productId === action.productId && effectiveRetail !== undefined ? { ...item, retail: effectiveRetail } : item),
+            items: rx.items.map(line => {
+              const item = quoted.get(line.productId);
+              return item ? { ...line, cost: item.wholesalePrice, retail: item.patientPrice } : line;
+            }),
           })),
         })),
       };
@@ -693,8 +744,8 @@ function reducer(state: AppState, action: Action): AppState {
           ...state,
           workspaceMode: 'training',
           screen: 'home',
-          catalogue: CATALOGUE,
-          formularyPrices: {},
+          catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
+          catalogueSource: state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
           crm: training.crm,
           submissions: training.submissions,
           orders: training.orders,
@@ -707,8 +758,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         workspaceMode: 'live',
         screen: 'home',
-        catalogue: [],
-        formularyPrices: {},
+        catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
         crm: [],
         submissions: [],
         orders: [],
@@ -730,8 +780,8 @@ function reducer(state: AppState, action: Action): AppState {
         portalMode: 'gateway',
         workspaceMode: 'training',
         screen: 'home',
-        catalogue: usePrototypeState ? CATALOGUE : [],
-        formularyPrices: {},
+        catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
+        catalogueSource: state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
         crm: usePrototypeState ? [...SEED_CRM] : [],
         submissions: usePrototypeState ? buildSeedSubmissions() : [],
         orders: usePrototypeState ? trainingSeed.orders : [],
@@ -862,8 +912,34 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'SET_RX_PRESCRIBER':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, prescriber: action.prescriber })));
+    case 'SET_RX_METADATA':
+      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, ...action.updates })));
     case 'SET_RX_COPY':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, copyFileName: action.fileName })));
+    case 'SET_RX_FILE':
+      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, copyFileName: action.fileName, fileId: action.fileId })));
+    case 'SET_ORDER_BACKEND_ID':
+      return mapOrder(state, action.orderId, o => ({ ...o, backendId: action.backendId }));
+    case 'SYNC_ORDER_PATIENT_PRICES': {
+      const prices = new Map(action.items.map(item => [item.productId, item.patientPrice]));
+      return {
+        ...mapOrder(state, action.orderId, order => ({
+          ...order,
+          prescriptions: order.prescriptions.map(rx => ({
+            ...rx,
+            items: rx.items.map(item => prices.has(item.productId) ? { ...item, retail: prices.get(item.productId)! } : item),
+          })),
+        })),
+        catalogue: state.catalogue.map(product => prices.has(product.id) ? { ...product, retail: prices.get(product.id)! } : product),
+      };
+    }
+    case 'CONFIRM_CURALEAF_SUBMISSION':
+      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+        ...r,
+        placed: true,
+        poRef: action.customerReference,
+        status: 'awaiting-approval',
+      })));
     case 'ADD_ITEM_TO_RX':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, items: [...r.items, action.item] })));
     case 'REMOVE_ITEM_FROM_RX':
@@ -874,9 +950,9 @@ function reducer(state: AppState, action: Action): AppState {
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
         ...r, items: r.items.map(i => i.productId === action.productId ? { ...i, qty: Math.max(1, action.qty) } : i),
       })));
-    case 'SET_ITEM_RETAIL':
+    case 'UPDATE_ITEM_UNITS':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
-        ...r, items: r.items.map(i => i.productId === action.productId ? { ...i, retail: Math.max(0, action.retail) } : i),
+        ...r, items: r.items.map(i => i.productId === action.productId ? { ...i, unitsNeededCount: Math.max(1, Math.floor(action.unitsNeededCount)) } : i),
       })));
     case 'REMOVE_RX':
       return mapOrder(state, action.orderId, o => ({
@@ -956,7 +1032,7 @@ function reducer(state: AppState, action: Action): AppState {
             return {
               ...r,
               placed: true,
-              // Supplier references are populated only from the Rocky response or
+              // Supplier references are populated only from the Curaleaf response or
               // a later reconciliation. Never invent courier or invoice data.
               poRef: null,
               status: 'awaiting-approval' as const,
@@ -1069,6 +1145,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.staffSession]);
 
   useEffect(() => {
+    const useLocalSandbox = isLocalPortalPreview && isApiConfigured;
+    const useConnectedPortal = !isLocalPortalPreview
+      && isApiConfigured
+      && Boolean(state.staffSession)
+      && state.workspaceMode === 'live'
+      && Boolean(state.currentOrganisationId);
+    if (!useLocalSandbox && !useConnectedPortal) return;
+    let cancelled = false;
+    dispatch({ type: 'SET_CATALOGUE_LOADING' });
+    const request = useLocalSandbox
+      ? getDevCuraleafCatalogue()
+      : getCuraleafCatalogue(state.currentOrganisationId);
+    request.then(catalogue => {
+      if (!cancelled) dispatch({ type: 'SET_CATALOGUE', catalogue: mapCuraleafCatalogue(catalogue), updatedAt: catalogue.fetchedAt });
+    }).catch(error => {
+      if (!cancelled) dispatch({ type: 'SET_CATALOGUE_ERROR', message: error instanceof Error ? error.message : 'Curaleaf catalogue unavailable.' });
+    });
+    return () => { cancelled = true; };
+  }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
+
+  useEffect(() => {
     if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.workspaceMode !== 'live') return;
     let cancelled = false;
     getCuraleafConnectionStatus().then(status => {
@@ -1082,19 +1179,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }).catch(error => console.warn('Curaleaf status check unavailable:', error));
     return () => { cancelled = true; };
   }, [state.staffSession, state.workspaceMode]);
-
-  useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.workspaceMode !== 'live' || !state.currentOrganisationId) return;
-    let cancelled = false;
-    getFormularyPrices(state.currentOrganisationId).then(records => {
-      if (cancelled) return;
-      const prices = Object.fromEntries(records
-        .filter(record => record.patientPricePence !== null)
-        .map(record => [record.productId, record.patientPricePence! / 100]));
-      dispatch({ type: 'SET_FORMULARY_PRICES', organisationId: state.currentOrganisationId, prices });
-    }).catch(error => console.warn('Formulary pricing sync unavailable:', error));
-    return () => { cancelled = true; };
-  }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
 
   // Cross-domain intake sync. In production, the access token comes from staff authentication.
   useEffect(() => {

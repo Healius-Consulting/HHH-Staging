@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react';
-import { CheckCircle, Clock, Download, FileText, Package, Printer, Search, Truck, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type RefObject } from 'react';
+import { CheckCircle, Clock, Download, FileText, Package, Printer, RefreshCw, Search, Truck, X } from 'lucide-react';
 import { PHARMACY, RX_STATUS_LABELS, lineRevenue, money, useApp, type Prescription, type RxStatus } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
+import { getCuraleafActivity, getDevCuraleafActivity, isApiConfigured } from '../shared/api';
+import type { CuraleafActivity } from '../shared/contracts';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
+import ProviderStatusNotice from '../components/ProviderStatusNotice';
 
 const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Received', 'Ready', 'Collected'] as const;
 const STATUS_TABS: Array<{ key: RxStatus | 'all'; label: string; shortLabel: string }> = [
@@ -45,7 +49,29 @@ export default function Orders() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [printingRx, setPrintingRx] = useState<{ rx: Prescription; patientName: string } | null>(null);
   const [receiptDrafts, setReceiptDrafts] = useState<Record<string, Record<string, number>>>({});
+  const [curaleafActivity, setCuraleafActivity] = useState<CuraleafActivity | null>(null);
+  const [curaleafLoading, setCuraleafLoading] = useState(false);
+  const [curaleafError, setCuraleafError] = useState<string | null>(null);
   const printDialogRef = useModalFocus<HTMLDivElement>(Boolean(printingRx), () => setPrintingRx(null));
+
+  const syncCuraleafActivity = useCallback(async () => {
+    if (!isApiConfigured || (!isLocalPortalPreview && state.workspaceMode !== 'live')) return;
+    setCuraleafLoading(true);
+    setCuraleafError(null);
+    try {
+      setCuraleafActivity(isLocalPortalPreview
+        ? await getDevCuraleafActivity()
+        : await getCuraleafActivity(state.currentOrganisationId));
+    } catch (error) {
+      setCuraleafError(error instanceof Error ? error.message : 'Curaleaf activity could not be loaded.');
+    } finally {
+      setCuraleafLoading(false);
+    }
+  }, [state.currentOrganisationId, state.workspaceMode]);
+
+  useEffect(() => {
+    void syncCuraleafActivity();
+  }, [syncCuraleafActivity]);
 
   const allSubOrders = useMemo(() => {
     const list: FlatSubOrder[] = [];
@@ -84,6 +110,24 @@ export default function Orders() {
     <div className="page-body supplier-workbench">
       <section className="operations-brief supplier-brief">
         <div className="operations-brief__lead"><p className="section-label">Supplier fulfilment</p><h2>Track orders through receipt and collection</h2><p>{allSubOrders.length} prescription order{allSubOrders.length === 1 ? '' : 's'} currently in the ledger. Follow each Curaleaf order from submission to patient handover.</p></div>
+      </section>
+
+      <section className="pricing-ledger" aria-label="Live Curaleaf supplier activity">
+        <header className="pricing-ledger__header">
+          <div><small>Live Curaleaf activity</small><strong>{curaleafActivity ? `${curaleafActivity.purchaseOrderTotal} purchase order${curaleafActivity.purchaseOrderTotal === 1 ? '' : 's'} · ${curaleafActivity.shipmentTotal} shipment${curaleafActivity.shipmentTotal === 1 ? '' : 's'}` : 'Connecting to Curaleaf…'}</strong></div>
+          <button type="button" className="btn btn-sm" disabled={curaleafLoading} onClick={() => void syncCuraleafActivity()}><RefreshCw size={13} className={curaleafLoading ? 'spin' : ''} /> Refresh</button>
+        </header>
+        {curaleafError ? <ProviderStatusNotice title="Curaleaf activity is temporarily delayed" detail="Wait and refresh later. If this continues, contact your HHH administrator; pharmacy staff cannot change the supplier connection." /> : null}
+        {curaleafActivity?.purchaseOrders.length ? <div className="table-wrap"><table><thead><tr><th>Curaleaf reference</th><th>Issued</th><th>Lines</th><th>Allocation</th><th>Courier</th><th>State</th></tr></thead><tbody>{curaleafActivity.purchaseOrders.map(order => {
+          const ordered = order.items.reduce((total, item) => total + item.packsOrderedCount, 0);
+          const allocated = order.items.reduce((total, item) => total + item.packsAllocatedCount, 0);
+          return <tr key={order.id}><td><strong>{order.customerReference || order.id}</strong><small>{order.id}</small></td><td>{new Date(order.issuedDate).toLocaleDateString('en-GB')}</td><td>{order.items.length}</td><td>{allocated} / {ordered} packs</td><td>{order.courier || 'Not assigned'}</td><td><span className="pill pill-info">{order.state}</span></td></tr>;
+        })}</tbody></table></div> : curaleafActivity && !curaleafLoading ? <div className="pricing-empty"><Package size={20} /><span><strong>No Curaleaf purchase orders</strong><small>Orders submitted through the connected account will appear here.</small></span></div> : null}
+        {curaleafActivity?.shipments.length ? <div className="table-wrap curaleaf-shipment-table"><table><thead><tr><th>Shipment</th><th>Purchase order</th><th>Created</th><th>Packs</th><th>Batch records</th><th>Supplier charge</th></tr></thead><tbody>{curaleafActivity.shipments.map(shipment => {
+          const packs = shipment.items.reduce((total, item) => total + item.packCount, 0);
+          const batches = new Set(shipment.items.map(item => item.batchNumber)).size;
+          return <tr key={shipment.id}><td><strong>{shipment.id}</strong></td><td>{shipment.purchaseOrderCustomerReference || shipment.purchaseOrderId}</td><td>{new Date(shipment.createdAt).toLocaleDateString('en-GB')}</td><td>{packs}</td><td>{batches}</td><td>{money(Number(shipment.shipmentCharge) || 0)}</td></tr>;
+        })}</tbody></table></div> : null}
       </section>
 
       <section className="supplier-filter-bar" aria-label="Filter supplier orders">
@@ -162,7 +206,7 @@ function SupplierOrderDetail({ item, values, onQuantity, onRecordReceipt, onPrin
     <section className="supplier-products">
       <header><span><small>Prescribed products</small><strong>{rx.items.length} line{rx.items.length === 1 ? '' : 's'}</strong></span><span>Ordered / received</span></header>
       {rx.items.map(line => <div className="supplier-product-row" key={line.productId}>
-        <span><strong>{line.name}</strong><small>{money(line.retail)} PX · {money(line.cost)} WX</small></span>
+        <span><strong>{line.name}</strong><small>{money(line.retail)} patient price · {line.cost === null ? 'wholesale pending quote' : `${money(line.cost)} wholesale`}</small></span>
         {canReceive ? <label><span className="sr-only">Quantity received for {line.name}</span><input className="input" type="number" min={0} max={line.qty} value={values[line.productId] ?? 0} onChange={event => onQuantity(line.productId, Math.max(0, Math.min(line.qty, Number(event.target.value))))} /><small>of {line.qty}</small></label> : <strong>{values[line.productId] ?? (['received', 'ready', 'collected'].includes(rx.status) ? line.qty : 0)} / {line.qty}</strong>}
       </div>)}
     </section>
@@ -179,7 +223,7 @@ function SupplierOrderDetail({ item, values, onQuantity, onRecordReceipt, onPrin
 function PrintDialog({ dialogRef, printingRx, onClose, onPrint }: { dialogRef: RefObject<HTMLDivElement | null>; printingRx: { rx: Prescription; patientName: string }; onClose: () => void; onPrint: () => void }) {
   return <><div className="drawer-backdrop" aria-hidden="true" onClick={onClose} /><div ref={dialogRef} className="print-label-dialog" role="dialog" aria-modal="true" aria-labelledby="print-dialog-title" tabIndex={-1}>
     <header><span><small>Printer queue</small><strong id="print-dialog-title">Dispensing label preview</strong></span><button type="button" className="icon-button" aria-label="Close print preview" onClick={onClose}><X size={16} /></button></header>
-    <div className="dispensing-label"><strong>{PHARMACY.name.toUpperCase()}</strong><span>Patient: {printingRx.patientName}</span><span>Date: {new Date().toLocaleDateString('en-GB')}</span>{printingRx.rx.items.map(line => <div key={line.productId}><b>{line.name} × {line.qty}</b><small>PX: {money(line.retail * line.qty)}</small></div>)}<em>Use as directed by the clinician. Keep out of reach and sight of children. Controlled Drug.</em><code>|||||| | |||| ||| ||</code><small>{printingRx.rx.poRef || 'PO-BATCH-REF'}</small></div>
+    <div className="dispensing-label"><strong>{PHARMACY.name.toUpperCase()}</strong><span>Patient: {printingRx.patientName}</span><span>Date: {new Date().toLocaleDateString('en-GB')}</span>{printingRx.rx.items.map(line => <div key={line.productId}><b>{line.name} × {line.qty}</b><small>Patient price: {money(line.retail * line.qty)}</small></div>)}<em>Use as directed by the clinician. Keep out of reach and sight of children. Controlled Drug.</em><code>|||||| | |||| ||| ||</code><small>{printingRx.rx.poRef || 'PO-BATCH-REF'}</small></div>
     <footer><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" onClick={onPrint}><Printer size={14} /> Send to printer</button></footer>
   </div></>;
 }

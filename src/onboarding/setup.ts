@@ -33,9 +33,9 @@ export const SETUP_TASKS: SetupTaskDefinition[] = [
   {
     id: 'pricing',
     title: 'Confirm charges',
-    description: 'Review medicine prices and the optional dispensing charge used for pharmacy collection orders.',
-    evidenceLabel: 'Pricing confirmation',
-    placeholder: 'e.g. Formulary prices and dispensing charge approved',
+    description: 'Acknowledge Curaleaf-supplied patient prices and agree the optional dispensing-charge policy for pharmacy collection orders.',
+    evidenceLabel: 'Charge policy confirmation',
+    placeholder: 'e.g. Curaleaf pricing acknowledged; dispensing-charge policy approved',
   },
   {
     id: 'notifications',

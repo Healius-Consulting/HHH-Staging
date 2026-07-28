@@ -53,13 +53,17 @@ export async function readIntegrationSecret<T extends Record<string, string>>(or
   }
 }
 
-export async function readPlatformSecret(secretId: 'CURALEAF_API_KEY'): Promise<string> {
-  try {
-    const [version] = await client.accessSecretVersion({ name: `projects/${projectId()}/secrets/${secretId}/versions/latest` });
-    const value = version.payload?.data?.toString().trim();
-    if (!value) throw new Error('Secret payload is empty.');
-    return value;
-  } catch {
-    throw new HttpError(503, 'The HHH Curaleaf API key is not configured.', 'PLATFORM_INTEGRATION_NOT_CONNECTED');
+export type CuraleafPlatformSecretId = 'CURALEAF_READ_API_KEY' | 'CURALEAF_WRITE_API_KEY' | 'CURALEAF_API_KEY';
+
+export async function readPlatformSecret(secretIds: readonly CuraleafPlatformSecretId[]): Promise<string> {
+  for (const secretId of secretIds) {
+    try {
+      const [version] = await client.accessSecretVersion({ name: `projects/${projectId()}/secrets/${secretId}/versions/latest` });
+      const value = version.payload?.data?.toString().trim();
+      if (value) return value;
+    } catch {
+      // Try the next supported secret name, including the legacy single key.
+    }
   }
+  throw new HttpError(503, 'The HHH Curaleaf API keys are not configured.', 'PLATFORM_INTEGRATION_NOT_CONNECTED');
 }

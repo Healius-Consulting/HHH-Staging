@@ -6,6 +6,7 @@ const REQUEST_TIMEOUT_MS = 12_000;
 
 type CuraleafCredential = { customerId: string; portalEmail: string };
 type CuraleafResult = Record<string, unknown> | unknown[] | null;
+const READ_METHODS = new Set(['GET', 'HEAD']);
 
 export class CuraleafRequestError extends HttpError {
   constructor(status: number, message: string, public readonly ambiguousWrite = false) {
@@ -21,10 +22,21 @@ function customerIds(value: unknown): string[] {
   return [typeof object.customerId === 'string' ? object.customerId : null, ...Object.values(object).flatMap(customerIds)].filter((item): item is string => Boolean(item));
 }
 
-export async function curaleafRequest<T = CuraleafResult>(organisationId: string, path: string, init: RequestInit = {}): Promise<T> {
-  const credential = await readIntegrationSecret<CuraleafCredential>(organisationId, 'curaleaf');
-  const apiKey = config.CURALEAF_API_KEY ?? await readPlatformSecret('CURALEAF_API_KEY');
+async function curaleafApiKey(method: string): Promise<string> {
+  if (READ_METHODS.has(method)) {
+    return config.CURALEAF_READ_API_KEY
+      ?? config.CURALEAF_WRITE_API_KEY
+      ?? config.CURALEAF_API_KEY
+      ?? readPlatformSecret(['CURALEAF_READ_API_KEY', 'CURALEAF_WRITE_API_KEY', 'CURALEAF_API_KEY']);
+  }
+  return config.CURALEAF_WRITE_API_KEY
+    ?? config.CURALEAF_API_KEY
+    ?? readPlatformSecret(['CURALEAF_WRITE_API_KEY', 'CURALEAF_API_KEY']);
+}
+
+export async function curaleafPlatformRequest<T = CuraleafResult>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase();
+  const apiKey = await curaleafApiKey(method);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -37,8 +49,6 @@ export async function curaleafRequest<T = CuraleafResult>(organisationId: string
     const text = await response.text();
     const body = text ? JSON.parse(text) as T : null as T;
     if (!response.ok) throw new CuraleafRequestError(response.status, `Curaleaf rejected the request (${response.status}).`);
-    const unexpectedCustomer = customerIds(body).find(id => id !== credential.customerId);
-    if (unexpectedCustomer) throw new CuraleafRequestError(502, 'Curaleaf returned data for a different pharmacy customer.');
     return body;
   } catch (error) {
     if (error instanceof CuraleafRequestError) throw error;
@@ -51,10 +61,52 @@ export async function curaleafRequest<T = CuraleafResult>(organisationId: string
   }
 }
 
+export async function curaleafRequest<T = CuraleafResult>(organisationId: string, path: string, init: RequestInit = {}): Promise<T> {
+  const credential = await readIntegrationSecret<CuraleafCredential>(organisationId, 'curaleaf');
+  const body = await curaleafPlatformRequest<T>(path, init);
+  const unexpectedCustomer = customerIds(body).find(id => id !== credential.customerId);
+  if (unexpectedCustomer) throw new CuraleafRequestError(502, 'Curaleaf returned data for a different pharmacy customer.');
+  return body;
+}
+
+async function readAllPages<T>(
+  request: <R>(path: string) => Promise<R>,
+  path: string,
+  collectionKey: string,
+  pageSize = 200,
+) {
+  const records: T[] = [];
+  let totalRecordCount = Number.POSITIVE_INFINITY;
+  for (let pageNumber = 0; records.length < totalRecordCount && pageNumber < 100; pageNumber += 1) {
+    const query = new URLSearchParams({ pageNumber: String(pageNumber), pageSize: String(pageSize) });
+    const page = await request<{ totalRecordCount?: number; [key: string]: unknown }>(`${path}?${query}`);
+    const items = page[collectionKey];
+    if (!Array.isArray(items)) throw new CuraleafRequestError(502, `Curaleaf returned an invalid ${collectionKey} page.`);
+    records.push(...items as T[]);
+    totalRecordCount = Number(page.totalRecordCount ?? records.length);
+    if (items.length === 0) break;
+  }
+  return { records, totalRecordCount: Number.isFinite(totalRecordCount) ? totalRecordCount : records.length };
+}
+
+export function curaleafPlatformList<T>(path: string, collectionKey: string, pageSize = 200) {
+  return readAllPages<T>(requestPath => curaleafPlatformRequest(requestPath), path, collectionKey, pageSize);
+}
+
+export function curaleafList<T>(organisationId: string, path: string, collectionKey: string, pageSize = 200) {
+  return readAllPages<T>(requestPath => curaleafRequest(organisationId, requestPath), path, collectionKey, pageSize);
+}
+
 export async function curaleafConnectionStatus(organisationId: string) {
   try {
     const response = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/formulas/?pageSize=1');
-    return { configured: true, connected: true, writeConfigured: true, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: 'Curaleaf pharmacy access verified.', sampleAvailable: Boolean(response) };
+    let writeConfigured = true;
+    try {
+      await curaleafApiKey('POST');
+    } catch {
+      writeConfigured = false;
+    }
+    return { configured: true, connected: true, writeConfigured, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: 'Curaleaf pharmacy access verified.', sampleAvailable: Boolean(response) };
   } catch (error) {
     const missingConfiguration = error instanceof HttpError && ['INTEGRATION_NOT_CONNECTED', 'PLATFORM_INTEGRATION_NOT_CONNECTED'].includes(error.code);
     return { configured: !missingConfiguration, connected: false, writeConfigured: false, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: error instanceof Error ? error.message : 'Connection check failed.' };
@@ -96,8 +148,15 @@ export async function submitManualPrescription(organisationId: string, input: Ma
   if (typeof prescription.id !== 'string') throw new CuraleafRequestError(502, 'Curaleaf created the prescription but did not return its identifier.', true);
   await uploadCuraleafFile(organisationId, `/v1/prescriptions/${prescription.id}/file/`, input.file.bytes, input.file.contentType, input.file.filename);
   const quote = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: input.items.map(({ packId, quantity }) => ({ packId, quantity })) }) });
-  await curaleafRequest(organisationId, '/v1/purchase-order-from-prescriptions/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customerReference: input.customerReference, prescriptionIds: [prescription.id] }) });
-  return { prescriptionId: prescription.id, prescriberId: prescriber.id, customerReference: input.customerReference, quote };
+  if (prescription.state !== 'ACTIVE') {
+    return { status: 'prescription_pending' as const, prescriptionId: prescription.id, prescriberId: prescriber.id, customerReference: input.customerReference, quote };
+  }
+  await curaleafRequest(organisationId, '/v1/purchase-orders/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customerReference: input.customerReference, items: input.items.map(({ packId, quantity }) => ({ productId: packId, count: quantity })) }),
+  });
+  return { status: 'purchase_order_submitted' as const, prescriptionId: prescription.id, prescriberId: prescriber.id, customerReference: input.customerReference, quote };
 }
 
 export async function submitBarcodePrescription(organisationId: string, input: { customerReference: string; file: { bytes: Buffer; contentType: string; filename: string }; quoteItems: Array<{ packId: string; quantity: number }> }) {

@@ -5,9 +5,21 @@ import type { EligibilitySubmissionInput, PublicPharmacy } from '../../../src/sh
 import { tenantThemeVariables } from '../../../src/utils/tenantTheme';
 
 const CONDITIONS = ['Anxiety', 'Arthritis', 'ADHD', 'Chronic Pain', 'Crohn’s Disease', 'Depression', 'Endometriosis', 'Epilepsy', 'Fibromyalgia', 'Insomnia', 'Migraine', 'Multiple Sclerosis', 'Neuropathic Pain', 'PTSD', 'Other'];
+const LOCAL_PREVIEW_TOKEN = 'local-preview';
+const LOCAL_PREVIEW_PHARMACY: PublicPharmacy = {
+  id: '11111111-1111-4111-8111-111111111111',
+  name: 'Holistic Health Pharmacy',
+  tradingName: 'Holistic Health Pharmacy',
+  logoText: 'HH',
+  gphcNumber: '9012345',
+  superintendent: 'Local preview',
+  address: 'Local preview — no patient data is stored',
+  primaryColour: '#0f766e',
+};
 
 export default function EligibilityApp() {
   const token = new URLSearchParams(window.location.search).get('token') ?? '';
+  const isLocalPreview = import.meta.env.DEV && token === LOCAL_PREVIEW_TOKEN;
   const [pharmacy, setPharmacy] = useState<PublicPharmacy | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -17,12 +29,13 @@ export default function EligibilityApp() {
   const themeStyle = tenantThemeVariables(pharmacy?.primaryColour ?? '#0f766e') as CSSProperties;
 
   useEffect(() => {
+    if (isLocalPreview) { setPharmacy(LOCAL_PREVIEW_PHARMACY); setLoading(false); return; }
     if (!token) { setError('This pharmacy link is missing its referral token.'); setLoading(false); return; }
     getPublicPharmacy(token)
       .then(setPharmacy)
       .catch(() => setError('This pharmacy link is not valid or is no longer active.'))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [isLocalPreview, token]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -39,7 +52,7 @@ export default function EligibilityApp() {
       marketing: data.get('marketing') === 'on', source: String(data.get('source') || 'Not provided'),
     };
     try {
-      await createEligibilitySubmission(input);
+      if (!isLocalPreview) await createEligibilitySubmission(input);
       setEligible(input.tried2 && !input.psychExclusion);
       setComplete(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -66,7 +79,7 @@ export default function EligibilityApp() {
       <div className="eligibility-consents"><label><input type="checkbox" name="consentReferral" required /> I understand the consultation and medicine may involve costs, and I want the pharmacy to consider me for referral.</label><label><input type="checkbox" name="consentShare" required /> I explicitly consent to my health information being collected and shared with this pharmacy and relevant specialist healthcare services for this enquiry.</label><label><input type="checkbox" name="marketing" /> I would like to receive optional service news and offers. I can withdraw this consent at any time.</label></div>
       {error && <div className="banner banner-red"><AlertTriangle size={16} /> {error}</div>}
       <button className="btn btn-primary eligibility-submit" type="submit" disabled={submitting}>{submitting ? 'Submitting securely…' : 'Submit eligibility check'}</button>
-      <p className="eligibility-legal">HHH is a platform of Healius Consulting. The approved live privacy notice must identify the verified legal entity and explain the pharmacy and platform operator’s data-protection roles before patient information is accepted.</p>
+      <p className="eligibility-legal">{isLocalPreview ? 'Local preview only — this form does not transmit or store the information entered.' : 'HHH is a platform of Healius Consulting. The approved live privacy notice must identify the verified legal entity and explain the pharmacy and platform operator’s data-protection roles before patient information is accepted.'}</p>
     </form>
   </main>;
 }

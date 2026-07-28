@@ -305,7 +305,7 @@ export default function Dashboard() {
 
           <div className="integration-note">
             <h4><FileText size={12} /> Curaleaf Integration</h4>
-            <p>{curaleafIntegration?.status === 'connected' ? 'Connected to Curaleaf Rocky. Supplier orders and shipment events are available.' : 'Platform connection is pending live Curaleaf credentials. The configured formulary remains available for workflow testing.'}</p>
+            <p>{curaleafIntegration?.status === 'connected' ? 'Connected to Curaleaf. Supplier orders and shipment events are available.' : 'Curaleaf is managed by HHH administration. Wait and retry later, or contact your HHH administrator if access remains unavailable.'}</p>
           </div>
         </aside>
 

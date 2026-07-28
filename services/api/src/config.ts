@@ -9,6 +9,9 @@ const schema = z.object({
   REQUIRE_APP_CHECK: z.enum(['true', 'false']).default('false'),
   REQUIRE_MFA: z.enum(['true', 'false']).default('false'),
   CURALEAF_BASE_URL: z.url().default('https://api.curaleaflaboratories.dev'),
+  CURALEAF_READ_API_KEY: z.string().min(16).max(500).optional(),
+  CURALEAF_WRITE_API_KEY: z.string().min(16).max(500).optional(),
+  // Legacy single-key deployments remain supported during secret rotation.
   CURALEAF_API_KEY: z.string().min(16).max(500).optional(),
   WORLDPAY_HPP_BASE_URL: z.url().optional(),
   WORLDPAY_VERIFY_BASE_URL: z.url().optional(),

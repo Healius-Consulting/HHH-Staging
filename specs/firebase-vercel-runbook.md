@@ -19,7 +19,7 @@ Production must start with empty patient, referral and order collections. The Re
 - Deploy the Firestore indexes/rules, Storage rules and Functions from the repository root.
 - Grant the Functions runtime service account the minimum Secret Manager accessor role for the named integration secrets.
 - Never put Curaleaf API keys or Worldpay merchant secrets in `VITE_*` variables.
-- The API can be deployed before Curaleaf supplies HHH’s key, so eligibility and onboarding testing are not blocked. Once the key arrives, create the single `CURALEAF_API_KEY` value in Secret Manager and grant the Functions runtime service account access to that named secret. Pharmacy activation then stores only that pharmacy’s customer ID and returned portal email in its Europe-hosted secret.
+- The API can be deployed before Curaleaf supplies HHH’s keys, so eligibility and onboarding testing are not blocked. Once the keys arrive, create `CURALEAF_READ_API_KEY` and `CURALEAF_WRITE_API_KEY` in Secret Manager and grant the Functions runtime service account access to those named secrets. Read requests use the least-privilege key; mutations use the read/write key. Pharmacy activation then stores only that pharmacy’s customer ID and returned portal email in its Europe-hosted secret. `CURALEAF_API_KEY` remains a temporary fallback for legacy deployments.
 
 Example deployment after selecting the correct Firebase project:
 

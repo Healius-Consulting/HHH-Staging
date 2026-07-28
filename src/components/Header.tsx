@@ -11,8 +11,8 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
     subtitle: 'Track patients attributed to your pharmacy while Holistic Health Hub completes its review and onboarding decision.',
   },
   formulary: {
-    title: 'Formulary and pricing',
-    subtitle: 'Review Curaleaf WX and control the PX used by this pharmacy.',
+    title: 'Curaleaf catalogue',
+    subtitle: 'Review Curaleaf products, pack sizes and the patient prices supplied for this pharmacy.',
   },
   create: {
     title: 'Prescription workspace',
@@ -36,7 +36,7 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   },
   settings: {
     title: 'Organisation',
-    subtitle: 'Review your Worldpay connection, pharmacy pricing, enabled modules and go-live requirements.',
+    subtitle: 'Review your Worldpay connection, dispensing-charge policy, enabled modules and go-live requirements.',
   },
 };
 

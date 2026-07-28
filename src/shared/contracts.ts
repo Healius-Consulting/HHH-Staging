@@ -54,6 +54,190 @@ export interface CuraleafConnectionStatus {
   maskedIdentifier?: string;
 }
 
+export interface CuraleafFormula {
+  formulaForm: string;
+  id: string;
+  printedName: string;
+  state: string;
+  unit: string;
+}
+
+export interface CuraleafProduct {
+  customerId: string;
+  formulaId: string;
+  formulaName: string;
+  formulaUnit: string;
+  id: string;
+  patientPackPrice: string;
+  quantity: number;
+  state: string;
+}
+
+export interface CuraleafCatalogue {
+  environment: 'test' | 'production';
+  fetchedAt: string;
+  formulas: CuraleafFormula[];
+  products: CuraleafProduct[];
+  formulaTotal: number;
+  productTotal: number;
+}
+
+export type CuraleafDevCatalogue = CuraleafCatalogue;
+
+export interface CuraleafQuoteItem {
+  packId: string;
+  quantity: number;
+  inStock: boolean;
+  wholesalePackPrice: string;
+  patientPackPrice: string;
+}
+
+export interface CuraleafQuote {
+  shippingPrice: string;
+  taxRate: string;
+  items: CuraleafQuoteItem[];
+}
+
+export interface CuraleafQuoteRequestItem {
+  packId: string;
+  quantity: number;
+}
+
+export interface CuraleafPurchaseOrderItem {
+  id: string;
+  purchaseOrderId: string;
+  productId: string;
+  formulaId: string;
+  packSize: number;
+  packsOrderedCount: number;
+  packsAllocatedCount: number;
+  packsReturnedCount: number;
+  unit: string;
+}
+
+export interface CuraleafPurchaseOrder {
+  id: string;
+  state: string;
+  courier: string;
+  customerReference: string | null;
+  issuedDate: string;
+  createdAt: string;
+  items: CuraleafPurchaseOrderItem[];
+}
+
+export interface CuraleafShipmentItem {
+  id: string;
+  shipmentId: string;
+  purchaseOrderItemId: string;
+  batchNumber: string;
+  batchExpiryDate: string;
+  packCount: number;
+  packsReturnedCount: number;
+  packPrice: string;
+  productId: string;
+  productPackSize: number;
+  sku: string;
+  unit: string;
+  formulaId: string;
+}
+
+export interface CuraleafShipment {
+  id: string;
+  purchaseOrderId: string;
+  purchaseOrderCustomerReference: string | null;
+  purchaseOrderIssuedDate: string | null;
+  shipmentCharge: string;
+  taxRate: string;
+  createdAt: string;
+  items: CuraleafShipmentItem[];
+}
+
+export interface CuraleafActivity {
+  environment: 'test' | 'production';
+  fetchedAt: string;
+  purchaseOrders: CuraleafPurchaseOrder[];
+  shipments: CuraleafShipment[];
+  purchaseOrderTotal: number;
+  shipmentTotal: number;
+}
+
+export interface PortalOrderInput {
+  organisationId: string;
+  patientId: string;
+  lineItems: Array<{
+    packId: string;
+    quantity: number;
+  }>;
+  dispensingFeePence: number;
+  currency: 'GBP';
+  paymentRoute: 'manual' | 'worldpay';
+}
+
+export interface PortalOrderRecord {
+  id: string;
+  organisationId: string;
+  patientId: string;
+  lineItems: Array<{
+    productId: string;
+    formulaId: string;
+    packId: string;
+    name: string;
+    quantity: number;
+    unitPricePence: number;
+  }>;
+  dispensingFeePence: number;
+  totalPence: number;
+  currency: 'GBP';
+  paymentRoute: 'manual' | 'worldpay';
+  paymentStatus: string;
+  fulfilmentStatus: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrescriptionUploadRequest {
+  organisationId: string;
+  filename: string;
+  contentType: 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp';
+}
+
+export interface PrescriptionUploadTarget {
+  id: string;
+  uploadUrl: string;
+  expiresAt: string;
+  requiredHeaders: Record<string, string>;
+}
+
+export interface CuraleafManualPrescriptionInput {
+  organisationId: string;
+  orderId: string;
+  subOrderId?: string;
+  fileId: string;
+  serialNumber: string;
+  issueDate: string;
+  prescriber: {
+    pin: string;
+    gmcNumber: number | null;
+    gphcNumber: string | null;
+    name: string;
+    initials: string;
+  };
+  items: Array<{
+    formulaId: string;
+    unitsNeededCount: number;
+    packId: string;
+    quantity: number;
+  }>;
+}
+
+export interface CuraleafSubmissionResult {
+  status: 'prescription_pending' | 'purchase_order_submitted';
+  prescriptionId: string;
+  prescriberId: string;
+  customerReference: string;
+  quote: CuraleafQuote;
+}
+
 export interface CuraleafActivationInput {
   organisationId: string;
   customerId: string;
@@ -195,15 +379,4 @@ export interface CreatePharmacyStaffInput {
 export interface PharmacyStaffInvitation extends PharmacyStaffAccount {
   invitationQueued: boolean;
   actionLink: string;
-}
-
-export interface FormularyPriceRecord {
-  productId: string;
-  patientPricePence: number | null;
-  updatedAt: string;
-}
-
-export interface UpdateFormularyPriceInput {
-  productId: string;
-  patientPricePence: number | null;
 }

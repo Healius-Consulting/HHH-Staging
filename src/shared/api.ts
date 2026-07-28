@@ -17,15 +17,28 @@ import type {
   PortalSession,
   UpdatePharmacySetupTaskInput,
   UpdateOrganisationInput,
-  FormularyPriceRecord,
-  UpdateFormularyPriceInput,
   PaymentSettings,
+  CuraleafDevCatalogue,
+  CuraleafCatalogue,
+  CuraleafQuote,
+  CuraleafQuoteRequestItem,
+  CuraleafActivity,
+  PortalOrderInput,
+  PortalOrderRecord,
+  PrescriptionUploadRequest,
+  PrescriptionUploadTarget,
+  CuraleafManualPrescriptionInput,
+  CuraleafSubmissionResult,
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-const API_BASE_URL = (configuredApiUrl || (import.meta.env.DEV ? 'http://localhost:8080' : undefined))?.replace(/\/$/, '');
+const API_BASE_URL = configuredApiUrl?.trim()
+  ? configuredApiUrl.replace(/\/$/, '')
+  : import.meta.env.DEV
+    ? ''
+    : undefined;
 
-export const isApiConfigured = Boolean(API_BASE_URL);
+export const isApiConfigured = API_BASE_URL !== undefined;
 
 type ApiSecurityTokenProvider = () => Promise<Record<string, string>>;
 let securityTokenProvider: ApiSecurityTokenProvider | null = null;
@@ -46,7 +59,7 @@ export function setApiSecurityTokenProvider(provider: ApiSecurityTokenProvider |
 }
 
 async function performApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  if (!API_BASE_URL) throw new Error('VITE_API_BASE_URL is not configured.');
+  if (API_BASE_URL === undefined) throw new Error('VITE_API_BASE_URL is not configured.');
   const securityHeaders = securityTokenProvider ? await securityTokenProvider() : {};
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -110,6 +123,77 @@ export function getCuraleafConnectionStatus() {
   return apiRequest<CuraleafConnectionStatus>('/v1/portal/integrations/curaleaf/status');
 }
 
+export function getDevCuraleafCatalogue() {
+  return apiRequest<CuraleafDevCatalogue>('/v1/dev/curaleaf/catalog');
+}
+
+export function getCuraleafCatalogue(organisationId: string) {
+  return apiRequest<CuraleafCatalogue>(`/v1/portal/integrations/curaleaf/catalog?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+export function getDevCuraleafQuote(items: CuraleafQuoteRequestItem[]) {
+  return apiRequest<CuraleafQuote>('/v1/dev/curaleaf/quote', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  });
+}
+
+export function getCuraleafQuote(organisationId: string, items: CuraleafQuoteRequestItem[]) {
+  return apiRequest<CuraleafQuote>('/v1/portal/integrations/curaleaf/quote', {
+    method: 'POST',
+    body: JSON.stringify({ organisationId, items }),
+  });
+}
+
+export function getDevCuraleafActivity() {
+  return apiRequest<CuraleafActivity>('/v1/dev/curaleaf/activity');
+}
+
+export function getCuraleafActivity(organisationId: string) {
+  return apiRequest<CuraleafActivity>(`/v1/portal/integrations/curaleaf/activity?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+export function createPortalOrder(input: PortalOrderInput) {
+  return apiRequest<PortalOrderRecord>('/v1/portal/orders', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function uploadPrescriptionFile(input: PrescriptionUploadRequest, file: File) {
+  const target = await apiRequest<PrescriptionUploadTarget>('/v1/portal/prescription-files/upload-url', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  const response = await fetch(target.uploadUrl, {
+    method: 'PUT',
+    headers: target.requiredHeaders,
+    body: file,
+  });
+  if (!response.ok) throw new Error(`Prescription upload failed with status ${response.status}.`);
+  return target;
+}
+
+export function recordPortalManualPayment(orderId: string, input: {
+  organisationId: string;
+  amountPence: number;
+  tender: 'cash' | 'epos' | 'bank_transfer' | 'other';
+  reference: string;
+  notes?: string;
+}) {
+  return apiRequest<Record<string, unknown>>(`/v1/portal/orders/${encodeURIComponent(orderId)}/payments/manual`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function submitCuraleafManualPrescription(input: CuraleafManualPrescriptionInput) {
+  return apiRequest<CuraleafSubmissionResult>('/v1/portal/integrations/curaleaf/prescriptions/manual', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export function activateCuraleafPharmacy(input: CuraleafActivationInput) {
   return apiRequest<CuraleafConnectionStatus>('/v1/portal/integrations/curaleaf/credentials', {
     method: 'PUT',
@@ -169,17 +253,6 @@ export function updateStaffAccessibilityPreferences(preferences: StaffAccessibil
   return apiRequest<StaffAccessibilityPreferences>('/v1/portal/preferences', {
     method: 'PATCH',
     body: JSON.stringify(preferences),
-  });
-}
-
-export function getFormularyPrices(organisationId: string) {
-  return apiRequest<FormularyPriceRecord[]>(`/v1/portal/formulary-pricing?organisationId=${encodeURIComponent(organisationId)}`);
-}
-
-export function updateFormularyPrices(organisationId: string, prices: UpdateFormularyPriceInput[]) {
-  return apiRequest<FormularyPriceRecord[]>('/v1/portal/formulary-pricing', {
-    method: 'PUT',
-    body: JSON.stringify({ organisationId, prices }),
   });
 }
 

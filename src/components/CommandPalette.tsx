@@ -38,7 +38,7 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
     { label: 'Review patient onboarding', detail: 'See HHH decisions and attributed enquiries', icon: <Users size={16} />, run: () => navigate('referrals') },
     { label: 'Open payments', detail: 'Review active and cleared payment requests', icon: <Clock size={16} />, run: () => navigate('review') },
     { label: 'Track supplier orders', detail: 'Open Curaleaf fulfilment activity', icon: <Package size={16} />, run: () => navigate('orders') },
-    { label: 'Set formulary prices', detail: 'Review Curaleaf WX and pharmacy PX', icon: <Tags size={16} />, run: () => navigate('formulary') },
+    { label: 'Open Curaleaf catalogue', detail: 'Review products, pack sizes and patient prices', icon: <Tags size={16} />, run: () => navigate('formulary') },
     { label: 'Copy forms and resources', detail: 'Eligibility link, QR and content pack', icon: <QrCode size={16} />, run: () => navigate('resources') },
     { label: 'Organisation settings', detail: 'Setup, services and pharmacy identity', icon: <Settings size={16} />, run: () => navigate('settings') },
   ];

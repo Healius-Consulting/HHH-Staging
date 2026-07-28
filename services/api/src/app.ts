@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { audit } from './audit.js';
 import { identity, requireRole, requireStaff, tenantFor } from './auth.js';
 import { allowedOrigins, config } from './config.js';
-import { CuraleafRequestError, curaleafConnectionStatus, curaleafRequest, submitBarcodePrescription, submitManualPrescription } from './curaleaf.js';
+import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, submitBarcodePrescription, submitManualPrescription } from './curaleaf.js';
 import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
 import { cached, invalidateCache } from './cache.js';
@@ -55,7 +55,7 @@ const setupDefinitions = [
   { id: 'pharmacy_profile', title: 'Confirm pharmacy and registered premises', required: true },
   { id: 'curaleaf_account', title: 'Verify Curaleaf customer account', required: true },
   { id: 'payment_route', title: 'Choose and verify a payment route', required: true },
-  { id: 'pricing', title: 'Configure pricing and pharmacy charges', required: true },
+  { id: 'pricing', title: 'Confirm Curaleaf pricing and dispensing-charge policy', required: true },
   { id: 'notifications', title: 'Confirm notification sender and wording', required: true },
   { id: 'operational_readiness', title: 'Complete operational readiness walkthrough', required: true },
 ] as const;
@@ -85,11 +85,6 @@ const preferencesSchema = z.object({
   underlineLinks: z.boolean().default(false),
 });
 
-const formularyPriceSchema = z.object({
-  productId: idSchema,
-  patientPricePence: z.number().int().nonnegative().max(10_000_000).nullable(),
-});
-
 const limitResponse = { code: 'RATE_LIMITED', message: 'Too many requests. Wait briefly before trying again.' };
 const publicReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const publicSubmissionLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false, message: { ...limitResponse, message: 'Too many form submissions from this connection. Try again later.' } });
@@ -99,6 +94,13 @@ const portalKey = (request: Request) => identity(request).uid;
 const portalReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 120, keyGenerator: portalKey, skip: request => request.method !== 'GET', standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const portalWriteLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, keyGenerator: portalKey, skip: request => ['GET', 'HEAD', 'OPTIONS'].includes(request.method), standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const externalProviderLimit = rateLimit({ windowMs: 60 * 1000, limit: 10, keyGenerator: portalKey, standardHeaders: 'draft-8', legacyHeaders: false, message: { ...limitResponse, message: 'Supplier or payment requests are temporarily rate limited. Wait a minute before retrying.' } });
+
+function localDevelopmentOnly(request: Request, response: Response, next: NextFunction) {
+  const remoteAddress = request.socket.remoteAddress ?? '';
+  const loopback = remoteAddress === '127.0.0.1' || remoteAddress === '::1' || remoteAddress === '::ffff:127.0.0.1';
+  if (config.NODE_ENV !== 'development' || !loopback) return response.status(404).json({ code: 'NOT_FOUND', message: 'Not found.' });
+  next();
+}
 
 async function requirePublicAppCheck(request: Request, _response: Response, next: NextFunction) {
   if (config.REQUIRE_APP_CHECK !== 'true') return next();
@@ -167,9 +169,9 @@ async function uploadedFile(organisationId: string, fileId: string) {
   return { bytes, contentType: record.contentType as string, filename: record.filename as string };
 }
 
-async function startOperation(organisationId: string, orderId: string, kind: 'manual' | 'barcode') {
-  const id = createHash('sha256').update(`${organisationId}:${orderId}:curaleaf`).digest('hex');
-  const reference = `HHH-${orderId}`.slice(0, 100);
+async function startOperation(organisationId: string, orderId: string, kind: 'manual' | 'barcode', subOrderId?: string) {
+  const id = createHash('sha256').update(`${organisationId}:${orderId}:${subOrderId ?? 'single'}:curaleaf`).digest('hex');
+  const reference = `HHH-${orderId}${subOrderId ? `-${subOrderId}` : ''}`.slice(0, 100);
   const document = firestore.collection('integrationOperations').doc(id);
   try {
     await document.create({ id, schemaVersion: 1, organisationId, orderId, integration: 'curaleaf', kind, customerReference: reference, status: 'started', createdAt: timestamp(), updatedAt: timestamp() });
@@ -194,6 +196,55 @@ app.get('/health', healthLimit, async (_request, response, next) => {
       return true;
     });
     response.json({ status: 'ok', storage: 'firestore', region: 'us-central1', checkedAt: timestamp() });
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/dev/curaleaf/catalog', publicReadLimit, localDevelopmentOnly, async (_request, response, next) => {
+  try {
+    response.json(await cached('curaleaf:catalog:platform', 5 * 60_000, async () => {
+      const [formulaPage, productPage] = await Promise.all([
+        curaleafPlatformList<Record<string, unknown>>('/v1/formulas/', 'formulas'),
+        curaleafPlatformList<Record<string, unknown>>('/v1/products/', 'products'),
+      ]);
+      return {
+        environment: 'test',
+        fetchedAt: timestamp(),
+        formulas: formulaPage.records,
+        products: productPage.records,
+        formulaTotal: formulaPage.totalRecordCount,
+        productTotal: productPage.totalRecordCount,
+      };
+    }));
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/dev/curaleaf/quote', publicReadLimit, localDevelopmentOnly, async (request, response, next) => {
+  try {
+    const input = z.object({ items: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1).max(50) }).parse(request.body);
+    response.json(await curaleafPlatformRequest('/v1/quotes/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }));
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/dev/curaleaf/activity', publicReadLimit, localDevelopmentOnly, async (_request, response, next) => {
+  try {
+    response.json(await cached('curaleaf:activity:platform', 30_000, async () => {
+      const [purchaseOrderPage, shipmentPage] = await Promise.all([
+        curaleafPlatformList<Record<string, unknown>>('/v1/purchase-orders/', 'purchaseOrders'),
+        curaleafPlatformList<Record<string, unknown>>('/v1/shipments/', 'shipments'),
+      ]);
+      return {
+        environment: 'test',
+        fetchedAt: timestamp(),
+        purchaseOrders: purchaseOrderPage.records,
+        shipments: shipmentPage.records,
+        purchaseOrderTotal: purchaseOrderPage.totalRecordCount,
+        shipmentTotal: shipmentPage.totalRecordCount,
+      };
+    }));
   } catch (error) { next(error); }
 });
 
@@ -336,44 +387,6 @@ app.patch('/v1/portal/setup/:taskId', async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
-app.get('/v1/portal/formulary-pricing', async (request, response, next) => {
-  try {
-    const organisationId = tenantFor(request, request.query.organisationId);
-    const records = await listTenantRecords('formularyPricing', organisationId, 500);
-    response.json(records.map(record => ({
-      productId: record.productId,
-      patientPricePence: record.patientPricePence ?? null,
-      updatedAt: record.updatedAt,
-    })));
-  } catch (error) { next(error); }
-});
-
-app.put('/v1/portal/formulary-pricing', async (request, response, next) => {
-  try {
-    const input = z.object({ organisationId: idSchema.optional(), prices: z.array(formularyPriceSchema).min(1).max(500) }).parse(request.body);
-    const organisationId = tenantFor(request, input.organisationId);
-    const updatedAt = timestamp();
-    const updatedBy = identity(request).uid;
-    const batch = firestore.batch();
-    input.prices.forEach(price => {
-      const id = createHash('sha256').update(`${organisationId}:${price.productId}`).digest('hex');
-      batch.set(firestore.collection('formularyPricing').doc(id), {
-        id,
-        schemaVersion: 1,
-        organisationId,
-        productId: price.productId,
-        patientPricePence: price.patientPricePence,
-        updatedAt,
-        updatedBy,
-      }, { merge: true });
-    });
-    await batch.commit();
-    invalidateCollectionCache('formularyPricing');
-    await audit(request, 'formulary.prices_updated', { organisationId, productIds: input.prices.map(price => price.productId) });
-    response.json(input.prices.map(price => ({ ...price, updatedAt })));
-  } catch (error) { next(error); }
-});
-
 app.get('/v1/portal/eligibility-submissions', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.query.organisationId);
@@ -411,11 +424,44 @@ app.patch('/v1/portal/patients/:id', async (request, response, next) => {
   try { const organisationId = tenantFor(request, request.body.organisationId); const record = await updateTenantRecord('patients', idSchema.parse(request.params.id), organisationId, patientSchema.partial().parse(request.body)); await audit(request, 'patient.updated', { organisationId, recordId: record.id }); response.json(record); } catch (error) { next(error); }
 });
 
-const lineItemSchema = z.object({ productId: z.string().min(1).max(128), formulaId: z.string().min(1).max(128), packId: z.string().min(1).max(128), name: z.string().min(1).max(200), quantity: z.number().int().positive().max(100), unitPricePence: z.number().int().nonnegative() });
-const orderSchema = z.object({ patientId: idSchema, lineItems: z.array(lineItemSchema).min(1).max(50), dispensingFeePence: z.number().int().nonnegative().max(1_000_000).default(0), totalPence: z.number().int().positive(), currency: z.literal('GBP').default('GBP'), paymentRoute: z.enum(['manual', 'worldpay']) });
+const orderLineItemSchema = z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) });
+const orderSchema = z.object({ patientId: idSchema, lineItems: z.array(orderLineItemSchema).min(1).max(50), dispensingFeePence: z.number().int().nonnegative().max(10_000).default(0), currency: z.literal('GBP').default('GBP'), paymentRoute: z.enum(['manual', 'worldpay']) });
+
+function curaleafPricePence(value: unknown) {
+  const price = String(value ?? '').trim();
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(price);
+  if (!match || (match[2]?.slice(2).match(/[1-9]/))) throw new HttpError(502, 'Curaleaf returned an invalid patient pack price.', 'INVALID_SUPPLIER_PRICE');
+  const pence = BigInt(match[1]!) * 100n + BigInt((match[2] ?? '').padEnd(2, '0').slice(0, 2) || '0');
+  if (pence > 10_000_000n) throw new HttpError(502, 'Curaleaf returned a patient pack price outside the supported range.', 'INVALID_SUPPLIER_PRICE');
+  return Number(pence);
+}
+
 app.get('/v1/portal/orders', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('orders', organisationId); response.json(records); } catch (error) { next(error); } });
 app.post('/v1/portal/orders', async (request, response, next) => {
-  try { const organisationId = tenantFor(request, request.body.organisationId); const input = orderSchema.parse(request.body); await getTenantRecord('patients', input.patientId, organisationId); const sum = input.lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, 0) + input.dispensingFeePence; if (sum !== input.totalPence) throw new HttpError(400, 'Order total does not match its products and dispensing charge.', 'AMOUNT_MISMATCH'); const record = await createRecord('orders', { ...input, organisationId, fulfilmentMethod: 'patient_collection', paymentStatus: 'pending', fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus }); await audit(request, 'order.created', { organisationId, recordId: record.id }); response.status(201).json(record); } catch (error) { next(error); }
+  try {
+    const organisationId = tenantFor(request, request.body.organisationId);
+    const input = orderSchema.parse(request.body);
+    await getTenantRecord('patients', input.patientId, organisationId);
+    const productPage = await curaleafList<{ id: string; formulaId: string; formulaName: string; patientPackPrice: string; state: string }>(organisationId, '/v1/products/', 'products');
+    const products = new Map(productPage.records.map(product => [product.id, product]));
+    const lineItems = input.lineItems.map(item => {
+      const product = products.get(item.packId);
+      if (!product) throw new HttpError(409, 'A selected Curaleaf product is no longer available. Refresh the catalogue and review the order.', 'PRODUCT_NOT_AVAILABLE');
+      if (product.state !== 'ACTIVE') throw new HttpError(409, `${product.formulaName} is no longer an active Curaleaf product.`, 'PRODUCT_NOT_AVAILABLE');
+      return {
+        productId: product.id,
+        formulaId: product.formulaId,
+        packId: product.id,
+        name: product.formulaName,
+        quantity: item.quantity,
+        unitPricePence: curaleafPricePence(product.patientPackPrice),
+      };
+    });
+    const totalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, input.dispensingFeePence);
+    const record = await createRecord('orders', { ...input, lineItems, totalPence, organisationId, fulfilmentMethod: 'patient_collection', paymentStatus: 'pending', fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus });
+    await audit(request, 'order.created', { organisationId, recordId: record.id, pricingSource: 'curaleaf' });
+    response.status(201).json(record);
+  } catch (error) { next(error); }
 });
 
 app.post('/v1/portal/prescription-files/upload-url', async (request, response, next) => {
@@ -494,12 +540,52 @@ app.get('/v1/portal/integrations/curaleaf/products', async (request, response, n
   try { const organisationId = tenantFor(request, request.query.organisationId); const query = new URLSearchParams({ pageSize: String(Math.min(Number(request.query.pageSize) || 100, 500)), pageNumber: String(Math.max(Number(request.query.pageNumber) || 0, 0)) }); response.json(await curaleafRequest(organisationId, `/v1/products/?${query}`)); } catch (error) { next(error); }
 });
 
+app.get('/v1/portal/integrations/curaleaf/catalog', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    response.json(await cached(`curaleaf:catalog:${organisationId}`, 5 * 60_000, async () => {
+      const [formulaPage, productPage] = await Promise.all([
+        curaleafList<Record<string, unknown>>(organisationId, '/v1/formulas/', 'formulas'),
+        curaleafList<Record<string, unknown>>(organisationId, '/v1/products/', 'products'),
+      ]);
+      return {
+        environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production',
+        fetchedAt: timestamp(),
+        formulas: formulaPage.records,
+        products: productPage.records,
+        formulaTotal: formulaPage.totalRecordCount,
+        productTotal: productPage.totalRecordCount,
+      };
+    }));
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/portal/integrations/curaleaf/activity', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    response.json(await cached(`curaleaf:activity:${organisationId}`, 30_000, async () => {
+      const [purchaseOrderPage, shipmentPage] = await Promise.all([
+        curaleafList<Record<string, unknown>>(organisationId, '/v1/purchase-orders/', 'purchaseOrders'),
+        curaleafList<Record<string, unknown>>(organisationId, '/v1/shipments/', 'shipments'),
+      ]);
+      return {
+        environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production',
+        fetchedAt: timestamp(),
+        purchaseOrders: purchaseOrderPage.records,
+        shipments: shipmentPage.records,
+        purchaseOrderTotal: purchaseOrderPage.totalRecordCount,
+        shipmentTotal: shipmentPage.totalRecordCount,
+      };
+    }));
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/integrations/curaleaf/quote', async (request, response, next) => {
   try { const input = z.object({ organisationId: idSchema.optional(), items: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); response.json(await curaleafRequest(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: input.items }) })); } catch (error) { next(error); }
 });
 
 const manualPrescriptionSchema = z.object({
-  organisationId: idSchema.optional(), orderId: idSchema, fileId: idSchema, serialNumber: z.string().min(1).max(200), issueDate: z.iso.date(),
+  organisationId: idSchema.optional(), orderId: idSchema, subOrderId: idSchema.optional(), fileId: idSchema, serialNumber: z.string().min(1).max(200), issueDate: z.iso.date(),
   prescriber: z.object({ pin: z.string().min(1).max(100), gmcNumber: z.number().int().positive().nullable(), gphcNumber: z.string().max(100).nullable(), name: z.string().min(1).max(200), initials: z.string().min(1).max(20) }),
   items: z.array(z.object({ formulaId: idSchema, unitsNeededCount: z.number().int().positive().max(100), packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1).max(50),
 });
@@ -507,7 +593,7 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
   let operation: Awaited<ReturnType<typeof startOperation>> | undefined;
   try {
     const input = manualPrescriptionSchema.parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const order = await getTenantRecord('orders', input.orderId, organisationId); if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Payment must be confirmed before Curaleaf submission.', 'PAYMENT_REQUIRED');
-    operation = await startOperation(organisationId, input.orderId, 'manual'); const file = await uploadedFile(organisationId, input.fileId); const result = await submitManualPrescription(organisationId, { ...input, customerReference: operation.reference, file });
+    operation = await startOperation(organisationId, input.orderId, 'manual', input.subOrderId); const file = await uploadedFile(organisationId, input.fileId); const result = await submitManualPrescription(organisationId, { ...input, customerReference: operation.reference, file });
     await operation.document.update({ status: 'completed', result, updatedAt: timestamp() }); await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, fulfilmentStatus: 'supplier_processing', updatedAt: timestamp() }); invalidateCollectionCache('orders', input.orderId); await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id }); response.status(201).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
 });
@@ -515,8 +601,8 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
 app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (request, response, next) => {
   let operation: Awaited<ReturnType<typeof startOperation>> | undefined;
   try {
-    const input = z.object({ organisationId: idSchema.optional(), orderId: idSchema, fileId: idSchema, quoteItems: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const order = await getTenantRecord('orders', input.orderId, organisationId); if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Payment must be confirmed before Curaleaf submission.', 'PAYMENT_REQUIRED');
-    operation = await startOperation(organisationId, input.orderId, 'barcode'); const file = await uploadedFile(organisationId, input.fileId); const result = await submitBarcodePrescription(organisationId, { customerReference: operation.reference, file, quoteItems: input.quoteItems });
+    const input = z.object({ organisationId: idSchema.optional(), orderId: idSchema, subOrderId: idSchema.optional(), fileId: idSchema, quoteItems: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const order = await getTenantRecord('orders', input.orderId, organisationId); if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Payment must be confirmed before Curaleaf submission.', 'PAYMENT_REQUIRED');
+    operation = await startOperation(organisationId, input.orderId, 'barcode', input.subOrderId); const file = await uploadedFile(organisationId, input.fileId); const result = await submitBarcodePrescription(organisationId, { customerReference: operation.reference, file, quoteItems: input.quoteItems });
     const reconciliationRequired = result.status === 'reconciliation_required';
     await operation.document.update({ status: reconciliationRequired ? 'reconciliation_required' : 'completed', result, updatedAt: timestamp() });
     await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, integrationStatus: reconciliationRequired ? 'reconciliation_required' : 'submitted', fulfilmentStatus: reconciliationRequired ? 'supplier_pending' : 'supplier_processing', updatedAt: timestamp() });

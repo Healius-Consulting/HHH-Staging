@@ -124,9 +124,10 @@ export default function PharmacySettings() {
       <section className="card settings-card pharmacy-pricing-card">
         <div className="settings-card-head">
           <div className="settings-card-icon"><Tags size={18} /></div>
-          <div><p className="section-label">Pharmacy-controlled pricing</p><h2>Formulary and dispensing charges</h2><p>Curaleaf WX is read-only. Your team controls PX in the formulary and can add an optional dispensing charge while building an order.</p></div>
+          <div><p className="section-label">Pricing responsibilities</p><h2>Curaleaf prices and dispensing charges</h2><p>Curaleaf supplies the patient price and order-specific wholesale cost. Your team can only add an optional dispensing charge while building an order.</p></div>
         </div>
-        <div className="settings-pricing-summary"><div><strong>Fulfilment</strong><span>Patient collection from the pharmacy</span></div><div><strong>Dispensing charge</strong><span>Optional, set per prescription order</span></div><button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'formulary' })}>Open formulary pricing</button></div>
+        <div className="settings-pricing-summary"><div><strong>Curaleaf connection</strong><span>Managed by HHH administration</span></div><div><strong>Dispensing charge</strong><span>£5, £10, £15 or a custom amount per order</span></div><button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'formulary' })}>Open Curaleaf catalogue</button></div>
+        <div className="settings-note"><ShieldCheck size={16} /><span>If Curaleaf is temporarily unavailable, wait and try again. If the issue continues, contact your HHH administrator; pharmacy staff cannot change API credentials.</span></div>
       </section>
 
       <section className="card settings-card modules-card">

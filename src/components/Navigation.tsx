@@ -34,7 +34,7 @@ export default function Navigation() {
     {
       label: 'Workspace',
       items: [
-        ...(organisation.modules.rx ? [{ key: 'formulary' as const, label: 'Formulary & pricing', icon: <Tags size={17} /> }] : []),
+        ...(organisation.modules.rx ? [{ key: 'formulary' as const, label: 'Curaleaf catalogue', shortLabel: 'Catalogue', icon: <Tags size={17} /> }] : []),
         ...(organisation.modules.resources ? [{ key: 'resources' as const, label: 'Forms & resources', icon: <QrCode size={17} /> }] : []),
         { key: 'settings', label: 'Organisation', icon: <Settings size={17} /> },
       ],

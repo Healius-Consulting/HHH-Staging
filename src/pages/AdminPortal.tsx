@@ -669,7 +669,7 @@ export default function AdminPortal() {
   const renderIntegrations = () => (
     <>
       <div className="admin-workspace-toolbar"><span><p className="section-label">Shared infrastructure</p><strong>Connection controls</strong><small>Supplier, payment, intake and notification services.</small></span><span className="pill pill-info"><ShieldCheck size={13} /> Platform-level access</span></div>
-      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Tenant payment boundary</strong><p>Each pharmacy owns its PX and approved Worldpay merchant relationship. Patient funds settle directly to that pharmacy. HHH charges a separate platform subscription fee and does not retain a percentage of prescription sales.</p></div></section>
+      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Pricing and payment boundary</strong><p>Curaleaf supplies each pharmacy’s patient medicine prices. The pharmacy controls only its dispensing charge and approved Worldpay merchant relationship; patient funds settle directly to that pharmacy.</p></div></section>
       <form className="card secure-integration-form" onSubmit={submitCuraleafActivation}>
         <div className="admin-directory-head"><div><p className="section-label">HHH administrator only</p><h2>Activate a pharmacy’s Curaleaf account</h2><p>After Curaleaf returns its onboarding email and customer ID, connect them here. Until this succeeds, the pharmacy stays in a session-only training workspace.</p></div><LockKeyhole size={22} /></div>
         <div className="form-grid-two">
@@ -677,7 +677,7 @@ export default function AdminPortal() {
           <label>Curaleaf portal email<input className="input" type="email" autoComplete="off" value={curaleafPortalEmail} onChange={event => setCuraleafPortalEmail(event.target.value)} required /></label>
           <label>Curaleaf customer ID<input className="input" autoComplete="off" value={curaleafCustomerId} onChange={event => setCuraleafCustomerId(event.target.value)} required /></label>
         </div>
-        <div className="setup-security-note"><ShieldCheck size={16} /><span>HHH’s single Curaleaf API key is held once as a Firebase Functions deployment secret. This form stores only this pharmacy’s customer ID and portal email in a Europe-hosted Secret Manager secret; Firestore receives a masked identifier only.</span></div>
+        <div className="setup-security-note"><ShieldCheck size={16} /><span>HHH’s least-privilege Curaleaf read key and read/write key are held as Firebase Functions deployment secrets. This form stores only this pharmacy’s customer ID and portal email in a Europe-hosted Secret Manager secret; Firestore receives a masked identifier only.</span></div>
         {curaleafError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div>}
         <div className="drawer-actions"><button className="btn btn-primary" type="submit" disabled={curaleafBusy || !curaleafOrganisationId}>{curaleafBusy ? 'Verifying securely…' : 'Verify and activate pharmacy'}</button></div>
       </form>

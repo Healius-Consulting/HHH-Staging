@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { ArrowRight, Banknote, CheckCircle, Clock, CreditCard, ReceiptText, Send, ShieldCheck } from 'lucide-react';
 import { useApp, money, rxRevenue, type ManualTender, type PatientOrder } from '../context/AppContext';
 import { compactPatientName } from '../utils/patientName';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
+import { recordPortalManualPayment, submitCuraleafManualPrescription } from '../shared/api';
 
 type PaymentFilter = 'all' | 'awaiting' | 'paid';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
@@ -12,6 +14,7 @@ export default function AwaitingPayment() {
   const [activeFilter, setActiveFilter] = useState<PaymentFilter>('awaiting');
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [manualForms, setManualForms] = useState<Record<number, ManualPaymentForm>>({});
+  const [submittingOrderId, setSubmittingOrderId] = useState<number | null>(null);
   const tenantOrders = state.orders.filter(order => order.organisationId === state.currentOrganisationId);
   const awaitingOrders = tenantOrders.filter(order => order.payment.status === 'sent');
   const paidOrders = tenantOrders.filter(order => order.payment.status === 'paid');
@@ -39,18 +42,87 @@ export default function AwaitingPayment() {
     [orderId]: { ...(current[orderId] ?? DEFAULT_MANUAL_FORM), ...patch },
   }));
 
-  const handleRecordManualPayment = (order: PatientOrder) => {
-    const form = manualForms[order.id] ?? DEFAULT_MANUAL_FORM;
-    if (!form.confirmed) return;
-    dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
-    dispatch({ type: 'PLACE_ORDER', orderId: order.id });
-    const label = form.tender === 'epos-card' ? 'EPOS card' : form.tender === 'bank-transfer' ? 'bank transfer' : form.tender;
-    dispatch({ type: 'ADD_TOAST', message: `${money(order.payment.amount)} ${label} payment recorded. Curaleaf submission queued for backend confirmation.`, toastType: 'success' });
+  const submitLiveOrder = async (order: PatientOrder) => {
+    if (!order.backendId) throw new Error('This order has not been saved to the HHH backend.');
+    let pendingAcceptance = 0;
+    for (const rx of order.prescriptions.filter(prescription => !prescription.placed)) {
+      if (!rx.fileId || !rx.serialNumber || !rx.issueDate || !rx.prescriberPin) throw new Error(`Rx ${rx.id} is missing its uploaded file or Curaleaf prescription details.`);
+      if (rx.items.some(item => !item.formulaId || !item.unitsNeededCount)) throw new Error(`Rx ${rx.id} has a product without a formula ID or prescribed-unit count.`);
+      const initials = rx.prescriber.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 20).toUpperCase() || 'NA';
+      const gmcNumber = rx.prescriberGmcNumber?.trim() ? Number(rx.prescriberGmcNumber) : null;
+      const result = await submitCuraleafManualPrescription({
+        organisationId: state.currentOrganisationId,
+        orderId: order.backendId,
+        subOrderId: String(rx.id),
+        fileId: rx.fileId,
+        serialNumber: rx.serialNumber,
+        issueDate: rx.issueDate,
+        prescriber: {
+          pin: rx.prescriberPin,
+          gmcNumber: gmcNumber && Number.isInteger(gmcNumber) && gmcNumber > 0 ? gmcNumber : null,
+          gphcNumber: rx.prescriberGphcNumber?.trim() || null,
+          name: rx.prescriber,
+          initials,
+        },
+        items: rx.items.map(item => ({
+          formulaId: item.formulaId!,
+          unitsNeededCount: item.unitsNeededCount!,
+          packId: item.productId,
+          quantity: item.qty,
+        })),
+      });
+      if (result.status === 'prescription_pending') pendingAcceptance += 1;
+      dispatch({ type: 'CONFIRM_CURALEAF_SUBMISSION', orderId: order.id, rxId: rx.id, customerReference: result.customerReference });
+    }
+    return pendingAcceptance;
   };
 
-  const handlePlaceOrder = (orderId: number) => {
-    dispatch({ type: 'PLACE_ORDER', orderId });
-    dispatch({ type: 'ADD_TOAST', message: 'Curaleaf submission queued. The supplier reference will appear after backend confirmation.', toastType: 'success' });
+  const handleRecordManualPayment = async (order: PatientOrder) => {
+    const form = manualForms[order.id] ?? DEFAULT_MANUAL_FORM;
+    if (!form.confirmed) return;
+    setSubmittingOrderId(order.id);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live') {
+        if (!order.backendId) throw new Error('This order has not been saved to the HHH backend.');
+        if (!form.reference.trim()) throw new Error('Enter the pharmacy receipt reference before recording a live payment.');
+        const tender = ({ 'epos-card': 'epos', cash: 'cash', 'bank-transfer': 'bank_transfer', other: 'other' } as const)[form.tender];
+        await recordPortalManualPayment(order.backendId, {
+          organisationId: state.currentOrganisationId,
+          amountPence: Math.round(order.payment.amount * 100),
+          tender,
+          reference: form.reference.trim(),
+          notes: form.notes.trim() || undefined,
+        });
+        dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
+        const pendingAcceptance = await submitLiveOrder({ ...order, payment: { ...order.payment, status: 'paid' } });
+        dispatch({ type: 'ADD_TOAST', message: pendingAcceptance ? `Payment recorded. ${pendingAcceptance} prescription${pendingAcceptance === 1 ? ' is' : 's are'} awaiting Curaleaf acceptance before purchase ordering.` : 'Payment recorded and Curaleaf purchase orders submitted.', toastType: 'success' });
+      } else {
+        dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
+        dispatch({ type: 'PLACE_ORDER', orderId: order.id });
+        dispatch({ type: 'ADD_TOAST', message: 'Training payment and Curaleaf submission simulated locally. Nothing was sent.', toastType: 'info' });
+      }
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Payment or Curaleaf submission failed.', toastType: 'error' });
+    } finally {
+      setSubmittingOrderId(null);
+    }
+  };
+
+  const handlePlaceOrder = async (order: PatientOrder) => {
+    setSubmittingOrderId(order.id);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live') {
+        const pendingAcceptance = await submitLiveOrder(order);
+        dispatch({ type: 'ADD_TOAST', message: pendingAcceptance ? `${pendingAcceptance} prescription${pendingAcceptance === 1 ? ' is' : 's are'} awaiting Curaleaf acceptance before purchase ordering.` : 'Curaleaf purchase orders submitted.', toastType: 'success' });
+      } else {
+        dispatch({ type: 'PLACE_ORDER', orderId: order.id });
+        dispatch({ type: 'ADD_TOAST', message: 'Training Curaleaf submission simulated locally. Nothing was sent.', toastType: 'info' });
+      }
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Curaleaf submission failed.', toastType: 'error' });
+    } finally {
+      setSubmittingOrderId(null);
+    }
   };
 
   const filterOptions: Array<{ key: PaymentFilter; label: string; count: number }> = [
@@ -97,8 +169,9 @@ export default function AwaitingPayment() {
             patientName={patientName(selectedOrder.patientId)}
             form={manualForms[selectedOrder.id] ?? DEFAULT_MANUAL_FORM}
             onFormChange={patch => updateManualForm(selectedOrder.id, patch)}
-            onRecordManual={() => handleRecordManualPayment(selectedOrder)}
-            onPlaceOrder={() => handlePlaceOrder(selectedOrder.id)}
+            onRecordManual={() => void handleRecordManualPayment(selectedOrder)}
+            onPlaceOrder={() => void handlePlaceOrder(selectedOrder)}
+            busy={submittingOrderId === selectedOrder.id}
           />}
         </div>
       )}
@@ -106,13 +179,14 @@ export default function AwaitingPayment() {
   );
 }
 
-function PaymentDetail({ order, patientName, form, onFormChange, onRecordManual, onPlaceOrder }: {
+function PaymentDetail({ order, patientName, form, onFormChange, onRecordManual, onPlaceOrder, busy }: {
   order: PatientOrder;
   patientName: string;
   form: ManualPaymentForm;
   onFormChange: (patch: Partial<ManualPaymentForm>) => void;
   onRecordManual: () => void;
   onPlaceOrder: () => void;
+  busy: boolean;
 }) {
   const { payment, prescriptions } = order;
   const isPaid = payment.status === 'paid';
@@ -154,14 +228,14 @@ function PaymentDetail({ order, patientName, form, onFormChange, onRecordManual,
           </div>
           <label><span>Reconciliation note <small>(optional)</small></span><textarea className="input" value={form.notes} onChange={event => onFormChange({ notes: event.target.value })} placeholder="Anything useful for the audit trail" /></label>
           <label className="payment-confirmation"><input type="checkbox" checked={form.confirmed} onChange={event => onFormChange({ confirmed: event.target.checked })} /><span><strong>I confirm {money(payment.amount)} has been received</strong><small>This creates the pharmacy’s manual payment record.</small></span></label>
-          <button type="button" className="btn btn-primary" disabled={!form.confirmed} onClick={onRecordManual}><ReceiptText size={15} /> Record payment and continue</button>
+          <button type="button" className="btn btn-primary" disabled={!form.confirmed || busy} onClick={onRecordManual}><ReceiptText size={15} /> {busy ? 'Recording and submitting…' : 'Record payment and continue'}</button>
         </section>
       )}
 
       {isPaid && (
         <section className="payment-complete-action">
           <div className="payment-callout success"><ShieldCheck size={18} /><span><strong>{isWorldpay ? 'Settled to the pharmacy merchant' : 'Payment recorded by the pharmacy'}</strong><small>The prescription can now continue to Curaleaf fulfilment.</small></span></div>
-          {allPlaced ? <span className="payment-submitted"><CheckCircle size={15} /> All prescription sub-orders are queued or confirmed with Curaleaf.</span> : <button type="button" className="btn btn-primary" onClick={onPlaceOrder}><Send size={15} /> Send to Curaleaf through HHH</button>}
+          {allPlaced ? <span className="payment-submitted"><CheckCircle size={15} /> All prescription sub-orders are queued or confirmed with Curaleaf.</span> : <button type="button" className="btn btn-primary" disabled={busy} onClick={onPlaceOrder}><Send size={15} /> {busy ? 'Submitting to Curaleaf…' : 'Send to Curaleaf through HHH'}</button>}
         </section>
       )}
     </article>

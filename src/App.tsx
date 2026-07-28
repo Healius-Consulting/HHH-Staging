@@ -194,7 +194,7 @@ function StaffWorkspace() {
         {state.workspaceMode === 'training' && (
           <div className="training-mode-banner" role="status">
             <strong>Training workspace</strong>
-            <span>Curaleaf has not activated this pharmacy yet. Patient, prescription, payment and order changes are temporary and reset when this page refreshes or the session ends.</span>
+            <span>Patient and order records are temporary. The catalogue may use live Curaleaf test data, but supplier writes and payments are not sent from this workspace.</span>
           </div>
         )}
         <div id="pharmacy-main-content" className="page-container" tabIndex={-1}>{renderScreen()}</div>
