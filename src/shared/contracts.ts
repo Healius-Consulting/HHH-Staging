@@ -168,6 +168,24 @@ export interface PortalOrderInput {
     packId: string;
     quantity: number;
   }>;
+  prescriptions: Array<{
+    fileId: string;
+    serialNumber: string;
+    issueDate: string;
+    prescriber: {
+      pin: string;
+      gmcNumber: number | null;
+      gphcNumber: string | null;
+      name: string;
+      initials: string;
+    };
+    items: Array<{
+      formulaId: string;
+      unitsNeededCount: number;
+      packId: string;
+      quantity: number;
+    }>;
+  }>;
   dispensingFeePence: number;
   currency: 'GBP';
   paymentRoute: 'manual' | 'worldpay';
@@ -200,12 +218,21 @@ export interface PortalOrderRecord {
     quantity: number;
     unitPricePence: number;
   }>;
+  prescriptions?: PortalOrderInput['prescriptions'];
   dispensingFeePence: number;
   totalPence: number;
   currency: 'GBP';
   paymentRoute: 'manual' | 'worldpay';
   paymentStatus: string;
   fulfilmentStatus: string;
+  paymentId?: string;
+  curaleaf?: {
+    status: 'prescription_pending' | 'purchase_order_submitted';
+    prescriptionId: string;
+    prescriberId: string;
+    customerReference: string;
+    quote: CuraleafQuote;
+  };
   createdAt: string;
   updatedAt: string;
 }

@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
-import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, getPortalPatients, isApiConfigured } from '../shared/api';
-import type { CuraleafCatalogue } from '../shared/contracts';
+import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
+import type { CuraleafCatalogue, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 
 /* ═══════════════════════════════════════════════════════════
@@ -403,6 +403,7 @@ export type Action =
   | { type: 'SET_CATALOGUE_ERROR'; message: string }
   | { type: 'APPLY_CURALEAF_QUOTE'; items: Array<{ productId: string; wholesalePrice: number; patientPrice: number; inStock: boolean }> }
   | { type: 'SYNC_CRM_PATIENTS'; organisationId: string; patients: CRMPatient[] }
+  | { type: 'SYNC_PORTAL_ORDERS'; organisationId: string; orders: PatientOrder[] }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
   | { type: 'ADD_SUBMISSION'; submission: EligibilitySubmission }
@@ -460,6 +461,82 @@ function blankOrder(id: number, patientId: string | null, organisationId: string
     id, organisationId, patientId, date: new Date(), dispensingFee: 0,
     payment: { status: 'none', route: null, amount: 0, ref: null, sentAt: null, paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions: [blankRx(1)],
+  };
+}
+
+function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder {
+  const orderId = 1_000 + index;
+  const rxStatus: RxStatus = record.fulfilmentStatus === 'supplier_pending'
+    ? 'awaiting-approval'
+    : record.fulfilmentStatus === 'supplier_processing'
+      ? 'approved'
+      : 'awaiting-approval';
+  const quoteItems = new Map(record.curaleaf?.quote.items.map(item => [item.packId, item]));
+  const orderItems = (items: Array<{ packId: string; formulaId: string; quantity: number; unitsNeededCount?: number }>): LineItem[] => items.map(item => {
+    const persisted = record.lineItems.find(line => line.packId === item.packId);
+    const quote = quoteItems.get(item.packId);
+    return {
+      productId: item.packId,
+      formulaId: item.formulaId || persisted?.formulaId,
+      name: persisted?.name ?? 'Curaleaf formulary product',
+      qty: item.quantity,
+      unitsNeededCount: item.unitsNeededCount,
+      cost: quote ? Number(quote.wholesalePackPrice) : null,
+      retail: persisted ? persisted.unitPricePence / 100 : Number(quote?.patientPackPrice ?? 0),
+    };
+  });
+  const prescriptions: Prescription[] = record.prescriptions?.length
+    ? record.prescriptions.map((prescription, rxIndex) => ({
+        id: orderId * 100 + rxIndex + 1,
+        prescriber: prescription.prescriber.name,
+        prescriberPin: prescription.prescriber.pin,
+        prescriberGmcNumber: prescription.prescriber.gmcNumber?.toString(),
+        prescriberGphcNumber: prescription.prescriber.gphcNumber ?? undefined,
+        serialNumber: prescription.serialNumber,
+        issueDate: prescription.issueDate,
+        copyFileName: null,
+        fileId: prescription.fileId,
+        items: orderItems(prescription.items),
+        placed: Boolean(record.curaleaf),
+        poRef: record.curaleaf?.customerReference ?? null,
+        status: rxStatus,
+        invoiceRef: null,
+        trackingNumber: null,
+        carrier: null,
+      }))
+    : [{
+        id: orderId * 100 + 1,
+        prescriber: 'Curaleaf prescription',
+        copyFileName: null,
+        items: orderItems(record.lineItems.map(item => ({ packId: item.packId, formulaId: item.formulaId, quantity: item.quantity }))),
+        placed: Boolean(record.curaleaf),
+        poRef: record.curaleaf?.customerReference ?? null,
+        status: rxStatus,
+        invoiceRef: null,
+        trackingNumber: null,
+        carrier: null,
+      }];
+  const paid = record.paymentStatus === 'paid';
+  return {
+    id: orderId,
+    backendId: record.id,
+    organisationId: record.organisationId,
+    patientId: record.patientId,
+    date: new Date(record.createdAt),
+    dispensingFee: record.dispensingFeePence / 100,
+    payment: {
+      status: paid ? 'paid' : 'sent',
+      route: record.paymentRoute === 'manual' ? 'pharmacy' : 'worldpay',
+      amount: record.totalPence / 100,
+      ref: record.paymentId ?? null,
+      sentAt: new Date(record.createdAt),
+      paidAt: paid ? new Date(record.updatedAt) : null,
+      manualTender: null,
+      manualReference: null,
+      manualNotes: null,
+      manualRecordedBy: null,
+    },
+    prescriptions,
   };
 }
 
@@ -725,6 +802,13 @@ function reducer(state: AppState, action: Action): AppState {
       const byId = new Map(retained.map(patient => [patient.id, patient]));
       action.patients.forEach(patient => byId.set(patient.id, patient));
       return { ...state, crm: [...byId.values()] };
+    }
+    case 'SYNC_PORTAL_ORDERS': {
+      const retained = state.orders.filter(order => order.organisationId !== action.organisationId || order.payment.status === 'none');
+      const orders = [...retained, ...action.orders];
+      const nextOrderId = Math.max(state.nextIds.order, ...orders.map(order => order.id + 1));
+      const nextRxId = Math.max(state.nextIds.rx, ...orders.flatMap(order => order.prescriptions.map(rx => rx.id + 1)));
+      return { ...state, orders, nextIds: { ...state.nextIds, order: nextOrderId, rx: nextRxId } };
     }
     case 'LOG_INTERACTION': {
       return {
@@ -1215,6 +1299,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         })),
       });
     }).catch(error => console.warn('Patient directory sync unavailable:', error));
+    return () => { cancelled = true; };
+  }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
+
+  useEffect(() => {
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || state.workspaceMode !== 'live') return;
+    let cancelled = false;
+    const organisationId = state.currentOrganisationId;
+    getPortalOrders(organisationId).then(records => {
+      if (cancelled) return;
+      const orders = records
+        .slice()
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        .map(mapPortalOrder);
+      dispatch({ type: 'SYNC_PORTAL_ORDERS', organisationId, orders });
+    }).catch(error => console.warn('Order history sync unavailable:', error));
     return () => { cancelled = true; };
   }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
 

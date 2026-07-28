@@ -436,7 +436,25 @@ app.patch('/v1/portal/patients/:id', async (request, response, next) => {
 });
 
 const orderLineItemSchema = z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) });
-const orderSchema = z.object({ patientId: idSchema, lineItems: z.array(orderLineItemSchema).min(1).max(50), dispensingFeePence: z.number().int().nonnegative().max(10_000).default(0), currency: z.literal('GBP').default('GBP'), paymentRoute: z.enum(['manual', 'worldpay']) });
+const orderPrescriptionSchema = z.object({
+  fileId: idSchema,
+  serialNumber: z.string().min(1).max(200),
+  issueDate: z.iso.date(),
+  prescriber: z.object({
+    pin: z.string().min(1).max(100),
+    gmcNumber: z.number().int().positive().nullable(),
+    gphcNumber: z.string().max(100).nullable(),
+    name: z.string().min(1).max(200),
+    initials: z.string().min(1).max(20),
+  }),
+  items: z.array(z.object({
+    formulaId: idSchema,
+    unitsNeededCount: z.number().int().positive().max(100),
+    packId: idSchema,
+    quantity: z.number().int().positive().max(100),
+  })).min(1).max(50),
+});
+const orderSchema = z.object({ patientId: idSchema, lineItems: z.array(orderLineItemSchema).min(1).max(50), prescriptions: z.array(orderPrescriptionSchema).max(20).default([]), dispensingFeePence: z.number().int().nonnegative().max(10_000).default(0), currency: z.literal('GBP').default('GBP'), paymentRoute: z.enum(['manual', 'worldpay']) });
 
 function curaleafPricePence(value: unknown) {
   const price = String(value ?? '').trim();

@@ -108,6 +108,10 @@ export default function CreateOrder() {
   const quoteCurrent = wholesaleKnown && quotedSignature === currentQuoteSignature;
 
   const initials = (name: string) => name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2);
+  const gmcNumber = (value?: string) => {
+    const number = value?.trim() ? Number(value) : null;
+    return number && Number.isInteger(number) && number > 0 ? number : null;
+  };
   const availabilityLabel = (item: CatalogueItem) => item.availability === 'in'
     ? 'In stock at last quote'
     : item.availability === 'out'
@@ -143,6 +147,24 @@ export default function CreateOrder() {
           organisationId: state.currentOrganisationId,
           patientId: activeOrder.patientId!,
           lineItems,
+          prescriptions: activeOrder.prescriptions.map(rx => ({
+            fileId: rx.fileId!,
+            serialNumber: rx.serialNumber!,
+            issueDate: rx.issueDate!,
+            prescriber: {
+              pin: rx.prescriberPin!,
+              gmcNumber: gmcNumber(rx.prescriberGmcNumber),
+              gphcNumber: rx.prescriberGphcNumber?.trim() || null,
+              name: rx.prescriber,
+              initials: rx.prescriber.split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 20),
+            },
+            items: rx.items.map(item => ({
+              formulaId: item.formulaId!,
+              unitsNeededCount: item.unitsNeededCount!,
+              packId: item.productId,
+              quantity: item.qty,
+            })),
+          })),
           dispensingFeePence: Math.round(activeOrder.dispensingFee * 100),
           currency: 'GBP',
           paymentRoute: 'manual',

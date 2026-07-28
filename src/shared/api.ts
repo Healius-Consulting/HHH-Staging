@@ -169,6 +169,10 @@ export function getPortalPatients(organisationId: string) {
   return apiRequest<PortalPatientRecord[]>(`/v1/portal/patients?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
+export function getPortalOrders(organisationId: string) {
+  return apiRequest<PortalOrderRecord[]>(`/v1/portal/orders?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
 export function createPortalOrder(input: PortalOrderInput) {
   return apiRequest<PortalOrderRecord>('/v1/portal/orders', {
     method: 'POST',
