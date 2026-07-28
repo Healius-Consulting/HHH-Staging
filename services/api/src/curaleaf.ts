@@ -27,11 +27,11 @@ async function curaleafApiKey(method: string): Promise<string> {
     return config.CURALEAF_READ_API_KEY
       ?? config.CURALEAF_WRITE_API_KEY
       ?? config.CURALEAF_API_KEY
-      ?? readPlatformSecret(['CURALEAF_READ_API_KEY_EUROPE_WEST2', 'CURALEAF_WRITE_API_KEY_EUROPE_WEST2', 'CURALEAF_API_KEY_EUROPE_WEST2', 'CURALEAF_READ_API_KEY', 'CURALEAF_WRITE_API_KEY', 'CURALEAF_API_KEY']);
+      ?? readPlatformSecret(['CURALEAF_READ_API_KEY_EUROPE_WEST2', 'CURALEAF_WRITE_API_KEY_EUROPE_WEST2', 'CURALEAF_API_KEY_EUROPE_WEST2']);
   }
   return config.CURALEAF_WRITE_API_KEY
     ?? config.CURALEAF_API_KEY
-    ?? readPlatformSecret(['CURALEAF_WRITE_API_KEY_EUROPE_WEST2', 'CURALEAF_API_KEY_EUROPE_WEST2', 'CURALEAF_WRITE_API_KEY', 'CURALEAF_API_KEY']);
+    ?? readPlatformSecret(['CURALEAF_WRITE_API_KEY_EUROPE_WEST2', 'CURALEAF_API_KEY_EUROPE_WEST2']);
 }
 
 export async function curaleafPlatformRequest<T = CuraleafResult>(path: string, init: RequestInit = {}): Promise<T> {

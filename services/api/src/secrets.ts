@@ -57,10 +57,7 @@ export async function readIntegrationSecret<T extends Record<string, string>>(or
 export type CuraleafPlatformSecretId =
   | 'CURALEAF_READ_API_KEY_EUROPE_WEST2'
   | 'CURALEAF_WRITE_API_KEY_EUROPE_WEST2'
-  | 'CURALEAF_API_KEY_EUROPE_WEST2'
-  | 'CURALEAF_READ_API_KEY'
-  | 'CURALEAF_WRITE_API_KEY'
-  | 'CURALEAF_API_KEY';
+  | 'CURALEAF_API_KEY_EUROPE_WEST2';
 
 export async function readPlatformSecret(secretIds: readonly CuraleafPlatformSecretId[]): Promise<string> {
   for (const secretId of secretIds) {
