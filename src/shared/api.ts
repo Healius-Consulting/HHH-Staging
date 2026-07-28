@@ -131,6 +131,10 @@ export function getCuraleafCatalogue(organisationId: string) {
   return apiRequest<CuraleafCatalogue>(`/v1/portal/integrations/curaleaf/catalog?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
+export function getCuraleafTrainingCatalogue(organisationId: string) {
+  return apiRequest<CuraleafCatalogue>(`/v1/portal/integrations/curaleaf/training/catalog?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
 export function getDevCuraleafQuote(items: CuraleafQuoteRequestItem[]) {
   return apiRequest<CuraleafQuote>('/v1/dev/curaleaf/quote', {
     method: 'POST',
@@ -140,6 +144,13 @@ export function getDevCuraleafQuote(items: CuraleafQuoteRequestItem[]) {
 
 export function getCuraleafQuote(organisationId: string, items: CuraleafQuoteRequestItem[]) {
   return apiRequest<CuraleafQuote>('/v1/portal/integrations/curaleaf/quote', {
+    method: 'POST',
+    body: JSON.stringify({ organisationId, items }),
+  });
+}
+
+export function getCuraleafTrainingQuote(organisationId: string, items: CuraleafQuoteRequestItem[]) {
+  return apiRequest<CuraleafQuote>('/v1/portal/integrations/curaleaf/training/quote', {
     method: 'POST',
     body: JSON.stringify({ organisationId, items }),
   });

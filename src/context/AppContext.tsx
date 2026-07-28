@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
-import { getCuraleafCatalogue, getCuraleafConnectionStatus, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, isApiConfigured } from '../shared/api';
+import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, isApiConfigured } from '../shared/api';
 import type { CuraleafCatalogue } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 
@@ -620,7 +620,7 @@ const initialState: AppState = {
   screen: 'home',
   catalogue: [],
   catalogueSource: 'unavailable',
-  catalogueLoading: isLocalPortalPreview,
+  catalogueLoading: isApiConfigured,
   catalogueError: null,
   catalogueUpdatedAt: null,
   crm: usePrototypeState ? [...SEED_CRM] : [],
@@ -1146,17 +1146,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const useLocalSandbox = isLocalPortalPreview && isApiConfigured;
-    const useConnectedPortal = !isLocalPortalPreview
+    const useAuthenticatedPortal = !isLocalPortalPreview
       && isApiConfigured
       && Boolean(state.staffSession)
-      && state.workspaceMode === 'live'
       && Boolean(state.currentOrganisationId);
-    if (!useLocalSandbox && !useConnectedPortal) return;
+    if (!useLocalSandbox && !useAuthenticatedPortal) return;
     let cancelled = false;
     dispatch({ type: 'SET_CATALOGUE_LOADING' });
     const request = useLocalSandbox
       ? getDevCuraleafCatalogue()
-      : getCuraleafCatalogue(state.currentOrganisationId);
+      : state.workspaceMode === 'live'
+        ? getCuraleafCatalogue(state.currentOrganisationId)
+        : getCuraleafTrainingCatalogue(state.currentOrganisationId);
     request.then(catalogue => {
       if (!cancelled) dispatch({ type: 'SET_CATALOGUE', catalogue: mapCuraleafCatalogue(catalogue), updatedAt: catalogue.fetchedAt });
     }).catch(error => {

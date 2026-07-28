@@ -102,6 +102,30 @@ function localDevelopmentOnly(request: Request, response: Response, next: NextFu
   next();
 }
 
+function curaleafTestEnvironmentOnly(_request: Request, response: Response, next: NextFunction) {
+  if (!config.CURALEAF_BASE_URL.includes('.dev')) {
+    return response.status(404).json({ code: 'NOT_FOUND', message: 'Not found.' });
+  }
+  next();
+}
+
+async function platformCuraleafCatalogue() {
+  return cached('curaleaf:catalog:platform', 5 * 60_000, async () => {
+    const [formulaPage, productPage] = await Promise.all([
+      curaleafPlatformList<Record<string, unknown>>('/v1/formulas/', 'formulas'),
+      curaleafPlatformList<Record<string, unknown>>('/v1/products/', 'products'),
+    ]);
+    return {
+      environment: 'test' as const,
+      fetchedAt: timestamp(),
+      formulas: formulaPage.records,
+      products: productPage.records,
+      formulaTotal: formulaPage.totalRecordCount,
+      productTotal: productPage.totalRecordCount,
+    };
+  });
+}
+
 async function requirePublicAppCheck(request: Request, _response: Response, next: NextFunction) {
   if (config.REQUIRE_APP_CHECK !== 'true') return next();
   try {
@@ -201,20 +225,7 @@ app.get('/health', healthLimit, async (_request, response, next) => {
 
 app.get('/v1/dev/curaleaf/catalog', publicReadLimit, localDevelopmentOnly, async (_request, response, next) => {
   try {
-    response.json(await cached('curaleaf:catalog:platform', 5 * 60_000, async () => {
-      const [formulaPage, productPage] = await Promise.all([
-        curaleafPlatformList<Record<string, unknown>>('/v1/formulas/', 'formulas'),
-        curaleafPlatformList<Record<string, unknown>>('/v1/products/', 'products'),
-      ]);
-      return {
-        environment: 'test',
-        fetchedAt: timestamp(),
-        formulas: formulaPage.records,
-        products: productPage.records,
-        formulaTotal: formulaPage.totalRecordCount,
-        productTotal: productPage.totalRecordCount,
-      };
-    }));
+    response.json(await platformCuraleafCatalogue());
   } catch (error) { next(error); }
 });
 
@@ -538,6 +549,28 @@ app.get('/v1/portal/integrations/:integration/status', async (request, response,
 
 app.get('/v1/portal/integrations/curaleaf/products', async (request, response, next) => {
   try { const organisationId = tenantFor(request, request.query.organisationId); const query = new URLSearchParams({ pageSize: String(Math.min(Number(request.query.pageSize) || 100, 500)), pageNumber: String(Math.max(Number(request.query.pageNumber) || 0, 0)) }); response.json(await curaleafRequest(organisationId, `/v1/products/?${query}`)); } catch (error) { next(error); }
+});
+
+app.get('/v1/portal/integrations/curaleaf/training/catalog', curaleafTestEnvironmentOnly, async (request, response, next) => {
+  try {
+    tenantFor(request, request.query.organisationId);
+    response.json(await platformCuraleafCatalogue());
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/integrations/curaleaf/training/quote', curaleafTestEnvironmentOnly, async (request, response, next) => {
+  try {
+    const input = z.object({
+      organisationId: idSchema.optional(),
+      items: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1).max(50),
+    }).parse(request.body);
+    tenantFor(request, input.organisationId);
+    response.json(await curaleafPlatformRequest('/v1/quotes/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: input.items }),
+    }));
+  } catch (error) { next(error); }
 });
 
 app.get('/v1/portal/integrations/curaleaf/catalog', async (request, response, next) => {

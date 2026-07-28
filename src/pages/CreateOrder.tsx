@@ -16,7 +16,7 @@ import {
   type PaymentRoute,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { createPortalOrder, getCuraleafQuote, getDevCuraleafQuote, isApiConfigured, uploadPrescriptionFile } from '../shared/api';
+import { createPortalOrder, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
 
 const TYPE_FILTERS = ['All', 'oil', 'flos', 'capsule', 'lozenge', 'vape', 'other'] as const;
@@ -201,7 +201,9 @@ export default function CreateOrder() {
     try {
       const quote = isLocalPortalPreview
         ? await getDevCuraleafQuote(currentQuoteItems)
-        : await getCuraleafQuote(state.currentOrganisationId, currentQuoteItems);
+        : state.workspaceMode === 'live'
+          ? await getCuraleafQuote(state.currentOrganisationId, currentQuoteItems)
+          : await getCuraleafTrainingQuote(state.currentOrganisationId, currentQuoteItems);
       if (!quote.items.length) throw new Error('Curaleaf has not returned quote prices yet. Your draft is unchanged; wait and try again, or contact your HHH administrator if this continues.');
       dispatch({
         type: 'APPLY_CURALEAF_QUOTE',

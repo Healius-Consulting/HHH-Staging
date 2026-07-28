@@ -47,11 +47,16 @@ export default function FormularyPricing() {
           title="Curaleaf information is temporarily delayed"
           detail="You can wait and try again later. If this continues, contact your HHH administrator; pharmacy staff do not need to change any connection settings."
         />
-      ) : (
+      ) : state.catalogueSource === 'curaleaf' ? (
         <ProviderStatusNotice
           state="available"
           title="Catalogue connected"
           detail={updatedAt ? `Last refreshed ${updatedAt}. Curaleaf remains the source of patient pricing.` : 'Curaleaf remains the source of patient pricing.'}
+        />
+      ) : (
+        <ProviderStatusNotice
+          title="Catalogue has not loaded"
+          detail="Wait and refresh this page. If it remains unavailable, contact your HHH administrator; pharmacy staff do not need to change any connection settings."
         />
       )}
 
