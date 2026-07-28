@@ -198,7 +198,7 @@ async function startOperation(organisationId: string, orderId: string, kind: 'ma
   const reference = `HHH-${orderId}${subOrderId ? `-${subOrderId}` : ''}`.slice(0, 100);
   const document = firestore.collection('integrationOperations').doc(id);
   try {
-    await document.create({ id, schemaVersion: 1, organisationId, orderId, integration: 'curaleaf', kind, customerReference: reference, status: 'started', createdAt: timestamp(), updatedAt: timestamp() });
+    await document.create({ id, schemaVersion: 1, organisationId, orderId, subOrderId: subOrderId ?? null, integration: 'curaleaf', kind, customerReference: reference, status: 'started', createdAt: timestamp(), updatedAt: timestamp() });
   } catch (error) {
     if ((error as { code?: number | string }).code === 6 || (error as { code?: number | string }).code === 'already-exists') throw new HttpError(409, 'This order already has a Curaleaf submission operation. Reconcile it instead of submitting again.', 'DUPLICATE_OPERATION');
     throw error;
@@ -684,7 +684,17 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
     const file = await uploadedFile(organisationId, authoritativeInput.fileId);
     const result = await submitManualPrescription(organisationId, { ...authoritativeInput, customerReference: operation.reference, file });
     const fulfilmentStatus: FulfilmentStatus = result.status === 'prescription_pending' ? 'supplier_pending' : 'supplier_processing';
-    await operation.document.update({ status: 'completed', result, updatedAt: timestamp() }); await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, fulfilmentStatus, updatedAt: timestamp() }); invalidateCollectionCache('orders', input.orderId); await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id }); response.status(201).json(result);
+    const operationStatus = result.status === 'prescription_pending' ? 'awaiting_prescription_approval' : 'purchase_order_submitted';
+    await operation.document.update({
+      status: operationStatus,
+      result,
+      prescriptionId: result.prescriptionId,
+      prescriptionState: result.prescriptionState,
+      prescriptionSerialNumber: authoritativeInput.serialNumber,
+      items: authoritativeInput.items.map(({ packId, quantity }) => ({ packId, quantity })),
+      updatedAt: timestamp(),
+    });
+    await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, integrationStatus: operationStatus, fulfilmentStatus, updatedAt: timestamp() }); invalidateCollectionCache('orders', input.orderId); await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id }); response.status(201).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
 });
 

@@ -228,9 +228,14 @@ export interface PortalOrderRecord {
   paymentId?: string;
   curaleaf?: {
     status: 'prescription_pending' | 'purchase_order_submitted';
+    prescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
     prescriptionId: string;
     prescriberId: string;
     customerReference: string;
+    purchaseOrderId?: string | null;
+    purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
+    courier?: string;
+    shipmentIds?: string[];
     quote: CuraleafQuote;
   };
   createdAt: string;
@@ -274,9 +279,12 @@ export interface CuraleafManualPrescriptionInput {
 
 export interface CuraleafSubmissionResult {
   status: 'prescription_pending' | 'purchase_order_submitted';
+  prescriptionState: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
   prescriptionId: string;
   prescriberId: string;
   customerReference: string;
+  purchaseOrderId?: string | null;
+  purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
   quote: CuraleafQuote;
 }
 

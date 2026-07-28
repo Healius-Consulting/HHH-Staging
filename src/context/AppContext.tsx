@@ -466,11 +466,17 @@ function blankOrder(id: number, patientId: string | null, organisationId: string
 
 function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder {
   const orderId = index + 1;
-  const rxStatus: RxStatus = record.fulfilmentStatus === 'supplier_pending'
-    ? 'awaiting-approval'
-    : record.fulfilmentStatus === 'supplier_processing'
-      ? 'approved'
-      : 'awaiting-approval';
+  const rxStatus: RxStatus = ({
+    supplier_pending: 'awaiting-approval',
+    supplier_processing: 'approved',
+    supplier_allocated: 'approved',
+    dispatched_to_pharmacy: 'dispatched',
+    partially_received: 'partially-received',
+    received: 'received',
+    ready_for_collection: 'ready',
+    collected: 'collected',
+    exception: 'awaiting-approval',
+  } as Record<string, RxStatus>)[record.fulfilmentStatus] ?? 'awaiting-approval';
   const quoteItems = new Map(record.curaleaf?.quote.items.map(item => [item.packId, item]));
   const orderItems = (items: Array<{ packId: string; formulaId: string; quantity: number; unitsNeededCount?: number }>): LineItem[] => items.map(item => {
     const persisted = record.lineItems.find(line => line.packId === item.packId);
@@ -497,24 +503,24 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
         copyFileName: null,
         fileId: prescription.fileId,
         items: orderItems(prescription.items),
-        placed: Boolean(record.curaleaf),
+        placed: record.curaleaf?.status === 'purchase_order_submitted',
         poRef: record.curaleaf?.customerReference ?? null,
         status: rxStatus,
         invoiceRef: null,
         trackingNumber: null,
-        carrier: null,
+        carrier: record.curaleaf?.courier ?? null,
       }))
     : [{
         id: orderId * 100 + 1,
         prescriber: 'Curaleaf prescription',
         copyFileName: null,
         items: orderItems(record.lineItems.map(item => ({ packId: item.packId, formulaId: item.formulaId, quantity: item.quantity }))),
-        placed: Boolean(record.curaleaf),
+        placed: record.curaleaf?.status === 'purchase_order_submitted',
         poRef: record.curaleaf?.customerReference ?? null,
         status: rxStatus,
         invoiceRef: null,
         trackingNumber: null,
-        carrier: null,
+        carrier: record.curaleaf?.courier ?? null,
       }];
   const paid = record.paymentStatus === 'paid';
   return {

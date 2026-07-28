@@ -128,6 +128,73 @@ export type ManualPrescriptionInput = {
   file: { bytes: Buffer; contentType: string; filename: string };
 };
 
+export type CuraleafPrescriptionState = 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
+export type CuraleafPurchaseOrderState = 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED';
+const prescriptionStates = new Set<CuraleafPrescriptionState>(['ACTIVE', 'FULFILLED', 'EXPIRED', 'CANCELLED', 'PENDING']);
+const purchaseOrderStates = new Set<CuraleafPurchaseOrderState>(['CREATED', 'PROCESSING', 'FULLY_ALLOCATED', 'CANCELLED']);
+
+export type CuraleafPurchaseOrderRecord = {
+  id: string;
+  customerReference: string | null;
+  state: CuraleafPurchaseOrderState;
+  courier: 'DX' | 'POLAR_SPEED' | 'CURALEAF' | 'TRANSFER' | 'OTHER';
+  items: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+export type CuraleafShipmentRecord = {
+  id: string;
+  purchaseOrderId: string;
+  purchaseOrderCustomerReference: string | null;
+  createdAt: string;
+  items: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+async function prescriptionBySerial(organisationId: string, serialNumber: string) {
+  const lookup = await curaleafRequest<{ prescription: Record<string, unknown> }>(organisationId, `/v1/prescriptions/${encodeURIComponent(serialNumber)}/`);
+  const prescription = lookup.prescription;
+  if (typeof prescription.id !== 'string' || typeof prescription.state !== 'string' || !prescriptionStates.has(prescription.state as CuraleafPrescriptionState)) {
+    throw new CuraleafRequestError(502, 'Curaleaf returned an invalid prescription response.');
+  }
+  return prescription as Record<string, unknown> & { id: string; state: CuraleafPrescriptionState };
+}
+
+export async function findCuraleafPurchaseOrder(organisationId: string, customerReference: string) {
+  const query = new URLSearchParams({ searchQuery: customerReference, pageNumber: '0', pageSize: '200' });
+  const page = await curaleafRequest<{ purchaseOrders: CuraleafPurchaseOrderRecord[] }>(organisationId, `/v1/purchase-orders/?${query}`);
+  if (!Array.isArray(page.purchaseOrders)) throw new CuraleafRequestError(502, 'Curaleaf returned an invalid purchase-order page.');
+  const purchaseOrder = page.purchaseOrders.find(order => order.customerReference === customerReference) ?? null;
+  if (purchaseOrder && (typeof purchaseOrder.id !== 'string' || !purchaseOrderStates.has(purchaseOrder.state))) {
+    throw new CuraleafRequestError(502, 'Curaleaf returned an invalid purchase-order response.');
+  }
+  return purchaseOrder;
+}
+
+export async function findCuraleafShipments(organisationId: string, purchaseOrderId: string) {
+  const query = new URLSearchParams({ purchaseOrderId, pageNumber: '0', pageSize: '200' });
+  const page = await curaleafRequest<{ shipments: CuraleafShipmentRecord[] }>(organisationId, `/v1/shipments/?${query}`);
+  if (!Array.isArray(page.shipments)) throw new CuraleafRequestError(502, 'Curaleaf returned an invalid shipment page.');
+  const shipments = page.shipments.filter(shipment => shipment.purchaseOrderId === purchaseOrderId);
+  if (shipments.some(shipment => typeof shipment.id !== 'string' || typeof shipment.createdAt !== 'string' || !Array.isArray(shipment.items))) {
+    throw new CuraleafRequestError(502, 'Curaleaf returned an invalid shipment response.');
+  }
+  return shipments;
+}
+
+async function ensurePurchaseOrder(organisationId: string, customerReference: string, items: Array<{ packId: string; quantity: number }>) {
+  const existing = await findCuraleafPurchaseOrder(organisationId, customerReference);
+  if (existing) return existing;
+  await curaleafRequest(organisationId, '/v1/purchase-orders/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customerReference, items: items.map(({ packId, quantity }) => ({ productId: packId, count: quantity })) }),
+  });
+  // Curaleaf documents no response body for the POST. Re-read the collection
+  // instead of guessing an ID or state; eventual consistency may yield null.
+  return findCuraleafPurchaseOrder(organisationId, customerReference);
+}
+
 export async function submitManualPrescription(organisationId: string, input: ManualPrescriptionInput) {
   const query = new URLSearchParams({ searchQuery: input.prescriber.pin, pageSize: '20' });
   let prescribers = await curaleafRequest<{ prescribers: Array<Record<string, unknown>> }>(organisationId, `/v1/prescribers/?${query}`);
@@ -143,20 +210,62 @@ export async function submitManualPrescription(organisationId: string, input: Ma
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ serialNumber: input.serialNumber, issueDate: input.issueDate, prescriberId: prescriber.id, items: input.items.map(({ formulaId, unitsNeededCount }) => ({ formulaId, unitsNeededCount })) }),
   });
-  const lookup = await curaleafRequest<{ prescription: Record<string, unknown> }>(organisationId, `/v1/prescriptions/${encodeURIComponent(input.serialNumber)}/`);
-  const prescription = lookup.prescription;
-  if (typeof prescription.id !== 'string') throw new CuraleafRequestError(502, 'Curaleaf created the prescription but did not return its identifier.', true);
+  const prescription = await prescriptionBySerial(organisationId, input.serialNumber);
   await uploadCuraleafFile(organisationId, `/v1/prescriptions/${prescription.id}/file/`, input.file.bytes, input.file.contentType, input.file.filename);
   const quote = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: input.items.map(({ packId, quantity }) => ({ packId, quantity })) }) });
   if (prescription.state !== 'ACTIVE') {
-    return { status: 'prescription_pending' as const, prescriptionId: prescription.id, prescriberId: prescriber.id, customerReference: input.customerReference, quote };
+    return { status: 'prescription_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id, prescriberId: prescriber.id, customerReference: input.customerReference, quote };
   }
-  await curaleafRequest(organisationId, '/v1/purchase-orders/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customerReference: input.customerReference, items: input.items.map(({ packId, quantity }) => ({ productId: packId, count: quantity })) }),
-  });
-  return { status: 'purchase_order_submitted' as const, prescriptionId: prescription.id, prescriberId: prescriber.id, customerReference: input.customerReference, quote };
+  const purchaseOrder = await ensurePurchaseOrder(organisationId, input.customerReference, input.items);
+  return {
+    status: 'purchase_order_submitted' as const,
+    prescriptionState: prescription.state,
+    prescriptionId: prescription.id,
+    prescriberId: prescriber.id,
+    customerReference: input.customerReference,
+    purchaseOrderId: purchaseOrder?.id ?? null,
+    purchaseOrderState: purchaseOrder?.state ?? null,
+    quote,
+  };
+}
+
+export async function reconcileManualPrescription(
+  organisationId: string,
+  input: { serialNumber: string; customerReference: string; items: Array<{ packId: string; quantity: number }>; allowPurchaseOrderCreate?: boolean },
+) {
+  const [prescription, existingPurchaseOrder] = await Promise.all([
+    prescriptionBySerial(organisationId, input.serialNumber),
+    findCuraleafPurchaseOrder(organisationId, input.customerReference),
+  ]);
+  if (existingPurchaseOrder) {
+    return {
+      status: 'purchase_order_submitted' as const,
+      prescriptionState: prescription.state,
+      prescriptionId: prescription.id,
+      purchaseOrderId: existingPurchaseOrder.id,
+      purchaseOrderState: existingPurchaseOrder.state,
+    };
+  }
+  if (prescription.state === 'PENDING') {
+    return { status: 'prescription_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id };
+  }
+  if (prescription.state === 'EXPIRED' || prescription.state === 'CANCELLED') {
+    return { status: 'prescription_closed' as const, prescriptionState: prescription.state, prescriptionId: prescription.id };
+  }
+  if (prescription.state === 'FULFILLED') {
+    return { status: 'reconciliation_required' as const, prescriptionState: prescription.state, prescriptionId: prescription.id };
+  }
+  if (input.allowPurchaseOrderCreate === false) {
+    return { status: 'purchase_order_confirmation_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id };
+  }
+  const purchaseOrder = await ensurePurchaseOrder(organisationId, input.customerReference, input.items);
+  return {
+    status: 'purchase_order_submitted' as const,
+    prescriptionState: prescription.state,
+    prescriptionId: prescription.id,
+    purchaseOrderId: purchaseOrder?.id ?? null,
+    purchaseOrderState: purchaseOrder?.state ?? null,
+  };
 }
 
 export async function submitBarcodePrescription(organisationId: string, input: { customerReference: string; file: { bytes: Buffer; contentType: string; filename: string }; quoteItems: Array<{ packId: string; quantity: number }> }) {
