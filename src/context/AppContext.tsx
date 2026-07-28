@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
-import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, isApiConfigured } from '../shared/api';
+import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, getPortalPatients, isApiConfigured } from '../shared/api';
 import type { CuraleafCatalogue } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 
@@ -402,6 +402,7 @@ export type Action =
   | { type: 'SET_CATALOGUE'; catalogue: CatalogueItem[]; updatedAt: string }
   | { type: 'SET_CATALOGUE_ERROR'; message: string }
   | { type: 'APPLY_CURALEAF_QUOTE'; items: Array<{ productId: string; wholesalePrice: number; patientPrice: number; inStock: boolean }> }
+  | { type: 'SYNC_CRM_PATIENTS'; organisationId: string; patients: CRMPatient[] }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
   | { type: 'ADD_SUBMISSION'; submission: EligibilitySubmission }
@@ -716,6 +717,14 @@ function reducer(state: AppState, action: Action): AppState {
           })),
         })),
       };
+    }
+    case 'SYNC_CRM_PATIENTS': {
+      const retained = state.workspaceMode === 'training'
+        ? state.crm
+        : state.crm.filter(patient => patient.organisationId !== action.organisationId);
+      const byId = new Map(retained.map(patient => [patient.id, patient]));
+      action.patients.forEach(patient => byId.set(patient.id, patient));
+      return { ...state, crm: [...byId.values()] };
     }
     case 'LOG_INTERACTION': {
       return {
@@ -1180,6 +1189,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }).catch(error => console.warn('Curaleaf status check unavailable:', error));
     return () => { cancelled = true; };
   }, [state.staffSession, state.workspaceMode]);
+
+  useEffect(() => {
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId) return;
+    let cancelled = false;
+    const organisationId = state.currentOrganisationId;
+    getPortalPatients(organisationId).then(records => {
+      if (cancelled) return;
+      dispatch({
+        type: 'SYNC_CRM_PATIENTS',
+        organisationId,
+        patients: records.map(record => ({
+          id: record.id,
+          organisationId: record.organisationId,
+          name: `${record.firstName} ${record.surname}`.trim(),
+          email: record.email,
+          mobile: record.mobile,
+          dob: record.dob,
+          address: [record.address, record.postcode].filter(Boolean).join(', '),
+          status: record.status === 'active' ? 'HHH approved' : 'Suspended',
+        })),
+      });
+    }).catch(error => console.warn('Patient directory sync unavailable:', error));
+    return () => { cancelled = true; };
+  }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
 
   // Cross-domain intake sync. In production, the access token comes from staff authentication.
   useEffect(() => {

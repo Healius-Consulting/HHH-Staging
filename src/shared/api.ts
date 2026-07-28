@@ -23,6 +23,7 @@ import type {
   CuraleafQuote,
   CuraleafQuoteRequestItem,
   CuraleafActivity,
+  PortalPatientRecord,
   PortalOrderInput,
   PortalOrderRecord,
   PrescriptionUploadRequest,
@@ -162,6 +163,10 @@ export function getDevCuraleafActivity() {
 
 export function getCuraleafActivity(organisationId: string) {
   return apiRequest<CuraleafActivity>(`/v1/portal/integrations/curaleaf/activity?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+export function getPortalPatients(organisationId: string) {
+  return apiRequest<PortalPatientRecord[]>(`/v1/portal/patients?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
 export function createPortalOrder(input: PortalOrderInput) {

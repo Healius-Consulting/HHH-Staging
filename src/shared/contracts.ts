@@ -173,6 +173,21 @@ export interface PortalOrderInput {
   paymentRoute: 'manual' | 'worldpay';
 }
 
+export interface PortalPatientRecord {
+  id: string;
+  organisationId: string;
+  firstName: string;
+  surname: string;
+  dob: string;
+  email: string;
+  mobile: string;
+  address: string;
+  postcode: string;
+  status: 'active' | 'inactive';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PortalOrderRecord {
   id: string;
   organisationId: string;
