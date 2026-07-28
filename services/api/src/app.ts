@@ -482,8 +482,8 @@ app.post('/v1/portal/prescription-files/upload-url', async (request, response, n
     const id = randomUUID();
     const filename = safeFilename(input.filename);
     const storagePath = `prescriptions/${organisationId}/${id}/${filename}`;
-    const record = await createRecord('prescriptionFiles', { organisationId, filename, contentType: input.contentType, storagePath, status: 'upload_pending', createdBy: identity(request).uid }, id);
     const [url] = await storage.bucket().file(storagePath).getSignedUrl({ version: 'v4', action: 'write', expires: Date.now() + 15 * 60 * 1000, contentType: input.contentType });
+    const record = await createRecord('prescriptionFiles', { organisationId, filename, contentType: input.contentType, storagePath, status: 'upload_pending', createdBy: identity(request).uid }, id);
     await audit(request, 'prescription_file.upload_authorised', { organisationId, recordId: id });
     response.status(201).json({ id: record.id, uploadUrl: url, expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), requiredHeaders: { 'Content-Type': input.contentType } });
   } catch (error) { next(error); }
