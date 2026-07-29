@@ -60,12 +60,17 @@ export interface GoodsReceiptLine {
 
 export interface Prescription {
   id: number;
+  clinicScanId?: string;
+  curaleafPrescriptionId?: string;
+  curaleafPrescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
   prescriber: string;
+  prescriberId?: string;
   prescriberPin?: string;
   prescriberGmcNumber?: string;
   prescriberGphcNumber?: string;
   serialNumber?: string;
   issueDate?: string;
+  expiryDate?: string;
   copyFileName: string | null;
   fileId?: string | null;
   items: LineItem[];
@@ -421,6 +426,24 @@ export type Action =
   | { type: 'SET_RX_METADATA'; orderId: number; rxId: number; updates: Partial<Pick<Prescription, 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber' | 'serialNumber' | 'issueDate'>> }
   | { type: 'SET_RX_COPY'; orderId: number; rxId: number; fileName: string }
   | { type: 'SET_RX_FILE'; orderId: number; rxId: number; fileName: string; fileId: string | null }
+  | {
+      type: 'APPLY_CURALEAF_SCAN';
+      orderId: number;
+      rxId: number;
+      scan: {
+        scanId: string;
+        prescriptionId: string;
+        state: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
+        serialNumber: string;
+        issueDate: string;
+        expiryDate: string;
+        prescriberId: string;
+        prescriberName: string;
+        prescriberGmcNumber: string;
+        prescriberGphcNumber: string;
+        items: LineItem[];
+      };
+    }
   | { type: 'SET_ORDER_BACKEND_ID'; orderId: number; backendId: string }
   | { type: 'SYNC_ORDER_PATIENT_PRICES'; orderId: number; items: Array<{ productId: string; patientPrice: number }> }
   | { type: 'CONFIRM_CURALEAF_SUBMISSION'; orderId: number; rxId: number; customerReference: string }
@@ -494,12 +517,17 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
   const prescriptions: Prescription[] = record.prescriptions?.length
     ? record.prescriptions.map((prescription, rxIndex) => ({
         id: orderId * 100 + rxIndex + 1,
+        clinicScanId: prescription.clinicScanId,
+        curaleafPrescriptionId: prescription.curaleafPrescriptionId,
+        curaleafPrescriptionState: record.curaleaf?.prescriptionState,
         prescriber: record.curaleaf?.prescriberName ?? prescription.prescriber.name,
+        prescriberId: prescription.prescriber.id,
         prescriberPin: prescription.prescriber.pin,
         prescriberGmcNumber: prescription.prescriber.gmcNumber?.toString(),
         prescriberGphcNumber: prescription.prescriber.gphcNumber ?? undefined,
         serialNumber: prescription.serialNumber,
         issueDate: prescription.issueDate,
+        expiryDate: prescription.expiryDate,
         copyFileName: null,
         fileId: prescription.fileId,
         items: orderItems(prescription.items),
@@ -1020,7 +1048,39 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_RX_COPY':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, copyFileName: action.fileName })));
     case 'SET_RX_FILE':
-      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, copyFileName: action.fileName, fileId: action.fileId })));
+      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+        ...r,
+        copyFileName: action.fileName,
+        fileId: action.fileId,
+        clinicScanId: undefined,
+        curaleafPrescriptionId: undefined,
+        curaleafPrescriptionState: undefined,
+        serialNumber: undefined,
+        issueDate: undefined,
+        expiryDate: undefined,
+        prescriberId: undefined,
+        prescriber: '',
+        prescriberPin: undefined,
+        prescriberGmcNumber: undefined,
+        prescriberGphcNumber: undefined,
+        items: [],
+      })));
+    case 'APPLY_CURALEAF_SCAN':
+      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+        ...r,
+        clinicScanId: action.scan.scanId,
+        curaleafPrescriptionId: action.scan.prescriptionId,
+        curaleafPrescriptionState: action.scan.state,
+        serialNumber: action.scan.serialNumber,
+        issueDate: action.scan.issueDate,
+        expiryDate: action.scan.expiryDate,
+        prescriberId: action.scan.prescriberId,
+        prescriber: action.scan.prescriberName,
+        prescriberPin: '',
+        prescriberGmcNumber: action.scan.prescriberGmcNumber,
+        prescriberGphcNumber: action.scan.prescriberGphcNumber,
+        items: action.scan.items,
+      })));
     case 'SET_ORDER_BACKEND_ID':
       return mapOrder(state, action.orderId, o => ({ ...o, backendId: action.backendId }));
     case 'SYNC_ORDER_PATIENT_PRICES': {

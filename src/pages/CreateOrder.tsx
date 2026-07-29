@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileText, Minus, Pencil, Plus, RefreshCw, Search, Send, Trash2, Upload } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, Plus, RefreshCw, Search, Send, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import {
   useApp,
@@ -10,16 +10,12 @@ import {
   orderRevenue,
   orderCost,
   marginPct,
-  TYPE_LABELS,
   type LineItem,
-  type CatalogueItem,
   type PaymentRoute,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { createPortalOrder, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, uploadPrescriptionFile } from '../shared/api';
+import { createPortalOrder, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
-
-const TYPE_FILTERS = ['All', 'oil', 'flos', 'capsule', 'lozenge', 'vape', 'other'] as const;
 
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
@@ -30,10 +26,6 @@ export default function CreateOrder() {
   const activeOrder = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === state.activeOrderId && order.payment.status === 'none');
   const patient = activeOrder?.patientId ? tenantPatients.find(candidate => candidate.id === activeOrder.patientId) ?? null : null;
   const [selectedRxId, setSelectedRxId] = useState<number | null>(null);
-  const [scanningRxId, setScanningRxId] = useState<number | null>(null);
-  const [scanProgress, setScanProgress] = useState(0);
-  const [catalogQuery, setCatalogQuery] = useState('');
-  const [catalogTypeFilter, setCatalogTypeFilter] = useState<string>('All');
   const [selectedPaymentRoute, setSelectedPaymentRoute] = useState<Exclude<PaymentRoute, null>>(canUseWorldpay ? 'worldpay' : 'pharmacy');
   const [changingPatient, setChangingPatient] = useState(false);
   const [patientQuery, setPatientQuery] = useState('');
@@ -45,6 +37,8 @@ export default function CreateOrder() {
   const [quotedSignature, setQuotedSignature] = useState<string | null>(null);
   const [quoteSummary, setQuoteSummary] = useState<{ shippingPrice: number; taxRate: number } | null>(null);
   const [uploadingRxId, setUploadingRxId] = useState<number | null>(null);
+  const [readingRxId, setReadingRxId] = useState<number | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
 
   useEffect(() => {
@@ -64,25 +58,6 @@ export default function CreateOrder() {
     setQuoteSummary(null);
   }, [activeOrder?.id, canUseWorldpay]);
 
-  useEffect(() => {
-    if (scanningRxId === null || !activeOrder) return;
-    const interval = window.setInterval(() => setScanProgress(progress => Math.min(100, progress + Math.floor(Math.random() * 14) + 6)), 100);
-    return () => window.clearInterval(interval);
-  }, [activeOrder, scanningRxId]);
-
-  useEffect(() => {
-    if (scanProgress < 100 || scanningRxId === null || !activeOrder) return;
-    const completedRxId = scanningRxId;
-    setScanningRxId(null);
-    dispatch({ type: 'SET_RX_COPY', orderId: activeOrder.id, rxId: completedRxId, fileName: `prescription_scan_${completedRxId}.pdf` });
-    dispatch({ type: 'ADD_TOAST', message: `Prescription copy prescription_scan_${completedRxId}.pdf verified and attached.`, toastType: 'success' });
-  }, [activeOrder, dispatch, scanProgress, scanningRxId]);
-
-  const filteredProducts = useMemo(() => state.catalogue.filter(item => {
-    const matchesQuery = !catalogQuery.trim() || item.name.toLowerCase().includes(catalogQuery.toLowerCase());
-    return matchesQuery && (catalogTypeFilter === 'All' || item.type === catalogTypeFilter);
-  }), [catalogQuery, catalogTypeFilter, state.catalogue]);
-
   const matchingPatients = useMemo(() => {
     const query = patientQuery.trim().toLowerCase();
     return tenantPatients.filter(candidate => !query || [candidate.name, candidate.email, candidate.mobile, candidate.dob ?? '', formatPatientDob(candidate.dob)].some(value => value.toLowerCase().includes(query))).slice(0, 7);
@@ -94,11 +69,11 @@ export default function CreateOrder() {
   const readiness = activeOrder ? [
     { label: 'Approved patient linked', complete: Boolean(activeOrder.patientId) },
     { label: 'Prescription copies attached', complete: activeOrder.prescriptions.every(rx => Boolean(rx.copyFileName) && (!requiresLiveCuraleafEvidence || Boolean(rx.fileId))) },
-    { label: 'Prescriber recorded', complete: activeOrder.prescriptions.every(rx => Boolean(rx.prescriber.trim())) },
-    ...(requiresLiveCuraleafEvidence ? [{ label: 'Curaleaf Clinic barcode details', complete: activeOrder.prescriptions.every(rx => Boolean(rx.serialNumber?.trim() && rx.issueDate && rx.prescriberPin?.trim())) }] : []),
-    { label: 'Products assigned', complete: activeOrder.prescriptions.every(rx => rx.items.length > 0 && (!requiresLiveCuraleafEvidence || rx.items.every(item => item.formulaId && item.unitsNeededCount))) },
+    { label: 'Curaleaf barcode verified', complete: activeOrder.prescriptions.every(rx => Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
+    { label: 'Curaleaf prescription details received', complete: activeOrder.prescriptions.every(rx => Boolean(rx.serialNumber?.trim() && rx.issueDate && rx.prescriberId && rx.prescriber.trim())) },
+    { label: 'Curaleaf packs matched', complete: activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => item.formulaId && item.unitsNeededCount)) },
   ] : [];
-  const readyForPayment = readiness.every(item => item.complete);
+  const prescriptionReady = readiness.every(item => item.complete);
   const wholesaleKnown = Boolean(activeOrder?.prescriptions.every(rx => rx.items.every(item => item.cost !== null)));
   const orderMargin = activeOrder && wholesaleKnown
     ? marginPct(orderCost(activeOrder), orderRevenue(activeOrder) - activeOrder.dispensingFee)
@@ -106,30 +81,113 @@ export default function CreateOrder() {
   const currentQuoteItems = activeOrder?.prescriptions.flatMap(rx => rx.items.map(item => ({ packId: item.productId, quantity: item.qty }))) ?? [];
   const currentQuoteSignature = JSON.stringify(currentQuoteItems.slice().sort((a, b) => a.packId.localeCompare(b.packId)));
   const quoteCurrent = wholesaleKnown && quotedSignature === currentQuoteSignature;
+  const readyForPayment = prescriptionReady && (!requiresLiveCuraleafEvidence || quoteCurrent);
 
   const initials = (name: string) => name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2);
   const gmcNumber = (value?: string) => {
     const number = value?.trim() ? Number(value) : null;
     return number && Number.isInteger(number) && number > 0 ? number : null;
   };
-  const availabilityLabel = (item: CatalogueItem) => item.availability === 'in'
-    ? 'In stock at last quote'
-    : item.availability === 'out'
-      ? 'Out of stock at last quote'
-      : 'Availability checked at quote';
-
-  const startScan = (rxId: number) => {
-    setScanningRxId(rxId);
-    setScanProgress(0);
-    dispatch({ type: 'ADD_TOAST', message: 'Reading prescription document…', toastType: 'info' });
+  const applyClinicScan = (rxId: number, scan: Awaited<ReturnType<typeof scanCuraleafClinicPrescription>>) => {
+    if (!activeOrder || scan.status !== 'ready' || !scan.prescription || !scan.prescriber || !scan.matchedItems?.length) return false;
+    const items: LineItem[] = scan.matchedItems.map(item => ({
+      productId: item.packId,
+      formulaId: item.formulaId,
+      name: item.formulaName,
+      qty: item.quantity,
+      unitsNeededCount: item.unitsNeededCount,
+      cost: null,
+      retail: Number(item.patientPackPrice),
+    }));
+    dispatch({
+      type: 'APPLY_CURALEAF_SCAN',
+      orderId: activeOrder.id,
+      rxId,
+      scan: {
+        scanId: scan.scanId,
+        prescriptionId: scan.prescription.id,
+        state: scan.prescription.state,
+        serialNumber: scan.prescription.serialNumber,
+        issueDate: scan.prescription.issueDate,
+        expiryDate: scan.prescription.expiryDate,
+        prescriberId: scan.prescriber.id,
+        prescriberName: scan.prescriber.name,
+        prescriberGmcNumber: scan.prescriber.gmcNumber?.toString() ?? '',
+        prescriberGphcNumber: scan.prescriber.gphcNumber ?? '',
+        items,
+      },
+    });
+    setQuotedSignature(null);
+    setQuoteSummary(null);
+    setQuoteError(null);
+    return true;
   };
 
-  const addToRx = (item: CatalogueItem) => {
-    if (!activeOrder || !selectedRx) return;
-    if (selectedRx.items.some(line => line.productId === item.id)) return;
-    const lineItem: LineItem = { productId: item.id, formulaId: item.formulaId, name: item.name, qty: 1, unitsNeededCount: 1, cost: item.cost, retail: item.retail };
-    dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item: lineItem });
-    dispatch({ type: 'ADD_TOAST', message: `Added “${item.name}” to Rx ${selectedRxIndex + 1}.`, toastType: 'success' });
+  const readClinicBarcode = async (rxId: number, fileId: string) => {
+    if (!activeOrder) return;
+    setReadingRxId(rxId);
+    setScanError(null);
+    try {
+      const scan = await scanCuraleafClinicPrescription(state.currentOrganisationId, fileId);
+      if (scan.status === 'processing') {
+        dispatch({ type: 'ADD_TOAST', message: 'Curaleaf is still reading the barcode. Wait a moment, then check again.', toastType: 'info' });
+        return;
+      }
+      if (!applyClinicScan(rxId, scan)) throw new Error('Curaleaf did not return the complete prescription and pack details.');
+      dispatch({ type: 'ADD_TOAST', message: 'Curaleaf verified the barcode and supplied the prescription details.', toastType: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Curaleaf could not read this prescription barcode.';
+      setScanError(message);
+      dispatch({ type: 'ADD_TOAST', message, toastType: 'error' });
+    } finally {
+      setReadingRxId(null);
+    }
+  };
+
+  const applySyntheticClinicScan = (rxId: number, fileName = `synthetic-curaleaf-clinic-${rxId}.pdf`) => {
+    if (!activeOrder) return;
+    const product = state.catalogue.find(item => item.supplierState === 'ACTIVE' && item.formulaId && item.packSize && item.retail > 0)
+      ?? state.catalogue.find(item => item.formulaId && item.packSize)
+      ?? {
+        id: '00000000-0000-4000-8000-000000000002',
+        formulaId: '00000000-0000-4000-8000-000000000001',
+        name: 'Synthetic Curaleaf Clinic training medicine',
+        packSize: 10,
+        retail: 50,
+        cost: 35,
+      };
+    const issued = new Date();
+    const expiry = new Date(issued);
+    expiry.setDate(expiry.getDate() + 28);
+    const serial = `TRAINING-${issued.toISOString().slice(0, 10).replaceAll('-', '')}-${activeOrder.id}-${rxId}`;
+    dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName, fileId: null });
+    dispatch({
+      type: 'APPLY_CURALEAF_SCAN',
+      orderId: activeOrder.id,
+      rxId,
+      scan: {
+        scanId: `training-scan-${activeOrder.id}-${rxId}`,
+        prescriptionId: `training-prescription-${activeOrder.id}-${rxId}`,
+        state: 'ACTIVE',
+        serialNumber: serial,
+        issueDate: issued.toISOString().slice(0, 10),
+        expiryDate: expiry.toISOString().slice(0, 10),
+        prescriberId: `training-prescriber-${rxId}`,
+        prescriberName: 'Dr Curaleaf Training',
+        prescriberGmcNumber: '7000001',
+        prescriberGphcNumber: '',
+        items: [{
+          productId: product.id,
+          formulaId: product.formulaId,
+          name: product.name,
+          qty: 1,
+          unitsNeededCount: product.packSize ?? 1,
+          cost: product.cost,
+          retail: product.retail,
+        }],
+      },
+    });
+    dispatch({ type: 'ADD_TOAST', message: 'Synthetic Clinic barcode verified for training. Nothing was sent to Curaleaf.', toastType: 'info' });
   };
 
   const createPaymentRequest = async () => {
@@ -149,10 +207,14 @@ export default function CreateOrder() {
           lineItems,
           prescriptions: activeOrder.prescriptions.map(rx => ({
             fileId: rx.fileId!,
+            clinicScanId: rx.clinicScanId,
+            curaleafPrescriptionId: rx.curaleafPrescriptionId,
             serialNumber: rx.serialNumber!,
             issueDate: rx.issueDate!,
+            expiryDate: rx.expiryDate,
             prescriber: {
-              pin: rx.prescriberPin!,
+              id: rx.prescriberId,
+              pin: rx.prescriberPin ?? '',
               gmcNumber: gmcNumber(rx.prescriberGmcNumber),
               gphcNumber: rx.prescriberGphcNumber?.trim() || null,
               name: rx.prescriber,
@@ -198,8 +260,7 @@ export default function CreateOrder() {
   const attachPrescriptionFile = async (rxId: number, file: File) => {
     if (!activeOrder) return;
     if (isLocalPortalPreview || state.workspaceMode !== 'live') {
-      dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: null });
-      dispatch({ type: 'ADD_TOAST', message: `${file.name} attached to the training record only.`, toastType: 'info' });
+      applySyntheticClinicScan(rxId, file.name);
       return;
     }
     setUploadingRxId(rxId);
@@ -208,7 +269,8 @@ export default function CreateOrder() {
       if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(contentType)) throw new Error('Use a PDF, JPG, PNG or WebP prescription file.');
       const uploaded = await uploadPrescriptionFile({ organisationId: state.currentOrganisationId, filename: file.name, contentType }, file);
       dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: uploaded.id });
-      dispatch({ type: 'ADD_TOAST', message: 'Prescription copy uploaded securely and linked to this order.', toastType: 'success' });
+      dispatch({ type: 'ADD_TOAST', message: 'Prescription uploaded securely. Curaleaf is reading its barcode now.', toastType: 'success' });
+      await readClinicBarcode(rxId, uploaded.id);
     } catch (error) {
       dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Prescription upload failed.', toastType: 'error' });
     } finally {
@@ -420,25 +482,32 @@ export default function CreateOrder() {
                   <div className="rx-record-body">
                     <div className="rx-record-evidence">
                       <div className="rx-record-evidence__heading"><span><small>Editing</small><strong>Prescription {selectedRxIndex + 1}</strong></span>{activeOrder.prescriptions.length > 1 && <button type="button" className="icon-button danger" aria-label={`Delete prescription ${selectedRxIndex + 1}`} title="Delete prescription record" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Removed Rx ${selectedRxIndex + 1}.`, toastType: 'info' }); }}><Trash2 size={14} /></button>}</div>
-                      {!isLocalPortalPreview && state.workspaceMode === 'live' ? <div className="rx-clinic-note"><strong>Curaleaf Clinic prescription</strong><span>The barcode image is sent to Curaleaf. Its returned serial, prescriber and formula lines are checked against this record before the purchase order is created.</span></div> : null}
-                      {isLocalPortalPreview ? <button type="button" className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${scanningRxId === selectedRx.id ? ' scanning' : ''}`} aria-label={selectedRx.copyFileName ? `Prescription ${selectedRxIndex + 1} copy uploaded: ${selectedRx.copyFileName}` : scanningRxId === selectedRx.id ? `Scanning prescription ${selectedRxIndex + 1}: ${scanProgress}%` : `Scan prescription ${selectedRxIndex + 1} copy`} disabled={Boolean(selectedRx.copyFileName) || scanningRxId !== null} onClick={() => startScan(selectedRx.id)}>
-                        {selectedRx.copyFileName ? <CheckCircle size={18} /> : <Upload size={18} />}<span><strong>{scanningRxId === selectedRx.id ? `Reading document · ${scanProgress}%` : selectedRx.copyFileName ?? 'Attach training prescription'}</strong><small>{selectedRx.copyFileName ? 'Training document attached' : 'Simulated locally; nothing is uploaded'}</small></span>
-                      </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}`}>
+                      <div className="rx-clinic-note"><FileScan size={18} aria-hidden="true" /><span><strong>Scan the Curaleaf Clinic barcode</strong><span>Attach the complete prescription with a clear barcode. Curaleaf supplies the serial, dates, prescriber, formula and prescribed quantity—pharmacy staff do not type them.</span></span></div>
+                      {isLocalPortalPreview ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
+                        {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
+                      </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
                         <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png,image/webp" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
-                        {selectedRx.copyFileName ? <CheckCircle size={18} /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : selectedRx.copyFileName ?? 'Attach prescription copy'}</strong><small>{selectedRx.fileId ? 'Uploaded and linked to the live order' : 'PDF, JPG, PNG or WebP · maximum 10 MB'}</small></span>
+                        {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading the barcode…' : selectedRx.copyFileName ?? 'Attach barcode prescription'}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded securely · verification required' : 'PDF, JPG, PNG or WebP · maximum 10 MB'}</small></span>
                       </label>}
-                      {scanningRxId === selectedRx.id && <div className="rx-scan-track"><span style={{ transform: `scaleX(${scanProgress / 100})` }} /></div>}
-                      <label className="rx-prescriber-field"><span>Expected prescribing clinician</span><input className="input" placeholder="e.g. Dr A. Lee" value={selectedRx.prescriber} onChange={event => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: event.target.value })} /></label>
-                      <label className="rx-prescriber-field"><span>Prescription serial number</span><input className="input" value={selectedRx.serialNumber ?? ''} onChange={event => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { serialNumber: event.target.value } })} /></label>
-                      <label className="rx-prescriber-field"><span>Issue date</span><input className="input" type="date" value={selectedRx.issueDate ?? ''} onChange={event => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { issueDate: event.target.value } })} /></label>
-                      <label className="rx-prescriber-field"><span>Expected prescriber PIN <small>(verified after Curaleaf scan)</small></span><input className="input" value={selectedRx.prescriberPin ?? ''} onChange={event => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { prescriberPin: event.target.value } })} /></label>
-                      <label className="rx-prescriber-field"><span>GMC number <small>(internal record, if applicable)</small></span><input className="input" inputMode="numeric" value={selectedRx.prescriberGmcNumber ?? ''} onChange={event => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { prescriberGmcNumber: event.target.value } })} /></label>
-                      <label className="rx-prescriber-field"><span>GPhC number <small>(internal record, if applicable)</small></span><input className="input" value={selectedRx.prescriberGphcNumber ?? ''} onChange={event => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { prescriberGphcNumber: event.target.value } })} /></label>
+                      {!isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
+                      {scanError ? <ProviderStatusNotice title="Barcode not verified" detail={`${scanError} Check that the full Curaleaf Clinic barcode is sharp and visible. If it still fails, contact your HHH administrator.`} /> : null}
+                      {selectedRx.clinicScanId ? (
+                        <div className="rx-clinic-result" aria-label="Curaleaf verified prescription details">
+                          <div className="rx-clinic-result__status"><ShieldCheck size={18} /><span><strong>{isLocalPortalPreview ? 'Synthetic Curaleaf response' : 'Verified by Curaleaf'}</strong><small>{isLocalPortalPreview ? 'Read-only local training fixture' : 'Read-only supplier record'} · {selectedRx.curaleafPrescriptionState}</small></span></div>
+                          <dl>
+                            <div><dt>Prescription serial</dt><dd>{selectedRx.serialNumber}</dd></div>
+                            <div><dt>Prescriber</dt><dd>{selectedRx.prescriber}</dd></div>
+                            <div><dt>Issued</dt><dd>{selectedRx.issueDate ? new Date(`${selectedRx.issueDate}T00:00:00`).toLocaleDateString('en-GB') : '—'}</dd></div>
+                            <div><dt>Expires</dt><dd>{selectedRx.expiryDate ? new Date(`${selectedRx.expiryDate}T00:00:00`).toLocaleDateString('en-GB') : '—'}</dd></div>
+                            <div><dt>Registration</dt><dd>{selectedRx.prescriberGmcNumber ? `GMC ${selectedRx.prescriberGmcNumber}` : selectedRx.prescriberGphcNumber ? `GPhC ${selectedRx.prescriberGphcNumber}` : 'Held by Curaleaf'}</dd></div>
+                          </dl>
+                        </div>
+                      ) : <p className="rx-scan-waiting">No prescription fields need completing. They appear here after Curaleaf verifies the barcode.</p>}
                     </div>
 
                     <div className="rx-line-editor">
-                      <div className="rx-line-editor__heading"><span><small>Contents</small><strong>{selectedRx.items.length} prescribed product{selectedRx.items.length === 1 ? '' : 's'}</strong></span><span>Curaleaf price · quoted cost</span></div>
-                      {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileText size={20} /><span><strong>This prescription is empty</strong><small>Add a product from the formulary below.</small></span></div> : (
+                      <div className="rx-line-editor__heading"><span><small>Curaleaf-matched medicines</small><strong>{selectedRx.items.length} prescribed product{selectedRx.items.length === 1 ? '' : 's'}</strong></span><span>Read-only prescription · live pricing</span></div>
+                      {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileScan size={20} /><span><strong>Medicines appear after the barcode scan</strong><small>Curaleaf supplies the formula, prescribed quantity and matching pack.</small></span></div> : (
                         <div className="rx-item-stack">
                           {selectedRx.items.map((item, index) => {
                             const margin = lineMargin(item);
@@ -447,13 +516,12 @@ export default function CreateOrder() {
                               <article className="rx-prescribed-item" key={item.productId}>
                                 <header className="rx-prescribed-item__header">
                                   <span className="rx-prescribed-item__index">Medicine {String(index + 1).padStart(2, '0')}</span>
-                                  <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Curaleaf formulary product</small></span>
+                                  <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Matched from the Curaleaf prescription</small></span>
                                   <span className={`rx-prescribed-item__margin${margin !== null && margin < 25 ? ' low' : ''}`}><strong>{margin === null ? '—' : `${margin}%`}</strong><small>{margin === null ? 'quote pending' : 'margin'}</small></span>
-                                  <button type="button" className="icon-button danger rx-line-delete" aria-label={`Delete ${item.name} from prescription`} title="Delete product" onClick={() => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId: item.productId })}><Trash2 size={15} /></button>
                                 </header>
                                 <div className="rx-prescribed-item__pricing">
-                                  <div className="rx-prescribed-item__quantity"><small>Packs to order</small><div className="rx-quantity-control" role="group" aria-label={`Pack quantity for ${item.name}`}><button type="button" disabled={item.qty <= 1} aria-label={`Reduce ${item.name} pack quantity`} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId: item.productId, qty: item.qty - 1 })}><Minus size={14} /></button><span aria-live="polite"><strong>{item.qty}</strong><small>{item.qty === 1 ? 'pack' : 'packs'}</small></span><button type="button" aria-label={`Increase ${item.name} pack quantity`} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId: item.productId, qty: item.qty + 1 })}><Plus size={14} /></button></div></div>
-                                  <label className="rx-dispensing-custom"><span>Prescribed {state.catalogue.find(product => product.id === item.productId)?.unit ?? 'units'}</span><span className="money-input"><input type="number" min="1" step="1" value={item.unitsNeededCount ?? 1} onChange={event => dispatch({ type: 'UPDATE_ITEM_UNITS', orderId: activeOrder.id, rxId: selectedRx.id, productId: item.productId, unitsNeededCount: Number(event.target.value) })} aria-label={`Prescribed units for ${item.name}`} /></span></label>
+                                  <div className="rx-prescribed-item__quantity rx-prescribed-item__quantity--readonly"><small>Curaleaf pack match</small><strong>{item.qty} {item.qty === 1 ? 'pack' : 'packs'}</strong><em>Read-only</em></div>
+                                  <div className="rx-prescribed-units"><small>Prescribed quantity</small><strong>{item.unitsNeededCount ?? '—'} {state.catalogue.find(product => product.id === item.productId)?.unit ?? 'units'}</strong><em>From barcode</em></div>
                                   <div className="rx-price-flow rx-price-flow--readonly" aria-label={`Pricing for ${item.name}`}>
                                     <span className="rx-price-node rx-price-node--px"><small>Patient price</small><strong>{money(item.retail)}</strong><em>Set by Curaleaf · {money(lineRevenue(item))} line</em></span>
                                     <span className="rx-price-node rx-price-node--wx"><small>Wholesale cost</small><strong>{item.cost === null ? 'Quote required' : money(item.cost)}</strong><em>{item.cost === null ? 'Order-specific' : `${money(lineCost(item))} line`}</em></span>
@@ -470,19 +538,14 @@ export default function CreateOrder() {
                 )}
               </section>
 
-              <section className="rx-surface rx-formulary">
-                <header className="rx-surface__header"><div><span className="rx-step-number">03</span><span><small>{state.workspaceMode === 'training' ? 'Curaleaf test formulary' : 'Live Curaleaf formulary'}</small><strong>Add products to Rx {selectedRxIndex + 1}</strong></span></div><span className="rx-formulary-result">{filteredProducts.length} products</span></header>
+              <section className="rx-surface rx-clinic-path">
+                <header className="rx-surface__header"><div><span className="rx-step-number">03</span><span><small>Automatic supplier matching</small><strong>Curaleaf determines the prescription lines</strong></span></div>{selectedRx?.clinicScanId ? <span className="pill pill-green"><CheckCircle size={11} /> Matched</span> : null}</header>
                 {state.catalogueLoading ? <ProviderStatusNotice state="loading" title="Refreshing Curaleaf products" detail="The latest patient prices and pack information are being retrieved." /> : null}
                 {state.catalogueError ? <ProviderStatusNotice title="Curaleaf information is temporarily delayed" detail="Wait and try again later. If this continues, contact your HHH administrator; pharmacy staff do not need to change the connection." /> : null}
-                <div className="rx-formulary-tools"><label className="rx-search"><Search size={15} /><input className="input" placeholder="Search product or strength" aria-label="Search Curaleaf formulary" value={catalogQuery} onChange={event => setCatalogQuery(event.target.value)} /></label><div className="rx-type-filter" role="group" aria-label="Filter formulary by type">{TYPE_FILTERS.map(type => <button type="button" key={type} aria-pressed={catalogTypeFilter === type} onClick={() => setCatalogTypeFilter(type)}>{type === 'All' ? 'All' : TYPE_LABELS[type] || type}</button>)}</div></div>
-                <div className="rx-catalogue" role="list">
-                  {filteredProducts.length === 0 ? <div className="rx-inline-empty"><Search size={20} /><span><strong>No matching products</strong><small>Change the search or category filter.</small></span></div> : filteredProducts.map((item, index) => {
-                    const patientPrice = item.retail;
-                    const margin = marginPct(item.cost, patientPrice);
-                    const outOfStock = item.availability === 'out' || item.supplierState !== 'ACTIVE' || patientPrice <= 0;
-                    const added = Boolean(selectedRx?.items.some(line => line.productId === item.id));
-                    return <div role="listitem" className={`rx-catalogue-row${outOfStock ? ' unavailable' : ''}`} key={item.id} style={{ '--stagger-index': index } as CSSProperties}><div className="rx-catalogue-row__name"><strong>{item.name}</strong><span>{TYPE_LABELS[item.type] || item.type}{item.packSize !== undefined ? ` · ${item.packSize} ${item.unit ?? 'units'} per pack` : ''}</span></div><div className={`stock-indicator stock-${item.availability}`}><span /><span>{availabilityLabel(item)}</span></div><div className="rx-catalogue-row__price"><strong>{patientPrice > 0 ? money(patientPrice) : 'Not supplied'}</strong><span>{patientPrice > 0 ? 'Patient price · Curaleaf' : 'Awaiting Curaleaf price'}</span></div><span className={margin === null ? '' : margin >= 25 ? 'text-green' : 'text-amber'}>{margin === null ? 'Wholesale on quote' : `${margin}% margin`}</span><button type="button" className="btn btn-sm" disabled={outOfStock || added || !selectedRx} onClick={() => addToRx(item)}>{added ? <><CheckCircle size={13} /> Added</> : <><Plus size={13} /> Add</>}</button></div>;
-                  })}
+                <div className="rx-clinic-path__steps">
+                  <span className={selectedRx?.clinicScanId ? 'complete' : ''}><em>1</em><span><strong>Barcode read</strong><small>Curaleaf identifies the Clinic prescription.</small></span></span>
+                  <span className={selectedRx?.items.length ? 'complete' : ''}><em>2</em><span><strong>Formula and packs matched</strong><small>Prescribed units are matched to active Curaleaf packs.</small></span></span>
+                  <span className={quoteCurrent ? 'complete' : ''}><em>3</em><span><strong>Price and stock quoted</strong><small>Patient price remains Curaleaf-controlled; wholesale and availability are checked for this order.</small></span></span>
                 </div>
               </section>
             </main>

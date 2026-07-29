@@ -160,13 +160,15 @@ async function prescriptionBySerial(organisationId: string, serialNumber: string
   return prescription as Record<string, unknown> & { id: string; state: CuraleafPrescriptionState };
 }
 
-async function prescriptionById(organisationId: string, prescriptionId: string) {
+export async function prescriptionById(organisationId: string, prescriptionId: string) {
   const prescription = await curaleafRequest<Record<string, unknown>>(organisationId, `/v1/prescriptions/${encodeURIComponent(prescriptionId)}/`);
   if (
     typeof prescription.id !== 'string'
     || typeof prescription.serialNumber !== 'string'
     || typeof prescription.prescriberId !== 'string'
     || typeof prescription.prescriberName !== 'string'
+    || typeof prescription.issueDate !== 'string'
+    || typeof prescription.expiryDate !== 'string'
     || typeof prescription.state !== 'string'
     || !prescriptionStates.has(prescription.state as CuraleafPrescriptionState)
     || !Array.isArray(prescription.items)
@@ -178,17 +180,105 @@ async function prescriptionById(organisationId: string, prescriptionId: string) 
     serialNumber: string;
     prescriberId: string;
     prescriberName: string;
+    issueDate: string;
+    expiryDate: string;
     state: CuraleafPrescriptionState;
     items: Array<Record<string, unknown>>;
   };
 }
 
-async function prescriberById(organisationId: string, prescriberId: string) {
+export async function prescriberById(organisationId: string, prescriberId: string) {
   const prescriber = await curaleafRequest<Record<string, unknown>>(organisationId, `/v1/prescribers/${encodeURIComponent(prescriberId)}/`);
-  if (typeof prescriber.id !== 'string' || typeof prescriber.pin !== 'string' || typeof prescriber.name !== 'string') {
+  if (
+    typeof prescriber.id !== 'string'
+    || typeof prescriber.pin !== 'string'
+    || typeof prescriber.name !== 'string'
+    || typeof prescriber.initials !== 'string'
+  ) {
     throw new CuraleafRequestError(502, 'Curaleaf returned an invalid prescriber response.');
   }
-  return prescriber as Record<string, unknown> & { id: string; pin: string; name: string };
+  return prescriber as Record<string, unknown> & {
+    id: string;
+    pin: string;
+    name: string;
+    initials: string;
+    gmcNumber: number | null;
+    gphcNumber: string | null;
+  };
+}
+
+export async function scanClinicPrescription(
+  organisationId: string,
+  input: {
+    prescriptionId?: string;
+    file?: { bytes: Buffer; contentType: string; filename: string };
+  },
+) {
+  let prescriptionId = input.prescriptionId;
+  if (!prescriptionId) {
+    if (!input.file) throw new HttpError(400, 'Attach the Curaleaf Clinic prescription before scanning.', 'PRESCRIPTION_FILE_REQUIRED');
+    prescriptionId = await uploadClinicPrescriptionImage(organisationId, input.file);
+  }
+  const prescription = await prescriptionById(organisationId, prescriptionId);
+  const prescriber = await prescriberById(organisationId, prescription.prescriberId);
+  const items = prescription.items.map(item => {
+    if (
+      typeof item.formulaId !== 'string'
+      || typeof item.formulaName !== 'string'
+      || typeof item.unit !== 'string'
+      || !Number.isInteger(item.unitsNeededCount)
+      || Number(item.unitsNeededCount) <= 0
+      || !Number.isInteger(item.unitsAssignedCount)
+    ) {
+      throw new CuraleafRequestError(502, 'Curaleaf returned an invalid prescription line.');
+    }
+    return {
+      formulaId: item.formulaId,
+      formulaName: item.formulaName,
+      unit: item.unit,
+      unitsNeededCount: Number(item.unitsNeededCount),
+      unitsAssignedCount: Number(item.unitsAssignedCount),
+    };
+  });
+  if (!items.length) throw new CuraleafRequestError(502, 'Curaleaf returned a prescription without medicine lines.');
+  return {
+    prescription: {
+      id: prescription.id,
+      serialNumber: prescription.serialNumber,
+      state: prescription.state,
+      issueDate: prescription.issueDate,
+      expiryDate: prescription.expiryDate,
+      prescriberId: prescription.prescriberId,
+      prescriberName: prescription.prescriberName,
+      items,
+    },
+    prescriber: {
+      id: prescriber.id,
+      pin: prescriber.pin,
+      name: prescriber.name,
+      initials: prescriber.initials,
+      gmcNumber: typeof prescriber.gmcNumber === 'number' ? prescriber.gmcNumber : null,
+      gphcNumber: typeof prescriber.gphcNumber === 'string' ? prescriber.gphcNumber : null,
+    },
+  };
+}
+
+export async function uploadClinicPrescriptionImage(
+  organisationId: string,
+  file: { bytes: Buffer; contentType: string; filename: string },
+) {
+  const upload = await uploadCuraleafFile(
+    organisationId,
+    '/v1/prescription-from-image/',
+    file.bytes,
+    file.contentType,
+    file.filename,
+  );
+  const prescriptionId = upload && typeof upload.id === 'string' ? upload.id : undefined;
+  if (!prescriptionId) {
+    throw new CuraleafRequestError(502, 'Curaleaf did not return a prescription reference for this barcode image.', true);
+  }
+  return prescriptionId;
 }
 
 export async function findCuraleafPurchaseOrder(organisationId: string, customerReference: string) {
@@ -313,7 +403,8 @@ export async function reconcileManualPrescription(
 type ClinicPrescriptionInput = {
   prescriptionId?: string;
   serialNumber: string;
-  expectedPrescriberPin: string;
+  expectedPrescriberId?: string;
+  expectedPrescriberPin?: string;
   expectedItems: Array<{ formulaId: string; unitsNeededCount: number }>;
   customerReference: string;
   quoteItems: Array<{ packId: string; quantity: number }>;
@@ -362,7 +453,10 @@ export async function reconcileClinicPrescription(
   if (prescription.serialNumber !== input.serialNumber) {
     return { status: 'prescription_mismatch' as const, reason: 'SERIAL_NUMBER_MISMATCH', prescriptionId: prescription.id, prescriptionState: prescription.state };
   }
-  if (prescriber.pin !== input.expectedPrescriberPin) {
+  if (
+    (input.expectedPrescriberId && prescriber.id !== input.expectedPrescriberId)
+    || (input.expectedPrescriberPin && prescriber.pin !== input.expectedPrescriberPin)
+  ) {
     return { status: 'prescription_mismatch' as const, reason: 'PRESCRIBER_MISMATCH', prescriptionId: prescription.id, prescriptionState: prescription.state, prescriberId: prescriber.id, prescriberName: prescriber.name };
   }
   if (!exactFormulaQuantities(input.expectedItems, prescription.items)) {
@@ -409,15 +503,19 @@ export async function reconcileClinicPrescription(
 
 export async function submitClinicPrescription(
   organisationId: string,
-  input: ClinicPrescriptionInput & { file: { bytes: Buffer; contentType: string; filename: string } },
+  input: ClinicPrescriptionInput & { file?: { bytes: Buffer; contentType: string; filename: string } },
 ) {
   const quote = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/quotes/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items: input.quoteItems }),
   });
-  const upload = await uploadCuraleafFile(organisationId, '/v1/prescription-from-image/', input.file.bytes, input.file.contentType, input.file.filename);
-  const prescriptionId = upload && typeof upload.id === 'string' ? upload.id : undefined;
+  let prescriptionId = input.prescriptionId;
+  if (!prescriptionId) {
+    if (!input.file) throw new HttpError(400, 'Attach the Curaleaf Clinic prescription before submitting.', 'PRESCRIPTION_FILE_REQUIRED');
+    const upload = await uploadCuraleafFile(organisationId, '/v1/prescription-from-image/', input.file.bytes, input.file.contentType, input.file.filename);
+    prescriptionId = upload && typeof upload.id === 'string' ? upload.id : undefined;
+  }
   const reconciliation = await reconcileClinicPrescription(organisationId, { ...input, prescriptionId, allowPurchaseOrderCreate: true });
   return { ...reconciliation, customerReference: input.customerReference, quote };
 }

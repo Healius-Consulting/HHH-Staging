@@ -170,9 +170,13 @@ export interface PortalOrderInput {
   }>;
   prescriptions: Array<{
     fileId: string;
+    clinicScanId?: string;
+    curaleafPrescriptionId?: string;
     serialNumber: string;
     issueDate: string;
+    expiryDate?: string;
     prescriber: {
+      id?: string;
       pin: string;
       gmcNumber: number | null;
       gphcNumber: string | null;
@@ -296,6 +300,45 @@ export interface CuraleafClinicPrescriptionInput {
   subOrderId?: string;
   fileId: string;
   serialNumber: string;
+}
+
+export interface CuraleafClinicScan {
+  scanId: string;
+  status: 'processing' | 'ready';
+  prescriptionId?: string;
+  prescription?: {
+    id: string;
+    serialNumber: string;
+    state: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
+    issueDate: string;
+    expiryDate: string;
+    prescriberId: string;
+    prescriberName: string;
+    items: Array<{
+      formulaId: string;
+      formulaName: string;
+      unit: string;
+      unitsNeededCount: number;
+      unitsAssignedCount: number;
+    }>;
+  };
+  prescriber?: {
+    id: string;
+    name: string;
+    initials: string;
+    gmcNumber: number | null;
+    gphcNumber: string | null;
+  };
+  matchedItems?: Array<{
+    packId: string;
+    formulaId: string;
+    formulaName: string;
+    unit: string;
+    packSize: number;
+    quantity: number;
+    unitsNeededCount: number;
+    patientPackPrice: string;
+  }>;
 }
 
 export interface CuraleafActivationInput {

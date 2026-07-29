@@ -29,6 +29,7 @@ import type {
   PrescriptionUploadRequest,
   PrescriptionUploadTarget,
   CuraleafClinicPrescriptionInput,
+  CuraleafClinicScan,
   CuraleafManualPrescriptionInput,
   CuraleafSubmissionResult,
 } from './contracts';
@@ -219,6 +220,13 @@ export function submitCuraleafClinicPrescription(input: CuraleafClinicPrescripti
   return apiRequest<CuraleafSubmissionResult>('/v1/portal/integrations/curaleaf/prescriptions/barcode', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export function scanCuraleafClinicPrescription(organisationId: string, fileId: string) {
+  return apiRequest<CuraleafClinicScan>('/v1/portal/integrations/curaleaf/prescriptions/scan', {
+    method: 'POST',
+    body: JSON.stringify({ organisationId, fileId }),
   });
 }
 

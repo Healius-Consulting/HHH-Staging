@@ -4,10 +4,11 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import { z } from 'zod';
+import type { DocumentReference } from 'firebase-admin/firestore';
 import { audit } from './audit.js';
 import { identity, requireRole, requireStaff, tenantFor } from './auth.js';
 import { allowedOrigins, config } from './config.js';
-import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, submitClinicPrescription, submitManualPrescription } from './curaleaf.js';
+import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, scanClinicPrescription, submitClinicPrescription, submitManualPrescription, uploadClinicPrescriptionImage } from './curaleaf.js';
 import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
 import { cached, invalidateCache } from './cache.js';
@@ -438,10 +439,14 @@ app.patch('/v1/portal/patients/:id', async (request, response, next) => {
 const orderLineItemSchema = z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) });
 const orderPrescriptionSchema = z.object({
   fileId: idSchema,
+  clinicScanId: idSchema.optional(),
+  curaleafPrescriptionId: idSchema.optional(),
   serialNumber: z.string().min(1).max(200),
   issueDate: z.iso.date(),
+  expiryDate: z.iso.date().optional(),
   prescriber: z.object({
-    pin: z.string().min(1).max(100),
+    id: idSchema.optional(),
+    pin: z.string().max(100).default(''),
     gmcNumber: z.number().int().positive().nullable(),
     gphcNumber: z.string().max(100).nullable(),
     name: z.string().min(1).max(200),
@@ -475,13 +480,185 @@ function curaleafPricePence(value: unknown) {
   return Number(pence);
 }
 
+type ClinicScanProduct = {
+  id: string;
+  formulaId: string;
+  formulaName: string;
+  formulaUnit: string;
+  patientPackPrice: string;
+  quantity: number;
+  state: string;
+};
+
+type ClinicScanLine = {
+  formulaId: string;
+  formulaName: string;
+  unit: string;
+  unitsNeededCount: number;
+  unitsAssignedCount: number;
+};
+
+function matchClinicPrescriptionPacks(lines: ClinicScanLine[], products: ClinicScanProduct[]) {
+  return lines.map(line => {
+    const candidates = products
+      .filter(product => product.state === 'ACTIVE' && product.formulaId === line.formulaId && product.quantity > 0 && line.unitsNeededCount % product.quantity === 0)
+      .map(product => ({
+        product,
+        packQuantity: line.unitsNeededCount / product.quantity,
+        totalPence: curaleafPricePence(product.patientPackPrice) * (line.unitsNeededCount / product.quantity),
+      }))
+      .sort((left, right) => left.packQuantity - right.packQuantity || left.totalPence - right.totalPence || left.product.id.localeCompare(right.product.id));
+    if (!candidates.length) {
+      throw new HttpError(409, `Curaleaf has not supplied an active pack that exactly fulfils ${line.formulaName}. Contact your HHH administrator.`, 'CURALEAF_PACK_MATCH_UNAVAILABLE');
+    }
+    const best = candidates[0]!;
+    const equallyRanked = candidates.filter(candidate => candidate.packQuantity === best.packQuantity && candidate.totalPence === best.totalPence);
+    if (equallyRanked.length > 1) {
+      throw new HttpError(409, `Curaleaf returned more than one equivalent pack for ${line.formulaName}. Contact your HHH administrator before taking payment.`, 'CURALEAF_PACK_MATCH_AMBIGUOUS');
+    }
+    return {
+      packId: best.product.id,
+      formulaId: line.formulaId,
+      formulaName: line.formulaName,
+      unit: line.unit,
+      packSize: best.product.quantity,
+      quantity: best.packQuantity,
+      unitsNeededCount: line.unitsNeededCount,
+      patientPackPrice: best.product.patientPackPrice,
+    };
+  });
+}
+
+type ClinicScanDetails = Awaited<ReturnType<typeof scanClinicPrescription>>;
+type StoredClinicScanResult = {
+  prescription: ClinicScanDetails['prescription'];
+  prescriber: Omit<ClinicScanDetails['prescriber'], 'pin'>;
+  matchedItems: ReturnType<typeof matchClinicPrescriptionPacks>;
+};
+
+function publicClinicScan(scanId: string, result: StoredClinicScanResult) {
+  return {
+    scanId,
+    status: 'ready' as const,
+    prescription: result.prescription,
+    prescriber: {
+      id: result.prescriber.id,
+      name: result.prescriber.name,
+      initials: result.prescriber.initials,
+      gmcNumber: result.prescriber.gmcNumber,
+      gphcNumber: result.prescriber.gphcNumber,
+    },
+    matchedItems: result.matchedItems,
+  };
+}
+
+app.post('/v1/portal/integrations/curaleaf/prescriptions/scan', async (request, response, next) => {
+  let scanDocument: DocumentReference | undefined;
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), fileId: idSchema }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    await requireSetupComplete(organisationId);
+    const scanId = createHash('sha256').update(`${organisationId}:${input.fileId}:curaleaf-clinic-scan`).digest('hex');
+    const document = firestore.collection('curaleafPrescriptionScans').doc(scanId);
+    scanDocument = document;
+    let snapshot = await document.get();
+    if (snapshot.exists && snapshot.data()?.status === 'ready') {
+      response.json(publicClinicScan(scanId, snapshot.data()!.result as StoredClinicScanResult));
+      return;
+    }
+    let created = false;
+    if (!snapshot.exists) {
+      await document.create({
+        id: scanId,
+        schemaVersion: 1,
+        organisationId,
+        fileId: input.fileId,
+        status: 'started',
+        prescriptionId: null,
+        createdBy: identity(request).uid,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+      });
+      created = true;
+      snapshot = await document.get();
+    }
+    let prescriptionId = typeof snapshot.data()?.prescriptionId === 'string' ? snapshot.data()!.prescriptionId as string : undefined;
+    if (!prescriptionId) {
+      if (!created) {
+        if (snapshot.data()?.status === 'reconciliation_required') {
+          throw new HttpError(409, 'Curaleaf may have received this barcode but did not return a reference. Contact your HHH administrator before scanning it again.', 'CURALEAF_SCAN_RECONCILIATION_REQUIRED');
+        }
+        if (snapshot.data()?.status === 'failed') {
+          throw new HttpError(409, 'This barcode scan could not be completed. Reattach a clear prescription copy to start a new scan.', 'CURALEAF_SCAN_FAILED');
+        }
+        response.status(202).json({ scanId, status: 'processing' });
+        return;
+      }
+      const file = await uploadedFile(organisationId, input.fileId);
+      prescriptionId = await uploadClinicPrescriptionImage(organisationId, file);
+      await document.update({ prescriptionId, status: 'processing', updatedAt: timestamp() });
+    }
+    let scan;
+    try {
+      scan = await scanClinicPrescription(organisationId, { prescriptionId });
+    } catch (error) {
+      if (error instanceof CuraleafRequestError && error.status === 404) {
+        await document.update({ status: 'processing', updatedAt: timestamp() });
+        response.status(202).json({ scanId, status: 'processing', prescriptionId });
+        return;
+      }
+      throw error;
+    }
+    const productPage = await curaleafList<ClinicScanProduct>(organisationId, '/v1/products/', 'products');
+    const matchedItems = matchClinicPrescriptionPacks(scan.prescription.items, productPage.records);
+    const { pin: _unusedPin, ...prescriber } = scan.prescriber;
+    const result: StoredClinicScanResult = { ...scan, prescriber, matchedItems };
+    await document.update({ status: 'ready', result, updatedAt: timestamp() });
+    await audit(request, 'curaleaf.clinic_scanned', { organisationId, recordId: scanId, prescriptionId });
+    response.json(publicClinicScan(scanId, result));
+  } catch (error) {
+    if (scanDocument) {
+      await scanDocument.set({
+        status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed',
+        errorCode: error instanceof HttpError ? error.code : 'UNKNOWN',
+        updatedAt: timestamp(),
+      }, { merge: true }).catch(() => undefined);
+    }
+    next(error);
+  }
+});
+
 app.get('/v1/portal/orders', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('orders', organisationId); response.json(records); } catch (error) { next(error); } });
 app.post('/v1/portal/orders', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.body.organisationId);
     const input = orderSchema.parse(request.body);
     await getTenantRecord('patients', input.patientId, organisationId);
-    const prescribedItems = input.prescriptions.flatMap(prescription => prescription.items);
+    const prescriptions = await Promise.all(input.prescriptions.map(async prescription => {
+      if (!prescription.clinicScanId) return prescription;
+      const scan = await getTenantRecord('curaleafPrescriptionScans', prescription.clinicScanId, organisationId);
+      if (scan.status !== 'ready' || !scan.result || typeof scan.result !== 'object') {
+        throw new HttpError(409, 'Curaleaf has not finished reading this prescription. Wait and scan it again before taking payment.', 'CURALEAF_SCAN_NOT_READY');
+      }
+      const result = scan.result as StoredClinicScanResult;
+      const matchedItems = z.array(z.object({
+        packId: idSchema,
+        formulaId: idSchema,
+        quantity: z.number().int().positive().max(100),
+        unitsNeededCount: z.number().int().positive().max(100),
+      })).parse(result.matchedItems);
+      return orderPrescriptionSchema.parse({
+        fileId: scan.fileId,
+        clinicScanId: prescription.clinicScanId,
+        curaleafPrescriptionId: result.prescription.id,
+        serialNumber: result.prescription.serialNumber,
+        issueDate: result.prescription.issueDate,
+        expiryDate: result.prescription.expiryDate,
+        prescriber: result.prescriber,
+        items: matchedItems,
+      });
+    }));
+    const prescribedItems = prescriptions.flatMap(prescription => prescription.items);
     if (prescribedItems.length && !samePackQuantities(packQuantities(input.lineItems), packQuantities(prescribedItems))) {
       throw new HttpError(400, 'The order lines must exactly match the products and quantities assigned to its prescriptions.', 'ORDER_ITEM_MISMATCH');
     }
@@ -504,7 +681,7 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       };
     });
     const totalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, input.dispensingFeePence);
-    const record = await createRecord('orders', { ...input, lineItems, totalPence, organisationId, fulfilmentMethod: 'patient_collection', paymentStatus: 'pending', fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus });
+    const record = await createRecord('orders', { ...input, prescriptions, lineItems, totalPence, organisationId, fulfilmentMethod: 'patient_collection', paymentStatus: 'pending', fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus });
     await audit(request, 'order.created', { organisationId, recordId: record.id, pricingSource: 'curaleaf' });
     response.status(201).json(record);
   } catch (error) { next(error); }
@@ -710,10 +887,12 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
     const storedPrescription = storedPrescriptions.find(prescription => prescription.fileId === input.fileId || prescription.serialNumber === input.serialNumber);
     if (!storedPrescription) throw new HttpError(409, 'The submitted Clinic prescription is not part of this saved order.', 'ORDER_PRESCRIPTION_MISMATCH');
     operation = await startOperation(organisationId, input.orderId, 'barcode', input.subOrderId);
-    const file = await uploadedFile(organisationId, storedPrescription.fileId);
+    const file = storedPrescription.curaleafPrescriptionId ? undefined : await uploadedFile(organisationId, storedPrescription.fileId);
     const result = await submitClinicPrescription(organisationId, {
+      prescriptionId: storedPrescription.curaleafPrescriptionId,
       serialNumber: storedPrescription.serialNumber,
-      expectedPrescriberPin: storedPrescription.prescriber.pin,
+      expectedPrescriberId: storedPrescription.prescriber.id,
+      expectedPrescriberPin: storedPrescription.prescriber.id ? undefined : storedPrescription.prescriber.pin,
       expectedItems: storedPrescription.items.map(({ formulaId, unitsNeededCount }) => ({ formulaId, unitsNeededCount })),
       customerReference: operation.reference,
       quoteItems: storedPrescription.items.map(({ packId, quantity }) => ({ packId, quantity })),
@@ -728,7 +907,7 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
       prescriptionId: 'prescriptionId' in result ? result.prescriptionId : null,
       prescriptionState: 'prescriptionState' in result ? result.prescriptionState : null,
       prescriptionSerialNumber: storedPrescription.serialNumber,
-      prescriberPin: storedPrescription.prescriber.pin,
+      prescriberId: storedPrescription.prescriber.id ?? null,
       prescriptionItems: storedPrescription.items.map(({ formulaId, unitsNeededCount }) => ({ formulaId, unitsNeededCount })),
       items: storedPrescription.items.map(({ packId, quantity }) => ({ packId, quantity })),
       updatedAt: timestamp(),

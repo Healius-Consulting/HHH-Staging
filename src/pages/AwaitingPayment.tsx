@@ -46,7 +46,7 @@ export default function AwaitingPayment() {
     if (!order.backendId) throw new Error('This order has not been saved to the HHH backend.');
     let pendingAcceptance = 0;
     for (const rx of order.prescriptions.filter(prescription => !prescription.placed)) {
-      if (!rx.fileId || !rx.serialNumber || !rx.issueDate || !rx.prescriberPin) throw new Error(`Rx ${rx.id} is missing its uploaded file or Curaleaf prescription details.`);
+      if (!rx.fileId || !rx.clinicScanId || !rx.curaleafPrescriptionId || !rx.serialNumber || !rx.issueDate || !rx.prescriberId) throw new Error(`Rx ${rx.id} does not have a verified Curaleaf Clinic barcode scan.`);
       if (rx.items.some(item => !item.formulaId || !item.unitsNeededCount)) throw new Error(`Rx ${rx.id} has a product without a formula ID or prescribed-unit count.`);
       const result = await submitCuraleafClinicPrescription({
         organisationId: state.currentOrganisationId,
