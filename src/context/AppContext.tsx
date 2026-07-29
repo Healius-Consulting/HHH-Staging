@@ -1300,6 +1300,7 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const catalogueOrganisationStatus = state.organisations.find(organisation => organisation.id === state.currentOrganisationId)?.status;
 
   useEffect(() => {
     if (!usePrototypeState) return;
@@ -1309,17 +1310,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const useLocalSandbox = isLocalPortalPreview && isApiConfigured;
-    const currentOrganisation = state.organisations.find(organisation => organisation.id === state.currentOrganisationId);
     const useAuthenticatedPortal = !isLocalPortalPreview
       && isApiConfigured
       && Boolean(state.staffSession)
-      && Boolean(currentOrganisation);
+      && Boolean(catalogueOrganisationStatus);
     if (!useLocalSandbox && !useAuthenticatedPortal) return;
     let cancelled = false;
     dispatch({ type: 'SET_CATALOGUE_LOADING' });
     const request = useLocalSandbox
       ? getDevCuraleafCatalogue()
-      : currentOrganisation?.status === 'live'
+      : catalogueOrganisationStatus === 'live'
         ? getCuraleafCatalogue(state.currentOrganisationId)
         : getCuraleafTrainingCatalogue(state.currentOrganisationId);
     request.then(catalogue => {
@@ -1328,7 +1328,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!cancelled) dispatch({ type: 'SET_CATALOGUE_ERROR', message: error instanceof Error ? error.message : 'Curaleaf catalogue unavailable.' });
     });
     return () => { cancelled = true; };
-  }, [state.currentOrganisationId, state.organisations, state.staffSession]);
+  }, [catalogueOrganisationStatus, state.currentOrganisationId, state.staffSession]);
 
   useEffect(() => {
     if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.workspaceMode !== 'live' || state.catalogueSource !== 'curaleaf') return;
