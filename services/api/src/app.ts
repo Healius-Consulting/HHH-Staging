@@ -94,7 +94,15 @@ const healthLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders:
 const portalKey = (request: Request) => identity(request).uid;
 const portalReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 120, keyGenerator: portalKey, skip: request => request.method !== 'GET', standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const portalWriteLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, keyGenerator: portalKey, skip: request => ['GET', 'HEAD', 'OPTIONS'].includes(request.method), standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
-const externalProviderLimit = rateLimit({ windowMs: 60 * 1000, limit: 10, keyGenerator: portalKey, standardHeaders: 'draft-8', legacyHeaders: false, message: { ...limitResponse, message: 'Supplier or payment requests are temporarily rate limited. Wait a minute before retrying.' } });
+const externalProviderLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  keyGenerator: portalKey,
+  skip: request => ['GET', 'HEAD', 'OPTIONS'].includes(request.method),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { ...limitResponse, message: 'Supplier or payment requests are temporarily rate limited. Wait a minute before retrying.' },
+});
 
 function localDevelopmentOnly(request: Request, response: Response, next: NextFunction) {
   const remoteAddress = request.socket.remoteAddress ?? '';
