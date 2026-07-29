@@ -1309,16 +1309,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const useLocalSandbox = isLocalPortalPreview && isApiConfigured;
+    const currentOrganisation = state.organisations.find(organisation => organisation.id === state.currentOrganisationId);
     const useAuthenticatedPortal = !isLocalPortalPreview
       && isApiConfigured
       && Boolean(state.staffSession)
-      && Boolean(state.currentOrganisationId);
+      && Boolean(currentOrganisation);
     if (!useLocalSandbox && !useAuthenticatedPortal) return;
     let cancelled = false;
     dispatch({ type: 'SET_CATALOGUE_LOADING' });
     const request = useLocalSandbox
       ? getDevCuraleafCatalogue()
-      : state.workspaceMode === 'live'
+      : currentOrganisation?.status === 'live'
         ? getCuraleafCatalogue(state.currentOrganisationId)
         : getCuraleafTrainingCatalogue(state.currentOrganisationId);
     request.then(catalogue => {
@@ -1327,10 +1328,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!cancelled) dispatch({ type: 'SET_CATALOGUE_ERROR', message: error instanceof Error ? error.message : 'Curaleaf catalogue unavailable.' });
     });
     return () => { cancelled = true; };
-  }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
+  }, [state.currentOrganisationId, state.organisations, state.staffSession]);
 
   useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.workspaceMode !== 'live') return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.workspaceMode !== 'live' || state.catalogueSource !== 'curaleaf') return;
     let cancelled = false;
     getCuraleafConnectionStatus().then(status => {
       if (cancelled) return;
@@ -1342,7 +1343,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }).catch(error => console.warn('Curaleaf status check unavailable:', error));
     return () => { cancelled = true; };
-  }, [state.staffSession, state.workspaceMode]);
+  }, [state.catalogueSource, state.staffSession, state.workspaceMode]);
 
   useEffect(() => {
     if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId) return;
