@@ -2841,6 +2841,25 @@ tr:hover td {
 .admin-patient-table td small { color: var(--text-tertiary); font-size: 10px; margin-top: 3px; }
 .admin-patient-table tbody tr:hover { background: #f8fafb; }
 .table-link { color: #1f587e; border: 0; background: transparent; font: inherit; font-weight: 650; cursor: pointer; padding: 0; }
+.admin-finance-filters {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(230px, 1.4fr) minmax(170px, .75fr) minmax(150px, .65fr);
+  gap: 14px;
+  align-items: end;
+  margin: 22px 0;
+  padding: 18px;
+}
+.admin-finance-filter { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.admin-finance-filter label { color: var(--text-secondary); font-size: 10px; font-weight: 700; letter-spacing: .035em; text-transform: uppercase; }
+.admin-finance-filter .input { min-width: 0; }
+.admin-finance-position,
+.admin-finance-ledger { margin-top: 22px; }
+.admin-finance-position .admin-directory-head > svg { flex: 0 0 auto; color: var(--tenant-primary); }
+.admin-finance-position td:last-child strong,
+.admin-finance-ledger td:last-child strong { font-size: 13px; font-variant-numeric: tabular-nums; }
+.admin-finance-ledger th:first-child { min-width: 115px; }
+.admin-finance-ledger th:nth-child(2) { min-width: 230px; }
+.admin-finance-ledger th:nth-child(3) { min-width: 160px; }
 .status-select { appearance: none; border: 0; border-radius: 6px; padding: 6px 24px 6px 9px; font: inherit; font-size: 11px; font-weight: 650; background-image: none; cursor: pointer; }
 .status-select.pill-green { background: var(--green-50); color: var(--green-100); }
 .status-select.pill-amber { background: var(--amber-50); color: #9a5b05; }
@@ -2878,6 +2897,7 @@ tr:hover td {
 /* Onboarding drawer */
 .admin-onboarding-backdrop { z-index: 200; }
 .admin-onboarding-drawer { z-index: 201; width: 680px; }
+.admin-referral-drawer { z-index: 201; width: min(560px, 100vw); }
 .onboarding-form label { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
 .onboarding-form textarea { min-height: 74px; resize: vertical; }
 .form-grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -2969,6 +2989,7 @@ tr:hover td {
   .admin-staff-invite-form { grid-template-columns: 1fr 1fr; }
   .admin-staff-invite-form .btn { grid-column: 1 / -1; justify-self: start; }
   .admin-org-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .admin-finance-filters { grid-template-columns: 1fr 1fr; }
   .settings-grid { grid-template-columns: 1fr; }
 }
 
@@ -3027,6 +3048,7 @@ tr:hover td {
   .compliance-summary-grid { grid-template-columns: 1fr 1fr; }
   .connection-actions { grid-template-columns: 1fr; }
   .form-grid-two { grid-template-columns: 1fr; }
+  .admin-finance-filters { grid-template-columns: 1fr; }
   .tenant-brand-preview { grid-template-columns: 38px minmax(0, 1fr); }
   .tenant-brand-preview button { justify-self: stretch; }
   .tenant-brand-preview button:first-of-type { grid-column: 1 / 2; }

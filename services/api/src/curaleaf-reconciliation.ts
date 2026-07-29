@@ -11,6 +11,7 @@ import {
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
 import { invalidateCollectionCache } from './repository.js';
+import { activatePatientForOrder } from './patient-finance.js';
 import type { FulfilmentStatus } from './types.js';
 
 type OperationRecord = {
@@ -216,6 +217,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
       lastCheckedAt: nowIso(),
       updatedAt: nowIso(),
     });
+    await activatePatientForOrder(operation.orderId);
     return 'submitted';
   }
 
@@ -231,6 +233,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
       lastCheckedAt: nowIso(),
       updatedAt: nowIso(),
     });
+    await activatePatientForOrder(operation.orderId);
     return 'submitted';
   }
 
@@ -271,6 +274,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     updatedAt: nowIso(),
   });
   invalidateCollectionCache('orders', operation.orderId);
+  if (purchaseOrder.state !== 'CANCELLED') await activatePatientForOrder(operation.orderId);
   return shipments.length ? 'dispatched' : 'processing';
 }
 

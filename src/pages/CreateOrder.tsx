@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, Plus, RefreshCw, Search, Send, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
+import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
 import {
   useApp,
   money,
@@ -11,22 +12,22 @@ import {
   orderCost,
   marginPct,
   type LineItem,
-  type PaymentRoute,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { createPortalOrder, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, uploadPrescriptionFile } from '../shared/api';
+import { createPortalOrder, createWorldpaySession, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
+import { checkPatientIdentity } from '../utils/patientIdentity';
 
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
-  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && patient.status === 'HHH approved');
+  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && patient.status !== 'Suspended');
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
   const canUseWorldpay = organisation.worldpay.enabled && organisation.worldpay.status === 'connected';
+  const selectedPaymentRoute = organisation.defaultPaymentRoute === 'worldpay' && canUseWorldpay ? 'worldpay' : 'pharmacy';
   const draftOrders = state.orders.filter(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none');
   const activeOrder = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === state.activeOrderId && order.payment.status === 'none');
   const patient = activeOrder?.patientId ? tenantPatients.find(candidate => candidate.id === activeOrder.patientId) ?? null : null;
   const [selectedRxId, setSelectedRxId] = useState<number | null>(null);
-  const [selectedPaymentRoute, setSelectedPaymentRoute] = useState<Exclude<PaymentRoute, null>>(canUseWorldpay ? 'worldpay' : 'pharmacy');
   const [changingPatient, setChangingPatient] = useState(false);
   const [patientQuery, setPatientQuery] = useState('');
   const [patientSearchOpen, setPatientSearchOpen] = useState(false);
@@ -47,7 +48,6 @@ export default function CreateOrder() {
   }, [activeOrder, selectedRxId]);
 
   useEffect(() => {
-    setSelectedPaymentRoute(canUseWorldpay ? 'worldpay' : 'pharmacy');
     setChangingPatient(false);
     setPatientQuery('');
     setPatientSearchOpen(false);
@@ -56,7 +56,7 @@ export default function CreateOrder() {
     setQuoteError(null);
     setQuotedSignature(null);
     setQuoteSummary(null);
-  }, [activeOrder?.id, canUseWorldpay]);
+  }, [activeOrder?.id]);
 
   const matchingPatients = useMemo(() => {
     const query = patientQuery.trim().toLowerCase();
@@ -66,11 +66,18 @@ export default function CreateOrder() {
   const selectedRx = activeOrder?.prescriptions.find(rx => rx.id === selectedRxId) ?? null;
   const selectedRxIndex = activeOrder && selectedRx ? activeOrder.prescriptions.findIndex(rx => rx.id === selectedRx.id) : -1;
   const requiresLiveCuraleafEvidence = state.workspaceMode === 'live' && !isLocalPortalPreview;
+  const identityCheck = selectedRx && patient ? checkPatientIdentity({
+    selectedName: patient.name,
+    selectedDob: patient.dob,
+    prescriptionName: selectedRx.curaleafPatientName,
+    prescriptionDob: selectedRx.curaleafPatientDob,
+  }) : null;
   const readiness = activeOrder ? [
     { label: 'Approved patient linked', complete: Boolean(activeOrder.patientId) },
     { label: 'Prescription copies attached', complete: activeOrder.prescriptions.every(rx => Boolean(rx.copyFileName) && (!requiresLiveCuraleafEvidence || Boolean(rx.fileId))) },
-    { label: 'Curaleaf barcode verified', complete: activeOrder.prescriptions.every(rx => Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
-    { label: 'Curaleaf prescription details received', complete: activeOrder.prescriptions.every(rx => Boolean(rx.serialNumber?.trim() && rx.issueDate && rx.prescriberId && rx.prescriber.trim())) },
+    { label: 'Prescription source verified', complete: activeOrder.prescriptions.every(rx => rx.entryMode === 'manual' || Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
+    { label: 'Prescription details complete', complete: activeOrder.prescriptions.every(rx => Boolean(rx.serialNumber?.trim() && rx.issueDate && rx.prescriber.trim() && (rx.entryMode === 'manual' ? rx.prescriberPin?.trim() : rx.prescriberId))) },
+    { label: 'Patient identity matches', complete: Boolean(patient) && activeOrder.prescriptions.every(rx => checkPatientIdentity({ selectedName: patient!.name, selectedDob: patient!.dob, prescriptionName: rx.curaleafPatientName, prescriptionDob: rx.curaleafPatientDob }).status === 'match') },
     { label: 'Curaleaf packs matched', complete: activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => item.formulaId && item.unitsNeededCount)) },
   ] : [];
   const prescriptionReady = readiness.every(item => item.complete);
@@ -114,6 +121,8 @@ export default function CreateOrder() {
         prescriberName: scan.prescriber.name,
         prescriberGmcNumber: scan.prescriber.gmcNumber?.toString() ?? '',
         prescriberGphcNumber: scan.prescriber.gphcNumber ?? '',
+        patientName: scan.prescription.patient?.name,
+        patientDob: scan.prescription.patient?.dob,
         items,
       },
     });
@@ -176,6 +185,8 @@ export default function CreateOrder() {
         prescriberName: 'Dr Curaleaf Training',
         prescriberGmcNumber: '7000001',
         prescriberGphcNumber: '',
+        patientName: patient?.name ?? 'Training Patient',
+        patientDob: patient?.dob ?? '1980-01-01',
         items: [{
           productId: product.id,
           formulaId: product.formulaId,
@@ -196,7 +207,6 @@ export default function CreateOrder() {
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live') {
         if (!quoteCurrent) throw new Error('Refresh the Curaleaf quote before creating the live order.');
-        if (selectedPaymentRoute === 'worldpay') throw new Error('Worldpay checkout is not connected to this screen yet. Choose pharmacy payment for the live Curaleaf workflow.');
         const lineItems = activeOrder.prescriptions.flatMap(rx => rx.items.map(item => ({
           packId: item.productId,
           quantity: item.qty,
@@ -212,6 +222,10 @@ export default function CreateOrder() {
             serialNumber: rx.serialNumber!,
             issueDate: rx.issueDate!,
             expiryDate: rx.expiryDate,
+            patient: {
+              name: rx.curaleafPatientName!,
+              dob: rx.curaleafPatientDob!,
+            },
             prescriber: {
               id: rx.prescriberId,
               pin: rx.prescriberPin ?? '',
@@ -229,7 +243,6 @@ export default function CreateOrder() {
           })),
           dispensingFeePence: Math.round(activeOrder.dispensingFee * 100),
           currency: 'GBP',
-          paymentRoute: 'manual',
         });
         if (!activeOrder.backendId) {
           dispatch({ type: 'SET_ORDER_BACKEND_ID', orderId: activeOrder.id, backendId: persisted.id });
@@ -239,8 +252,23 @@ export default function CreateOrder() {
             items: persisted.lineItems.map(item => ({ productId: item.productId, patientPrice: item.unitPricePence / 100 })),
           });
         }
-        dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
-        dispatch({ type: 'ADD_TOAST', message: 'Order saved. Confirm the pharmacy payment before sending its prescriptions to Curaleaf.', toastType: 'success' });
+        if (selectedPaymentRoute === 'worldpay') {
+          if (!canUseWorldpay) throw new Error('This pharmacy’s Worldpay connection is not verified. Change the default route in Settings.');
+          const origin = window.location.origin;
+          const session = await createWorldpaySession(persisted.id, {
+            organisationId: state.currentOrganisationId,
+            successUrl: `${origin}/?payment=success`,
+            cancelUrl: `${origin}/?payment=cancelled`,
+          });
+          const provider = session.provider as { url?: string; _links?: { redirect?: { href?: string } } };
+          const paymentUrl = provider.url ?? provider._links?.redirect?.href;
+          if (paymentUrl) await navigator.clipboard.writeText(paymentUrl).catch(() => undefined);
+          dispatch({ type: 'SEND_PAYMENT_LINK', orderId: activeOrder.id });
+          dispatch({ type: 'ADD_TOAST', message: paymentUrl ? 'Worldpay checkout created and its secure link copied.' : 'Worldpay checkout created. It is awaiting the patient.', toastType: 'success' });
+        } else {
+          dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
+          dispatch({ type: 'ADD_TOAST', message: 'Order saved. Confirm the pharmacy payment before sending its prescriptions to Curaleaf.', toastType: 'success' });
+        }
       } else if (selectedPaymentRoute === 'worldpay') {
         if (!canUseWorldpay) return;
         dispatch({ type: 'SEND_PAYMENT_LINK', orderId: activeOrder.id });
@@ -259,8 +287,14 @@ export default function CreateOrder() {
 
   const attachPrescriptionFile = async (rxId: number, file: File) => {
     if (!activeOrder) return;
+    const prescription = activeOrder.prescriptions.find(candidate => candidate.id === rxId);
     if (isLocalPortalPreview || state.workspaceMode !== 'live') {
-      applySyntheticClinicScan(rxId, file.name);
+      if (prescription?.entryMode === 'manual') {
+        dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: `training-file-${activeOrder.id}-${rxId}` });
+        dispatch({ type: 'ADD_TOAST', message: 'Manual prescription attached for training. Nothing was uploaded.', toastType: 'info' });
+      } else {
+        applySyntheticClinicScan(rxId, file.name);
+      }
       return;
     }
     setUploadingRxId(rxId);
@@ -269,8 +303,12 @@ export default function CreateOrder() {
       if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(contentType)) throw new Error('Use a PDF, JPG, PNG or WebP prescription file.');
       const uploaded = await uploadPrescriptionFile({ organisationId: state.currentOrganisationId, filename: file.name, contentType }, file);
       dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: uploaded.id });
-      dispatch({ type: 'ADD_TOAST', message: 'Prescription uploaded securely. Curaleaf is reading its barcode now.', toastType: 'success' });
-      await readClinicBarcode(rxId, uploaded.id);
+      if (prescription?.entryMode === 'manual') {
+        dispatch({ type: 'ADD_TOAST', message: 'Manual prescription copy uploaded securely.', toastType: 'success' });
+      } else {
+        dispatch({ type: 'ADD_TOAST', message: 'Prescription uploaded securely. Curaleaf is reading its barcode now.', toastType: 'success' });
+        await readClinicBarcode(rxId, uploaded.id);
+      }
     } catch (error) {
       dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Prescription upload failed.', toastType: 'error' });
     } finally {
@@ -482,16 +520,32 @@ export default function CreateOrder() {
                   <div className="rx-record-body">
                     <div className="rx-record-evidence">
                       <div className="rx-record-evidence__heading"><span><small>Editing</small><strong>Prescription {selectedRxIndex + 1}</strong></span>{activeOrder.prescriptions.length > 1 && <button type="button" className="icon-button danger" aria-label={`Delete prescription ${selectedRxIndex + 1}`} title="Delete prescription record" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Removed Rx ${selectedRxIndex + 1}.`, toastType: 'info' }); }}><Trash2 size={14} /></button>}</div>
-                      <div className="rx-clinic-note"><FileScan size={18} aria-hidden="true" /><span><strong>Scan the Curaleaf Clinic barcode</strong><span>Attach the complete prescription with a clear barcode. Curaleaf supplies the serial, dates, prescriber, formula and prescribed quantity—pharmacy staff do not type them.</span></span></div>
-                      {isLocalPortalPreview ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
+                      <div className="rx-entry-mode" role="group" aria-label="Prescription entry route">
+                        <button type="button" aria-pressed={selectedRx.entryMode === 'clinic'} onClick={() => dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' })}><FileScan size={15} /><span><strong>Curaleaf Clinic QR</strong><small>Preferred automatic route</small></span></button>
+                        <button type="button" aria-pressed={selectedRx.entryMode === 'manual'} onClick={() => dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'manual' })}><Pencil size={15} /><span><strong>Manual prescription</strong><small>Copy from the signed document</small></span></button>
+                      </div>
+                      <div className="rx-clinic-note"><FileScan size={18} aria-hidden="true" /><span><strong>{selectedRx.entryMode === 'clinic' ? 'Scan the Curaleaf Clinic barcode' : 'Attach the complete signed prescription'}</strong><span>{selectedRx.entryMode === 'clinic' ? 'Attach the complete prescription with a clear barcode. Curaleaf supplies the serial, dates, prescriber, patient identity, formula and prescribed quantity.' : 'Use this only when the Clinic QR cannot be read. Copy every detail exactly as printed before taking payment.'}</span></span></div>
+                      {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
                       </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
                         <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png,image/webp" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading the barcode…' : selectedRx.copyFileName ?? 'Attach barcode prescription'}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded securely · verification required' : 'PDF, JPG, PNG or WebP · maximum 10 MB'}</small></span>
                       </label>}
-                      {!isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
-                      {scanError ? <ProviderStatusNotice title="Barcode not verified" detail={`${scanError} Check that the full Curaleaf Clinic barcode is sharp and visible. If it still fails, contact your HHH administrator.`} /> : null}
-                      {selectedRx.clinicScanId ? (
+                      {selectedRx.entryMode === 'clinic' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
+                      {selectedRx.entryMode === 'clinic' && scanError ? <ProviderStatusNotice title="Barcode not verified" detail={`${scanError} Check that the full Curaleaf Clinic barcode is sharp and visible. If it still fails, use the manual route or contact your HHH administrator.`} /> : null}
+                      {selectedRx.entryMode === 'manual' ? (
+                        <ManualPrescriptionEditor
+                          prescription={selectedRx}
+                          catalogue={state.catalogue}
+                          onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
+                          onPatientIdentityChange={(name, dob) => dispatch({ type: 'SET_RX_PATIENT_IDENTITY', orderId: activeOrder.id, rxId: selectedRx.id, name, dob })}
+                          onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
+                          onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
+                          onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}
+                          onUpdateQuantity={(productId, qty) => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId, qty })}
+                          onUpdateUnits={(productId, unitsNeededCount) => dispatch({ type: 'UPDATE_ITEM_UNITS', orderId: activeOrder.id, rxId: selectedRx.id, productId, unitsNeededCount })}
+                        />
+                      ) : selectedRx.clinicScanId ? (
                         <div className="rx-clinic-result" aria-label="Curaleaf verified prescription details">
                           <div className="rx-clinic-result__status"><ShieldCheck size={18} /><span><strong>{isLocalPortalPreview ? 'Synthetic Curaleaf response' : 'Verified by Curaleaf'}</strong><small>{isLocalPortalPreview ? 'Read-only local training fixture' : 'Read-only supplier record'} · {selectedRx.curaleafPrescriptionState}</small></span></div>
                           <dl>
@@ -503,9 +557,10 @@ export default function CreateOrder() {
                           </dl>
                         </div>
                       ) : <p className="rx-scan-waiting">No prescription fields need completing. They appear here after Curaleaf verifies the barcode.</p>}
+                      {identityCheck && (selectedRx.clinicScanId || selectedRx.entryMode === 'manual' && (selectedRx.curaleafPatientName || selectedRx.curaleafPatientDob)) && identityCheck.status !== 'match' ? <ProviderStatusNotice title={identityCheck.status === 'mismatch' ? 'Patient details do not match' : 'Patient details unavailable'} detail={`${identityCheck.reason} Payment and Curaleaf submission remain blocked until the prescription and patient record match.`} /> : null}
                     </div>
 
-                    <div className="rx-line-editor">
+                    {selectedRx.entryMode === 'clinic' ? <div className="rx-line-editor">
                       <div className="rx-line-editor__heading"><span><small>Curaleaf-matched medicines</small><strong>{selectedRx.items.length} prescribed product{selectedRx.items.length === 1 ? '' : 's'}</strong></span><span>Read-only prescription · live pricing</span></div>
                       {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileScan size={20} /><span><strong>Medicines appear after the barcode scan</strong><small>Curaleaf supplies the formula, prescribed quantity and matching pack.</small></span></div> : (
                         <div className="rx-item-stack">
@@ -533,7 +588,7 @@ export default function CreateOrder() {
                           })}
                         </div>
                       )}
-                    </div>
+                    </div> : null}
                   </div>
                 )}
               </section>
@@ -570,11 +625,10 @@ export default function CreateOrder() {
                 <div className="rx-checkout-readiness"><span className="section-label">Ready to continue</span>{readiness.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}</div>
                 <div className="rx-payment-actions">
                   <span className="section-label">Payment route</span>
-                  <div className="rx-payment-route-toggle" role="radiogroup" aria-label="Choose payment route">
-                    <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'worldpay'} disabled={!canUseWorldpay} onClick={() => setSelectedPaymentRoute('worldpay')}><CreditCard size={17} /><span><strong>Worldpay</strong><small>{organisation.worldpay.enabled ? organisation.worldpay.status === 'connected' ? 'Online checkout' : 'Link account first' : 'Not enabled'}</small></span>{selectedPaymentRoute === 'worldpay' && canUseWorldpay ? <CheckCircle size={14} /> : null}</button>
-                    <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'pharmacy'} onClick={() => setSelectedPaymentRoute('pharmacy')}><Banknote size={17} /><span><strong>Pharmacy payment</strong><small>EPOS, cash or transfer</small></span>{selectedPaymentRoute === 'pharmacy' ? <CheckCircle size={14} /> : null}</button>
+                  <div className="rx-payment-route-toggle" aria-label="Pharmacy payment route">
+                    <div className="is-selected">{selectedPaymentRoute === 'worldpay' ? <CreditCard size={17} /> : <Banknote size={17} />}<span><strong>{selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy payment'}</strong><small>{selectedPaymentRoute === 'worldpay' ? 'Verified hosted checkout' : 'EPOS, cash or transfer'}</small></span><CheckCircle size={14} /></div>
                   </div>
-                  <p className="rx-payment-route-note">Choosing a route does not send anything. Review the total, then create the payment request below.</p>
+                  <p className="rx-payment-route-note">This route is set in Pharmacy Settings and is locked when the order is saved. Changing Settings only affects future orders.</p>
                   <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : selectedPaymentRoute === 'worldpay' ? 'Create Worldpay request' : 'Continue with pharmacy payment'}</button>
                 </div>
                 {!readyForPayment && <p className="rx-checkout-blocker"><AlertTriangle size={13} /> Complete the outstanding checks before requesting payment.</p>}

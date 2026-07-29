@@ -29,7 +29,8 @@ export interface CRMPatient {
   mobile: string;
   dob?: string;
   address?: string;
-  status: 'HHH approved' | 'Suspended';
+  primaryCondition?: string | null;
+  status: 'Referred' | 'HHH approved' | 'Suspended';
   interactions?: { ts: Date | string; type: string; detail: string }[];
 }
 
@@ -60,9 +61,12 @@ export interface GoodsReceiptLine {
 
 export interface Prescription {
   id: number;
+  entryMode: 'clinic' | 'manual';
   clinicScanId?: string;
   curaleafPrescriptionId?: string;
   curaleafPrescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
+  curaleafPatientName?: string;
+  curaleafPatientDob?: string;
   prescriber: string;
   prescriberId?: string;
   prescriberPin?: string;
@@ -130,11 +134,29 @@ export interface EligibilitySubmission {
   marketing: boolean;
   source: string;
   status: SubmissionStatus;
-  recordsUploaded: boolean;
   calls: { ts: Date }[];
   reviewedAt: Date | string | null;
   reviewedBy: string | null;
   decisionNote: string | null;
+  recordsCheck?: {
+    status: 'pending' | 'completed';
+    notes: string | null;
+    completedAt: Date | string | null;
+    completedBy: string | null;
+  };
+  referral?: {
+    status: 'pending' | 'completed' | 'declined';
+    notes: string | null;
+    completedAt: Date | string | null;
+    completedBy: string | null;
+  };
+  emailDelivery?: {
+    status: 'not_sent' | 'queued' | 'sent' | 'failed';
+    queuedAt: Date | string | null;
+    sentAt: Date | string | null;
+    failedAt: Date | string | null;
+  };
+  patientId?: string | null;
   submittedAt: Date;
   organisationId: string;
   pharmacyName: string;
@@ -155,6 +177,7 @@ export interface PharmacyTenant {
   status: 'live' | 'onboarding' | 'paused';
   staffCount: number;
   platformFeeMonthly: number | null;
+  defaultPaymentRoute: 'manual' | 'worldpay';
   brand: {
     primary: string;
     portalName: string;
@@ -205,7 +228,7 @@ export interface PlatformIntegration {
   status: 'connected' | 'pending' | 'attention';
 }
 
-export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'orders' | 'patients' | 'resources' | 'settings';
+export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'orders' | 'patients' | 'finance' | 'resources' | 'settings';
 
 export type PortalMode = 'gateway' | 'admin' | 'clinician';
 export type WorkspaceMode = 'training' | 'live';
@@ -263,6 +286,7 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['hhh.health'],
     status: 'onboarding', staffCount: 4,
     platformFeeMonthly: null,
+    defaultPaymentRoute: 'worldpay',
     brand: { primary: '#0f766e', portalName: 'HHH Leeds Patient Services' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: true, status: 'connected', environment: 'sandbox', merchantId: 'WP-DEMO-LEEDS', merchantName: 'HHH Leeds', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
@@ -274,6 +298,7 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     address: 'Lincoln, Lincolnshire, United Kingdom', websiteDomains: ['eastmidlandspharmacy.co.uk'],
     status: 'onboarding', staffCount: 2,
     platformFeeMonthly: null,
+    defaultPaymentRoute: 'manual',
     brand: { primary: '#315b7d', portalName: 'EMP Lincoln Patient Services' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: false, patients: true, resources: true },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
@@ -412,7 +437,7 @@ export type Action =
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
   | { type: 'ADD_SUBMISSION'; submission: EligibilitySubmission }
-  | { type: 'UPLOAD_RECORDS'; subId: EligibilitySubmission['id'] }
+  | { type: 'UPDATE_SUBMISSION'; subId: EligibilitySubmission['id']; updates: Partial<EligibilitySubmission> }
   | { type: 'LOG_CALL'; subId: EligibilitySubmission['id'] }
   | { type: 'APPROVE_ONBOARDING'; subId: EligibilitySubmission['id']; note?: string }
   | { type: 'DECLINE_ONBOARDING'; subId: EligibilitySubmission['id']; note?: string }
@@ -422,7 +447,9 @@ export type Action =
   | { type: 'SET_ORDER_PATIENT'; orderId: number; patientId: string }
   | { type: 'SET_ORDER_DISPENSING_FEE'; orderId: number; amount: number }
   | { type: 'ADD_RX'; orderId: number }
+  | { type: 'SET_RX_ENTRY_MODE'; orderId: number; rxId: number; mode: 'clinic' | 'manual' }
   | { type: 'SET_RX_PRESCRIBER'; orderId: number; rxId: number; prescriber: string }
+  | { type: 'SET_RX_PATIENT_IDENTITY'; orderId: number; rxId: number; name: string; dob: string }
   | { type: 'SET_RX_METADATA'; orderId: number; rxId: number; updates: Partial<Pick<Prescription, 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber' | 'serialNumber' | 'issueDate'>> }
   | { type: 'SET_RX_COPY'; orderId: number; rxId: number; fileName: string }
   | { type: 'SET_RX_FILE'; orderId: number; rxId: number; fileName: string; fileId: string | null }
@@ -441,6 +468,8 @@ export type Action =
         prescriberName: string;
         prescriberGmcNumber: string;
         prescriberGphcNumber: string;
+        patientName?: string;
+        patientDob?: string;
         items: LineItem[];
       };
     }
@@ -474,7 +503,7 @@ export type Action =
 
 function blankRx(id: number): Prescription {
   return {
-    id, prescriber: '', copyFileName: null, items: [], placed: false,
+    id, entryMode: 'clinic', prescriber: '', copyFileName: null, items: [], placed: false,
     poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
   };
 }
@@ -517,6 +546,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
   const prescriptions: Prescription[] = record.prescriptions?.length
     ? record.prescriptions.map((prescription, rxIndex) => ({
         id: orderId * 100 + rxIndex + 1,
+        entryMode: prescription.clinicScanId ? 'clinic' : 'manual',
         clinicScanId: prescription.clinicScanId,
         curaleafPrescriptionId: prescription.curaleafPrescriptionId,
         curaleafPrescriptionState: record.curaleaf?.prescriptionState,
@@ -540,6 +570,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
       }))
     : [{
         id: orderId * 100 + 1,
+        entryMode: 'clinic',
         prescriber: 'Curaleaf prescription',
         copyFileName: null,
         items: orderItems(record.lineItems.map(item => ({ packId: item.packId, formulaId: item.formulaId, quantity: item.quantity }))),
@@ -579,22 +610,22 @@ function buildSeedSubmissions(): EligibilitySubmission[] {
   const s1: EligibilitySubmission = {
     id: 1, name: 'Tom Hughes', dob: '1989-04-12', mobile: '07700 900501', email: 't.hughes@email.com',
     postcode: 'LS1 6PJ', condition: 'Chronic Pain', ...base, marketing: false, source: 'Google',
-    status: 'New', recordsUploaded: false, calls: [], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(),
+    status: 'New', calls: [], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(),
   };
   const s2: EligibilitySubmission = {
     id: 2, name: 'Rebecca Allen', dob: '1994-11-02', mobile: '07700 900502', email: 'r.allen@email.com',
     postcode: 'LS2 8PQ', condition: 'Anxiety', ...base, marketing: true, source: 'Word of mouth',
-    status: 'Under HHH review', recordsUploaded: false, calls: [{ ts: new Date(Date.now() - 24 * 60 * 60 * 1000) }], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
+    status: 'Under HHH review', calls: [{ ts: new Date(Date.now() - 24 * 60 * 60 * 1000) }], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
   };
   const s3: EligibilitySubmission = {
     id: 3, name: 'Daniel Price', dob: '1977-07-23', mobile: '07700 900503', email: 'd.price@email.com',
     postcode: 'LS2 7DR', condition: 'Chronic Pain', ...base, marketing: false, source: 'Poster / Leaflet',
-    status: 'Approved', recordsUploaded: true, calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Approved for programme onboarding after telephone review.', submittedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+    status: 'Approved', calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Approved for programme onboarding after telephone review.', submittedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
   };
   const s4: EligibilitySubmission = {
     id: 4, name: 'Sara Knight', dob: '1985-02-15', mobile: '07700 900504', email: 's.knight@email.com',
     postcode: 'LS1 5DA', condition: 'Insomnia', ...base, marketing: false, source: 'Text',
-    status: 'Declined', recordsUploaded: true, calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Not onboarded following HHH review.', submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+    status: 'Declined', calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Not onboarded following HHH review.', submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
   };
   s3.organisationId = '22222222-2222-4222-8222-222222222222';
   s3.pharmacyName = 'East Midlands Pharmacy Lincoln';
@@ -604,12 +635,12 @@ function buildSeedSubmissions(): EligibilitySubmission[] {
 
 function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   const rx1: Prescription = {
-    id: 1, prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_1.pdf',
+    id: 1, entryMode: 'clinic', prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_1.pdf',
     items: [],
     placed: false, poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
   };
   const rx2: Prescription = {
-    id: 2, prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_2.pdf',
+    id: 2, entryMode: 'clinic', prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_2.pdf',
     items: [],
     placed: false, poRef: null, status: 'draft', invoiceRef: null, trackingNumber: null, carrier: null,
   };
@@ -620,7 +651,7 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   };
 
   const rx3: Prescription = {
-    id: 3, prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_asmith.pdf',
+    id: 3, entryMode: 'clinic', prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_asmith.pdf',
     items: [],
     placed: true, poRef: 'PO-9002', status: 'ready', invoiceRef: 'INV-4071', trackingNumber: null, carrier: null,
     receivedItems: [], goodsInAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), goodsInBy: 'S. Patel',
@@ -633,7 +664,7 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   };
 
   const rx4: Prescription = {
-    id: 4, prescriber: 'Dr. S. Patel', copyFileName: 'prescription_jdoe_overdue.pdf',
+    id: 4, entryMode: 'clinic', prescriber: 'Dr. S. Patel', copyFileName: 'prescription_jdoe_overdue.pdf',
     items: [],
     placed: true, poRef: 'PO-9003', status: 'approved', invoiceRef: 'INV-4073', trackingNumber: null, carrier: null,
   };
@@ -651,7 +682,7 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   };
 
   const rx5: Prescription = {
-    id: 5, prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_sbennett.pdf',
+    id: 5, entryMode: 'clinic', prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_sbennett.pdf',
     items: [],
     placed: true, poRef: 'PO-9004', status: 'collected', invoiceRef: 'INV-4074', trackingNumber: null, carrier: null,
   };
@@ -947,22 +978,32 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, complianceItems: state.complianceItems.map(item => item.id === action.itemId ? { ...item, status: action.status, evidence: action.evidence ?? item.evidence } : item) };
     // ---- Referrals ----
     case 'ADD_SUBMISSION': {
-      if (state.submissions.some(s => s.organisationId === action.submission.organisationId && s.email.toLowerCase() === action.submission.email.toLowerCase())) {
-        return state;
+      if (state.submissions.some(s =>
+        s.id === action.submission.id ||
+        (s.organisationId === action.submission.organisationId &&
+          s.email.toLowerCase() === action.submission.email.toLowerCase())
+      )) {
+        return {
+          ...state,
+          submissions: state.submissions.map(submission =>
+            submission.id === action.submission.id ||
+            (submission.organisationId === action.submission.organisationId &&
+              submission.email.toLowerCase() === action.submission.email.toLowerCase())
+              ? { ...submission, ...action.submission }
+              : submission
+          ),
+        };
       }
       return {
         ...state,
         submissions: [action.submission, ...state.submissions],
       };
     }
-    case 'UPLOAD_RECORDS': {
+    case 'UPDATE_SUBMISSION':
       return {
         ...state,
-        submissions: state.submissions.map(s =>
-          s.id === action.subId ? { ...s, recordsUploaded: true } : s
-        ),
+        submissions: state.submissions.map(submission => submission.id === action.subId ? { ...submission, ...action.updates } : submission),
       };
-    }
     case 'LOG_CALL': {
       return {
         ...state,
@@ -1013,7 +1054,7 @@ function reducer(state: AppState, action: Action): AppState {
 
     // ---- Orders ----
     case 'NEW_ORDER': {
-      if (action.patientId && !state.crm.some(patient => patient.id === action.patientId && patient.organisationId === state.currentOrganisationId && patient.status === 'HHH approved')) return state;
+      if (action.patientId && !state.crm.some(patient => patient.id === action.patientId && patient.organisationId === state.currentOrganisationId && patient.status !== 'Suspended')) return state;
       const id = state.nextIds.order;
       const rxId = state.nextIds.rx;
       const newOrder = blankOrder(id, action.patientId || null, state.currentOrganisationId);
@@ -1029,7 +1070,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, activeOrderId: action.orderId };
     case 'SET_ORDER_PATIENT': {
       const order = state.orders.find(item => item.id === action.orderId);
-      const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && item.status === 'HHH approved');
+      const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && item.status !== 'Suspended');
       return patient ? mapOrder(state, action.orderId, o => ({ ...o, patientId: patient.id })) : state;
     }
     case 'SET_ORDER_DISPENSING_FEE':
@@ -1041,8 +1082,19 @@ function reducer(state: AppState, action: Action): AppState {
         nextIds: { ...state.nextIds, rx: rxId + 1 },
       };
     }
+    case 'SET_RX_ENTRY_MODE':
+      return mapOrder(state, action.orderId, order => mapRx(order, action.rxId, prescription => ({
+        ...blankRx(prescription.id),
+        entryMode: action.mode,
+      })));
     case 'SET_RX_PRESCRIBER':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, prescriber: action.prescriber })));
+    case 'SET_RX_PATIENT_IDENTITY':
+      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+        ...r,
+        curaleafPatientName: action.name,
+        curaleafPatientDob: action.dob,
+      })));
     case 'SET_RX_METADATA':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, ...action.updates })));
     case 'SET_RX_COPY':
@@ -1052,18 +1104,22 @@ function reducer(state: AppState, action: Action): AppState {
         ...r,
         copyFileName: action.fileName,
         fileId: action.fileId,
-        clinicScanId: undefined,
-        curaleafPrescriptionId: undefined,
-        curaleafPrescriptionState: undefined,
-        serialNumber: undefined,
-        issueDate: undefined,
-        expiryDate: undefined,
-        prescriberId: undefined,
-        prescriber: '',
-        prescriberPin: undefined,
-        prescriberGmcNumber: undefined,
-        prescriberGphcNumber: undefined,
-        items: [],
+        ...(r.entryMode === 'clinic' ? {
+          clinicScanId: undefined,
+          curaleafPrescriptionId: undefined,
+          curaleafPrescriptionState: undefined,
+          curaleafPatientName: undefined,
+          curaleafPatientDob: undefined,
+          serialNumber: undefined,
+          issueDate: undefined,
+          expiryDate: undefined,
+          prescriberId: undefined,
+          prescriber: '',
+          prescriberPin: undefined,
+          prescriberGmcNumber: undefined,
+          prescriberGphcNumber: undefined,
+          items: [],
+        } : {}),
       })));
     case 'APPLY_CURALEAF_SCAN':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
@@ -1071,6 +1127,9 @@ function reducer(state: AppState, action: Action): AppState {
         clinicScanId: action.scan.scanId,
         curaleafPrescriptionId: action.scan.prescriptionId,
         curaleafPrescriptionState: action.scan.state,
+        entryMode: 'clinic',
+        curaleafPatientName: action.scan.patientName,
+        curaleafPatientDob: action.scan.patientDob,
         serialNumber: action.scan.serialNumber,
         issueDate: action.scan.issueDate,
         expiryDate: action.scan.expiryDate,
@@ -1136,7 +1195,7 @@ function reducer(state: AppState, action: Action): AppState {
     // ---- Payment ----
     case 'SEND_PAYMENT_LINK': {
       const order = findOrder(state, action.orderId);
-      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status === 'HHH approved');
+      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status !== 'Suspended');
       const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
       if (!order || !patientApproved || !prescriptionReady) return state;
       const amount = orderRevenue(order);
@@ -1151,7 +1210,7 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'START_MANUAL_PAYMENT': {
       const order = findOrder(state, action.orderId);
-      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status === 'HHH approved');
+      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status !== 'Suspended');
       const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
       if (!order || !patientApproved || !prescriptionReady) return state;
       const amount = orderRevenue(order);
@@ -1185,7 +1244,7 @@ function reducer(state: AppState, action: Action): AppState {
     // ---- Curaleaf submission simulation ----
     case 'PLACE_ORDER': {
       const order = findOrder(state, action.orderId);
-      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status === 'HHH approved');
+      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status !== 'Suspended');
       const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
       if (!order || order.payment.status !== 'paid' || !patientApproved || !prescriptionReady) return state;
       return {
@@ -1362,7 +1421,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           mobile: record.mobile,
           dob: record.dob,
           address: [record.address, record.postcode].filter(Boolean).join(', '),
-          status: record.status === 'active' ? 'HHH approved' : 'Suspended',
+          primaryCondition: record.primaryCondition ?? null,
+          status: record.status === 'active' ? 'HHH approved' : record.status === 'referred' ? 'Referred' : 'Suspended',
         })),
       });
     }).catch(error => console.warn('Patient directory sync unavailable:', error));
@@ -1415,11 +1475,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             marketing: record.marketing,
             source: record.source,
             status: record.status,
-            recordsUploaded: false,
             calls: [],
             reviewedAt: record.reviewedAt,
             reviewedBy: record.reviewedBy,
             decisionNote: record.decisionNote,
+            recordsCheck: record.recordsCheck,
+            referral: record.referral,
+            emailDelivery: record.emailDelivery,
+            patientId: record.patientId,
             submittedAt: new Date(record.submittedAt),
             organisationId: record.organisationId,
             pharmacyName: record.pharmacyName,

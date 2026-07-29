@@ -1,4 +1,4 @@
-import { ArrowUpRight, Clock, FilePlus, Home, LogOut, Package, QrCode, Settings, Tags, UserSearch, Users } from 'lucide-react';
+import { ArrowUpRight, BadgePoundSterling, Clock, FilePlus, Home, LogOut, Package, QrCode, Settings, Tags, UserSearch, Users } from 'lucide-react';
 import { useAuth } from '../auth/useAuth';
 import { useApp, type Screen } from '../context/AppContext';
 import HhhBrandMark from './HhhBrandMark';
@@ -34,6 +34,7 @@ export default function Navigation() {
     {
       label: 'Workspace',
       items: [
+        { key: 'finance', label: 'Prescription financials', shortLabel: 'Financials', icon: <BadgePoundSterling size={17} /> },
         ...(organisation.modules.rx ? [{ key: 'formulary' as const, label: 'Curaleaf catalogue', shortLabel: 'Catalogue', icon: <Tags size={17} /> }] : []),
         ...(organisation.modules.resources ? [{ key: 'resources' as const, label: 'Forms & resources', icon: <QrCode size={17} /> }] : []),
         { key: 'settings', label: 'Organisation', icon: <Settings size={17} /> },

@@ -34,6 +34,25 @@ export type EligibilitySubmissionRecord = Omit<EligibilitySubmissionInput, 'refe
   reviewedAt: string | null;
   reviewedBy: string | null;
   decisionNote: string | null;
+  recordsCheck: {
+    status: 'pending' | 'completed';
+    notes: string | null;
+    completedAt: string | null;
+    completedBy: string | null;
+  };
+  referral: {
+    status: 'pending' | 'completed' | 'declined';
+    notes: string | null;
+    completedAt: string | null;
+    completedBy: string | null;
+  };
+  emailDelivery: {
+    status: 'not_sent' | 'queued' | 'sent' | 'failed';
+    queuedAt: string | null;
+    sentAt: string | null;
+    failedAt: string | null;
+  };
+  patientId: string | null;
   submittedAt: string;
 };
 
@@ -175,6 +194,10 @@ export interface PortalOrderInput {
     serialNumber: string;
     issueDate: string;
     expiryDate?: string;
+    patient: {
+      name: string;
+      dob: string;
+    };
     prescriber: {
       id?: string;
       pin: string;
@@ -192,7 +215,6 @@ export interface PortalOrderInput {
   }>;
   dispensingFeePence: number;
   currency: 'GBP';
-  paymentRoute: 'manual' | 'worldpay';
 }
 
 export interface PortalPatientRecord {
@@ -205,7 +227,8 @@ export interface PortalPatientRecord {
   mobile: string;
   address: string;
   postcode: string;
-  status: 'active' | 'inactive';
+  status: 'referred' | 'active' | 'inactive';
+  primaryCondition?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -314,6 +337,10 @@ export interface CuraleafClinicScan {
     expiryDate: string;
     prescriberId: string;
     prescriberName: string;
+    patient: {
+      name: string;
+      dob: string;
+    } | null;
     items: Array<{
       formulaId: string;
       formulaName: string;
@@ -345,6 +372,22 @@ export interface CuraleafActivationInput {
   organisationId: string;
   customerId: string;
   portalEmail: string;
+}
+
+export interface WorldpayConnectionInput {
+  organisationId: string;
+  username: string;
+  password: string;
+  entityId: string;
+  webhookSecret: string;
+}
+
+export interface WorldpayConnectionStatus {
+  configured: boolean;
+  connected: boolean;
+  status?: 'verification_required' | 'connected' | 'attention';
+  maskedIdentifier?: string;
+  updatedAt?: string;
 }
 
 export interface CreateOrganisationInput {
@@ -445,12 +488,48 @@ export interface PortalOrganisation {
   portalName?: string;
   modules?: OrganisationModules;
   worldpayEnabled?: boolean;
+  defaultPaymentRoute?: 'manual' | 'worldpay';
 }
 
 export interface PaymentSettings {
   organisationId: string;
-  worldpayEnabled: boolean;
+  defaultPaymentRoute: 'manual' | 'worldpay';
   updatedAt: string;
+}
+
+export interface AdminReferralFinanceRow {
+  id: string;
+  organisationId: string;
+  pharmacyName: string;
+  patientId: string;
+  patientName?: string;
+  patientEmail?: string;
+  referralSubmissionId: string | null;
+  kind: 'new_referral' | 'annual_patient';
+  amountPence: number;
+  currency: 'GBP';
+  dueDate: string;
+  occurredAt: string;
+}
+
+export interface AdminReferralFinanceReport {
+  currency: 'GBP';
+  range: { from: string | null; to: string | null };
+  organisationId: string | null;
+  totals: {
+    eventCount: number;
+    newReferralCount: number;
+    annualPatientCount: number;
+    amountPence: number;
+  };
+  byPharmacy: Array<{
+    organisationId: string;
+    pharmacyName: string;
+    newReferralCount: number;
+    annualPatientCount: number;
+    amountPence: number;
+  }>;
+  rows: AdminReferralFinanceRow[];
 }
 
 export interface PortalSession {

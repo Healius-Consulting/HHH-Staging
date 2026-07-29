@@ -207,6 +207,24 @@ export async function prescriberById(organisationId: string, prescriberId: strin
   };
 }
 
+function prescriptionPatientIdentity(prescription: Record<string, unknown>) {
+  const nested = prescription.patient && typeof prescription.patient === 'object'
+    ? prescription.patient as Record<string, unknown>
+    : {};
+  const firstName = [nested.firstName, prescription.patientFirstName].find(value => typeof value === 'string') as string | undefined;
+  const surname = [nested.surname, nested.lastName, prescription.patientSurname, prescription.patientLastName].find(value => typeof value === 'string') as string | undefined;
+  const combinedName = [nested.name, nested.fullName, prescription.patientName, prescription.patientFullName].find(value => typeof value === 'string') as string | undefined;
+  const name = combinedName?.trim() || [firstName, surname].filter(Boolean).join(' ').trim();
+  const dob = [
+    nested.dob,
+    nested.dateOfBirth,
+    prescription.patientDob,
+    prescription.patientDOB,
+    prescription.patientDateOfBirth,
+  ].find(value => typeof value === 'string') as string | undefined;
+  return name && dob ? { name, dob } : null;
+}
+
 export async function scanClinicPrescription(
   organisationId: string,
   input: {
@@ -241,6 +259,7 @@ export async function scanClinicPrescription(
     };
   });
   if (!items.length) throw new CuraleafRequestError(502, 'Curaleaf returned a prescription without medicine lines.');
+  const patient = prescriptionPatientIdentity(prescription);
   return {
     prescription: {
       id: prescription.id,
@@ -251,6 +270,7 @@ export async function scanClinicPrescription(
       prescriberId: prescription.prescriberId,
       prescriberName: prescription.prescriberName,
       items,
+      patient,
     },
     prescriber: {
       id: prescriber.id,

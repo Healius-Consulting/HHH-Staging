@@ -16,6 +16,8 @@ import { createRecord, getRecord, getTenantRecord, invalidateCollectionCache, li
 import { readIntegrationSecret, writeIntegrationSecret } from './secrets.js';
 import type { FulfilmentStatus, IntegrationName, PaymentStatus } from './types.js';
 import { createHostedPaymentSession, reconcileWorldpayPayment, type WorldpayCredential, verifyWorldpaySignature } from './worldpay.js';
+import { activatePatientForOrder, completeReferral } from './patient-finance.js';
+import { adminReferralFinance, pharmacyPrescriptionFinance } from './finance-reporting.js';
 
 const idSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 const tokenSchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/);
@@ -50,6 +52,7 @@ const organisationDetailsSchema = z.object({
   portalName: z.string().trim().min(1).max(200),
   modules: tenantModulesSchema,
   worldpayEnabled: z.boolean(),
+  defaultPaymentRoute: z.enum(['manual', 'worldpay']),
 });
 
 const setupDefinitions = [
@@ -84,6 +87,13 @@ const preferencesSchema = z.object({
   reduceMotion: z.boolean().default(false),
   enhancedFocus: z.boolean().default(false),
   underlineLinks: z.boolean().default(false),
+});
+
+const financeRangeSchema = z.object({
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+}).refine(value => !value.from || !value.to || value.from <= value.to, {
+  message: 'The finance date range is invalid.',
 });
 
 const limitResponse = { code: 'RATE_LIMITED', message: 'Too many requests. Wait briefly before trying again.' };
@@ -299,6 +309,9 @@ app.post('/v1/public/eligibility-submissions', publicSubmissionLimit, requirePub
       requestIp: request.ip,
       requestUserAgent: request.get('user-agent') ?? null,
       status: 'new',
+      recordsCheck: { status: 'pending', notes: null, completedAt: null, completedBy: null },
+      referral: { status: 'pending', notes: null, completedAt: null, completedBy: null },
+      emailDelivery: { status: 'not_sent', queuedAt: null, sentAt: null, failedAt: null },
     });
     await audit(request, 'eligibility.submitted', { organisationId: organisation.id, recordId: record.id });
     response.status(201).json({ id: record.id, organisationId: organisation.id, pharmacyName: organisation.name, submittedAt: record.createdAt });
@@ -311,6 +324,11 @@ app.post('/v1/public/worldpay/webhooks/:organisationId', webhookLimit, async (re
     const credential = await readIntegrationSecret<WorldpayCredential>(organisationId, 'worldpay');
     if (!verifyWorldpaySignature(request.rawBody ?? Buffer.alloc(0), request.get('worldpay-signature'), credential.webhookSecret)) throw new HttpError(401, 'Webhook signature is invalid.', 'INVALID_WEBHOOK_SIGNATURE');
     const event = z.object({ eventId: z.string().min(1).max(200), transactionReference: z.string().min(1).max(200) }).passthrough().parse(request.body);
+    await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).set({
+      status: 'connected',
+      webhookVerifiedAt: timestamp(),
+      updatedAt: timestamp(),
+    }, { merge: true });
     const eventKey = createHash('sha256').update(event.eventId).digest('hex');
     const eventRef = firestore.collection('worldpayWebhookEvents').doc(eventKey);
     try { await eventRef.create({ id: eventKey, organisationId, eventId: event.eventId, transactionReference: event.transactionReference, receivedAt: timestamp(), status: 'received' }); }
@@ -377,14 +395,31 @@ app.patch('/v1/portal/preferences', async (request, response, next) => {
 
 app.put('/v1/portal/payment-settings', async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), worldpayEnabled: z.boolean() }).parse(request.body);
+    const input = z.object({
+      organisationId: idSchema.optional(),
+      defaultPaymentRoute: z.enum(['manual', 'worldpay']).optional(),
+      worldpayEnabled: z.boolean().optional(),
+    }).refine(value => value.defaultPaymentRoute !== undefined || value.worldpayEnabled !== undefined, {
+      message: 'Choose a default payment route.',
+    }).parse(request.body);
     const organisationId = tenantFor(request, input.organisationId);
+    const defaultPaymentRoute = input.defaultPaymentRoute ?? (input.worldpayEnabled ? 'worldpay' : 'manual');
+    if (defaultPaymentRoute === 'worldpay') {
+      const connection = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
+      if (!connection.exists || connection.data()?.status !== 'connected') {
+        throw new HttpError(409, 'Verify this pharmacy’s Worldpay connection before making it the default payment route.', 'WORLDPAY_VERIFICATION_REQUIRED');
+      }
+    }
     const updatedAt = timestamp();
-    await firestore.collection('organisations').doc(organisationId).set({ worldpayEnabled: input.worldpayEnabled, updatedAt }, { merge: true });
+    await firestore.collection('organisations').doc(organisationId).set({
+      defaultPaymentRoute,
+      worldpayEnabled: defaultPaymentRoute === 'worldpay',
+      updatedAt,
+    }, { merge: true });
     invalidateCollectionCache('organisations', organisationId);
     invalidateCache('admin:organisations');
-    await audit(request, 'payment.settings_updated', { organisationId, worldpayEnabled: input.worldpayEnabled });
-    response.json({ organisationId, worldpayEnabled: input.worldpayEnabled, updatedAt });
+    await audit(request, 'payment.settings_updated', { organisationId, defaultPaymentRoute });
+    response.json({ organisationId, defaultPaymentRoute, worldpayEnabled: defaultPaymentRoute === 'worldpay', updatedAt });
   } catch (error) { next(error); }
 });
 
@@ -419,29 +454,191 @@ app.get('/v1/portal/eligibility-submissions', async (request, response, next) =>
       psychExclusion: record.psychosisExclusion, consentReferral: record.consentReferral, consentShare: record.consentShare,
       marketing: record.marketingConsent, source: record.source, status: statusLabels[String(record.status)] ?? 'New',
       reviewedAt: record.reviewedAt ?? null, reviewedBy: record.reviewedBy ?? null, decisionNote: record.decisionNote ?? null,
+      recordsCheck: record.recordsCheck ?? { status: 'pending', notes: null, completedAt: null, completedBy: null },
+      referral: record.referral ?? {
+        status: record.status === 'approved' ? 'completed' : record.status === 'declined' ? 'declined' : 'pending',
+        notes: record.decisionNote ?? null,
+        completedAt: record.status === 'approved' || record.status === 'declined' ? record.reviewedAt ?? null : null,
+        completedBy: record.status === 'approved' || record.status === 'declined' ? record.reviewedBy ?? null : null,
+      },
+      emailDelivery: record.emailDelivery ?? { status: 'not_sent', queuedAt: null, sentAt: null, failedAt: null },
+      patientId: record.patientId ?? null,
       submittedAt: record.createdAt,
     })));
   }
   catch (error) { next(error); }
 });
 
-app.patch('/v1/portal/eligibility-submissions/:id', async (request, response, next) => {
+app.post('/v1/portal/admin/eligibility-submissions/:id/records-check', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const input = z.object({
+      organisationId: idSchema,
+      notes: z.string().trim().min(1).max(2_000),
+    }).parse(request.body);
+    const recordId = idSchema.parse(request.params.id);
+    const current = await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
+    if (current.referral?.status === 'completed' || current.status === 'approved') {
+      throw new HttpError(409, 'The completed referral record can no longer be changed.', 'REFERRAL_ALREADY_COMPLETED');
+    }
+    const completedAt = timestamp();
+    const result = await updateTenantRecord('eligibilitySubmissions', recordId, input.organisationId, {
+      status: 'reviewing',
+      recordsCheck: { status: 'completed', notes: input.notes, completedAt, completedBy: identity(request).uid },
+    });
+    await audit(request, 'eligibility.records_check_completed', { organisationId: input.organisationId, recordId });
+    response.json(result);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/eligibility-submissions/:id/referral-decision', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const input = z.object({
+      organisationId: idSchema,
+      decision: z.enum(['completed', 'declined']),
+      notes: z.string().trim().max(2_000).nullable().optional(),
+    }).parse(request.body);
+    const recordId = idSchema.parse(request.params.id);
+    if (input.decision === 'completed') {
+      await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
+      const result = await completeReferral(recordId, identity(request).uid, input.notes ?? null);
+      await audit(request, 'eligibility.referral_completed', { organisationId: input.organisationId, recordId, patientId: result.patientId, feeEventId: result.feeEventId });
+      response.json({ ...result, status: 'approved', referralStatus: 'completed' });
+      return;
+    }
+    const current = await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
+    if (current.referral?.status === 'completed' || current.status === 'approved') {
+      throw new HttpError(409, 'A completed referral cannot be declined.', 'REFERRAL_ALREADY_COMPLETED');
+    }
+    const completedAt = timestamp();
+    const result = await updateTenantRecord('eligibilitySubmissions', recordId, input.organisationId, {
+      status: 'declined',
+      decisionNote: input.notes ?? null,
+      referral: { status: 'declined', notes: input.notes ?? null, completedAt, completedBy: identity(request).uid },
+      reviewedAt: completedAt,
+      reviewedBy: identity(request).uid,
+    });
+    await audit(request, 'eligibility.referral_declined', { organisationId: input.organisationId, recordId });
+    response.json(result);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/eligibility-submissions/:id/email', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema }).parse(request.body);
+    const recordId = idSchema.parse(request.params.id);
+    const submission = await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
+    if (submission.referral?.status !== 'completed' && submission.status !== 'approved') {
+      throw new HttpError(409, 'Complete the referral before sending the patient email.', 'REFERRAL_NOT_COMPLETED');
+    }
+    const outboxId = `${recordId}--referral-completed`;
+    const outboxRef = firestore.collection('notificationOutbox').doc(outboxId);
+    const queuedAt = timestamp();
+    try {
+      await outboxRef.create({
+        id: outboxId,
+        schemaVersion: 1,
+        organisationId: input.organisationId,
+        kind: 'patient_referral_completed',
+        recipient: submission.email,
+        templateData: {
+          firstName: submission.firstName,
+          pharmacyName: (await getRecord('organisations', input.organisationId)).tradingName,
+        },
+        status: 'pending',
+        referralSubmissionId: recordId,
+        createdAt: queuedAt,
+        updatedAt: queuedAt,
+        createdBy: identity(request).uid,
+      });
+      await firestore.collection('eligibilitySubmissions').doc(recordId).update({
+        emailDelivery: { status: 'queued', queuedAt, queuedBy: identity(request).uid, outboxId },
+        updatedAt: queuedAt,
+      });
+      invalidateCollectionCache('eligibilitySubmissions', recordId);
+    } catch (error) {
+      const code = (error as { code?: number | string } | null)?.code;
+      if (code !== 6 && code !== 'already-exists') throw error;
+    }
+    await audit(request, 'eligibility.patient_email_queued', { organisationId: input.organisationId, recordId, outboxId });
+    response.status(202).json({ status: 'queued', outboxId });
+  } catch (error) { next(error); }
+});
+
+app.patch('/v1/portal/eligibility-submissions/:id', requireRole('hhh_admin'), async (request, response, next) => {
   try {
     const input = z.object({ organisationId: idSchema.optional(), status: z.enum(['reviewing', 'approved', 'declined']), decisionNote: z.string().trim().max(2000).nullable().optional() }).parse(request.body);
     const organisationId = tenantFor(request, input.organisationId);
-    const result = await updateTenantRecord('eligibilitySubmissions', idSchema.parse(request.params.id), organisationId, { status: input.status, decisionNote: input.decisionNote ?? null, reviewedAt: timestamp(), reviewedBy: identity(request).uid });
+    const recordId = idSchema.parse(request.params.id);
+    if (input.status === 'approved') {
+      await getTenantRecord('eligibilitySubmissions', recordId, organisationId);
+      const result = await completeReferral(recordId, identity(request).uid, input.decisionNote ?? null);
+      await audit(request, 'eligibility.reviewed', { organisationId, recordId, status: input.status, patientId: result.patientId });
+      response.json(result);
+      return;
+    }
+    const reviewedAt = timestamp();
+    const result = await updateTenantRecord('eligibilitySubmissions', recordId, organisationId, {
+      status: input.status,
+      decisionNote: input.decisionNote ?? null,
+      reviewedAt,
+      reviewedBy: identity(request).uid,
+      ...(input.status === 'declined' ? {
+        referral: { status: 'declined', notes: input.decisionNote ?? null, completedAt: reviewedAt, completedBy: identity(request).uid },
+      } : {}),
+    });
     await audit(request, 'eligibility.reviewed', { organisationId, recordId: result.id, status: input.status });
     response.json(result);
   } catch (error) { next(error); }
 });
 
-const patientSchema = z.object({ firstName: z.string().trim().min(1).max(100), surname: z.string().trim().min(1).max(100), dob: z.iso.date(), email: z.email(), mobile: z.string().trim().min(7).max(30), address: z.string().trim().max(500), postcode: z.string().trim().max(16), status: z.enum(['active', 'inactive']).default('active') });
+const patientSchema = z.object({
+  firstName: z.string().trim().min(1).max(100),
+  surname: z.string().trim().min(1).max(100),
+  dob: z.iso.date(),
+  email: z.email(),
+  mobile: z.string().trim().min(7).max(30),
+  address: z.string().trim().max(500),
+  postcode: z.string().trim().max(16),
+  status: z.enum(['referred', 'active', 'inactive']).default('active'),
+  primaryCondition: z.string().trim().max(160).nullable().optional(),
+});
 app.get('/v1/portal/patients', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('patients', organisationId); response.json(records); } catch (error) { next(error); } });
 app.post('/v1/portal/patients', async (request, response, next) => {
   try { const organisationId = tenantFor(request, request.body.organisationId); const record = await createRecord('patients', { ...patientSchema.parse(request.body), organisationId }); await audit(request, 'patient.created', { organisationId, recordId: record.id }); response.status(201).json(record); } catch (error) { next(error); }
 });
 app.patch('/v1/portal/patients/:id', async (request, response, next) => {
-  try { const organisationId = tenantFor(request, request.body.organisationId); const record = await updateTenantRecord('patients', idSchema.parse(request.params.id), organisationId, patientSchema.partial().parse(request.body)); await audit(request, 'patient.updated', { organisationId, recordId: record.id }); response.json(record); } catch (error) { next(error); }
+  try {
+    const organisationId = tenantFor(request, request.body.organisationId);
+    const patientId = idSchema.parse(request.params.id);
+    const current = await getTenantRecord('patients', patientId, organisationId);
+    const updates = patientSchema.partial().parse(request.body);
+    if (updates.status === 'active' && current.sourceReferralId && !current.activatedAt) {
+      throw new HttpError(409, 'A referred patient becomes active only after their first prescription reaches Curaleaf.', 'PATIENT_ACTIVATION_REQUIRES_ORDER');
+    }
+    const statusChanged = updates.status !== undefined && updates.status !== current.status;
+    const record = await updateTenantRecord('patients', patientId, organisationId, {
+      ...updates,
+      ...(statusChanged ? { statusChangedAt: timestamp() } : {}),
+    });
+    await audit(request, 'patient.updated', { organisationId, recordId: record.id });
+    response.json(record);
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/portal/finance/prescriptions', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    const range = financeRangeSchema.parse({ from: request.query.from, to: request.query.to });
+    response.json(await pharmacyPrescriptionFinance(organisationId, range));
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/portal/admin/finance/referrals', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const range = financeRangeSchema.parse({ from: request.query.from, to: request.query.to });
+    const organisationId = request.query.organisationId === undefined ? undefined : idSchema.parse(request.query.organisationId);
+    response.json(await adminReferralFinance(range, organisationId));
+  } catch (error) { next(error); }
 });
 
 const orderLineItemSchema = z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) });
@@ -452,6 +649,10 @@ const orderPrescriptionSchema = z.object({
   serialNumber: z.string().min(1).max(200),
   issueDate: z.iso.date(),
   expiryDate: z.iso.date().optional(),
+  patient: z.object({
+    name: z.string().trim().min(1).max(200),
+    dob: z.iso.date(),
+  }),
   prescriber: z.object({
     id: idSchema.optional(),
     pin: z.string().max(100).default(''),
@@ -467,7 +668,37 @@ const orderPrescriptionSchema = z.object({
     quantity: z.number().int().positive().max(100),
   })).min(1).max(50),
 });
-const orderSchema = z.object({ patientId: idSchema, lineItems: z.array(orderLineItemSchema).min(1).max(50), prescriptions: z.array(orderPrescriptionSchema).max(20).default([]), dispensingFeePence: z.number().int().nonnegative().max(10_000).default(0), currency: z.literal('GBP').default('GBP'), paymentRoute: z.enum(['manual', 'worldpay']) });
+const orderSchema = z.object({
+  patientId: idSchema,
+  lineItems: z.array(orderLineItemSchema).min(1).max(50),
+  prescriptions: z.array(orderPrescriptionSchema).max(20).default([]),
+  dispensingFeePence: z.number().int().nonnegative().max(10_000).default(0),
+  currency: z.literal('GBP').default('GBP'),
+  // Accepted during the compatibility window, but never trusted. The server
+  // snapshots the pharmacy setting below.
+  paymentRoute: z.enum(['manual', 'worldpay']).optional(),
+});
+
+function normalisedPatientName(value: string) {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('en-GB')
+    .replace(/\b(mr|mrs|miss|ms|mx|dr)\b\.?/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(' ');
+}
+
+function requireMatchingPatient(prescription: { name: string; dob: string }, patient: Record<string, unknown>) {
+  const selectedName = `${String(patient.firstName ?? '')} ${String(patient.surname ?? '')}`.trim();
+  if (prescription.dob !== patient.dob || normalisedPatientName(prescription.name) !== normalisedPatientName(selectedName)) {
+    throw new HttpError(409, 'The prescription patient does not match the selected patient record.', 'PRESCRIPTION_PATIENT_MISMATCH');
+  }
+}
 
 function packQuantities(items: Array<{ packId: string; quantity: number }>) {
   const quantities = new Map<string, number>();
@@ -641,9 +872,20 @@ app.post('/v1/portal/orders', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.body.organisationId);
     const input = orderSchema.parse(request.body);
-    await getTenantRecord('patients', input.patientId, organisationId);
+    const organisation = await getRecord('organisations', organisationId);
+    const paymentRoute = organisation.defaultPaymentRoute === 'worldpay' ? 'worldpay' : 'manual';
+    if (paymentRoute === 'worldpay') {
+      const connection = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
+      if (!connection.exists || connection.data()?.status !== 'connected') {
+        throw new HttpError(409, 'This pharmacy’s Worldpay route is not ready. Update payment settings before creating the order.', 'WORLDPAY_VERIFICATION_REQUIRED');
+      }
+    }
+    const patient = await getTenantRecord('patients', input.patientId, organisationId);
     const prescriptions = await Promise.all(input.prescriptions.map(async prescription => {
-      if (!prescription.clinicScanId) return prescription;
+      if (!prescription.clinicScanId) {
+        requireMatchingPatient(prescription.patient, patient);
+        return prescription;
+      }
       const scan = await getTenantRecord('curaleafPrescriptionScans', prescription.clinicScanId, organisationId);
       if (scan.status !== 'ready' || !scan.result || typeof scan.result !== 'object') {
         throw new HttpError(409, 'Curaleaf has not finished reading this prescription. Wait and scan it again before taking payment.', 'CURALEAF_SCAN_NOT_READY');
@@ -655,6 +897,10 @@ app.post('/v1/portal/orders', async (request, response, next) => {
         quantity: z.number().int().positive().max(100),
         unitsNeededCount: z.number().int().positive().max(100),
       })).parse(result.matchedItems);
+      if (!result.prescription.patient) {
+        throw new HttpError(409, 'Curaleaf did not return the prescription patient’s name and date of birth. Contact your HHH administrator before taking payment.', 'PRESCRIPTION_PATIENT_UNAVAILABLE');
+      }
+      requireMatchingPatient(result.prescription.patient, patient);
       return orderPrescriptionSchema.parse({
         fileId: scan.fileId,
         clinicScanId: prescription.clinicScanId,
@@ -662,6 +908,7 @@ app.post('/v1/portal/orders', async (request, response, next) => {
         serialNumber: result.prescription.serialNumber,
         issueDate: result.prescription.issueDate,
         expiryDate: result.prescription.expiryDate,
+        patient: result.prescription.patient,
         prescriber: result.prescriber,
         items: matchedItems,
       });
@@ -689,8 +936,20 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       };
     });
     const totalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, input.dispensingFeePence);
-    const record = await createRecord('orders', { ...input, prescriptions, lineItems, totalPence, organisationId, fulfilmentMethod: 'patient_collection', paymentStatus: 'pending', fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus });
-    await audit(request, 'order.created', { organisationId, recordId: record.id, pricingSource: 'curaleaf' });
+    const { paymentRoute: _ignoredRequestedRoute, ...authoritativeInput } = input;
+    const record = await createRecord('orders', {
+      ...authoritativeInput,
+      prescriptions,
+      lineItems,
+      totalPence,
+      organisationId,
+      paymentRoute,
+      paymentRouteSnapshotAt: timestamp(),
+      fulfilmentMethod: 'patient_collection',
+      paymentStatus: 'pending',
+      fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus,
+    });
+    await audit(request, 'order.created', { organisationId, recordId: record.id, pricingSource: 'curaleaf', paymentRoute });
     response.status(201).json(record);
   } catch (error) { next(error); }
 });
@@ -727,14 +986,21 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
     const organisationId = tenantFor(request, request.body.organisationId);
     const credential = integration === 'curaleaf'
       ? z.object({ customerId: z.string().min(1).max(128), portalEmail: z.email().max(254) }).parse(request.body)
-      : z.object({ serviceKey: z.string().min(16).max(1000), entityId: z.string().min(1).max(200), webhookSecret: z.string().min(24).max(1000) }).parse(request.body);
+      : z.object({
+        username: z.string().trim().min(1).max(500),
+        password: z.string().min(8).max(1_000),
+        entityId: z.string().trim().min(1).max(200),
+        webhookSecret: z.string().min(24).max(1_000),
+      }).parse(request.body);
     const safeIdentifier = maskedIdentifier(integration === 'curaleaf'
       ? (credential as { customerId: string }).customerId
       : (credential as { entityId: string }).entityId);
     const stored = await writeIntegrationSecret(organisationId, integration, credential);
     const id = `${organisationId}--${integration}`;
     await firestore.collection('integrationConnections').doc(id).set({ id, schemaVersion: 1, organisationId, integration, secretName: stored.secretName, secretVersion: stored.version, status: integration === 'worldpay' ? 'verification_required' : 'configured', maskedIdentifier: safeIdentifier, updatedAt: timestamp(), updatedBy: identity(request).uid }, { merge: true });
-    const status = integration === 'curaleaf' ? await curaleafConnectionStatus(organisationId) : { configured: true, connected: false, verificationRequired: true };
+    const status = integration === 'curaleaf'
+      ? await curaleafConnectionStatus(organisationId)
+      : { configured: true, connected: false, verificationRequired: true, status: 'verification_required' as const };
     if (integration === 'curaleaf') {
       const taskId = `${organisationId}--curaleaf_account`;
       await firestore.collection('setupTasks').doc(taskId).set({
@@ -879,7 +1145,11 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
       items: authoritativeInput.items.map(({ packId, quantity }) => ({ packId, quantity })),
       updatedAt: timestamp(),
     });
-    await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, integrationStatus: operationStatus, fulfilmentStatus, updatedAt: timestamp() }); invalidateCollectionCache('orders', input.orderId); await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id }); response.status(201).json(result);
+    await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, integrationStatus: operationStatus, fulfilmentStatus, updatedAt: timestamp() });
+    invalidateCollectionCache('orders', input.orderId);
+    if (result.status === 'purchase_order_submitted') await activatePatientForOrder(input.orderId);
+    await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id });
+    response.status(201).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
 });
 
@@ -927,6 +1197,7 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
       updatedAt: timestamp(),
     });
     invalidateCollectionCache('orders', input.orderId);
+    if (result.status === 'purchase_order_submitted') await activatePatientForOrder(input.orderId);
     await audit(request, needsAttention ? 'curaleaf.clinic_attention_required' : 'curaleaf.clinic_submitted', { organisationId, orderId: input.orderId, operationId: operation.id });
     response.status(needsAttention || awaitingSupplier ? 202 : 201).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
@@ -934,14 +1205,14 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
 
 app.post('/v1/portal/orders/:id/payments/manual', async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), amountPence: z.number().int().positive(), tender: z.enum(['cash', 'epos', 'bank_transfer', 'other']), reference: z.string().trim().min(1).max(200), notes: z.string().trim().max(1000).optional() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if (input.amountPence !== order.totalPence) throw new HttpError(400, 'Payment amount must match the order total.', 'AMOUNT_MISMATCH');
+    const input = z.object({ organisationId: idSchema.optional(), amountPence: z.number().int().positive(), tender: z.enum(['cash', 'epos', 'bank_transfer', 'other']), reference: z.string().trim().min(1).max(200), notes: z.string().trim().max(1000).optional() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if ((order.paymentRoute ?? 'manual') !== 'manual') throw new HttpError(409, 'This order is locked to Worldpay.', 'PAYMENT_ROUTE_LOCKED'); if (input.amountPence !== order.totalPence) throw new HttpError(400, 'Payment amount must match the order total.', 'AMOUNT_MISMATCH');
     const payment = await createRecord('payments', { organisationId, orderId, route: 'manual', status: 'paid' satisfies PaymentStatus, amountPence: input.amountPence, currency: 'GBP', tender: input.tender, reference: input.reference, notes: input.notes ?? null, confirmedBy: identity(request).uid, confirmedAt: timestamp() }); await firestore.collection('orders').doc(orderId).update({ paymentStatus: 'paid', paymentId: payment.id, updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.manual_confirmed', { organisationId, orderId, paymentId: payment.id, amountPence: input.amountPence }); response.status(201).json(payment);
   } catch (error) { next(error); }
 });
 
 app.post('/v1/portal/orders/:id/payments/worldpay-session', externalProviderLimit, async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID'); const transactionReference = `HHH-${orderId}-${randomUUID().slice(0, 8)}`; const provider = await createHostedPaymentSession(organisationId, { transactionReference, amountPence: order.totalPence as number, currency: 'GBP', successUrl: input.successUrl, cancelUrl: input.cancelUrl }); const payment = await createRecord('payments', { organisationId, orderId, route: 'worldpay', status: 'pending' satisfies PaymentStatus, amountPence: order.totalPence, currency: 'GBP', transactionReference, providerSession: provider }); await firestore.collection('orders').doc(orderId).update({ paymentId: payment.id, paymentStatus: 'pending', updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.worldpay_session_created', { organisationId, orderId, paymentId: payment.id }); response.status(201).json({ paymentId: payment.id, transactionReference, provider });
+    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if ((order.paymentRoute ?? 'manual') !== 'worldpay') throw new HttpError(409, 'This order is locked to the pharmacy payment route.', 'PAYMENT_ROUTE_LOCKED'); const connection = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get(); if (connection.data()?.status !== 'connected') throw new HttpError(409, 'This pharmacy’s Worldpay connection must be verified before taking payment.', 'WORLDPAY_VERIFICATION_REQUIRED'); if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID'); const organisation = await getRecord('organisations', organisationId); const transactionReference = `HHH-${orderId}-${randomUUID().slice(0, 8)}`; const provider = await createHostedPaymentSession(organisationId, { transactionReference, amountPence: order.totalPence as number, currency: 'GBP', successUrl: input.successUrl, cancelUrl: input.cancelUrl, statementNarrative: String(organisation.tradingName ?? organisation.name ?? 'HHH Pharmacy') }); const payment = await createRecord('payments', { organisationId, orderId, route: 'worldpay', status: 'pending' satisfies PaymentStatus, amountPence: order.totalPence, currency: 'GBP', transactionReference, providerSession: provider }); await firestore.collection('orders').doc(orderId).update({ paymentId: payment.id, paymentStatus: 'pending', updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.worldpay_session_created', { organisationId, orderId, paymentId: payment.id }); response.status(201).json({ paymentId: payment.id, transactionReference, provider });
   } catch (error) { next(error); }
 });
 
@@ -1004,6 +1275,7 @@ app.post('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (requ
       portalName: `${input.tradingName} Patient Services`,
       modules: tenantModulesSchema.parse({ intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true }),
       worldpayEnabled: false,
+      defaultPaymentRoute: 'manual',
       curaleafActivated: false,
       referralToken: rawReferralToken,
     });
@@ -1022,8 +1294,19 @@ app.patch('/v1/portal/admin/organisations/:id', requireRole('hhh_admin'), async 
       .refine(value => Object.keys(value).length > 0, { message: 'At least one pharmacy detail must be supplied.' })
       .parse(request.body);
     const changedFields = Object.keys(input);
+    const requestedPaymentRoute = input.defaultPaymentRoute ?? (input.worldpayEnabled === undefined ? undefined : input.worldpayEnabled ? 'worldpay' : 'manual');
+    if (requestedPaymentRoute === 'worldpay') {
+      const connection = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
+      if (!connection.exists || connection.data()?.status !== 'connected') {
+        throw new HttpError(409, 'Verify this pharmacy’s Worldpay connection before making it the default payment route.', 'WORLDPAY_VERIFICATION_REQUIRED');
+      }
+    }
     await firestore.collection('organisations').doc(organisationId).update({
       ...input,
+      ...(requestedPaymentRoute ? {
+        defaultPaymentRoute: requestedPaymentRoute,
+        worldpayEnabled: requestedPaymentRoute === 'worldpay',
+      } : {}),
       updatedAt: timestamp(),
       updatedBy: identity(request).uid,
     });

@@ -1,9 +1,9 @@
 const ONBOARDING_STATUS_LABELS: Record<string, string> = {
   New: 'New Enquiry',
   'Under HHH review': 'Under Review',
-  Approved: 'Onboarded',
+  Approved: 'Referred',
   Declined: 'Declined',
-  'HHH approved': 'Onboarded',
+  'HHH approved': 'Active',
 };
 
 export function onboardingStatusLabel(status: string) {

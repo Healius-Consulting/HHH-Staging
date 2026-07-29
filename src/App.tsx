@@ -13,6 +13,7 @@ import Patients from './pages/Patients';
 import AdminPortal from './pages/AdminPortal';
 import PharmacyResources from './pages/PharmacyResources';
 import PharmacySettings from './pages/PharmacySettings';
+import PharmacyFinance from './pages/PharmacyFinance';
 import { tenantThemeVariables } from './utils/tenantTheme';
 import { AuthProvider } from './auth/AuthProvider';
 import { useAuth } from './auth/useAuth';
@@ -48,9 +49,17 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
     status: record.status,
     staffCount: 0,
     platformFeeMonthly: record.platformFeeMonthly ?? null,
+    defaultPaymentRoute: record.defaultPaymentRoute ?? 'manual',
     brand: { primary: record.primaryColour, portalName: record.portalName ?? `${record.tradingName} Patient Services` },
     modules: record.modules ?? { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
-    worldpay: { enabled: record.worldpayEnabled ?? true, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+    worldpay: {
+      enabled: record.defaultPaymentRoute === 'worldpay',
+      status: record.defaultPaymentRoute === 'worldpay' ? 'connected' : 'not-connected',
+      environment: 'sandbox',
+      merchantId: null,
+      merchantName: null,
+      lastSyncedAt: null,
+    },
   };
 }
 
@@ -180,6 +189,7 @@ function StaffWorkspace() {
       case 'review': return <AwaitingPayment />;
       case 'orders': return <Orders />;
       case 'patients': return <Patients />;
+      case 'finance': return <PharmacyFinance />;
       case 'resources': return <PharmacyResources />;
       case 'settings': return <><PharmacySetupWizard organisation={organisation} setup={setup} />{setupComplete && <PharmacySettings />}</>;
       default: return <Dashboard />;

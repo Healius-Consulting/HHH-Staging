@@ -30,6 +30,10 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
     title: 'Patient directory',
     subtitle: 'Search the patient index and view order histories, clinical files, and logged activities.',
   },
+  finance: {
+    title: 'Prescription financials',
+    subtitle: 'Compare paid patient revenue, Curaleaf wholesale costs, dispensing fees and pharmacy contribution.',
+  },
   resources: {
     title: 'Forms and resources',
     subtitle: 'Copy the pharmacy-specific patient link, save its QR code, or hand a website pack to developers.',

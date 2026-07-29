@@ -32,6 +32,9 @@ import type {
   CuraleafClinicScan,
   CuraleafManualPrescriptionInput,
   CuraleafSubmissionResult,
+  WorldpayConnectionInput,
+  WorldpayConnectionStatus,
+  AdminReferralFinanceReport,
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -122,6 +125,27 @@ export function getPortalEligibilitySubmissions(organisationId: string) {
   return apiRequest<EligibilitySubmissionRecord[]>(`/v1/portal/eligibility-submissions?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
+export function completeReferralRecordsCheck(submissionId: string, input: { organisationId: string; notes: string }) {
+  return apiRequest<Record<string, unknown>>(`/v1/portal/admin/eligibility-submissions/${encodeURIComponent(submissionId)}/records-check`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function recordReferralDecision(submissionId: string, input: { organisationId: string; decision: 'completed' | 'declined'; notes?: string | null }) {
+  return apiRequest<Record<string, unknown>>(`/v1/portal/admin/eligibility-submissions/${encodeURIComponent(submissionId)}/referral-decision`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function queueReferralPatientEmail(submissionId: string, organisationId: string) {
+  return apiRequest<{ status: 'queued'; outboxId: string }>(`/v1/portal/admin/eligibility-submissions/${encodeURIComponent(submissionId)}/email`, {
+    method: 'POST',
+    body: JSON.stringify({ organisationId }),
+  });
+}
+
 export function getCuraleafConnectionStatus() {
   return apiRequest<CuraleafConnectionStatus>('/v1/portal/integrations/curaleaf/status');
 }
@@ -209,6 +233,17 @@ export function recordPortalManualPayment(orderId: string, input: {
   });
 }
 
+export function createWorldpaySession(orderId: string, input: {
+  organisationId: string;
+  successUrl: string;
+  cancelUrl: string;
+}) {
+  return apiRequest<{ paymentId: string; transactionReference: string; provider: Record<string, unknown> }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/payments/worldpay-session`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export function submitCuraleafManualPrescription(input: CuraleafManualPrescriptionInput) {
   return apiRequest<CuraleafSubmissionResult>('/v1/portal/integrations/curaleaf/prescriptions/manual', {
     method: 'POST',
@@ -237,6 +272,17 @@ export function activateCuraleafPharmacy(input: CuraleafActivationInput) {
   });
 }
 
+export function connectWorldpayPharmacy(input: WorldpayConnectionInput) {
+  return apiRequest<WorldpayConnectionStatus>('/v1/portal/integrations/worldpay/credentials', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export function getWorldpayConnectionStatus(organisationId: string) {
+  return apiRequest<WorldpayConnectionStatus>(`/v1/portal/integrations/worldpay/status?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
 export function createOrganisation(input: CreateOrganisationInput) {
   return apiRequest<CreatedOrganisation>('/v1/portal/admin/organisations', {
     method: 'POST',
@@ -246,6 +292,15 @@ export function createOrganisation(input: CreateOrganisationInput) {
 
 export function getAdminOrganisations() {
   return apiRequest<PortalOrganisation[]>('/v1/portal/admin/organisations');
+}
+
+export function getAdminReferralFinance(filters: { from?: string; to?: string; organisationId?: string } = {}) {
+  const query = new URLSearchParams();
+  if (filters.from) query.set('from', filters.from);
+  if (filters.to) query.set('to', filters.to);
+  if (filters.organisationId) query.set('organisationId', filters.organisationId);
+  const suffix = query.size ? `?${query.toString()}` : '';
+  return apiRequest<AdminReferralFinanceReport>(`/v1/portal/admin/finance/referrals${suffix}`);
 }
 
 export function updateOrganisation(organisationId: string, input: UpdateOrganisationInput) {
@@ -292,9 +347,9 @@ export function updateStaffAccessibilityPreferences(preferences: StaffAccessibil
   });
 }
 
-export function updatePaymentSettings(organisationId: string, worldpayEnabled: boolean) {
+export function updatePaymentSettings(organisationId: string, defaultPaymentRoute: 'manual' | 'worldpay') {
   return apiRequest<PaymentSettings>('/v1/portal/payment-settings', {
     method: 'PUT',
-    body: JSON.stringify({ organisationId, worldpayEnabled }),
+    body: JSON.stringify({ organisationId, defaultPaymentRoute }),
   });
 }

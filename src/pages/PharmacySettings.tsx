@@ -1,18 +1,15 @@
 import { useState } from 'react';
 import {
-  ArrowUpRight,
   Building2,
   CheckCircle2,
   CreditCard,
-  ExternalLink,
-  RefreshCw,
   ShieldCheck,
-  SlidersHorizontal,
   Tags,
 } from 'lucide-react';
 import { useApp, type TenantModule } from '../context/AppContext';
 import { brandSwatchStyle } from '../utils/tenantTheme';
 import { isApiConfigured, updatePaymentSettings } from '../shared/api';
+import WorldpayConnectionPanel from '../components/WorldpayConnectionPanel';
 
 const MODULE_LABELS: Record<TenantModule, { name: string; description: string }> = {
   intake: { name: 'Patient onboarding', description: 'Pharmacy-attributed eligibility submissions and HHH decisions' },
@@ -23,35 +20,29 @@ const MODULE_LABELS: Record<TenantModule, { name: string; description: string }>
   resources: { name: 'Form and content pack', description: 'Pharmacy link, QR code and developer assets' },
 };
 
-const statusLabel = {
-  'not-connected': 'Not connected',
-  onboarding: 'Onboarding in progress',
-  connected: 'Connected',
-  'action-required': 'Action required',
-} as const;
-
 export default function PharmacySettings() {
   const { state, dispatch } = useApp();
-  const [showConnectionDetails, setShowConnectionDetails] = useState(false);
+  const [savingRoute, setSavingRoute] = useState(false);
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
-  const toggleWorldpay = async (enabled: boolean) => {
-    dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled } });
-    try {
-      if (state.workspaceMode === 'live' && isApiConfigured) await updatePaymentSettings(organisation.id, enabled);
-      dispatch({ type: 'ADD_TOAST', message: enabled ? 'Worldpay has been enabled as a payment option. Link the pharmacy merchant account before using it.' : 'Worldpay has been removed from the prescription checkout. The existing account link has not been deleted.', toastType: 'success' });
-    } catch (error) {
-      dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled: !enabled } });
-      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Payment settings could not be saved.', toastType: 'error' });
+  const setPaymentRoute = async (route: 'manual' | 'worldpay') => {
+    if (route === 'worldpay' && organisation.worldpay.status !== 'connected') {
+      dispatch({ type: 'ADD_TOAST', message: 'Verify this pharmacy’s Worldpay merchant connection before making it the default.', toastType: 'warning' });
+      return;
     }
-  };
-  const startWorldpayOnboarding = () => {
-    dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { status: 'onboarding' } });
-    dispatch({ type: 'ADD_TOAST', message: 'Worldpay onboarding started. Continue in the secure Worldpay window when platform access is configured.', toastType: 'info' });
-  };
-
-  const syncWorldpay = () => {
-    dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { lastSyncedAt: new Date() } });
-    dispatch({ type: 'ADD_TOAST', message: 'Worldpay account status refreshed.', toastType: 'success' });
+    const previousRoute = organisation.defaultPaymentRoute;
+    setSavingRoute(true);
+    dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: route } });
+    dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled: route === 'worldpay' } });
+    try {
+      if (state.workspaceMode === 'live' && isApiConfigured) await updatePaymentSettings(organisation.id, route);
+      dispatch({ type: 'ADD_TOAST', message: `${route === 'worldpay' ? 'Worldpay' : 'Pharmacy payment'} will be used for new orders. Existing orders are unchanged.`, toastType: 'success' });
+    } catch (error) {
+      dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: previousRoute } });
+      dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled: previousRoute === 'worldpay' } });
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Payment settings could not be saved.', toastType: 'error' });
+    } finally {
+      setSavingRoute(false);
+    }
   };
 
   return (
@@ -70,42 +61,35 @@ export default function PharmacySettings() {
         <section className="card settings-card worldpay-card">
           <div className="settings-card-head">
             <div className="settings-card-icon"><CreditCard size={18} /></div>
-            <div><p className="section-label">Payment provider</p><h2>Your Worldpay connection</h2></div>
-            <span className={`pill ${!organisation.worldpay.enabled ? '' : organisation.worldpay.status === 'connected' ? 'pill-green' : organisation.worldpay.status === 'action-required' ? 'pill-red' : 'pill-amber'}`}>{organisation.worldpay.enabled ? statusLabel[organisation.worldpay.status] : 'Disabled'}</span>
+            <div><p className="section-label">Default payment route</p><h2>Choose how new orders take payment</h2></div>
+            <span className={`pill ${organisation.defaultPaymentRoute === 'worldpay' ? 'pill-green' : ''}`}>{organisation.defaultPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy payment'}</span>
           </div>
 
-          <label className="payment-provider-toggle">
-            <input type="checkbox" checked={organisation.worldpay.enabled} onChange={event => void toggleWorldpay(event.target.checked)} />
-            <span><strong>Offer Worldpay checkout</strong><small>Staff can select Worldpay while reviewing a prescription. The linked merchant account receives patient funds directly.</small></span>
-          </label>
+          <div className="payment-route-settings" role="radiogroup" aria-label="Default payment route">
+            <button type="button" role="radio" aria-checked={organisation.defaultPaymentRoute === 'manual'} disabled={savingRoute} onClick={() => void setPaymentRoute('manual')}><span><strong>Pharmacy payment</strong><small>EPOS, cash, bank transfer or another pharmacy-controlled route.</small></span>{organisation.defaultPaymentRoute === 'manual' ? <CheckCircle2 size={16} /> : null}</button>
+            <button type="button" role="radio" aria-checked={organisation.defaultPaymentRoute === 'worldpay'} disabled={savingRoute || organisation.worldpay.status !== 'connected'} onClick={() => void setPaymentRoute('worldpay')}><span><strong>Worldpay hosted checkout</strong><small>{organisation.worldpay.status === 'connected' ? 'Verified merchant connection; settlement goes directly to this pharmacy.' : 'Connect and verify the pharmacy merchant account below first.'}</small></span>{organisation.defaultPaymentRoute === 'worldpay' ? <CheckCircle2 size={16} /> : null}</button>
+          </div>
 
-          {organisation.worldpay.enabled && <div className="connection-summary">
+          {organisation.worldpay.status === 'connected' && <div className="connection-summary">
             <div><span>Environment</span><strong>{organisation.worldpay.environment === 'live' ? 'Live' : 'Sandbox'}</strong></div>
             <div><span>Merchant</span><strong>{organisation.worldpay.merchantName ?? 'Not assigned'}</strong></div>
             <div><span>Merchant ID</span><strong>{organisation.worldpay.merchantId ?? 'Pending onboarding'}</strong></div>
             <div><span>Monthly HHH fee</span><strong>{organisation.platformFeeMonthly == null ? 'To be agreed' : `£${organisation.platformFeeMonthly.toFixed(2)}`}</strong></div>
           </div>}
 
-          <div className="settings-note"><ShieldCheck size={16} /><span>{organisation.worldpay.enabled ? 'Patient funds settle directly to your pharmacy. HHH does not retain a percentage of prescription sales; your separate platform subscription is shown above.' : 'Pharmacy-managed payment remains available. Enabling Worldpay does not send an order or move funds until the pharmacy links its merchant account and staff create a payment request.'}</span></div>
-
-          {organisation.worldpay.enabled && <div className="flex gap-sm flex-wrap">
-            {organisation.worldpay.status === 'connected' ? (
-              <>
-                <button className="btn btn-primary" onClick={syncWorldpay}><RefreshCw size={14} /> Sync status</button>
-                <button className="btn" onClick={() => setShowConnectionDetails(value => !value)}><SlidersHorizontal size={14} /> Manage connection</button>
-              </>
-            ) : (
-              <button className="btn btn-primary" onClick={startWorldpayOnboarding}><ExternalLink size={14} /> Connect Worldpay</button>
-            )}
-          </div>}
-
-          {showConnectionDetails && (
-            <div className="connection-actions">
-              <div><strong>Settlement ownership</strong><span>Worldpay → {organisation.tradingName}</span></div>
-              <div><strong>HHH access</strong><span>Payment status and reconciliation only</span></div>
-              <button className="btn btn-sm" onClick={() => dispatch({ type: 'ADD_TOAST', message: 'The live Worldpay dashboard link will be supplied during implementation.', toastType: 'info' })}>Open Worldpay dashboard <ArrowUpRight size={13} /></button>
-            </div>
-          )}
+          <div className="settings-note"><ShieldCheck size={16} /><span>Each order permanently records the route selected here when that order is created. Later changes apply only to future orders.</span></div>
+          <WorldpayConnectionPanel
+            organisationId={organisation.id}
+            onConnected={connection => dispatch({
+              type: 'UPDATE_WORLDPAY',
+              organisationId: organisation.id,
+              updates: {
+                status: connection.connected ? 'connected' : connection.configured ? 'onboarding' : 'not-connected',
+                merchantId: connection.maskedIdentifier ?? null,
+                lastSyncedAt: connection.updatedAt ?? new Date(),
+              },
+            })}
+          />
         </section>
 
         <section className="card settings-card">
@@ -117,7 +101,7 @@ export default function PharmacySettings() {
           <div className="compact-checklist">
             <div><CheckCircle2 size={16} className="text-green" /><span><strong>Six setup steps completed</strong><small>Profile, Curaleaf account, payment route, pricing, communications and walkthrough recorded</small></span></div>
           </div>
-          <p className="settings-footnote">HHH administrators can review the recorded evidence and connection status from the client readiness screen.</p>
+          <p className="settings-footnote">HHH administrators can review the recorded evidence and connection status from the pharmacy readiness screen.</p>
         </section>
       </div>
 

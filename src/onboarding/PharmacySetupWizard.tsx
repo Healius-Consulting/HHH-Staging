@@ -16,7 +16,7 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
   const { status, loading, savingTask, error, updateTask } = setup;
   const [activeIndex, setActiveIndex] = useState(0);
   const [evidence, setEvidence] = useState<Record<string, string>>({});
-  const initialPaymentEvidence = useRef(organisation.worldpay.enabled ? 'worldpay-enabled' : 'pharmacy-only');
+  const initialPaymentEvidence = useRef(organisation.defaultPaymentRoute === 'worldpay' ? 'worldpay-enabled' : 'pharmacy-only');
   const activeDefinition = SETUP_TASKS[activeIndex];
   const activeTask = status?.tasks.find(task => task.id === activeDefinition.id);
   const adminManaged = activeDefinition.id === 'curaleaf_account';
@@ -39,11 +39,13 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
   const worldpayEnabled = activeDefinition.id === 'payment_route' && currentEvidence === 'worldpay-enabled';
   const setWorldpayEnabled = async (enabled: boolean) => {
     setEvidence(current => ({ ...current, payment_route: enabled ? 'worldpay-enabled' : 'pharmacy-only' }));
+    dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: enabled ? 'worldpay' : 'manual' } });
     dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled } });
     try {
-      if (!isLocalPortalPreview && isApiConfigured && state.workspaceMode === 'live') await updatePaymentSettings(organisation.id, enabled);
+      if (!isLocalPortalPreview && isApiConfigured && state.workspaceMode === 'live') await updatePaymentSettings(organisation.id, enabled ? 'worldpay' : 'manual');
     } catch (saveError) {
       setEvidence(current => ({ ...current, payment_route: enabled ? 'pharmacy-only' : 'worldpay-enabled' }));
+      dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: enabled ? 'manual' : 'worldpay' } });
       dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled: !enabled } });
       dispatch({ type: 'ADD_TOAST', message: saveError instanceof Error ? saveError.message : 'Payment settings could not be saved.', toastType: 'error' });
     }

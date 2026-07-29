@@ -55,14 +55,16 @@ export default function Referrals() {
       <SummaryTiles className="summary-tiles--compact summary-tiles--three" label="Onboarding totals" items={[
         { label: 'Received', value: submissions.length, detail: 'attributed enquiries' },
         { label: 'In review', value: pending, detail: 'with HHH' },
-        { label: 'Released', value: approved, detail: 'approved patients' },
+        { label: 'Referred', value: approved, detail: 'completed referrals' },
       ]} />
 
       <section className="card admin-patient-table pharmacy-referral-register">
-        <div className="admin-directory-head"><div><h2>Onboarding status</h2><p>This is a read-only pharmacy view. HHH records the telephone review and final onboarding decision.</p></div></div>
-        {submissions.length === 0 ? <div className="empty-state">No patient enquiries have used this pharmacy link yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Screening information</th><th>HHH contact</th><th>Decision</th></tr></thead><tbody>{submissions.map(submission => {
+        <div className="admin-directory-head"><div><h2>Onboarding status</h2><p>This is a read-only pharmacy view. HHH records the call/check, referral completion and patient email separately.</p></div></div>
+        {submissions.length === 0 ? <div className="empty-state">No patient enquiries have used this pharmacy link yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Primary concern</th><th>Call / check</th><th>Referral</th><th>Email</th></tr></thead><tbody>{submissions.map(submission => {
           const meta = STATUS_META[submission.status];
-          return <tr key={submission.id}><td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} /></td><td>{new Date(submission.submittedAt).toLocaleDateString('en-GB')}<small>Source: {submission.source}</small></td><td><strong>{submission.condition}</strong><small>{submission.recordsUploaded ? 'Records noted' : 'Records not yet noted'}</small></td><td><strong>{submission.calls.length ? `${submission.calls.length} call${submission.calls.length === 1 ? '' : 's'} logged` : 'Awaiting call'}</strong><small>{submission.reviewedBy ? `Reviewed by ${submission.reviewedBy}` : 'HHH review team'}</small></td><td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${meta.pill}`}>{meta.icon}{meta.label}</span></div></td></tr>;
+          const recordsComplete = submission.recordsCheck?.status === 'completed' || submission.calls.length > 0;
+          const emailStatus = submission.emailDelivery?.status ?? 'not_sent';
+          return <tr key={submission.id}><td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} /></td><td>{new Date(submission.submittedAt).toLocaleDateString('en-GB')}<small>Source: {submission.source}</small></td><td><strong>{submission.condition}</strong><small>Recorded from the eligibility form</small></td><td><strong>{recordsComplete ? 'Completed' : 'Pending'}</strong><small>{recordsComplete ? 'Recorded by HHH' : 'Awaiting HHH'}</small></td><td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${meta.pill}`}>{meta.icon}{meta.label}</span></div></td><td><strong>{emailStatus === 'not_sent' ? 'Not sent' : emailStatus.charAt(0).toUpperCase() + emailStatus.slice(1)}</strong><small>{emailStatus === 'queued' ? 'Awaiting delivery provider' : 'HHH communication'}</small></td></tr>;
         })}</tbody></table></div>}
       </section>
     </div>

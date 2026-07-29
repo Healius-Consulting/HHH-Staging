@@ -18,9 +18,12 @@ import {
   Pencil,
   Plus,
   PhoneCall,
+  PoundSterling,
+  RefreshCw,
   Search,
   Settings2,
   ShieldCheck,
+  TrendingUp,
   UserPlus,
   UserCheck,
   UserX,
@@ -37,8 +40,8 @@ import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
-import { activateCuraleafPharmacy, createOrganisation, createPharmacyStaffInvitation, getPharmacySetupStatus, getPharmacyStaff, updateOrganisation } from '../shared/api';
-import type { PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
+import { activateCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminReferralFinance, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordReferralDecision, updateOrganisation } from '../shared/api';
+import type { AdminReferralFinanceReport, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -50,7 +53,49 @@ import SummaryTiles from '../components/SummaryTiles';
 import CompactPatientCell from '../components/CompactPatientCell';
 import { formatPatientDob } from '../utils/patientDob';
 
-type AdminView = 'overview' | 'referrals' | 'patients' | 'compliance' | 'integrations';
+type AdminView = 'overview' | 'referrals' | 'patients' | 'finance' | 'compliance' | 'integrations';
+
+type AdminFeeEvent = {
+  id: string;
+  kind: 'new-referral' | 'annual-patient';
+  amount: number;
+  occurredAt: Date;
+  organisationId: string;
+  pharmacyName: string;
+  patientKey: string;
+  patientName: string;
+  patientEmail: string;
+  anniversary: number | null;
+};
+
+const referralFeeFormatter = new Intl.NumberFormat('en-GB', {
+  style: 'currency',
+  currency: 'GBP',
+});
+
+function toValidDate(value: Date | string | null | undefined) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function referralAnniversary(referralDate: Date, yearNumber: number) {
+  const anniversary = new Date(referralDate);
+  anniversary.setFullYear(referralDate.getFullYear() + yearNumber);
+  return anniversary;
+}
+
+function referralFinanceDateRange(period: 'all' | 'month' | 'year', month: string, year: string) {
+  if (period === 'month' && /^\d{4}-\d{2}$/.test(month)) {
+    const [yearNumber, monthNumber] = month.split('-').map(Number);
+    const finalDay = new Date(Date.UTC(yearNumber, monthNumber, 0)).getUTCDate();
+    return { from: `${month}-01`, to: `${month}-${String(finalDay).padStart(2, '0')}` };
+  }
+  if (period === 'year' && /^\d{4}$/.test(year)) {
+    return { from: `${year}-01-01`, to: `${year}-12-31` };
+  }
+  return {};
+}
 
 const MODULE_LABELS: Record<TenantModule, string> = {
   intake: 'Patient intake',
@@ -80,9 +125,10 @@ function AdminHeader({ view, setView, pending = 0, readiness = 0 }: { view: Admi
   const staffName = state.staffSession?.name || 'HHH Administrator';
   const groups: WorkspaceNavGroup<AdminView>[] = [
     { label: 'Administration', items: [
-      { key: 'overview', label: 'Clients', icon: <LayoutDashboard size={17} /> },
+      { key: 'overview', label: 'Pharmacies', icon: <LayoutDashboard size={17} /> },
       { key: 'referrals', label: 'Onboarding', icon: <UserCheck size={17} />, count: pending },
       { key: 'patients', label: 'Patients', icon: <Users size={17} /> },
+      { key: 'finance', label: 'Finance', icon: <PoundSterling size={17} /> },
     ] },
     { label: 'Platform', items: [
       { key: 'compliance', label: 'Readiness', icon: <ClipboardCheck size={17} />, count: readiness },
@@ -93,7 +139,7 @@ function AdminHeader({ view, setView, pending = 0, readiness = 0 }: { view: Admi
     ariaLabel="HHH administration"
     activeKey={view}
     groups={groups}
-    mobilePrimaryKeys={['overview', 'referrals', 'patients', 'compliance']}
+    mobilePrimaryKeys={['overview', 'referrals', 'patients', 'finance']}
     onNavigate={setView}
     brand={{ title: 'Holistic Health Hub', subtitle: 'Operations console', logo: <HhhBrandMark /> }}
     user={{ initials: staffName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase(), name: staffName, role: 'HHH administrator' }}
@@ -127,7 +173,7 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
       const created = await createOrganisation({ name, tradingName, gphcNumber, superintendent, address, websiteDomains, primaryColour: primary, logoText, status: 'onboarding' });
       const organisation: PharmacyTenant = {
         id: created.id, slug, referralToken: created.referralToken, name, tradingName, logoText, gphcNumber, superintendent, address, websiteDomains,
-        status: 'onboarding', staffCount: 0, platformFeeMonthly: null,
+        status: 'onboarding', staffCount: 0, platformFeeMonthly: null, defaultPaymentRoute: 'manual',
         brand: { primary, portalName: `${tradingName} Patient Services` }, modules: defaultModules,
         worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
       };
@@ -144,7 +190,7 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
   return (
     <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
       <aside ref={onboardingDialogRef} className="drawer admin-onboarding-drawer" role="dialog" aria-modal="true" aria-labelledby="onboard-title" tabIndex={-1}>
-        <div className="drawer-header"><div><p className="section-label">New client</p><h2 id="onboard-title">Onboard a pharmacy</h2></div><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
+        <div className="drawer-header"><div><p className="section-label">New pharmacy</p><h2 id="onboard-title">Onboard a pharmacy</h2></div><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
         <form className="drawer-body onboarding-form" onSubmit={submit}>
           <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Legal and GPhC identity used for compliance evidence.</small></div></div>
           <label>Registered pharmacy name<input className="input" value={name} onChange={event => setName(event.target.value)} required /></label>
@@ -153,10 +199,10 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
           <label>Registered premises address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
           <label>Approved website domain<input className="input" type="text" value={domain} onChange={event => setDomain(event.target.value)} placeholder="pharmacy.co.uk" /></label>
 
-          <div className="form-section-heading"><span>02</span><div><strong>Tenant identity</strong><small>The colour is applied consistently across that pharmacy’s workspace.</small></div></div>
+          <div className="form-section-heading"><span>02</span><div><strong>Workspace identity</strong><small>The colour is applied consistently across that pharmacy’s workspace.</small></div></div>
           <div className="brand-colour-field"><input type="color" value={primary} onChange={event => setPrimary(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primary.toUpperCase()} · secondary generated automatically</small></div><div className="onboarding-palette"><i style={{ background: onboardingTheme.primary }} /><i style={{ background: onboardingTheme.secondary }} /><i style={{ background: onboardingTheme.primarySoft }} /></div><div className="brand-preview-button" style={{ background: onboardingTheme.primary, color: onboardingTheme.onPrimary }}>Action</div></div>
 
-          <div className="onboarding-callout"><ShieldCheck size={17} /><span>The tenant starts in onboarding status. Its six setup steps must be completed before live processing begins.</span></div>
+          <div className="onboarding-callout"><ShieldCheck size={17} /><span>The pharmacy starts in onboarding status. Its six setup steps must be completed before live processing begins.</span></div>
           {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
           <div className="drawer-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={busy}><Plus size={14} /> {busy ? 'Creating securely…' : 'Create onboarding record'}</button></div>
         </form>
@@ -352,8 +398,84 @@ export default function AdminPortal() {
   const [curaleafPortalEmail, setCuraleafPortalEmail] = useState('');
   const [curaleafBusy, setCuraleafBusy] = useState(false);
   const [curaleafError, setCuraleafError] = useState<string | null>(null);
+  const [financeOrganisationId, setFinanceOrganisationId] = useState('all');
+  const [financePatientKey, setFinancePatientKey] = useState('all');
+  const [financePeriod, setFinancePeriod] = useState<'all' | 'month' | 'year'>('all');
+  const [financeMonth, setFinanceMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [financeYear, setFinanceYear] = useState(() => String(new Date().getFullYear()));
+  const [adminFinanceReport, setAdminFinanceReport] = useState<AdminReferralFinanceReport | null>(null);
+  const [adminFinanceLoading, setAdminFinanceLoading] = useState(false);
+  const [adminFinanceError, setAdminFinanceError] = useState<string | null>(null);
+  const [adminFinanceRefresh, setAdminFinanceRefresh] = useState(0);
+  const [referralDialog, setReferralDialog] = useState<{ id: string | number; organisationId: string; patientName: string; action: 'records' | 'complete' | 'decline' | 'email' } | null>(null);
+  const [referralNotes, setReferralNotes] = useState('');
+  const [referralBusy, setReferralBusy] = useState(false);
+  const [referralError, setReferralError] = useState<string | null>(null);
 
   const selectedOrganisation = state.organisations.find(org => org.id === selectedOrganisationId);
+
+  const runReferralAction = async () => {
+    if (!referralDialog) return;
+    const submission = state.submissions.find(item => item.id === referralDialog.id);
+    if (!submission) return;
+    setReferralBusy(true);
+    setReferralError(null);
+    const now = new Date();
+    const actor = state.staffSession?.name ?? 'HHH administrator';
+    try {
+      if (!isLocalPortalPreview) {
+        if (referralDialog.action === 'records') {
+          await completeReferralRecordsCheck(String(referralDialog.id), { organisationId: referralDialog.organisationId, notes: referralNotes.trim() });
+        } else if (referralDialog.action === 'email') {
+          await queueReferralPatientEmail(String(referralDialog.id), referralDialog.organisationId);
+        } else {
+          await recordReferralDecision(String(referralDialog.id), {
+            organisationId: referralDialog.organisationId,
+            decision: referralDialog.action === 'complete' ? 'completed' : 'declined',
+            notes: referralNotes.trim() || null,
+          });
+        }
+      }
+
+      if (referralDialog.action === 'records') {
+        dispatch({ type: 'UPDATE_SUBMISSION', subId: submission.id, updates: {
+          status: 'Under HHH review',
+          calls: [...submission.calls, { ts: now }],
+          recordsCheck: { status: 'completed', notes: referralNotes.trim(), completedAt: now, completedBy: actor },
+        } });
+      } else if (referralDialog.action === 'complete') {
+        dispatch({ type: 'UPDATE_SUBMISSION', subId: submission.id, updates: {
+          status: 'Approved',
+          reviewedAt: now,
+          reviewedBy: actor,
+          decisionNote: referralNotes.trim() || 'Referral completed.',
+          referral: { status: 'completed', notes: referralNotes.trim() || null, completedAt: now, completedBy: actor },
+        } });
+      } else if (referralDialog.action === 'decline') {
+        dispatch({ type: 'UPDATE_SUBMISSION', subId: submission.id, updates: {
+          status: 'Declined',
+          reviewedAt: now,
+          reviewedBy: actor,
+          decisionNote: referralNotes.trim() || 'Referral declined.',
+          referral: { status: 'declined', notes: referralNotes.trim() || null, completedAt: now, completedBy: actor },
+        } });
+      } else {
+        dispatch({ type: 'UPDATE_SUBMISSION', subId: submission.id, updates: {
+          emailDelivery: { status: 'queued', queuedAt: now, sentAt: null, failedAt: null },
+        } });
+      }
+      dispatch({ type: 'ADD_TOAST', message: referralDialog.action === 'records' ? 'Call and records check saved.' : referralDialog.action === 'email' ? 'Patient email queued separately.' : referralDialog.action === 'complete' ? 'Referral completed and £50 fee recorded.' : 'Referral declined.', toastType: referralDialog.action === 'decline' ? 'warning' : 'success' });
+      setReferralDialog(null);
+      setReferralNotes('');
+    } catch (error) {
+      setReferralError(error instanceof Error ? error.message : 'The referral action could not be saved.');
+    } finally {
+      setReferralBusy(false);
+    }
+  };
   const updateSelectedStaffCount = useCallback((count: number) => {
     if (selectedOrganisationId) dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisationId, updates: { staffCount: count } });
   }, [dispatch, selectedOrganisationId]);
@@ -419,6 +541,148 @@ export default function AdminPortal() {
     return [...records.values()];
   }, [state.crm, state.submissions]);
 
+  const previewReferralFeeEvents = useMemo<AdminFeeEvent[]>(() => {
+    const now = new Date();
+    const organisations = new Map(state.organisations.map(organisation => [organisation.id, organisation]));
+    const patients = new Map(state.crm.map(patient => [
+      `${patient.organisationId}:${patient.email.trim().toLowerCase()}`,
+      patient,
+    ]));
+    const events: AdminFeeEvent[] = [];
+
+    state.submissions
+      .filter(submission => submission.status === 'Approved')
+      .forEach(submission => {
+        const patientKey = `${submission.organisationId}:${submission.email.trim().toLowerCase()}`;
+        const patient = patients.get(patientKey);
+        const financePatient = patient as (typeof patient & {
+          referralCompletedAt?: Date | string | null;
+          activatedAt?: Date | string | null;
+        });
+        const completedAt = toValidDate(financePatient?.referralCompletedAt)
+          ?? toValidDate(submission.reviewedAt)
+          ?? toValidDate(submission.submittedAt);
+        if (!completedAt) return;
+
+        const pharmacyName = organisations.get(submission.organisationId)?.tradingName
+          ?? submission.pharmacyName
+          ?? 'Unknown pharmacy';
+        const eventBase = {
+          organisationId: submission.organisationId,
+          pharmacyName,
+          patientKey,
+          patientName: submission.name,
+          patientEmail: submission.email,
+        };
+
+        events.push({
+          ...eventBase,
+          id: `referral-${submission.id}`,
+          kind: 'new-referral',
+          amount: 50,
+          occurredAt: completedAt,
+          anniversary: null,
+        });
+
+        const patientStatus = String(patient?.status ?? '').toLowerCase();
+        const patientIsActive = Boolean(patient)
+          && patientStatus !== 'suspended'
+          && patientStatus !== 'inactive'
+          && patientStatus !== 'referred';
+        if (!patientIsActive) return;
+
+        for (let anniversaryNumber = 1; anniversaryNumber <= 100; anniversaryNumber += 1) {
+          const anniversaryDate = referralAnniversary(completedAt, anniversaryNumber);
+          if (anniversaryDate > now) break;
+          events.push({
+            ...eventBase,
+            id: `annual-${submission.id}-${anniversaryNumber}`,
+            kind: 'annual-patient',
+            amount: 40,
+            occurredAt: anniversaryDate,
+            anniversary: anniversaryNumber,
+          });
+        }
+      });
+
+    return events.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+  }, [state.crm, state.organisations, state.submissions]);
+
+  useEffect(() => {
+    if (view !== 'finance' || isLocalPortalPreview) {
+      setAdminFinanceError(null);
+      setAdminFinanceLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setAdminFinanceLoading(true);
+    setAdminFinanceError(null);
+    const range = referralFinanceDateRange(financePeriod, financeMonth, financeYear);
+    void getAdminReferralFinance({
+      ...range,
+      organisationId: financeOrganisationId === 'all' ? undefined : financeOrganisationId,
+    })
+      .then(report => {
+        if (!cancelled) setAdminFinanceReport(report);
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setAdminFinanceReport(null);
+          setAdminFinanceError(error instanceof Error ? error.message : 'Referral finance could not be loaded.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAdminFinanceLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [adminFinanceRefresh, financeMonth, financeOrganisationId, financePeriod, financeYear, view]);
+
+  const referralFeeEvents = useMemo<AdminFeeEvent[]>(() => {
+    if (isLocalPortalPreview) return previewReferralFeeEvents;
+    return (adminFinanceReport?.rows ?? []).flatMap(row => {
+      const occurredAt = toValidDate(row.occurredAt) ?? toValidDate(row.dueDate);
+      if (!occurredAt) return [];
+      const patient = state.crm.find(record => record.id === row.patientId);
+      return [{
+        id: row.id,
+        kind: row.kind === 'new_referral' ? 'new-referral' as const : 'annual-patient' as const,
+        amount: row.amountPence / 100,
+        occurredAt,
+        organisationId: row.organisationId,
+        pharmacyName: row.pharmacyName,
+        patientKey: `${row.organisationId}:${row.patientId}`,
+        patientName: row.patientName || patient?.name || `Patient ${row.patientId.slice(0, 8)}`,
+        patientEmail: row.patientEmail || patient?.email || row.patientId,
+        anniversary: null,
+      }];
+    }).sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+  }, [adminFinanceReport, previewReferralFeeEvents, state.crm]);
+
+  const financePatients = useMemo(() => {
+    const patients = new Map<string, { key: string; name: string; email: string }>();
+    referralFeeEvents
+      .filter(event => financeOrganisationId === 'all' || event.organisationId === financeOrganisationId)
+      .forEach(event => patients.set(event.patientKey, { key: event.patientKey, name: event.patientName, email: event.patientEmail }));
+    return [...patients.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [financeOrganisationId, referralFeeEvents]);
+
+  const filteredReferralFeeEvents = useMemo(() => referralFeeEvents.filter(event => {
+    if (financeOrganisationId !== 'all' && event.organisationId !== financeOrganisationId) return false;
+    if (financePatientKey !== 'all' && event.patientKey !== financePatientKey) return false;
+    if (financePeriod === 'month') {
+      const eventMonth = `${event.occurredAt.getFullYear()}-${String(event.occurredAt.getMonth() + 1).padStart(2, '0')}`;
+      return eventMonth === financeMonth;
+    }
+    if (financePeriod === 'year') return String(event.occurredAt.getFullYear()) === financeYear;
+    return true;
+  }), [financeMonth, financeOrganisationId, financePatientKey, financePeriod, financeYear, referralFeeEvents]);
+
+  useEffect(() => {
+    if (financePatientKey !== 'all' && !financePatients.some(patient => patient.key === financePatientKey)) {
+      setFinancePatientKey('all');
+    }
+  }, [financePatientKey, financePatients]);
+
   const filteredOrganisations = state.organisations.filter(org => `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase()));
   const filteredPatients = allPatients.filter(patient => {
     const org = state.organisations.find(item => item.id === patient.organisationId);
@@ -428,12 +692,13 @@ export default function AdminPortal() {
   const remainingSetupSteps = Object.values(setupByOrganisation).reduce((total, status) => total + status.requiredCount - status.completedCount, 0);
   const pendingAdminDecisions = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review').length;
   const adminCommands: CommandDefinition[] = [
-    { label: 'Open clients', detail: 'Manage pharmacy organisations', icon: <LayoutDashboard size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); } },
+    { label: 'Open pharmacies', detail: 'Manage pharmacy organisations', icon: <LayoutDashboard size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); } },
     { label: 'Review onboarding', detail: 'Record patient calls and decisions', icon: <UserCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('referrals'); } },
-    { label: 'Search patients', detail: 'Open the cross-client patient register', icon: <Users size={16} />, run: () => { setSelectedOrganisationId(null); setView('patients'); } },
+    { label: 'Search patients', detail: 'Open the cross-pharmacy patient register', icon: <Users size={16} />, run: () => { setSelectedOrganisationId(null); setView('patients'); } },
+    { label: 'Open referral finance', detail: 'Review £50 referrals and £40 annual fees', icon: <PoundSterling size={16} />, run: () => { setSelectedOrganisationId(null); setView('finance'); } },
     { label: 'Review readiness', detail: 'Inspect pharmacy setup progress', icon: <ClipboardCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('compliance'); } },
     { label: 'Open integrations', detail: 'Curaleaf and platform connections', icon: <Settings2 size={16} />, run: () => { setSelectedOrganisationId(null); setView('integrations'); } },
-    { label: 'Onboard pharmacy', detail: 'Create a new client workspace', icon: <Plus size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); setShowOnboarding(true); } },
+    { label: 'Onboard pharmacy', detail: 'Create a new pharmacy workspace', icon: <Plus size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); setShowOnboarding(true); } },
   ];
 
   const tenantReadiness = (organisationId: string) => {
@@ -456,16 +721,16 @@ export default function AdminPortal() {
         <a className="skip-link" href="#admin-main-content">Skip to main content</a>
         <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
         <div className="app-main">
-          <WorkspacePageHeader section="Client workspace" context="HHH administration" title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} contextControl={<div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div>} />
+          <WorkspacePageHeader section="Pharmacy workspace" context="HHH administration" title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} contextControl={<div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div>} />
           <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
-          <button className="btn btn-sm admin-detail-back" onClick={() => setSelectedOrganisationId(null)}><ArrowLeft size={14} /> Back to client directory</button>
+          <button className="btn btn-sm admin-detail-back" onClick={() => setSelectedOrganisationId(null)}><ArrowLeft size={14} /> Back to pharmacy directory</button>
 
           <section className="admin-client-heading">
-            <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Client account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
+            <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Pharmacy account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
             <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><strong>{readiness.percent}% setup complete</strong><button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
           </section>
 
-          <SummaryTiles className="summary-tiles--compact" label="Client account summary" items={[
+          <SummaryTiles className="summary-tiles--compact" label="Pharmacy account summary" items={[
             { label: 'Patients', value: new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size, detail: 'attributed records' },
             { label: 'Access', value: selectedOrganisation.staffCount, detail: 'staff accounts' },
             { label: 'Readiness', value: `${readiness.ready}/${readiness.total}`, detail: 'steps complete' },
@@ -494,7 +759,7 @@ export default function AdminPortal() {
                 <label>Primary colour<span><input type="color" value={selectedOrganisation.brand.primary} disabled /><code>{selectedOrganisation.brand.primary}</code></span></label>
                 <label>Automatic secondary<span className="derived-colour"><i style={{ background: tenantTheme.secondary }} /><code>{tenantTheme.secondary}</code><small>Derived from primary</small></span></label>
               </div>
-              <div className="generated-palette" aria-label="Automatically generated tenant palette"><span style={{ background: tenantTheme.primary }} title="Primary" /><span style={{ background: tenantTheme.secondary }} title="Secondary" /><span style={{ background: tenantTheme.primaryMuted }} title="Muted brand" /><span style={{ background: tenantTheme.primarySoft }} title="Soft surface" /><span style={{ background: tenantTheme.sidebar }} title="Navigation" /></div>
+              <div className="generated-palette" aria-label="Automatically generated pharmacy palette"><span style={{ background: tenantTheme.primary }} title="Primary" /><span style={{ background: tenantTheme.secondary }} title="Secondary" /><span style={{ background: tenantTheme.primaryMuted }} title="Muted brand" /><span style={{ background: tenantTheme.primarySoft }} title="Soft surface" /><span style={{ background: tenantTheme.sidebar }} title="Navigation" /></div>
               <p className="theme-help">Secondary, soft surfaces, navigation and readable text colours update automatically. Success, warning and error colours remain consistent across every pharmacy.</p>
               <div className="tenant-brand-preview" style={{ borderTopColor: tenantTheme.primary, background: tenantTheme.surfaceTint }}><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><span><strong>{selectedOrganisation.brand.portalName}</strong><small>Patient and pharmacy workspace preview</small></span><button style={{ background: tenantTheme.primary, color: tenantTheme.onPrimary }}>Primary action</button><button className="preview-secondary" style={{ background: tenantTheme.secondary, color: tenantTheme.onSecondary }}>Secondary</button></div>
             </section>
@@ -502,7 +767,7 @@ export default function AdminPortal() {
 
           <div className="admin-detail-grid admin-config-grid">
             <section className="card admin-detail-card">
-              <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Tenant modules</h2></div>
+              <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Pharmacy modules</h2></div>
               <p className="admin-card-intro">Enable only the capabilities included in this pharmacy’s service.</p>
               <div className="admin-module-list">
                 {(Object.keys(MODULE_LABELS) as TenantModule[]).map(module => <label key={module}><span><strong>{MODULE_LABELS[module]}</strong><small>{selectedOrganisation.modules[module] ? 'Available to pharmacy staff' : 'Hidden from navigation'}</small></span><input type="checkbox" checked={selectedOrganisation.modules[module]} disabled /></label>)}
@@ -511,7 +776,7 @@ export default function AdminPortal() {
 
             <section className="card admin-detail-card admin-detail-assets">
               <div className="admin-detail-card-title"><Link2 size={18} /><h2>Eligibility form and content assets</h2></div>
-              <p>Every submission through this hosted URL is permanently attributed to this client token.</p>
+              <p>Every submission through this hosted URL is permanently attributed to this pharmacy token.</p>
               <div className="resource-url">{formUrl}</div>
               <div className="flex gap-sm flex-wrap"><button className="btn btn-primary btn-sm" onClick={async () => { await navigator.clipboard.writeText(formUrl); dispatch({ type: 'ADD_TOAST', message: 'Eligibility link copied.', toastType: 'success' }); }}><Copy size={13} /> Copy link</button><a className="btn btn-sm" href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Preview form</a><button className="btn btn-sm" onClick={() => void downloadContentPack(selectedOrganisation)}><FileArchive size={13} /> Content pack</button></div>
             </section>
@@ -534,7 +799,7 @@ export default function AdminPortal() {
           </section>
           </div>
         </div>
-        <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a client, register or platform action…" />
+        <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a pharmacy, patient or platform action…" />
       </div>
     );
   }
@@ -543,21 +808,21 @@ export default function AdminPortal() {
     <>
       <div className="admin-workspace-toolbar"><span><p className="section-label">Portfolio position</p><strong>Multi-pharmacy operations</strong><small>Provision workspaces and control each go-live gate.</small></span><button className="btn btn-primary" onClick={() => setShowOnboarding(true)}><Plus size={15} /> Onboard pharmacy</button></div>
       <SummaryTiles label="Portfolio summary" items={[
-        { label: 'Portfolio', value: state.organisations.length, detail: 'pharmacy clients' },
-        { label: 'Operating', value: liveCount, detail: 'live tenants' },
+        { label: 'Portfolio', value: state.organisations.length, detail: 'pharmacies' },
+        { label: 'Operating', value: liveCount, detail: 'live pharmacies' },
         { label: 'Patient reach', value: allPatients.length, detail: 'attributed records' },
         { label: 'Readiness', value: remainingSetupSteps, detail: 'steps outstanding' },
       ]} />
 
       {remainingSetupSteps > 0 && <section className="card admin-attention-strip">
-        <div><AlertCircle size={18} /><span><strong>Some pharmacy setup is still incomplete</strong><small>{remainingSetupSteps} step{remainingSetupSteps === 1 ? '' : 's'} remain across the current pharmacy clients.</small></span></div>
+        <div><AlertCircle size={18} /><span><strong>Some pharmacy setup is still incomplete</strong><small>{remainingSetupSteps} step{remainingSetupSteps === 1 ? '' : 's'} remain across the current pharmacies.</small></span></div>
         <button className="btn btn-sm" onClick={() => setView('compliance')}>Open readiness</button>
       </section>}
 
       <section className="card admin-directory">
-        <div className="admin-directory-head"><div><h2>Pharmacy clients</h2><p>Account records, tenant configuration and patient attribution.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or GPhC number" /></label></div>
+        <div className="admin-directory-head"><div><h2>Pharmacy directory</h2><p>Account records, workspace configuration and patient attribution.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or GPhC number" /></label></div>
         <div className="admin-org-list">
-          {filteredOrganisations.length === 0 && <div className="empty-state">{state.organisations.length === 0 ? 'No pharmacy clients have been onboarded yet.' : 'No pharmacy clients match this search.'}</div>}
+          {filteredOrganisations.length === 0 && <div className="empty-state">{state.organisations.length === 0 ? 'No pharmacies have been onboarded yet.' : 'No pharmacies match this search.'}</div>}
           {filteredOrganisations.map(org => {
             const submissions = submissionsByOrganisation.get(org.id) ?? [];
             const patients = crmByOrganisation.get(org.id) ?? [];
@@ -567,7 +832,7 @@ export default function AdminPortal() {
                 <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(org.brand.primary)}>{org.logoText}</div><div><strong>{org.name}</strong><span>GPhC {org.gphcNumber} · {org.websiteDomains.join(', ') || 'domain pending'}</span></div></div>
                 <div className="admin-org-metric"><strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong><span>Patients</span></div>
                 <div className="readiness-cell"><div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} gates</span></div><div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div></div>
-                <div className="admin-org-actions"><span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage client</button></div>
+                <div className="admin-org-actions"><span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button></div>
               </article>
             );
           })}
@@ -581,35 +846,44 @@ export default function AdminPortal() {
     const reviewed = state.submissions.filter(submission => submission.status === 'Approved' || submission.status === 'Declined');
     const row = (submission: typeof state.submissions[number]) => {
       const organisation = state.organisations.find(org => org.id === submission.organisationId);
-      const hasCall = submission.calls.length > 0;
+      const recordsComplete = submission.recordsCheck?.status === 'completed' || submission.calls.length > 0;
+      const referralComplete = submission.referral?.status === 'completed' || submission.status === 'Approved';
+      const emailStatus = submission.emailDelivery?.status ?? 'not_sent';
+      const openAction = (action: 'records' | 'complete' | 'decline' | 'email') => {
+        setReferralNotes(action === 'records' ? submission.recordsCheck?.notes ?? '' : action === 'complete' || action === 'decline' ? submission.decisionNote ?? '' : '');
+        setReferralError(null);
+        setReferralDialog({ id: submission.id, organisationId: submission.organisationId, patientName: submission.name, action });
+      };
       return (
         <tr key={submission.id}>
           <td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} /></td>
           <td><strong>{organisation?.tradingName ?? submission.pharmacyName}</strong><small>Token-attributed pharmacy</small></td>
           <td><strong>{submission.condition}</strong><small>{submission.tried2 ? 'Two treatments reported' : 'Treatment history requires review'} · {submission.psychExclusion ? 'Exclusion flagged' : 'No psychosis exclusion reported'}</small></td>
-          <td><strong>{submission.calls.length}</strong><small>{hasCall ? `Last call ${new Date(submission.calls.at(-1)!.ts).toLocaleDateString('en-GB')}` : 'Patient call required before decision'}</small></td>
+          <td><strong>{recordsComplete ? 'Completed' : 'Pending'}</strong><small>{submission.recordsCheck?.completedAt ? new Date(submission.recordsCheck.completedAt).toLocaleDateString('en-GB') : 'Patient call and records check required'}</small></td>
           <td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(submission.status)}`}>{onboardingStatusLabel(submission.status)}</span>{submission.reviewedBy && <small>{submission.reviewedBy} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</div></td>
           <td>
-            {submission.status === 'New' || submission.status === 'Under HHH review' ? <div className="admin-referral-actions">
-              <button className="btn btn-sm" onClick={() => { dispatch({ type: 'LOG_CALL', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `Patient call recorded for ${submission.name}.`, toastType: 'success' }); }}><PhoneCall size={13} /> Log call</button>
-              <button className="btn btn-sm btn-primary" disabled={!hasCall} onClick={() => { dispatch({ type: 'APPROVE_ONBOARDING', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `${submission.name} approved for HHH programme onboarding and released to ${organisation?.tradingName ?? 'the pharmacy'}.`, toastType: 'success' }); }}><UserCheck size={13} /> Approve</button>
-              <button className="btn btn-sm" disabled={!hasCall} onClick={() => { dispatch({ type: 'DECLINE_ONBOARDING', subId: submission.id }); dispatch({ type: 'ADD_TOAST', message: `${submission.name} was not approved for programme onboarding.`, toastType: 'warning' }); }}><UserX size={13} /> Decline</button>
-            </div> : <small>{submission.decisionNote}</small>}
+            <div className="admin-referral-actions">
+              {!recordsComplete && <button className="btn btn-sm" onClick={() => openAction('records')}><PhoneCall size={13} /> Log call / records check</button>}
+              {!referralComplete && submission.status !== 'Declined' && <button className="btn btn-sm btn-primary" disabled={!recordsComplete} onClick={() => openAction('complete')}><UserCheck size={13} /> Complete referral</button>}
+              {!referralComplete && submission.status !== 'Declined' && <button className="btn btn-sm" disabled={!recordsComplete} onClick={() => openAction('decline')}><UserX size={13} /> Decline</button>}
+              {referralComplete && emailStatus === 'not_sent' && <button className="btn btn-sm btn-primary" onClick={() => openAction('email')}><ExternalLink size={13} /> Send email</button>}
+              {referralComplete && emailStatus !== 'not_sent' && <span className={`pill ${emailStatus === 'failed' ? 'pill-red' : 'pill-green'}`}>Email {emailStatus.replace('_', ' ')}</span>}
+            </div>
           </td>
         </tr>
       );
     };
     return (
       <>
-        <div className="admin-workspace-toolbar"><span><p className="section-label">Programme gate</p><strong>Decision queue</strong><small>A recorded patient call is required before approval or decline.</small></span><span className="pill pill-amber"><PhoneCall size={13} /> {pending.length} awaiting decision</span></div>
+        <div className="admin-workspace-toolbar"><span><p className="section-label">Programme gate</p><strong>Referral workflow</strong><small>Record the call/check, complete the referral, then send the patient email as a separate action.</small></span><span className="pill pill-amber"><PhoneCall size={13} /> {pending.length} awaiting decision</span></div>
         <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Approval boundary</strong><p>HHH approval authorises programme onboarding only. It does not diagnose, prescribe, replace a doctor’s prescription, or replace the pharmacy’s legal and professional checks before dispensing.</p></div></section>
         <section className="card admin-patient-table admin-referral-register">
-          <div className="admin-directory-head"><div><h2>Awaiting HHH review</h2><p>A patient call is required before an approval or decline decision can be recorded.</p></div></div>
-          {pending.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>Patient calls</th><th>Status</th><th>Decision</th></tr></thead><tbody>{pending.map(row)}</tbody></table></div> : <div className="empty-state">No onboarding decisions are waiting.</div>}
+          <div className="admin-directory-head"><div><h2>Awaiting HHH review</h2><p>The patient call and records outcome must be recorded before referral completion.</p></div></div>
+          {pending.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>Call / check</th><th>Referral</th><th>Actions</th></tr></thead><tbody>{pending.map(row)}</tbody></table></div> : <div className="empty-state">No onboarding decisions are waiting.</div>}
         </section>
         <section className="card admin-patient-table admin-referral-register">
           <div className="admin-directory-head"><div><h2>Decision history</h2><p>Approved patients become available only inside their attributed pharmacy workspace.</p></div></div>
-          {reviewed.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>Patient calls</th><th>Status</th><th>Decision record</th></tr></thead><tbody>{reviewed.map(row)}</tbody></table></div> : <div className="empty-state">No decisions have been recorded.</div>}
+          {reviewed.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>Call / check</th><th>Referral</th><th>Email</th></tr></thead><tbody>{reviewed.map(row)}</tbody></table></div> : <div className="empty-state">No decisions have been recorded.</div>}
         </section>
       </>
     );
@@ -617,27 +891,107 @@ export default function AdminPortal() {
 
   const renderPatients = () => (
     <>
-      <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-client register</p><strong>Patient index</strong><small>Operational oversight of pharmacy attribution.</small></span><span className="pill pill-info"><Users size={13} /> {allPatients.length} unique records</span></div>
+      <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-pharmacy register</p><strong>Patient index</strong><small>Operational oversight of pharmacy attribution.</small></span><span className="pill pill-info"><Users size={13} /> {allPatients.length} unique records</span></div>
       <section className="card admin-patient-table admin-master-patients">
         <div className="admin-directory-head"><div><h2>Patient register</h2><p>Operational oversight only. Every access must be authenticated and audited in production.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB or pharmacy" /></label></div>
-        <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Acquisition source</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown tenant'}</button><small>{org?.gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.source}</td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB') : '—'}</td></tr>; })}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Acquisition source</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown pharmacy'}</button><small>{org?.gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.source}</td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB') : '—'}</td></tr>; })}</tbody></table></div>
       </section>
     </>
   );
+
+  const renderFinance = () => {
+    const newReferralEvents = filteredReferralFeeEvents.filter(event => event.kind === 'new-referral');
+    const annualEvents = filteredReferralFeeEvents.filter(event => event.kind === 'annual-patient');
+    const totalAccrued = filteredReferralFeeEvents.reduce((total, event) => total + event.amount, 0);
+    const patientsWithFees = new Set(filteredReferralFeeEvents.map(event => event.patientKey)).size;
+    const pharmacyPositions = state.organisations
+      .map(organisation => {
+        const events = filteredReferralFeeEvents.filter(event => event.organisationId === organisation.id);
+        return {
+          organisation,
+          newReferrals: events.filter(event => event.kind === 'new-referral').length,
+          annualFees: events.filter(event => event.kind === 'annual-patient').length,
+          newReferralAmount: events.filter(event => event.kind === 'new-referral').reduce((sum, event) => sum + event.amount, 0),
+          annualFeeAmount: events.filter(event => event.kind === 'annual-patient').reduce((sum, event) => sum + event.amount, 0),
+          patients: new Set(events.map(event => event.patientKey)).size,
+          total: events.reduce((sum, event) => sum + event.amount, 0),
+        };
+      })
+      .filter(position => financeOrganisationId === 'all' ? position.total > 0 : position.organisation.id === financeOrganisationId);
+
+    return (
+      <>
+        <div className="admin-workspace-toolbar"><span><p className="section-label">HHH referral finance</p><strong>Referral fee ledger</strong><small>Accrued HHH fees only. Pharmacy prescription revenue and wholesale performance remain inside each pharmacy workspace.</small></span><div className="flex gap-sm flex-wrap"><span className="pill pill-info"><PoundSterling size={13} /> £50 + £40 model</span><button type="button" className="btn btn-sm" onClick={() => setAdminFinanceRefresh(value => value + 1)} disabled={adminFinanceLoading}><RefreshCw size={13} className={adminFinanceLoading ? 'spin' : ''} /> Refresh</button></div></div>
+
+        <section className="card admin-finance-filters" aria-label="Referral finance filters">
+          <div className="admin-finance-filter">
+            <label htmlFor="finance-pharmacy">Pharmacy</label>
+            <select id="finance-pharmacy" className="input" value={financeOrganisationId} onChange={event => setFinanceOrganisationId(event.target.value)}>
+              <option value="all">All pharmacies</option>
+              {state.organisations.map(organisation => <option value={organisation.id} key={organisation.id}>{organisation.tradingName}</option>)}
+            </select>
+          </div>
+          <div className="admin-finance-filter">
+            <label htmlFor="finance-patient">Patient</label>
+            <select id="finance-patient" className="input" value={financePatientKey} onChange={event => setFinancePatientKey(event.target.value)}>
+              <option value="all">All patients</option>
+              {financePatients.map(patient => <option value={patient.key} key={patient.key}>{patient.name} · {patient.email}</option>)}
+            </select>
+          </div>
+          <div className="admin-finance-filter">
+            <label htmlFor="finance-period">Period</label>
+            <select id="finance-period" className="input" value={financePeriod} onChange={event => setFinancePeriod(event.target.value as typeof financePeriod)}>
+              <option value="all">All time</option>
+              <option value="month">Specific month</option>
+              <option value="year">Specific year</option>
+            </select>
+          </div>
+          {financePeriod === 'month' && <div className="admin-finance-filter">
+            <label htmlFor="finance-month">Month</label>
+            <input id="finance-month" className="input" type="month" value={financeMonth} onChange={event => setFinanceMonth(event.target.value)} />
+          </div>}
+          {financePeriod === 'year' && <div className="admin-finance-filter">
+            <label htmlFor="finance-year">Year</label>
+            <input id="finance-year" className="input" type="number" min="2000" max="2200" step="1" value={financeYear} onChange={event => setFinanceYear(event.target.value)} />
+          </div>}
+        </section>
+
+        {adminFinanceError && <div className="banner banner-amber" role="alert"><AlertCircle size={16} /><span><strong>Referral finance is temporarily unavailable</strong><small>{adminFinanceError}</small></span><button className="btn btn-sm" type="button" onClick={() => setAdminFinanceRefresh(value => value + 1)}>Try again</button></div>}
+        {adminFinanceLoading && !adminFinanceReport && !isLocalPortalPreview && <div className="empty-state admin-finance-loading">Loading the referral fee ledger…</div>}
+
+        <SummaryTiles label="Referral finance summary" items={[
+          { label: 'Total accrued', value: referralFeeFormatter.format(totalAccrued), detail: `${filteredReferralFeeEvents.length} fee event${filteredReferralFeeEvents.length === 1 ? '' : 's'}` },
+          { label: 'New referrals', value: referralFeeFormatter.format(newReferralEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${newReferralEvents.length} × £50` },
+          { label: 'Annual fees', value: referralFeeFormatter.format(annualEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${annualEvents.length} × £40` },
+          { label: 'Patients', value: patientsWithFees, detail: 'with accrued fees' },
+        ]} />
+
+        <section className="card admin-patient-table admin-finance-position">
+          <div className="admin-directory-head"><div><h2>Pharmacy fee position</h2><p>Referral fees attributed to each pharmacy for the selected reporting period.</p></div><TrendingUp size={20} /></div>
+          {pharmacyPositions.length === 0 ? <div className="empty-state">No referral fees match the selected filters.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Patients</th><th>New referrals</th><th>Annual fees</th><th>Total accrued</th></tr></thead><tbody>{pharmacyPositions.map(position => <tr key={position.organisation.id}><td><button className="table-link" onClick={() => setFinanceOrganisationId(position.organisation.id)}>{position.organisation.tradingName}</button><small>GPhC {position.organisation.gphcNumber}</small></td><td>{position.patients}</td><td><strong>{referralFeeFormatter.format(position.newReferralAmount)}</strong><small>{position.newReferrals} × £50</small></td><td><strong>{referralFeeFormatter.format(position.annualFeeAmount)}</strong><small>{position.annualFees} × £40</small></td><td><strong>{referralFeeFormatter.format(position.total)}</strong></td></tr>)}</tbody></table></div>}
+        </section>
+
+        <section className="card admin-patient-table admin-finance-ledger">
+          <div className="admin-directory-head"><div><h2>Fee event register</h2><p>Patient-level accrual history. This is an operational ledger, not an invoice or payment-receipt register.</p></div></div>
+          {filteredReferralFeeEvents.length === 0 ? <div className="empty-state">No fee events match the selected filters.</div> : <div className="table-wrap"><table><thead><tr><th>Accrued</th><th>Patient</th><th>Pharmacy</th><th>Fee event</th><th>Amount</th></tr></thead><tbody>{filteredReferralFeeEvents.map(event => <tr key={event.id}><td><strong>{event.occurredAt.toLocaleDateString('en-GB')}</strong><small>{event.occurredAt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</small></td><td><CompactPatientCell name={event.patientName} email={event.patientEmail} /></td><td>{event.pharmacyName}</td><td><span className={`pill ${event.kind === 'new-referral' ? 'pill-green' : 'pill-info'}`}>{event.kind === 'new-referral' ? 'Completed referral' : event.anniversary ? `Annual fee · year ${event.anniversary}` : 'Annual patient fee'}</span></td><td><strong>{referralFeeFormatter.format(event.amount)}</strong></td></tr>)}</tbody></table></div>}
+        </section>
+      </>
+    );
+  };
 
   const renderCompliance = () => (
     <>
       <div className="admin-workspace-toolbar"><span><p className="section-label">Operational setup</p><strong>Go-live position</strong><small>Six required steps per pharmacy.</small></span><span className="pill pill-info"><ClipboardCheck size={13} /> Six-step checklist</span></div>
       <SummaryTiles label="Readiness summary" items={[
-        { label: 'Pharmacies', value: state.organisations.length, detail: 'client accounts' },
+        { label: 'Pharmacies', value: state.organisations.length, detail: 'pharmacy accounts' },
         { label: 'Fully ready', value: Object.values(setupByOrganisation).filter(status => status.completed).length, detail: 'all steps complete' },
         { label: 'Completed', value: Object.values(setupByOrganisation).reduce((total, status) => total + status.completedCount, 0), detail: 'steps recorded' },
         { label: 'Waiting', value: remainingSetupSteps, detail: 'actions remaining' },
       ]} />
       <section className="card admin-patient-table compliance-register">
-        <div className="admin-directory-head"><div><h2>Client setup progress</h2><p>Open a client to see its evidence. Pharmacy staff update their own steps; Curaleaf activation remains HHH-admin only.</p></div></div>
+        <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Open a pharmacy to see its evidence. Pharmacy staff update their own steps; Curaleaf activation remains HHH-admin only.</p></div></div>
         {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
-        {state.organisations.length === 0 ? <div className="empty-state">No pharmacy clients have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Setup progress</th><th>Next action</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const status = setupByOrganisation[organisation.id]; const readiness = tenantReadiness(organisation.id); const nextTask = SETUP_TASKS.find(definition => !status?.tasks.find(task => task.id === definition.id)?.completed); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>{readiness.percent}% ready</small></td><td><strong>{nextTask?.title ?? 'No action required'}</strong><small>{nextTask?.id === 'curaleaf_account' ? 'HHH administrator' : nextTask ? 'Pharmacy team' : 'Setup complete'}</small></td><td><span className={`pill ${status?.completed ? 'pill-green' : 'pill-amber'}`}>{status?.completed ? 'Ready' : 'In setup'}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
+        {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Setup progress</th><th>Next action</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const status = setupByOrganisation[organisation.id]; const readiness = tenantReadiness(organisation.id); const nextTask = SETUP_TASKS.find(definition => !status?.tasks.find(task => task.id === definition.id)?.completed); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>{readiness.percent}% ready</small></td><td><strong>{nextTask?.title ?? 'No action required'}</strong><small>{nextTask?.id === 'curaleaf_account' ? 'HHH administrator' : nextTask ? 'Pharmacy team' : 'Setup complete'}</small></td><td><span className={`pill ${status?.completed ? 'pill-green' : 'pill-amber'}`}>{status?.completed ? 'Ready' : 'In setup'}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
       </section>
     </>
   );
@@ -688,9 +1042,10 @@ export default function AdminPortal() {
   );
 
   const pageMeta: Record<AdminView, { title: string; subtitle: string }> = {
-    overview: { title: 'Client administration', subtitle: 'Provision tenant workspaces, monitor attribution and control each pharmacy’s go-live gate.' },
+    overview: { title: 'Pharmacy administration', subtitle: 'Provision pharmacy workspaces, monitor attribution and control each pharmacy’s go-live gate.' },
     referrals: { title: 'Patient onboarding decisions', subtitle: 'Record patient calls and release approved patients to their attributed pharmacy.' },
-    patients: { title: 'Patients and pharmacy attribution', subtitle: 'Review the cross-client patient index and its pharmacy ownership.' },
+    patients: { title: 'Patients and pharmacy attribution', subtitle: 'Review the cross-pharmacy patient index and its pharmacy ownership.' },
+    finance: { title: 'HHH referral finance', subtitle: 'Track £50 completed-referral fees and recurring £40 annual patient fees.' },
     compliance: { title: 'Pharmacy readiness', subtitle: 'Track the six setup steps required before each pharmacy begins live processing.' },
     integrations: { title: 'Platform integrations', subtitle: 'Manage Curaleaf activation and shared HHH infrastructure.' },
   };
@@ -705,12 +1060,29 @@ export default function AdminPortal() {
           {view === 'overview' && renderOverview()}
           {view === 'referrals' && renderReferrals()}
           {view === 'patients' && renderPatients()}
+          {view === 'finance' && renderFinance()}
           {view === 'compliance' && renderCompliance()}
           {view === 'integrations' && renderIntegrations()}
         </div>
       </div>
       {showOnboarding && <OnboardPharmacy onClose={() => setShowOnboarding(false)} onCreated={id => { setShowOnboarding(false); setSelectedOrganisationId(id); }} />}
-      <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a client, register or platform action…" />
+      {referralDialog && (
+        <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
+          <aside className="drawer admin-referral-drawer" role="dialog" aria-modal="true" aria-labelledby="referral-action-title">
+            <div className="drawer-header">
+              <div><p className="section-label">Patient referral</p><h2 id="referral-action-title">{referralDialog.action === 'records' ? 'Log call and records check' : referralDialog.action === 'complete' ? 'Complete referral' : referralDialog.action === 'decline' ? 'Decline referral' : 'Send patient email'}</h2></div>
+              <button className="icon-btn" disabled={referralBusy} onClick={() => setReferralDialog(null)} aria-label="Close"><X size={18} /></button>
+            </div>
+            <div className="drawer-body onboarding-form">
+              <div className="integration-boundary"><ShieldCheck size={17} /><div><strong>{referralDialog.patientName}</strong><p>{referralDialog.action === 'records' ? 'Record the outcome only. Do not upload or paste Summary Care Records or supporting health documents.' : referralDialog.action === 'email' ? 'This queues the approved referral template as a separate, audited action.' : 'This decision is recorded in the audit trail and cannot be silently changed.'}</p></div></div>
+              {referralDialog.action !== 'email' && <label>{referralDialog.action === 'records' ? 'Call / records-check notes' : 'Decision notes'}<textarea className="input" rows={6} value={referralNotes} onChange={event => setReferralNotes(event.target.value)} placeholder="Record the operational outcome without attaching health records." /></label>}
+              {referralError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {referralError}</div>}
+              <div className="drawer-actions"><button type="button" className="btn" disabled={referralBusy} onClick={() => setReferralDialog(null)}>Cancel</button><button type="button" className={`btn ${referralDialog.action === 'decline' ? 'btn-danger' : 'btn-primary'}`} disabled={referralBusy || (referralDialog.action === 'records' && !referralNotes.trim())} onClick={() => void runReferralAction()}>{referralBusy ? 'Saving…' : referralDialog.action === 'records' ? 'Save check' : referralDialog.action === 'complete' ? 'Complete referral' : referralDialog.action === 'decline' ? 'Record decline' : 'Queue patient email'}</button></div>
+            </div>
+          </aside>
+        </div>
+      )}
+      <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a pharmacy, patient or platform action…" />
     </div>
   );
 }
