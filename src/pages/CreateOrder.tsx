@@ -34,9 +34,10 @@ export default function CreateOrder() {
   const [patientActiveIndex, setPatientActiveIndex] = useState(0);
   const [confirmingDraftDelete, setConfirmingDraftDelete] = useState(false);
   const [quoteBusy, setQuoteBusy] = useState(false);
-  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteError, setQuoteError] = useState<{ title: string; detail: string } | null>(null);
   const [quotedSignature, setQuotedSignature] = useState<string | null>(null);
   const [quoteSummary, setQuoteSummary] = useState<{ shippingPrice: number; taxRate: number } | null>(null);
+  const [quotedUnavailableProductIds, setQuotedUnavailableProductIds] = useState<string[]>([]);
   const [uploadingRxId, setUploadingRxId] = useState<number | null>(null);
   const [readingRxId, setReadingRxId] = useState<number | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -57,6 +58,7 @@ export default function CreateOrder() {
     setQuoteError(null);
     setQuotedSignature(null);
     setQuoteSummary(null);
+    setQuotedUnavailableProductIds([]);
     setEditingClinicFormularyRxId(null);
   }, [activeOrder?.id]);
 
@@ -89,8 +91,18 @@ export default function CreateOrder() {
     : null;
   const currentQuoteItems = activeOrder?.prescriptions.flatMap(rx => rx.items.map(item => ({ packId: item.productId, quantity: item.qty }))) ?? [];
   const currentQuoteSignature = JSON.stringify(currentQuoteItems.slice().sort((a, b) => a.packId.localeCompare(b.packId)));
+
+  useEffect(() => {
+    setQuoteError(null);
+    setQuotedSignature(null);
+    setQuoteSummary(null);
+    setQuotedUnavailableProductIds([]);
+  }, [currentQuoteSignature]);
+
   const quoteCurrent = wholesaleKnown && quotedSignature === currentQuoteSignature;
-  const readyForPayment = prescriptionReady && (!requiresLiveCuraleafEvidence || quoteCurrent);
+  const currentUnavailableProductIds = quotedSignature === currentQuoteSignature ? quotedUnavailableProductIds : [];
+  const quoteAvailable = quoteCurrent && currentUnavailableProductIds.length === 0;
+  const readyForPayment = prescriptionReady && (!requiresLiveCuraleafEvidence || quoteAvailable);
 
   const initials = (name: string) => name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2);
   const gmcNumber = (value?: string) => {
@@ -130,6 +142,7 @@ export default function CreateOrder() {
     });
     setQuotedSignature(null);
     setQuoteSummary(null);
+    setQuotedUnavailableProductIds([]);
     setQuoteError(null);
     return true;
   };
@@ -208,7 +221,7 @@ export default function CreateOrder() {
     setCheckoutBusy(true);
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live') {
-        if (!quoteCurrent) throw new Error('Refresh the Curaleaf quote before creating the live order.');
+        if (!quoteAvailable) throw new Error('A complete in-stock Curaleaf quote is required before creating the live order.');
         const lineItems = activeOrder.prescriptions.flatMap(rx => rx.items.map(item => ({
           packId: item.productId,
           quantity: item.qty,
@@ -328,10 +341,25 @@ export default function CreateOrder() {
         : state.workspaceMode === 'live'
           ? await getCuraleafQuote(state.currentOrganisationId, currentQuoteItems)
           : await getCuraleafTrainingQuote(state.currentOrganisationId, currentQuoteItems);
-      if (!quote.items.length) {
-        throw new Error(state.workspaceMode === 'training'
-          ? 'The Curaleaf test environment did not return quote lines for these packs. You can continue the training workflow; no supplier order will be sent.'
-          : 'Curaleaf has not returned quote prices yet. Your draft is unchanged; wait and try again, or contact your HHH administrator if this continues.');
+      const quotedPackIds = new Set(quote.items.map(item => item.packId));
+      const missingPackIds = [...new Set(currentQuoteItems.map(item => item.packId).filter(packId => !quotedPackIds.has(packId)))];
+      const lineNames = (packIds: string[]) => [...new Set(
+        activeOrder.prescriptions.flatMap(rx => rx.items)
+          .filter(item => packIds.includes(item.productId))
+          .map(item => item.name),
+      )];
+      if (missingPackIds.length) {
+        const names = lineNames(missingPackIds);
+        setQuotedSignature(null);
+        setQuoteSummary(null);
+        setQuotedUnavailableProductIds([]);
+        setQuoteError({
+          title: 'Selected pack not quoted by Curaleaf',
+          detail: state.workspaceMode === 'training'
+            ? `Curaleaf returned no wholesale or availability line for ${names.join(', ') || 'the selected pack'}. The draft is unchanged and no supplier order has been sent.`
+            : `Curaleaf returned no wholesale or availability line for ${names.join(', ') || 'the selected pack'}, although it remains listed in the catalogue. Keep the draft and retry later, or ask your HHH administrator to raise the pack with Curaleaf.`,
+        });
+        return;
       }
       dispatch({
         type: 'APPLY_CURALEAF_QUOTE',
@@ -342,12 +370,29 @@ export default function CreateOrder() {
           inStock: item.inStock,
         })),
       });
+      const unavailableProductIds = quote.items.filter(item => !item.inStock).map(item => item.packId);
       setQuotedSignature(currentQuoteSignature);
       setQuoteSummary({ shippingPrice: Number(quote.shippingPrice) || 0, taxRate: Number(quote.taxRate) || 0 });
-      dispatch({ type: 'ADD_TOAST', message: `Curaleaf quote refreshed for ${quote.items.length} product line${quote.items.length === 1 ? '' : 's'}.`, toastType: 'success' });
+      setQuotedUnavailableProductIds(unavailableProductIds);
+      if (unavailableProductIds.length) {
+        const names = lineNames(unavailableProductIds);
+        setQuoteError({
+          title: 'Selected pack is currently unavailable',
+          detail: `Curaleaf returned pricing for ${names.join(', ') || 'the selected pack'} but marked it out of stock. Payment remains blocked; keep the draft and refresh later.`,
+        });
+        dispatch({ type: 'ADD_TOAST', message: 'Curaleaf returned pricing, but one or more selected packs are out of stock.', toastType: 'info' });
+      } else {
+        setQuoteError(null);
+        dispatch({ type: 'ADD_TOAST', message: `Curaleaf quote refreshed for ${quote.items.length} product line${quote.items.length === 1 ? '' : 's'}.`, toastType: 'success' });
+      }
     } catch (error) {
       setQuoteSummary(null);
-      setQuoteError(error instanceof Error ? error.message : 'The Curaleaf quote could not be loaded. Wait and retry, or contact your HHH administrator if this continues.');
+      setQuotedSignature(null);
+      setQuotedUnavailableProductIds([]);
+      setQuoteError({
+        title: 'Quote request could not be completed',
+        detail: error instanceof Error ? error.message : 'The Curaleaf quote could not be loaded. Wait and retry, or contact your HHH administrator if this continues.',
+      });
     } finally {
       setQuoteBusy(false);
     }
@@ -641,9 +686,9 @@ export default function CreateOrder() {
                 <dl className="rx-order-totals"><div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div><div><dt>Wholesale total</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div><div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div><div><dt>Product margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${orderMargin}%`}</dd></div></dl>
                 <div className={`rx-checkout-readiness${quoteError ? ' has-error' : ''}`}>
                   <span className="section-label">{state.workspaceMode === 'training' ? 'Curaleaf test quote' : 'Live Curaleaf quote'}</span>
-                  <span className={quoteCurrent ? 'complete' : ''}>{quoteCurrent ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{quoteCurrent ? 'Wholesale and stock verified' : state.workspaceMode === 'training' ? 'Optional availability and wholesale check' : 'Required for current quantities'}</span>
-                  {quoteSummary && quoteCurrent ? <span className="complete"><CheckCircle size={13} /> Shipping {money(quoteSummary.shippingPrice)} · tax {quoteSummary.taxRate}%</span> : null}
-                  {quoteError ? <ProviderStatusNotice title="Quote not available yet" detail={quoteError} /> : null}
+                  <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{quoteAvailable ? 'Wholesale and stock verified' : quoteCurrent ? 'Pricing returned · stock unavailable' : state.workspaceMode === 'training' ? 'Optional availability and wholesale check' : 'Required for current quantities'}</span>
+                  {quoteSummary && quoteCurrent ? <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />} Shipping {money(quoteSummary.shippingPrice)} · tax {quoteSummary.taxRate}%</span> : null}
+                  {quoteError ? <ProviderStatusNotice title={quoteError.title} detail={quoteError.detail} /> : null}
                   <button type="button" className="btn btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Requesting quote…' : quoteCurrent ? 'Refresh Curaleaf quote' : 'Get Curaleaf quote'}</button>
                 </div>
                 <div className="rx-dispensing-charge">

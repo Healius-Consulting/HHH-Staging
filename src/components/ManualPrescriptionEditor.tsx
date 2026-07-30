@@ -178,6 +178,7 @@ export default function ManualPrescriptionEditor({
           const wholesaleTotal = item.cost === null ? null : item.cost * item.qty;
           const contribution = wholesaleTotal === null ? null : patientTotal - wholesaleTotal;
           const margin = wholesaleTotal === null || patientTotal <= 0 ? null : Math.round((contribution! / patientTotal) * 100);
+          const unavailable = product?.availability === 'out';
           return (
             <article className="manual-pack-card" key={item.productId}>
               <header className="manual-pack-card__header">
@@ -186,7 +187,7 @@ export default function ManualPrescriptionEditor({
                   <small>Curaleaf formulary pack</small>
                   <strong>{item.name}</strong>
                 </span>
-                <span className="pill pill-green">Active</span>
+                <span className={`pill ${unavailable ? 'pill-amber' : 'pill-green'}`}>{unavailable ? 'Unavailable after quote' : 'Active'}</span>
                 <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => onRemoveItem(item.productId)}><Trash2 size={14} /></button>
               </header>
 
