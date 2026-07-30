@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, Plus, RefreshCw, Search, Send, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
 import {
@@ -41,6 +41,7 @@ export default function CreateOrder() {
   const [readingRxId, setReadingRxId] = useState<number | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [editingClinicFormularyRxId, setEditingClinicFormularyRxId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!activeOrder?.prescriptions.length) return setSelectedRxId(null);
@@ -56,6 +57,7 @@ export default function CreateOrder() {
     setQuoteError(null);
     setQuotedSignature(null);
     setQuoteSummary(null);
+    setEditingClinicFormularyRxId(null);
   }, [activeOrder?.id]);
 
   const matchingPatients = useMemo(() => {
@@ -450,6 +452,24 @@ export default function CreateOrder() {
     setConfirmingDraftDelete(false);
   };
 
+  const renderFormularyEditor = () => {
+    if (!selectedRx || !activeOrder) return null;
+    return (
+      <ManualPrescriptionEditor
+        view="formulary"
+        prescription={selectedRx}
+        catalogue={state.catalogue}
+        onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
+        onPatientIdentityChange={(name, dob) => dispatch({ type: 'SET_RX_PATIENT_IDENTITY', orderId: activeOrder.id, rxId: selectedRx.id, name, dob })}
+        onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
+        onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
+        onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}
+        onUpdateQuantity={(productId, qty) => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId, qty })}
+        onUpdateUnits={(productId, unitsNeededCount) => dispatch({ type: 'UPDATE_ITEM_UNITS', orderId: activeOrder.id, rxId: selectedRx.id, productId, unitsNeededCount })}
+      />
+    );
+  };
+
   return (
     <div className="page-body rx-workbench">
       <section className="rx-draft-bar" aria-label="Prescription draft sessions">
@@ -521,8 +541,8 @@ export default function CreateOrder() {
                     <div className="rx-record-evidence">
                       <div className="rx-record-evidence__heading"><span><small>Editing</small><strong>Prescription {selectedRxIndex + 1}</strong></span>{activeOrder.prescriptions.length > 1 && <button type="button" className="icon-button danger" aria-label={`Delete prescription ${selectedRxIndex + 1}`} title="Delete prescription record" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Removed Rx ${selectedRxIndex + 1}.`, toastType: 'info' }); }}><Trash2 size={14} /></button>}</div>
                       <div className="rx-entry-mode" role="group" aria-label="Prescription entry route">
-                        <button type="button" aria-pressed={selectedRx.entryMode === 'clinic'} onClick={() => dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' })}><FileScan size={15} /><span><strong>Curaleaf Clinic QR</strong><small>Preferred automatic route</small></span></button>
-                        <button type="button" aria-pressed={selectedRx.entryMode === 'manual'} onClick={() => dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'manual' })}><Pencil size={15} /><span><strong>Manual prescription</strong><small>Copy from the signed document</small></span></button>
+                        <button type="button" aria-pressed={selectedRx.entryMode === 'clinic'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' }); }}><FileScan size={15} /><span><strong>Curaleaf Clinic QR</strong><small>Preferred automatic route</small></span></button>
+                        <button type="button" aria-pressed={selectedRx.entryMode === 'manual'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'manual' }); }}><Pencil size={15} /><span><strong>Manual prescription</strong><small>Copy from the signed document</small></span></button>
                       </div>
                       <div className="rx-clinic-note"><FileScan size={18} aria-hidden="true" /><span><strong>{selectedRx.entryMode === 'clinic' ? 'Scan the Curaleaf Clinic barcode' : 'Attach the complete signed prescription'}</strong><span>{selectedRx.entryMode === 'clinic' ? 'Attach the complete prescription with a clear barcode. Curaleaf supplies the serial, dates, prescriber, patient identity, formula and prescribed quantity.' : 'Use this only when the Clinic QR cannot be read. Copy every detail exactly as printed before taking payment.'}</span></span></div>
                       {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
@@ -569,25 +589,21 @@ export default function CreateOrder() {
 
               <section className="rx-surface rx-formulary-stage">
                 <header className="rx-surface__header">
-                  <div><span className="rx-step-number">03</span><span><small>Formulary and packs</small><strong>{selectedRx?.entryMode === 'manual' ? 'Select the prescribed Curaleaf medicines' : 'Review the Curaleaf formula and pack match'}</strong></span></div>
-                  {selectedRx?.items.length ? <span className="pill pill-green"><CheckCircle size={11} /> {selectedRx.entryMode === 'clinic' ? 'Matched automatically' : `${selectedRx.items.length} selected`}</span> : null}
+                  <div><span className="rx-step-number">03</span><span><small>Formulary and packs</small><strong>{selectedRx?.entryMode === 'manual' ? 'Select the prescribed Curaleaf medicines' : editingClinicFormularyRxId === selectedRx?.id ? 'Correct the Curaleaf formula and pack match' : 'Review the Curaleaf formula and pack match'}</strong></span></div>
+                  <div className="rx-formulary-actions">
+                    {selectedRx?.items.length ? <span className="pill pill-green"><CheckCircle size={11} /> {selectedRx.entryMode === 'clinic' && editingClinicFormularyRxId !== selectedRx.id ? 'Matched automatically' : `${selectedRx.items.length} selected`}</span> : null}
+                    {selectedRx?.entryMode === 'clinic' && selectedRx.clinicScanId ? (
+                      editingClinicFormularyRxId === selectedRx.id ? (
+                        <button type="button" className="btn btn-sm btn-primary" onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'ADD_TOAST', message: 'Formulary corrections saved to this prescription draft.', toastType: 'success' }); }}><Save size={13} /> Save formulary</button>
+                      ) : (
+                        <button type="button" className="btn btn-sm" onClick={() => setEditingClinicFormularyRxId(selectedRx.id)}><Pencil size={13} /> Edit formulary</button>
+                      )
+                    ) : null}
+                  </div>
                 </header>
                 {state.catalogueLoading ? <ProviderStatusNotice state="loading" title="Refreshing Curaleaf products" detail="The latest patient prices and pack information are being retrieved." /> : null}
                 {state.catalogueError ? <ProviderStatusNotice title="Curaleaf information is temporarily delayed" detail="Wait and try again later. If this continues, contact your HHH administrator; pharmacy staff do not need to change the connection." /> : null}
-                {!selectedRx ? <div className="rx-inline-empty"><FileText size={20} /><span><strong>Select a prescription record</strong><small>Its prescribed medicines will appear here.</small></span></div> : selectedRx.entryMode === 'manual' ? (
-                  <ManualPrescriptionEditor
-                    view="formulary"
-                    prescription={selectedRx}
-                    catalogue={state.catalogue}
-                    onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
-                    onPatientIdentityChange={(name, dob) => dispatch({ type: 'SET_RX_PATIENT_IDENTITY', orderId: activeOrder.id, rxId: selectedRx.id, name, dob })}
-                    onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
-                    onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
-                    onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}
-                    onUpdateQuantity={(productId, qty) => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId, qty })}
-                    onUpdateUnits={(productId, unitsNeededCount) => dispatch({ type: 'UPDATE_ITEM_UNITS', orderId: activeOrder.id, rxId: selectedRx.id, productId, unitsNeededCount })}
-                  />
-                ) : (
+                {!selectedRx ? <div className="rx-inline-empty"><FileText size={20} /><span><strong>Select a prescription record</strong><small>Its prescribed medicines will appear here.</small></span></div> : selectedRx.entryMode === 'manual' || editingClinicFormularyRxId === selectedRx.id ? renderFormularyEditor() : (
                   <div className="rx-line-editor">
                     <div className="rx-line-editor__heading"><span><small>Curaleaf formulary result</small><strong>{selectedRx.items.length} prescribed product{selectedRx.items.length === 1 ? '' : 's'}</strong></span><span>Matched automatically · read-only</span></div>
                     {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileScan size={20} /><span><strong>Medicines appear after the barcode scan</strong><small>Curaleaf supplies the formula, prescribed quantity and matching pack automatically.</small></span></div> : (

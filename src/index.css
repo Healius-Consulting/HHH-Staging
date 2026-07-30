@@ -5896,6 +5896,11 @@ html[data-reduced-motion='true'] .mobile-more-sheet { animation: none; }
 }
 .rx-formulary-stage > .manual-rx-editor { padding: 16px; }
 .rx-prescription-details { align-self: stretch; }
+.rx-formulary-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+@media (max-width: 680px) {
+  .rx-formulary-stage .rx-surface__header { flex-direction: column; }
+  .rx-formulary-actions { width: 100%; justify-content: space-between; }
+}
 .rx-quantity-control {
   display: grid;
   width: 150px;
