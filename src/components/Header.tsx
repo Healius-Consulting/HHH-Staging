@@ -22,6 +22,10 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
     title: 'Payments and billing',
     subtitle: 'Track active Worldpay payment requests and review cleared transaction logs.',
   },
+  'provider-prescriptions': {
+    title: 'Provider prescriptions',
+    subtitle: 'Review the prescription records and assignment states returned for this pharmacy’s Curaleaf account.',
+  },
   orders: {
     title: 'Supplier order fulfilment',
     subtitle: 'Track B2B orders sent to Curaleaf, confirm pharmacy receipt, and retrieve invoices.',

@@ -263,15 +263,21 @@ app.post('/v1/dev/curaleaf/quote', publicReadLimit, localDevelopmentOnly, async 
 app.get('/v1/dev/curaleaf/activity', publicReadLimit, localDevelopmentOnly, async (_request, response, next) => {
   try {
     response.json(await cached('curaleaf:activity:platform', 30_000, async () => {
-      const [purchaseOrderPage, shipmentPage] = await Promise.all([
+      const [prescriberPage, prescriptionPage, purchaseOrderPage, shipmentPage] = await Promise.all([
+        curaleafPlatformList<Record<string, unknown>>('/v1/prescribers/', 'prescribers'),
+        curaleafPlatformList<Record<string, unknown>>('/v1/prescriptions/', 'prescriptions'),
         curaleafPlatformList<Record<string, unknown>>('/v1/purchase-orders/', 'purchaseOrders'),
         curaleafPlatformList<Record<string, unknown>>('/v1/shipments/', 'shipments'),
       ]);
       return {
         environment: 'test',
         fetchedAt: timestamp(),
+        prescribers: prescriberPage.records,
+        prescriptions: prescriptionPage.records,
         purchaseOrders: purchaseOrderPage.records,
         shipments: shipmentPage.records,
+        prescriberTotal: prescriberPage.totalRecordCount,
+        prescriptionTotal: prescriptionPage.totalRecordCount,
         purchaseOrderTotal: purchaseOrderPage.totalRecordCount,
         shipmentTotal: shipmentPage.totalRecordCount,
       };

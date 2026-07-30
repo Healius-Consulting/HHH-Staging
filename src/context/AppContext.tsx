@@ -228,7 +228,7 @@ export interface PlatformIntegration {
   status: 'connected' | 'pending' | 'attention';
 }
 
-export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'orders' | 'patients' | 'finance' | 'resources' | 'settings';
+export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'provider-prescriptions' | 'orders' | 'patients' | 'finance' | 'resources' | 'settings';
 
 export type PortalMode = 'gateway' | 'admin' | 'clinician';
 export type WorkspaceMode = 'training' | 'live';

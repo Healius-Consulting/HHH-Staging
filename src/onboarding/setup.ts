@@ -2,6 +2,7 @@ import type { SetupTaskId } from '../shared/contracts';
 
 export interface SetupTaskDefinition {
   id: SetupTaskId;
+  owner: 'pharmacy' | 'hhh_admin';
   title: string;
   description: string;
   evidenceLabel: string;
@@ -11,6 +12,7 @@ export interface SetupTaskDefinition {
 export const SETUP_TASKS: SetupTaskDefinition[] = [
   {
     id: 'pharmacy_profile',
+    owner: 'pharmacy',
     title: 'Confirm pharmacy profile',
     description: 'Check the registered premises, GPhC number, superintendent and collection address.',
     evidenceLabel: 'Confirmation note',
@@ -18,6 +20,7 @@ export const SETUP_TASKS: SetupTaskDefinition[] = [
   },
   {
     id: 'curaleaf_account',
+    owner: 'hhh_admin',
     title: 'Await Curaleaf activation',
     description: 'HHH submits the Curaleaf onboarding form. When Curaleaf returns the portal email and customer ID, an HHH administrator connects them securely.',
     evidenceLabel: 'Activation state',
@@ -25,6 +28,7 @@ export const SETUP_TASKS: SetupTaskDefinition[] = [
   },
   {
     id: 'payment_route',
+    owner: 'pharmacy',
     title: 'Choose a payment route',
     description: 'Worldpay is optional, but every pharmacy must choose how patient payment will be confirmed.',
     evidenceLabel: 'Payment routes',
@@ -32,6 +36,7 @@ export const SETUP_TASKS: SetupTaskDefinition[] = [
   },
   {
     id: 'pricing',
+    owner: 'pharmacy',
     title: 'Confirm charges',
     description: 'Acknowledge Curaleaf-supplied patient prices and agree the optional dispensing-charge policy for pharmacy collection orders.',
     evidenceLabel: 'Charge policy confirmation',
@@ -39,6 +44,7 @@ export const SETUP_TASKS: SetupTaskDefinition[] = [
   },
   {
     id: 'notifications',
+    owner: 'pharmacy',
     title: 'Confirm patient communications',
     description: 'Set the sender contact and approve the wording used when medication is ready for collection.',
     evidenceLabel: 'Sender name or contact',
@@ -46,6 +52,7 @@ export const SETUP_TASKS: SetupTaskDefinition[] = [
   },
   {
     id: 'operational_readiness',
+    owner: 'pharmacy',
     title: 'Complete the operational walkthrough',
     description: 'Confirm staff have rehearsed referral, prescription, payment, supplier order, goods-in and collection without real patient data.',
     evidenceLabel: 'Readiness note',

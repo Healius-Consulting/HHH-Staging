@@ -19,7 +19,7 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
   const initialPaymentEvidence = useRef(organisation.defaultPaymentRoute === 'worldpay' ? 'worldpay-enabled' : 'pharmacy-only');
   const activeDefinition = SETUP_TASKS[activeIndex];
   const activeTask = status?.tasks.find(task => task.id === activeDefinition.id);
-  const adminManaged = activeDefinition.id === 'curaleaf_account';
+  const adminManaged = activeDefinition.owner === 'hhh_admin';
 
   useEffect(() => {
     if (!status) return;
@@ -73,7 +73,13 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
             return (
               <button type="button" key={definition.id} aria-current={index === activeIndex ? 'step' : undefined} className={`setup-checklist-item ${index === activeIndex ? 'active' : ''} ${task?.completed ? 'complete' : ''}`} onClick={() => setActiveIndex(index)}>
                 {task?.completed ? <CheckCircle2 size={18} /> : <span className="setup-step-number">{index + 1}</span>}
-                <span><strong>{definition.title}</strong><small>{task?.completed ? 'Completed' : definition.id === 'curaleaf_account' ? 'HHH admin managed' : 'Required'}</small></span>
+                <span>
+                  <span className="setup-task-title-row">
+                    <strong>{definition.title}</strong>
+                    {definition.owner === 'hhh_admin' ? <em className="setup-owner-tag">HHH admin</em> : null}
+                  </span>
+                  <small>{task?.completed ? 'Completed' : definition.owner === 'hhh_admin' ? 'Managed centrally' : 'Pharmacy action'}</small>
+                </span>
               </button>
             );
           })}
@@ -82,7 +88,13 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
         <section className="card setup-step" aria-labelledby="setup-step-title">
           <div className="setup-step-heading">
             <span className="resource-icon">{activeTask?.completed ? <CheckCircle2 size={20} /> : <ClipboardCheck size={20} />}</span>
-            <div><p className="section-label">Step {activeIndex + 1} of {SETUP_TASKS.length}</p><h2 id="setup-step-title">{activeDefinition.title}</h2></div>
+            <div>
+              <p className="section-label">Step {activeIndex + 1} of {SETUP_TASKS.length}</p>
+              <span className="setup-step-title-row">
+                <h2 id="setup-step-title">{activeDefinition.title}</h2>
+                {adminManaged ? <em className="setup-owner-tag">HHH admin</em> : null}
+              </span>
+            </div>
           </div>
           <p>{activeDefinition.description}</p>
 

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useState, type RefObject } from 'react';
 import { CheckCircle, Clock, Download, FileText, Package, Printer, RefreshCw, Search, Truck, X } from 'lucide-react';
 import { PHARMACY, RX_STATUS_LABELS, lineRevenue, money, useApp, type Prescription, type RxStatus } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
-import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { getCuraleafActivity, isApiConfigured } from '../shared/api';
+import { useCuraleafActivity } from '../integrations/useCuraleafActivity';
 import type { CuraleafActivity } from '../shared/contracts';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
@@ -49,29 +48,14 @@ export default function Orders() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [printingRx, setPrintingRx] = useState<{ rx: Prescription; patientName: string } | null>(null);
   const [receiptDrafts, setReceiptDrafts] = useState<Record<string, Record<string, number>>>({});
-  const [curaleafActivity, setCuraleafActivity] = useState<CuraleafActivity | null>(null);
-  const [curaleafLoading, setCuraleafLoading] = useState(false);
-  const [curaleafError, setCuraleafError] = useState(false);
   const printDialogRef = useModalFocus<HTMLDivElement>(Boolean(printingRx), () => setPrintingRx(null));
-  const showCuraleafAccount = !isLocalPortalPreview && isApiConfigured && state.workspaceMode === 'live';
-
-  const refreshCuraleafActivity = useCallback(async () => {
-    if (!showCuraleafAccount || !state.currentOrganisationId) return;
-    setCuraleafLoading(true);
-    setCuraleafError(false);
-    try {
-      setCuraleafActivity(await getCuraleafActivity(state.currentOrganisationId));
-    } catch {
-      setCuraleafError(true);
-    } finally {
-      setCuraleafLoading(false);
-    }
-  }, [showCuraleafAccount, state.currentOrganisationId]);
-
-  useEffect(() => {
-    setCuraleafActivity(null);
-    if (showCuraleafAccount) void refreshCuraleafActivity();
-  }, [refreshCuraleafActivity, showCuraleafAccount]);
+  const {
+    activity: curaleafActivity,
+    enabled: showCuraleafAccount,
+    error: curaleafError,
+    loading: curaleafLoading,
+    refresh: refreshCuraleafActivity,
+  } = useCuraleafActivity(state.currentOrganisationId, state.workspaceMode);
 
   const allSubOrders = useMemo(() => {
     const list: FlatSubOrder[] = [];
@@ -187,8 +171,9 @@ function CuraleafAccountRecords({
   loading: boolean;
   onRefresh: () => void;
 }) {
-  const prescriptions = activity?.prescriptions ?? [];
   const purchaseOrders = activity?.purchaseOrders ?? [];
+  const orderedPacks = purchaseOrders.flatMap(order => order.items).reduce((total, item) => total + item.packsOrderedCount, 0);
+  const allocatedPacks = purchaseOrders.flatMap(order => order.items).reduce((total, item) => total + item.packsAllocatedCount, 0);
   const fetchedAt = activity?.fetchedAt
     ? new Date(activity.fetchedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
     : null;
@@ -196,9 +181,9 @@ function CuraleafAccountRecords({
   return <section className="curaleaf-account-records" aria-labelledby="curaleaf-account-title">
     <header className="curaleaf-account-records__header">
       <span>
-        <small>Provider account feed</small>
-        <strong id="curaleaf-account-title">Curaleaf records for this pharmacy</strong>
-        <em>Authentic records returned by the linked Curaleaf {activity?.environment === 'production' ? 'production' : 'test'} account.</em>
+        <small>Supplier account feed</small>
+        <strong id="curaleaf-account-title">Curaleaf purchase orders for this pharmacy</strong>
+        <em>Provider prescriptions now have their own dedicated pharmacy workspace.</em>
       </span>
       <button type="button" className="btn btn-sm" disabled={loading} onClick={onRefresh}>
         <RefreshCw className={loading ? 'spin' : undefined} size={13} />
@@ -220,30 +205,13 @@ function CuraleafAccountRecords({
 
     {activity ? <>
       <dl className="curaleaf-account-summary" aria-label="Curaleaf account record counts">
-        <div><dt>Prescribers</dt><dd>{activity.prescriberTotal ?? activity.prescribers?.length ?? 0}</dd></div>
-        <div><dt>Prescriptions</dt><dd>{activity.prescriptionTotal ?? prescriptions.length}</dd></div>
         <div><dt>Purchase orders</dt><dd>{activity.purchaseOrderTotal}</dd></div>
         <div><dt>Shipments</dt><dd>{activity.shipmentTotal}</dd></div>
+        <div><dt>Ordered packs</dt><dd>{orderedPacks}</dd></div>
+        <div><dt>Allocated packs</dt><dd>{allocatedPacks}</dd></div>
       </dl>
 
       <div className="curaleaf-account-records__groups">
-        <section className="curaleaf-record-group" aria-labelledby="curaleaf-prescriptions-title">
-          <header><span><small>Provider prescriptions</small><strong id="curaleaf-prescriptions-title">{prescriptions.length} returned</strong></span></header>
-          {prescriptions.length ? <div className="curaleaf-record-list">
-            {prescriptions.map(prescription => <article className="curaleaf-record-row curaleaf-record-row--prescription" key={prescription.id}>
-              <span className="curaleaf-record-row__identity">
-                <small>Serial number</small>
-                <strong>{prescription.serialNumber}</strong>
-                <em>{prescription.id}</em>
-              </span>
-              <span><small>Prescriber</small><strong>{prescription.prescriberName}</strong></span>
-              <span><small>Medicine</small><strong>{prescription.items.map(item => `${item.formulaName} · ${item.unitsNeededCount}${item.unit}`).join(', ')}</strong></span>
-              <span><small>Issue / expiry</small><strong>{providerDate(prescription.issueDate)} · {providerDate(prescription.expiryDate)}</strong></span>
-              <span className={`pill ${providerStateClass(prescription.state)}`}>{prescription.state}</span>
-            </article>)}
-          </div> : <p className="curaleaf-record-empty">No prescriptions were returned for this pharmacy account.</p>}
-        </section>
-
         <section className="curaleaf-record-group" aria-labelledby="curaleaf-purchase-orders-title">
           <header><span><small>Provider purchase orders</small><strong id="curaleaf-purchase-orders-title">{purchaseOrders.length} returned</strong></span></header>
           {purchaseOrders.length ? <div className="curaleaf-record-list">
@@ -268,8 +236,8 @@ function CuraleafAccountRecords({
       </div>
 
       <footer>
-        <span>Last refreshed {fetchedAt}. Account records are also mirrored to Firebase every five minutes.</span>
-        <span>Curaleaf’s list response does not expose patient identity, so these records remain separate until linked through an HHH prescription order.</span>
+        <span>Last refreshed {fetchedAt}. Purchase-order records are also mirrored to Firebase every five minutes.</span>
+        <span>Only orders belonging to this pharmacy’s configured Curaleaf customer are accepted.</span>
       </footer>
     </> : null}
   </section>;

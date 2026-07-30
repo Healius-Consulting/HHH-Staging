@@ -8,6 +8,7 @@ import Referrals from './pages/Referrals';
 import CreateOrder from './pages/CreateOrder';
 import AwaitingPayment from './pages/AwaitingPayment';
 import Orders from './pages/Orders';
+import ProviderPrescriptions from './pages/ProviderPrescriptions';
 import FormularyPricing from './pages/FormularyPricing';
 import Patients from './pages/Patients';
 import AdminPortal from './pages/AdminPortal';
@@ -187,11 +188,12 @@ function StaffWorkspace() {
       case 'formulary': return <FormularyPricing />;
       case 'create': return <CreateOrder />;
       case 'review': return <AwaitingPayment />;
+      case 'provider-prescriptions': return <ProviderPrescriptions />;
       case 'orders': return <Orders />;
       case 'patients': return <Patients />;
       case 'finance': return <PharmacyFinance />;
       case 'resources': return <PharmacyResources />;
-      case 'settings': return <><PharmacySetupWizard organisation={organisation} setup={setup} />{setupComplete && <PharmacySettings />}</>;
+      case 'settings': return setupComplete ? <PharmacySettings /> : <PharmacySetupWizard organisation={organisation} setup={setup} />;
       default: return <Dashboard />;
     }
   };

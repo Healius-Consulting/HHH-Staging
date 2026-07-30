@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Building2, Clock, FilePlus, Home, Package, QrCode, Search, Settings, Tags, UserSearch, Users, X } from 'lucide-react';
+import { Building2, Clock, FileCheck2, FilePlus, Home, Package, QrCode, Search, Settings, Tags, UserSearch, Users, X } from 'lucide-react';
 import { useApp, type Screen } from '../context/AppContext';
 import { OPEN_COMMAND_PALETTE_EVENT } from './commandPaletteEvents';
 
@@ -37,6 +37,7 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
     { label: 'Find a patient', detail: 'Search the pharmacy patient directory', icon: <UserSearch size={16} />, run: () => navigate('patients') },
     { label: 'Review patient onboarding', detail: 'See HHH decisions and attributed enquiries', icon: <Users size={16} />, run: () => navigate('referrals') },
     { label: 'Open payments', detail: 'Review active and cleared payment requests', icon: <Clock size={16} />, run: () => navigate('review') },
+    { label: 'Review provider prescriptions', detail: 'Open Curaleaf prescription records for this pharmacy', icon: <FileCheck2 size={16} />, run: () => navigate('provider-prescriptions') },
     { label: 'Track supplier orders', detail: 'Open Curaleaf fulfilment activity', icon: <Package size={16} />, run: () => navigate('orders') },
     { label: 'Open Curaleaf catalogue', detail: 'Review products, pack sizes and patient prices', icon: <Tags size={16} />, run: () => navigate('formulary') },
     { label: 'Copy forms and resources', detail: 'Eligibility link, QR and content pack', icon: <QrCode size={16} />, run: () => navigate('resources') },
