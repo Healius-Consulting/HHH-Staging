@@ -5894,42 +5894,8 @@ html[data-reduced-motion='true'] .mobile-more-sheet { animation: none; }
   font-size: 8px;
   font-style: normal;
 }
-.rx-clinic-path { overflow: hidden; }
-.rx-clinic-path__steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid var(--border);
-}
-.rx-clinic-path__steps > span {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 26px minmax(0, 1fr);
-  gap: 9px;
-  padding: 15px 16px;
-  border-right: 1px solid var(--border);
-}
-.rx-clinic-path__steps > span:last-child { border-right: 0; }
-.rx-clinic-path__steps > span > em {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
-  color: var(--text-tertiary);
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 750;
-}
-.rx-clinic-path__steps > span.complete > em {
-  border-color: color-mix(in srgb, var(--color-success) 38%, var(--border));
-  color: var(--color-success);
-  background: color-mix(in srgb, var(--color-success) 9%, var(--bg-surface));
-}
-.rx-clinic-path__steps strong,
-.rx-clinic-path__steps small { display: block; }
-.rx-clinic-path__steps strong { color: var(--text-primary); font-size: 10px; }
-.rx-clinic-path__steps small { margin-top: 4px; color: var(--text-tertiary); font-size: 8px; line-height: 1.45; }
+.rx-formulary-stage > .manual-rx-editor { padding: 16px; }
+.rx-prescription-details { align-self: stretch; }
 .rx-quantity-control {
   display: grid;
   width: 150px;
@@ -6401,9 +6367,6 @@ tbody tr:hover { background: var(--bg-elevated); }
   .supplier-detail__actions { align-items: stretch; flex-direction: column; }
   .supplier-detail__waiting { margin: 0; }
   .rx-prescribed-item__header { grid-template-columns: 72px minmax(0, 1fr) auto; gap: 10px; }
-  .rx-clinic-path__steps { grid-template-columns: 1fr; }
-  .rx-clinic-path__steps > span { border-right: 0; border-bottom: 1px solid var(--border); }
-  .rx-clinic-path__steps > span:last-child { border-bottom: 0; }
   .supplier-filter-bar { grid-template-columns: 1fr 1fr; }
   .supplier-search { grid-column: 1 / -1; }
   .payment-brief__filter { justify-self: start; margin: 0; }

@@ -5,10 +5,12 @@ import { money } from '../context/AppContext';
 import './ManualPrescriptionEditor.css';
 
 type MetadataField = 'serialNumber' | 'issueDate' | 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber';
+export type ManualPrescriptionEditorView = 'details' | 'formulary' | 'all';
 
 export default function ManualPrescriptionEditor({
   prescription,
   catalogue,
+  view = 'all',
   onPrescriberChange,
   onPatientIdentityChange,
   onMetadataChange,
@@ -19,6 +21,7 @@ export default function ManualPrescriptionEditor({
 }: {
   prescription: Prescription;
   catalogue: CatalogueItem[];
+  view?: ManualPrescriptionEditorView;
   onPrescriberChange: (value: string) => void;
   onPatientIdentityChange: (name: string, dob: string) => void;
   onMetadataChange: (field: MetadataField, value: string) => void;
@@ -54,52 +57,56 @@ export default function ManualPrescriptionEditor({
 
   return (
     <div className="manual-rx-editor">
-      <div className="manual-rx-editor__notice">
-        <AlertTriangle size={17} />
-        <span>
-          <strong>Manual prescription entry</strong>
-          <small>Copy every field from the signed prescription. HHH will check the serial with Curaleaf before creating a supplier record.</small>
-        </span>
-      </div>
+      {view !== 'formulary' ? (
+        <>
+          <div className="manual-rx-editor__notice">
+            <AlertTriangle size={17} />
+            <span>
+              <strong>Manual prescription entry</strong>
+              <small>Copy every field from the signed prescription. HHH will check the serial with Curaleaf before creating a supplier record.</small>
+            </span>
+          </div>
 
-      <div className="manual-rx-fields">
-        <label>
-          <span>Patient’s full name</span>
-          <input className="input" value={prescription.curaleafPatientName ?? ''} maxLength={200} onChange={event => onPatientIdentityChange(event.target.value, prescription.curaleafPatientDob ?? '')} />
-        </label>
-        <label>
-          <span>Patient’s date of birth</span>
-          <input className="input" type="date" value={prescription.curaleafPatientDob ?? ''} onChange={event => onPatientIdentityChange(prescription.curaleafPatientName ?? '', event.target.value)} />
-        </label>
-        <label>
-          <span>Prescription serial</span>
-          <input className="input" value={prescription.serialNumber ?? ''} maxLength={200} onChange={event => onMetadataChange('serialNumber', event.target.value)} />
-        </label>
-        <label>
-          <span>Issue date</span>
-          <input className="input" type="date" value={prescription.issueDate ?? ''} onChange={event => onMetadataChange('issueDate', event.target.value)} />
-        </label>
-        <label className="manual-rx-fields__wide">
-          <span>Prescriber’s full name</span>
-          <input className="input" value={prescription.prescriber} maxLength={200} onChange={event => onPrescriberChange(event.target.value)} />
-        </label>
-        <label>
-          <span>Prescriber PIN</span>
-          <input className="input" value={prescription.prescriberPin ?? ''} maxLength={100} onChange={event => onMetadataChange('prescriberPin', event.target.value)} />
-        </label>
-        <label>
-          <span>GMC number <small>(when applicable)</small></span>
-          <input className="input" inputMode="numeric" value={prescription.prescriberGmcNumber ?? ''} maxLength={12} onChange={event => onMetadataChange('prescriberGmcNumber', event.target.value.replace(/\D/g, ''))} />
-        </label>
-        <label>
-          <span>GPhC number <small>(when applicable)</small></span>
-          <input className="input" value={prescription.prescriberGphcNumber ?? ''} maxLength={100} onChange={event => onMetadataChange('prescriberGphcNumber', event.target.value)} />
-        </label>
-      </div>
+          <div className="manual-rx-fields">
+            <label>
+              <span>Patient’s full name</span>
+              <input className="input" value={prescription.curaleafPatientName ?? ''} maxLength={200} onChange={event => onPatientIdentityChange(event.target.value, prescription.curaleafPatientDob ?? '')} />
+            </label>
+            <label>
+              <span>Patient’s date of birth</span>
+              <input className="input" type="date" value={prescription.curaleafPatientDob ?? ''} onChange={event => onPatientIdentityChange(prescription.curaleafPatientName ?? '', event.target.value)} />
+            </label>
+            <label>
+              <span>Prescription serial</span>
+              <input className="input" value={prescription.serialNumber ?? ''} maxLength={200} onChange={event => onMetadataChange('serialNumber', event.target.value)} />
+            </label>
+            <label>
+              <span>Issue date</span>
+              <input className="input" type="date" value={prescription.issueDate ?? ''} onChange={event => onMetadataChange('issueDate', event.target.value)} />
+            </label>
+            <label className="manual-rx-fields__wide">
+              <span>Prescriber’s full name</span>
+              <input className="input" value={prescription.prescriber} maxLength={200} onChange={event => onPrescriberChange(event.target.value)} />
+            </label>
+            <label>
+              <span>Prescriber PIN</span>
+              <input className="input" value={prescription.prescriberPin ?? ''} maxLength={100} onChange={event => onMetadataChange('prescriberPin', event.target.value)} />
+            </label>
+            <label>
+              <span>GMC number <small>(when applicable)</small></span>
+              <input className="input" inputMode="numeric" value={prescription.prescriberGmcNumber ?? ''} maxLength={12} onChange={event => onMetadataChange('prescriberGmcNumber', event.target.value.replace(/\D/g, ''))} />
+            </label>
+            <label>
+              <span>GPhC number <small>(when applicable)</small></span>
+              <input className="input" value={prescription.prescriberGphcNumber ?? ''} maxLength={100} onChange={event => onMetadataChange('prescriberGphcNumber', event.target.value)} />
+            </label>
+          </div>
+        </>
+      ) : null}
 
-      <section className="manual-rx-medicines">
+      {view !== 'details' ? <section className="manual-rx-medicines">
         <header>
-          <span><small>Prescription lines</small><strong>{prescription.items.length} medicine{prescription.items.length === 1 ? '' : 's'}</strong></span>
+          <span><small>Curaleaf formulary</small><strong>{prescription.items.length} prescribed medicine{prescription.items.length === 1 ? '' : 's'} selected</strong></span>
         </header>
 
         {prescription.items.map((item, index) => (
@@ -134,7 +141,7 @@ export default function ManualPrescriptionEditor({
             </div>
           )}
         </div>
-      </section>
+      </section> : null}
     </div>
   );
 }

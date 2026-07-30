@@ -78,7 +78,7 @@ export default function CreateOrder() {
     { label: 'Prescription source verified', complete: activeOrder.prescriptions.every(rx => rx.entryMode === 'manual' || Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
     { label: 'Prescription details complete', complete: activeOrder.prescriptions.every(rx => Boolean(rx.serialNumber?.trim() && rx.issueDate && rx.prescriber.trim() && (rx.entryMode === 'manual' ? rx.prescriberPin?.trim() : rx.prescriberId))) },
     { label: 'Patient identity matches', complete: Boolean(patient) && activeOrder.prescriptions.every(rx => checkPatientIdentity({ selectedName: patient!.name, selectedDob: patient!.dob, prescriptionName: rx.curaleafPatientName, prescriptionDob: rx.curaleafPatientDob }).status === 'match') },
-    { label: 'Curaleaf packs matched', complete: activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => item.formulaId && item.unitsNeededCount)) },
+    { label: 'Formulary medicines selected', complete: activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => item.formulaId && item.unitsNeededCount)) },
   ] : [];
   const prescriptionReady = readiness.every(item => item.complete);
   const wholesaleKnown = Boolean(activeOrder?.prescriptions.every(rx => rx.items.every(item => item.cost !== null)));
@@ -506,7 +506,7 @@ export default function CreateOrder() {
             <main className="rx-workbench-main">
               <section className="rx-surface rx-record-editor">
                 <header className="rx-surface__header">
-                  <div><span className="rx-step-number">02</span><span><small>Prescription records</small><strong>Verify and build the selected Rx</strong></span></div>
+                  <div><span className="rx-step-number">02</span><span><small>Prescription records</small><strong>Attach and verify the selected Rx</strong></span></div>
                   <button type="button" className="btn btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}><Plus size={13} /> Add record</button>
                 </header>
                 <div className="rx-record-tabs" role="tablist" aria-label="Prescription records">
@@ -529,12 +529,16 @@ export default function CreateOrder() {
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
                       </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
                         <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png,image/webp" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
-                        {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading the barcode…' : selectedRx.copyFileName ?? 'Attach barcode prescription'}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded securely · verification required' : 'PDF, JPG, PNG or WebP · maximum 10 MB'}</small></span>
+                        {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading the barcode…' : selectedRx.copyFileName ?? (selectedRx.entryMode === 'manual' ? 'Attach signed prescription' : 'Attach barcode prescription')}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded securely · verification required' : 'PDF, JPG, PNG or WebP · maximum 10 MB'}</small></span>
                       </label>}
                       {selectedRx.entryMode === 'clinic' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
                       {selectedRx.entryMode === 'clinic' && scanError ? <ProviderStatusNotice title="Barcode not verified" detail={`${scanError} Check that the full Curaleaf Clinic barcode is sharp and visible. If it still fails, use the manual route or contact your HHH administrator.`} /> : null}
+                    </div>
+
+                    <div className="rx-line-editor rx-prescription-details">
                       {selectedRx.entryMode === 'manual' ? (
                         <ManualPrescriptionEditor
+                          view="details"
                           prescription={selectedRx}
                           catalogue={state.catalogue}
                           onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
@@ -559,49 +563,61 @@ export default function CreateOrder() {
                       ) : <p className="rx-scan-waiting">No prescription fields need completing. They appear here after Curaleaf verifies the barcode.</p>}
                       {identityCheck && (selectedRx.clinicScanId || selectedRx.entryMode === 'manual' && (selectedRx.curaleafPatientName || selectedRx.curaleafPatientDob)) && identityCheck.status !== 'match' ? <ProviderStatusNotice title={identityCheck.status === 'mismatch' ? 'Patient details do not match' : 'Patient details unavailable'} detail={`${identityCheck.reason} Payment and Curaleaf submission remain blocked until the prescription and patient record match.`} /> : null}
                     </div>
-
-                    {selectedRx.entryMode === 'clinic' ? <div className="rx-line-editor">
-                      <div className="rx-line-editor__heading"><span><small>Curaleaf-matched medicines</small><strong>{selectedRx.items.length} prescribed product{selectedRx.items.length === 1 ? '' : 's'}</strong></span><span>Read-only prescription · live pricing</span></div>
-                      {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileScan size={20} /><span><strong>Medicines appear after the barcode scan</strong><small>Curaleaf supplies the formula, prescribed quantity and matching pack.</small></span></div> : (
-                        <div className="rx-item-stack">
-                          {selectedRx.items.map((item, index) => {
-                            const margin = lineMargin(item);
-                            const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
-                            return (
-                              <article className="rx-prescribed-item" key={item.productId}>
-                                <header className="rx-prescribed-item__header">
-                                  <span className="rx-prescribed-item__index">Medicine {String(index + 1).padStart(2, '0')}</span>
-                                  <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Matched from the Curaleaf prescription</small></span>
-                                  <span className={`rx-prescribed-item__margin${margin !== null && margin < 25 ? ' low' : ''}`}><strong>{margin === null ? '—' : `${margin}%`}</strong><small>{margin === null ? 'quote pending' : 'margin'}</small></span>
-                                </header>
-                                <div className="rx-prescribed-item__pricing">
-                                  <div className="rx-prescribed-item__quantity rx-prescribed-item__quantity--readonly"><small>Curaleaf pack match</small><strong>{item.qty} {item.qty === 1 ? 'pack' : 'packs'}</strong><em>Read-only</em></div>
-                                  <div className="rx-prescribed-units"><small>Prescribed quantity</small><strong>{item.unitsNeededCount ?? '—'} {state.catalogue.find(product => product.id === item.productId)?.unit ?? 'units'}</strong><em>From barcode</em></div>
-                                  <div className="rx-price-flow rx-price-flow--readonly" aria-label={`Pricing for ${item.name}`}>
-                                    <span className="rx-price-node rx-price-node--px"><small>Patient price</small><strong>{money(item.retail)}</strong><em>Set by Curaleaf · {money(lineRevenue(item))} line</em></span>
-                                    <span className="rx-price-node rx-price-node--wx"><small>Wholesale cost</small><strong>{item.cost === null ? 'Quote required' : money(item.cost)}</strong><em>{item.cost === null ? 'Order-specific' : `${money(lineCost(item))} line`}</em></span>
-                                  </div>
-                                  <span className={`rx-prescribed-item__contribution${margin !== null && margin < 25 ? ' low' : ''}`}><small>Gross margin</small>{contribution === null ? <><strong>Pending quote</strong><em>Calculated when Curaleaf returns wholesale cost</em></> : <><strong>{contribution >= 0 ? '+' : '−'}{money(Math.abs(contribution))}</strong><em>{item.retail - item.cost! >= 0 ? '+' : '−'}{money(Math.abs(item.retail - item.cost!))} per unit</em></>}</span>
-                                </div>
-                              </article>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div> : null}
                   </div>
                 )}
               </section>
 
-              <section className="rx-surface rx-clinic-path">
-                <header className="rx-surface__header"><div><span className="rx-step-number">03</span><span><small>Automatic supplier matching</small><strong>Curaleaf determines the prescription lines</strong></span></div>{selectedRx?.clinicScanId ? <span className="pill pill-green"><CheckCircle size={11} /> Matched</span> : null}</header>
+              <section className="rx-surface rx-formulary-stage">
+                <header className="rx-surface__header">
+                  <div><span className="rx-step-number">03</span><span><small>Formulary and packs</small><strong>{selectedRx?.entryMode === 'manual' ? 'Select the prescribed Curaleaf medicines' : 'Review the Curaleaf formula and pack match'}</strong></span></div>
+                  {selectedRx?.items.length ? <span className="pill pill-green"><CheckCircle size={11} /> {selectedRx.entryMode === 'clinic' ? 'Matched automatically' : `${selectedRx.items.length} selected`}</span> : null}
+                </header>
                 {state.catalogueLoading ? <ProviderStatusNotice state="loading" title="Refreshing Curaleaf products" detail="The latest patient prices and pack information are being retrieved." /> : null}
                 {state.catalogueError ? <ProviderStatusNotice title="Curaleaf information is temporarily delayed" detail="Wait and try again later. If this continues, contact your HHH administrator; pharmacy staff do not need to change the connection." /> : null}
-                <div className="rx-clinic-path__steps">
-                  <span className={selectedRx?.clinicScanId ? 'complete' : ''}><em>1</em><span><strong>Barcode read</strong><small>Curaleaf identifies the Clinic prescription.</small></span></span>
-                  <span className={selectedRx?.items.length ? 'complete' : ''}><em>2</em><span><strong>Formula and packs matched</strong><small>Prescribed units are matched to active Curaleaf packs.</small></span></span>
-                  <span className={quoteCurrent ? 'complete' : ''}><em>3</em><span><strong>Price and stock quoted</strong><small>Patient price remains Curaleaf-controlled; wholesale and availability are checked for this order.</small></span></span>
-                </div>
+                {!selectedRx ? <div className="rx-inline-empty"><FileText size={20} /><span><strong>Select a prescription record</strong><small>Its prescribed medicines will appear here.</small></span></div> : selectedRx.entryMode === 'manual' ? (
+                  <ManualPrescriptionEditor
+                    view="formulary"
+                    prescription={selectedRx}
+                    catalogue={state.catalogue}
+                    onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
+                    onPatientIdentityChange={(name, dob) => dispatch({ type: 'SET_RX_PATIENT_IDENTITY', orderId: activeOrder.id, rxId: selectedRx.id, name, dob })}
+                    onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
+                    onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
+                    onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}
+                    onUpdateQuantity={(productId, qty) => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId, qty })}
+                    onUpdateUnits={(productId, unitsNeededCount) => dispatch({ type: 'UPDATE_ITEM_UNITS', orderId: activeOrder.id, rxId: selectedRx.id, productId, unitsNeededCount })}
+                  />
+                ) : (
+                  <div className="rx-line-editor">
+                    <div className="rx-line-editor__heading"><span><small>Curaleaf formulary result</small><strong>{selectedRx.items.length} prescribed product{selectedRx.items.length === 1 ? '' : 's'}</strong></span><span>Matched automatically · read-only</span></div>
+                    {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileScan size={20} /><span><strong>Medicines appear after the barcode scan</strong><small>Curaleaf supplies the formula, prescribed quantity and matching pack automatically.</small></span></div> : (
+                      <div className="rx-item-stack">
+                        {selectedRx.items.map((item, index) => {
+                          const margin = lineMargin(item);
+                          const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
+                          return (
+                            <article className="rx-prescribed-item" key={item.productId}>
+                              <header className="rx-prescribed-item__header">
+                                <span className="rx-prescribed-item__index">Medicine {String(index + 1).padStart(2, '0')}</span>
+                                <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Matched from the Curaleaf prescription</small></span>
+                                <span className={`rx-prescribed-item__margin${margin !== null && margin < 25 ? ' low' : ''}`}><strong>{margin === null ? '—' : `${margin}%`}</strong><small>{margin === null ? 'quote pending' : 'margin'}</small></span>
+                              </header>
+                              <div className="rx-prescribed-item__pricing">
+                                <div className="rx-prescribed-item__quantity rx-prescribed-item__quantity--readonly"><small>Curaleaf pack match</small><strong>{item.qty} {item.qty === 1 ? 'pack' : 'packs'}</strong><em>Read-only</em></div>
+                                <div className="rx-prescribed-units"><small>Prescribed quantity</small><strong>{item.unitsNeededCount ?? '—'} {state.catalogue.find(product => product.id === item.productId)?.unit ?? 'units'}</strong><em>From barcode</em></div>
+                                <div className="rx-price-flow rx-price-flow--readonly" aria-label={`Pricing for ${item.name}`}>
+                                  <span className="rx-price-node rx-price-node--px"><small>Patient price</small><strong>{money(item.retail)}</strong><em>Set by Curaleaf · {money(lineRevenue(item))} line</em></span>
+                                  <span className="rx-price-node rx-price-node--wx"><small>Wholesale cost</small><strong>{item.cost === null ? 'Quote required' : money(item.cost)}</strong><em>{item.cost === null ? 'Order-specific' : `${money(lineCost(item))} line`}</em></span>
+                                </div>
+                                <span className={`rx-prescribed-item__contribution${margin !== null && margin < 25 ? ' low' : ''}`}><small>Gross margin</small>{contribution === null ? <><strong>Pending quote</strong><em>Calculated when Curaleaf returns wholesale cost</em></> : <><strong>{contribution >= 0 ? '+' : '−'}{money(Math.abs(contribution))}</strong><em>{item.retail - item.cost! >= 0 ? '+' : '−'}{money(Math.abs(item.retail - item.cost!))} per unit</em></>}</span>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </section>
             </main>
 
