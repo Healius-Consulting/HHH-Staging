@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Plus, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, Minus, Package, Plus, Search, Trash2 } from 'lucide-react';
 import type { CatalogueItem, LineItem, Prescription } from '../context/AppContext';
 import { money } from '../context/AppContext';
 import './ManualPrescriptionEditor.css';
@@ -53,6 +53,15 @@ export default function ManualPrescriptionEditor({
     });
     setQuery('');
     setPickerOpen(false);
+  };
+
+  const updatePackQuantity = (item: LineItem, nextQuantity: number) => {
+    const quantity = Math.max(1, Math.min(100, Math.floor(nextQuantity) || 1));
+    const product = catalogue.find(candidate => candidate.id === item.productId);
+    const currentPackSize = item.unitsNeededCount && item.qty ? item.unitsNeededCount / item.qty : 1;
+    const packSize = product?.packSize ?? currentPackSize;
+    onUpdateQuantity(item.productId, quantity);
+    onUpdateUnits(item.productId, Math.max(1, Math.round(packSize * quantity)));
   };
 
   return (
@@ -109,17 +118,58 @@ export default function ManualPrescriptionEditor({
           <span><small>Curaleaf formulary</small><strong>{prescription.items.length} prescribed medicine{prescription.items.length === 1 ? '' : 's'} selected</strong></span>
         </header>
 
-        {prescription.items.map((item, index) => (
-          <article key={item.productId}>
-            <span className="manual-rx-medicines__number">{index + 1}</span>
-            <span className="manual-rx-medicines__identity"><strong>{item.name}</strong><small>{money(item.retail)} patient pack price · Curaleaf-managed</small></span>
-            <label><span>Prescribed units</span><input className="input" type="number" min="1" max="100" value={item.unitsNeededCount ?? 1} onChange={event => onUpdateUnits(item.productId, Number(event.target.value))} /></label>
-            <label><span>Packs</span><input className="input" type="number" min="1" max="100" value={item.qty} onChange={event => onUpdateQuantity(item.productId, Number(event.target.value))} /></label>
-            <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => onRemoveItem(item.productId)}><Trash2 size={14} /></button>
-          </article>
-        ))}
+        {prescription.items.map((item, index) => {
+          const product = catalogue.find(candidate => candidate.id === item.productId);
+          const packSize = product?.packSize ?? (item.unitsNeededCount && item.qty ? item.unitsNeededCount / item.qty : null);
+          const packUnit = product?.unit ?? 'units';
+          const patientTotal = item.retail * item.qty;
+          const wholesaleTotal = item.cost === null ? null : item.cost * item.qty;
+          const contribution = wholesaleTotal === null ? null : patientTotal - wholesaleTotal;
+          const margin = wholesaleTotal === null || patientTotal <= 0 ? null : Math.round((contribution! / patientTotal) * 100);
+          return (
+            <article className="manual-pack-card" key={item.productId}>
+              <header className="manual-pack-card__header">
+                <span className="manual-rx-medicines__number">{index + 1}</span>
+                <span className="manual-rx-medicines__identity">
+                  <small>Curaleaf formulary pack</small>
+                  <strong>{item.name}</strong>
+                </span>
+                <span className="pill pill-green">Active</span>
+                <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => onRemoveItem(item.productId)}><Trash2 size={14} /></button>
+              </header>
+
+              <div className="manual-pack-card__body">
+                <div className="manual-pack-fact">
+                  <span><Package size={15} /><small>Pack supplied by Curaleaf</small></span>
+                  <strong>{packSize ?? '—'} {packUnit}</strong>
+                  <em>Pack size is fixed from the API</em>
+                </div>
+
+                <div className="manual-pack-quantity">
+                  <small>Packs to order</small>
+                  <div className="manual-pack-stepper" aria-label={`Packs of ${item.name}`}>
+                    <button type="button" aria-label={`Reduce packs of ${item.name}`} disabled={item.qty <= 1} onClick={() => updatePackQuantity(item, item.qty - 1)}><Minus size={14} /></button>
+                    <span><strong>{item.qty}</strong><small>{item.qty === 1 ? 'pack' : 'packs'}</small></span>
+                    <button type="button" aria-label={`Add pack of ${item.name}`} disabled={item.qty >= 100} onClick={() => updatePackQuantity(item, item.qty + 1)}><Plus size={14} /></button>
+                  </div>
+                </div>
+
+                <dl className="manual-pack-pricing">
+                  <div><dt>Patient pack price</dt><dd>{money(item.retail)}</dd><small>Set by Curaleaf</small></div>
+                  <div className="manual-pack-pricing__total"><dt>Patient line total</dt><dd>{money(patientTotal)}</dd><small>{item.qty} × {money(item.retail)}</small></div>
+                  <div><dt>Wholesale</dt><dd>{item.cost === null ? 'Quote required' : money(wholesaleTotal!)}</dd><small>{item.cost === null ? 'Returned for this order' : `${money(item.cost)} per pack`}</small></div>
+                  <div className={contribution !== null && contribution < 0 ? 'is-negative' : ''}><dt>Gross margin</dt><dd>{contribution === null ? 'Pending' : `${contribution >= 0 ? '+' : '−'}${money(Math.abs(contribution))}`}</dd><small>{margin === null ? 'Available after quote' : `${margin}% of patient total`}</small></div>
+                </dl>
+              </div>
+            </article>
+          );
+        })}
 
         <div className="manual-rx-picker">
+          <div className="manual-rx-picker__heading">
+            <span><small>Add formulary pack</small><strong>Search the live Curaleaf catalogue</strong></span>
+            <small>Pack size and patient price come directly from Curaleaf.</small>
+          </div>
           <div className="manual-rx-picker__field">
             <Search size={15} />
             <input
@@ -128,16 +178,19 @@ export default function ManualPrescriptionEditor({
               placeholder="Search the Curaleaf catalogue"
               onFocus={() => setPickerOpen(true)}
               onChange={event => { setQuery(event.target.value); setPickerOpen(true); }}
+              onKeyDown={event => { if (event.key === 'Escape') setPickerOpen(false); }}
             />
           </div>
           {pickerOpen && (
             <div className="manual-rx-picker__results">
               {products.length ? products.map(product => (
                 <button type="button" key={product.id} onClick={() => addProduct(product)}>
-                  <span><strong>{product.name}</strong><small>{product.packSize ?? '—'} {product.unit ?? 'units'} · {money(product.retail)}</small></span>
-                  <Plus size={14} />
+                  <span className="manual-rx-picker__product"><small>{product.type} · active</small><strong>{product.name}</strong></span>
+                  <span className="manual-rx-picker__pack"><small>Pack size</small><strong>{product.packSize ?? '—'} {product.unit ?? 'units'}</strong></span>
+                  <span className="manual-rx-picker__price"><small>Patient price</small><strong>{money(product.retail)}</strong></span>
+                  <span className="manual-rx-picker__add"><Plus size={14} /> Add</span>
                 </button>
-              )) : <span>No additional active Curaleaf products match.</span>}
+              )) : <span className="manual-rx-picker__empty">No additional active Curaleaf packs match this search.</span>}
             </div>
           )}
         </div>
