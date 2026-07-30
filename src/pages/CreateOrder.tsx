@@ -460,7 +460,6 @@ export default function CreateOrder() {
         prescription={selectedRx}
         catalogue={state.catalogue}
         onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
-        onPatientIdentityChange={(name, dob) => dispatch({ type: 'SET_RX_PATIENT_IDENTITY', orderId: activeOrder.id, rxId: selectedRx.id, name, dob })}
         onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
         onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
         onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}
@@ -562,7 +561,6 @@ export default function CreateOrder() {
                           prescription={selectedRx}
                           catalogue={state.catalogue}
                           onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
-                          onPatientIdentityChange={(name, dob) => dispatch({ type: 'SET_RX_PATIENT_IDENTITY', orderId: activeOrder.id, rxId: selectedRx.id, name, dob })}
                           onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
                           onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
                           onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}

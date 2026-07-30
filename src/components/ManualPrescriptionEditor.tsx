@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { FileText, Minus, Package, Plus, Search, Stethoscope, Trash2, UserRound } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { FileText, Minus, Package, Plus, Search, Stethoscope, Trash2 } from 'lucide-react';
 import type { CatalogueItem, LineItem, Prescription } from '../context/AppContext';
 import { money } from '../context/AppContext';
 import './ManualPrescriptionEditor.css';
@@ -7,12 +7,70 @@ import './ManualPrescriptionEditor.css';
 type MetadataField = 'serialNumber' | 'issueDate' | 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber';
 export type ManualPrescriptionEditorView = 'details' | 'formulary' | 'all';
 
+const dateParts = (value?: string) => {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? { day: match[3], month: match[2], year: match[1] } : { day: '', month: '', year: '' };
+};
+
+function ManualDateField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => void }) {
+  const initial = dateParts(value);
+  const [day, setDay] = useState(initial.day);
+  const [month, setMonth] = useState(initial.month);
+  const [year, setYear] = useState(initial.year);
+
+  useEffect(() => {
+    const next = dateParts(value);
+    setDay(next.day);
+    setMonth(next.month);
+    setYear(next.year);
+  }, [value]);
+
+  const commit = (nextDay: string, nextMonth: string, nextYear: string) => {
+    if (!nextDay && !nextMonth && !nextYear) {
+      onChange('');
+      return;
+    }
+    if (nextDay.length !== 2 || nextMonth.length !== 2 || nextYear.length !== 4) return;
+    const dayNumber = Number(nextDay);
+    const monthNumber = Number(nextMonth);
+    const yearNumber = Number(nextYear);
+    const candidate = new Date(Date.UTC(yearNumber, monthNumber - 1, dayNumber));
+    if (candidate.getUTCFullYear() === yearNumber && candidate.getUTCMonth() === monthNumber - 1 && candidate.getUTCDate() === dayNumber) {
+      onChange(`${nextYear}-${nextMonth}-${nextDay}`);
+    }
+  };
+
+  const updatePart = (part: 'day' | 'month' | 'year', rawValue: string) => {
+    const limit = part === 'year' ? 4 : 2;
+    const nextValue = rawValue.replace(/\D/g, '').slice(0, limit);
+    const nextDay = part === 'day' ? nextValue : day;
+    const nextMonth = part === 'month' ? nextValue : month;
+    const nextYear = part === 'year' ? nextValue : year;
+    if (part === 'day') setDay(nextValue);
+    if (part === 'month') setMonth(nextValue);
+    if (part === 'year') setYear(nextValue);
+    commit(nextDay, nextMonth, nextYear);
+  };
+
+  return (
+    <label className="manual-rx-date-label">
+      <span>{label}</span>
+      <span className="manual-rx-date-field" role="group" aria-label={label}>
+        <input aria-label={`${label} day`} inputMode="numeric" placeholder="DD" value={day} onChange={event => updatePart('day', event.target.value)} />
+        <i>/</i>
+        <input aria-label={`${label} month`} inputMode="numeric" placeholder="MM" value={month} onChange={event => updatePart('month', event.target.value)} />
+        <i>/</i>
+        <input aria-label={`${label} year`} inputMode="numeric" placeholder="YYYY" value={year} onChange={event => updatePart('year', event.target.value)} />
+      </span>
+    </label>
+  );
+}
+
 export default function ManualPrescriptionEditor({
   prescription,
   catalogue,
   view = 'all',
   onPrescriberChange,
-  onPatientIdentityChange,
   onMetadataChange,
   onAddItem,
   onRemoveItem,
@@ -23,7 +81,6 @@ export default function ManualPrescriptionEditor({
   catalogue: CatalogueItem[];
   view?: ManualPrescriptionEditorView;
   onPrescriberChange: (value: string) => void;
-  onPatientIdentityChange: (name: string, dob: string) => void;
   onMetadataChange: (field: MetadataField, value: string) => void;
   onAddItem: (item: LineItem) => void;
   onRemoveItem: (productId: string) => void;
@@ -70,39 +127,22 @@ export default function ManualPrescriptionEditor({
         <div className="manual-rx-details">
           <header className="manual-rx-details__header">
             <span><small>Prescription details</small><strong>Copy the signed document exactly</strong></span>
-            <small>Required fields are checked before payment.</small>
+            <small>Patient identity is inherited from Step 1.</small>
           </header>
 
           <section className="manual-rx-field-group">
-            <header><UserRound size={15} /><span><small>01</small><strong>Patient on prescription</strong></span></header>
-            <div className="manual-rx-fields">
-              <label>
-                <span>Patient’s full name</span>
-                <input className="input" value={prescription.curaleafPatientName ?? ''} maxLength={200} onChange={event => onPatientIdentityChange(event.target.value, prescription.curaleafPatientDob ?? '')} />
-              </label>
-              <label>
-                <span>Date of birth</span>
-                <input className="input" type="date" value={prescription.curaleafPatientDob ?? ''} onChange={event => onPatientIdentityChange(prescription.curaleafPatientName ?? '', event.target.value)} />
-              </label>
-            </div>
-          </section>
-
-          <section className="manual-rx-field-group">
-            <header><FileText size={15} /><span><small>02</small><strong>Prescription record</strong></span></header>
+            <header><FileText size={15} /><span><small>01</small><strong>Prescription record</strong></span></header>
             <div className="manual-rx-fields">
               <label>
                 <span>Prescription serial</span>
                 <input className="input" value={prescription.serialNumber ?? ''} maxLength={200} onChange={event => onMetadataChange('serialNumber', event.target.value)} />
               </label>
-              <label>
-                <span>Issue date</span>
-                <input className="input" type="date" value={prescription.issueDate ?? ''} onChange={event => onMetadataChange('issueDate', event.target.value)} />
-              </label>
+              <ManualDateField label="Issue date" value={prescription.issueDate} onChange={issueDate => onMetadataChange('issueDate', issueDate)} />
             </div>
           </section>
 
           <section className="manual-rx-field-group">
-            <header><Stethoscope size={15} /><span><small>03</small><strong>Prescriber</strong></span></header>
+            <header><Stethoscope size={15} /><span><small>02</small><strong>Prescriber</strong></span></header>
             <div className="manual-rx-fields manual-rx-fields--prescriber">
               <label className="manual-rx-fields__wide">
                 <span>Prescriber’s full name</span>

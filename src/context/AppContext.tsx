@@ -1072,7 +1072,15 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_ORDER_PATIENT': {
       const order = state.orders.find(item => item.id === action.orderId);
       const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && item.status !== 'Suspended');
-      return patient ? mapOrder(state, action.orderId, o => ({ ...o, patientId: patient.id })) : state;
+      return patient ? mapOrder(state, action.orderId, o => ({
+        ...o,
+        patientId: patient.id,
+        prescriptions: o.prescriptions.map(prescription => prescription.entryMode === 'manual' ? {
+          ...prescription,
+          curaleafPatientName: patient.name,
+          curaleafPatientDob: patient.dob ?? '',
+        } : prescription),
+      })) : state;
     }
     case 'SET_ORDER_DISPENSING_FEE':
       return mapOrder(state, action.orderId, order => ({ ...order, dispensingFee: Math.max(0, action.amount) }));
@@ -1084,10 +1092,19 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
     case 'SET_RX_ENTRY_MODE':
-      return mapOrder(state, action.orderId, order => mapRx(order, action.rxId, prescription => ({
-        ...blankRx(prescription.id),
-        entryMode: action.mode,
-      })));
+      return mapOrder(state, action.orderId, order => {
+        const patient = order.patientId
+          ? state.crm.find(item => item.id === order.patientId && item.organisationId === order.organisationId && item.status !== 'Suspended')
+          : null;
+        return mapRx(order, action.rxId, prescription => ({
+          ...blankRx(prescription.id),
+          entryMode: action.mode,
+          ...(action.mode === 'manual' && patient ? {
+            curaleafPatientName: patient.name,
+            curaleafPatientDob: patient.dob ?? '',
+          } : {}),
+        }));
+      });
     case 'SET_RX_PRESCRIBER':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({ ...r, prescriber: action.prescriber })));
     case 'SET_RX_PATIENT_IDENTITY':
