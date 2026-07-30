@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react';
-import { CheckCircle, Clock, Download, FileText, Package, Printer, Search, Truck, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type RefObject } from 'react';
+import { CheckCircle, Clock, Download, FileText, Package, Printer, RefreshCw, Search, Truck, X } from 'lucide-react';
 import { PHARMACY, RX_STATUS_LABELS, lineRevenue, money, useApp, type Prescription, type RxStatus } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
+import ProviderStatusNotice from '../components/ProviderStatusNotice';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
+import { getCuraleafActivity, isApiConfigured } from '../shared/api';
+import type { CuraleafActivity } from '../shared/contracts';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
 
@@ -45,7 +49,29 @@ export default function Orders() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [printingRx, setPrintingRx] = useState<{ rx: Prescription; patientName: string } | null>(null);
   const [receiptDrafts, setReceiptDrafts] = useState<Record<string, Record<string, number>>>({});
+  const [curaleafActivity, setCuraleafActivity] = useState<CuraleafActivity | null>(null);
+  const [curaleafLoading, setCuraleafLoading] = useState(false);
+  const [curaleafError, setCuraleafError] = useState(false);
   const printDialogRef = useModalFocus<HTMLDivElement>(Boolean(printingRx), () => setPrintingRx(null));
+  const showCuraleafAccount = !isLocalPortalPreview && isApiConfigured && state.workspaceMode === 'live';
+
+  const refreshCuraleafActivity = useCallback(async () => {
+    if (!showCuraleafAccount || !state.currentOrganisationId) return;
+    setCuraleafLoading(true);
+    setCuraleafError(false);
+    try {
+      setCuraleafActivity(await getCuraleafActivity(state.currentOrganisationId));
+    } catch {
+      setCuraleafError(true);
+    } finally {
+      setCuraleafLoading(false);
+    }
+  }, [showCuraleafAccount, state.currentOrganisationId]);
+
+  useEffect(() => {
+    setCuraleafActivity(null);
+    if (showCuraleafAccount) void refreshCuraleafActivity();
+  }, [refreshCuraleafActivity, showCuraleafAccount]);
 
   const allSubOrders = useMemo(() => {
     const list: FlatSubOrder[] = [];
@@ -83,8 +109,17 @@ export default function Orders() {
   return (
     <div className="page-body supplier-workbench">
       <section className="operations-brief supplier-brief">
-        <div className="operations-brief__lead"><p className="section-label">Supplier fulfilment</p><h2>Track orders through receipt and collection</h2><p>{allSubOrders.length} prescription order{allSubOrders.length === 1 ? '' : 's'} currently in the ledger. Follow each Curaleaf order from submission to patient handover.</p></div>
+        <div className="operations-brief__lead"><p className="section-label">Supplier fulfilment</p><h2>Track orders through receipt and collection</h2><p>{allSubOrders.length} prescription order{allSubOrders.length === 1 ? '' : 's'} currently in the patient-linked ledger. Curaleaf account records are shown separately and are never merged across pharmacies.</p></div>
       </section>
+
+      {showCuraleafAccount ? (
+        <CuraleafAccountRecords
+          activity={curaleafActivity}
+          error={curaleafError}
+          loading={curaleafLoading}
+          onRefresh={() => void refreshCuraleafActivity()}
+        />
+      ) : null}
 
       <section className="supplier-filter-bar" aria-label="Filter supplier orders">
         <label className="supplier-search"><Search size={15} /><input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB, order or supplier reference" aria-label="Search supplier orders" /></label>
@@ -124,6 +159,120 @@ export default function Orders() {
       {printingRx && <PrintDialog dialogRef={printDialogRef} printingRx={printingRx} onClose={() => setPrintingRx(null)} onPrint={() => { dispatch({ type: 'ADD_TOAST', message: 'Dispensing label sent to the ZPL printer queue.', toastType: 'success' }); setPrintingRx(null); }} />}
     </div>
   );
+}
+
+function providerDate(value: string) {
+  if (!value) return 'Not supplied';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function providerStateClass(state: string) {
+  if (['ACTIVE', 'FULFILLED', 'FULLY_ALLOCATED', 'DISPATCHED'].includes(state)) return 'pill-green';
+  if (['PENDING', 'CREATED', 'PROCESSING'].includes(state)) return 'pill-info';
+  if (['EXPIRED', 'CANCELLED'].includes(state)) return 'pill-neutral';
+  return 'pill-amber';
+}
+
+function CuraleafAccountRecords({
+  activity,
+  error,
+  loading,
+  onRefresh,
+}: {
+  activity: CuraleafActivity | null;
+  error: boolean;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const prescriptions = activity?.prescriptions ?? [];
+  const purchaseOrders = activity?.purchaseOrders ?? [];
+  const fetchedAt = activity?.fetchedAt
+    ? new Date(activity.fetchedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+    : null;
+
+  return <section className="curaleaf-account-records" aria-labelledby="curaleaf-account-title">
+    <header className="curaleaf-account-records__header">
+      <span>
+        <small>Provider account feed</small>
+        <strong id="curaleaf-account-title">Curaleaf records for this pharmacy</strong>
+        <em>Authentic records returned by the linked Curaleaf {activity?.environment === 'production' ? 'production' : 'test'} account.</em>
+      </span>
+      <button type="button" className="btn btn-sm" disabled={loading} onClick={onRefresh}>
+        <RefreshCw className={loading ? 'spin' : undefined} size={13} />
+        {loading ? 'Refreshing' : 'Refresh'}
+      </button>
+    </header>
+
+    {error ? <ProviderStatusNotice
+      title="Curaleaf records are temporarily unavailable"
+      detail="Wait and try again. If this continues, contact your HHH administrator; pharmacy staff do not need to change the API connection."
+      action={<button type="button" className="btn btn-sm" onClick={onRefresh}>Try again</button>}
+    /> : null}
+
+    {!error && loading && !activity ? <ProviderStatusNotice
+      state="loading"
+      title="Refreshing Curaleaf account records"
+      detail="Retrieving this pharmacy’s prescribers, prescriptions, purchase orders and shipments."
+    /> : null}
+
+    {activity ? <>
+      <dl className="curaleaf-account-summary" aria-label="Curaleaf account record counts">
+        <div><dt>Prescribers</dt><dd>{activity.prescriberTotal ?? activity.prescribers?.length ?? 0}</dd></div>
+        <div><dt>Prescriptions</dt><dd>{activity.prescriptionTotal ?? prescriptions.length}</dd></div>
+        <div><dt>Purchase orders</dt><dd>{activity.purchaseOrderTotal}</dd></div>
+        <div><dt>Shipments</dt><dd>{activity.shipmentTotal}</dd></div>
+      </dl>
+
+      <div className="curaleaf-account-records__groups">
+        <section className="curaleaf-record-group" aria-labelledby="curaleaf-prescriptions-title">
+          <header><span><small>Provider prescriptions</small><strong id="curaleaf-prescriptions-title">{prescriptions.length} returned</strong></span></header>
+          {prescriptions.length ? <div className="curaleaf-record-list">
+            {prescriptions.map(prescription => <article className="curaleaf-record-row curaleaf-record-row--prescription" key={prescription.id}>
+              <span className="curaleaf-record-row__identity">
+                <small>Serial number</small>
+                <strong>{prescription.serialNumber}</strong>
+                <em>{prescription.id}</em>
+              </span>
+              <span><small>Prescriber</small><strong>{prescription.prescriberName}</strong></span>
+              <span><small>Medicine</small><strong>{prescription.items.map(item => `${item.formulaName} · ${item.unitsNeededCount}${item.unit}`).join(', ')}</strong></span>
+              <span><small>Issue / expiry</small><strong>{providerDate(prescription.issueDate)} · {providerDate(prescription.expiryDate)}</strong></span>
+              <span className={`pill ${providerStateClass(prescription.state)}`}>{prescription.state}</span>
+            </article>)}
+          </div> : <p className="curaleaf-record-empty">No prescriptions were returned for this pharmacy account.</p>}
+        </section>
+
+        <section className="curaleaf-record-group" aria-labelledby="curaleaf-purchase-orders-title">
+          <header><span><small>Provider purchase orders</small><strong id="curaleaf-purchase-orders-title">{purchaseOrders.length} returned</strong></span></header>
+          {purchaseOrders.length ? <div className="curaleaf-record-list">
+            {purchaseOrders.map(order => {
+              const ordered = order.items.reduce((total, item) => total + item.packsOrderedCount, 0);
+              const allocated = order.items.reduce((total, item) => total + item.packsAllocatedCount, 0);
+              return <article className="curaleaf-record-row curaleaf-record-row--purchase-order" key={order.id}>
+                <span className="curaleaf-record-row__identity">
+                  <small>Customer reference</small>
+                  <strong>{order.customerReference || 'Not supplied'}</strong>
+                  <em>{order.id}</em>
+                </span>
+                <span><small>Issued</small><strong>{providerDate(order.issuedDate || order.createdAt)}</strong></span>
+                <span><small>Lines</small><strong>{order.items.length}</strong></span>
+                <span><small>Allocation</small><strong>{allocated} / {ordered} packs</strong></span>
+                <span><small>Courier</small><strong>{order.courier.replaceAll('_', ' ')}</strong></span>
+                <span className={`pill ${providerStateClass(order.state)}`}>{order.state}</span>
+              </article>;
+            })}
+          </div> : <p className="curaleaf-record-empty">No purchase orders were returned for this pharmacy account.</p>}
+        </section>
+      </div>
+
+      <footer>
+        <span>Last refreshed {fetchedAt}. Account records are also mirrored to Firebase every five minutes.</span>
+        <span>Curaleaf’s list response does not expose patient identity, so these records remain separate until linked through an HHH prescription order.</span>
+      </footer>
+    </> : null}
+  </section>;
 }
 
 function SupplierOrderDetail({ item, values, onQuantity, onRecordReceipt, onPrint, onDispatch, onInvoice }: {

@@ -21,12 +21,16 @@ function moneyPence(value: unknown) {
 }
 
 function wholesaleByPack(order: DocumentData) {
+  const pricingQuote = order.pricingQuote && typeof order.pricingQuote === 'object'
+    ? order.pricingQuote as Record<string, unknown>
+    : null;
   const curaleaf = order.curaleaf && typeof order.curaleaf === 'object'
     ? order.curaleaf as Record<string, unknown>
     : null;
-  const quote = curaleaf?.quote && typeof curaleaf.quote === 'object'
+  const submissionQuote = curaleaf?.quote && typeof curaleaf.quote === 'object'
     ? curaleaf.quote as Record<string, unknown>
     : null;
+  const quote = pricingQuote ?? submissionQuote;
   const items = Array.isArray(quote?.items) ? quote.items : [];
   const prices = new Map<string, number>();
   for (const raw of items) {

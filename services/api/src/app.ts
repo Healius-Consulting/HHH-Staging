@@ -9,6 +9,7 @@ import { audit } from './audit.js';
 import { identity, requireRole, requireStaff, tenantFor } from './auth.js';
 import { allowedOrigins, config } from './config.js';
 import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, scanClinicPrescription, submitClinicPrescription, submitManualPrescription, uploadClinicPrescriptionImage } from './curaleaf.js';
+import { fetchCuraleafAccountSnapshot } from './curaleaf-mirror.js';
 import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
 import { cached, invalidateCache } from './cache.js';
@@ -642,6 +643,17 @@ app.get('/v1/portal/admin/finance/referrals', requireRole('hhh_admin'), async (r
 });
 
 const orderLineItemSchema = z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) });
+const curaleafQuoteSchema = z.object({
+  shippingPrice: z.string().trim().min(1).max(40),
+  taxRate: z.string().trim().min(1).max(40),
+  items: z.array(z.object({
+    packId: idSchema,
+    quantity: z.number().int().positive().max(100),
+    inStock: z.boolean(),
+    wholesalePackPrice: z.string().trim().min(1).max(40),
+    patientPackPrice: z.string().trim().min(1).max(40),
+  })).min(1).max(100),
+});
 const orderPrescriptionSchema = z.object({
   fileId: idSchema,
   clinicScanId: idSchema.optional(),
@@ -710,12 +722,12 @@ function samePackQuantities(left: Map<string, number>, right: Map<string, number
   return left.size === right.size && [...left].every(([packId, quantity]) => right.get(packId) === quantity);
 }
 
-function curaleafPricePence(value: unknown) {
+function curaleafMoneyPence(value: unknown, field = 'price') {
   const price = String(value ?? '').trim();
   const match = /^(\d+)(?:\.(\d+))?$/.exec(price);
-  if (!match || (match[2]?.slice(2).match(/[1-9]/))) throw new HttpError(502, 'Curaleaf returned an invalid patient pack price.', 'INVALID_SUPPLIER_PRICE');
+  if (!match || (match[2]?.slice(2).match(/[1-9]/))) throw new HttpError(502, `Curaleaf returned an invalid ${field}.`, 'INVALID_SUPPLIER_PRICE');
   const pence = BigInt(match[1]!) * 100n + BigInt((match[2] ?? '').padEnd(2, '0').slice(0, 2) || '0');
-  if (pence > 10_000_000n) throw new HttpError(502, 'Curaleaf returned a patient pack price outside the supported range.', 'INVALID_SUPPLIER_PRICE');
+  if (pence > 10_000_000n) throw new HttpError(502, `Curaleaf returned a ${field} outside the supported range.`, 'INVALID_SUPPLIER_PRICE');
   return Number(pence);
 }
 
@@ -744,7 +756,7 @@ function matchClinicPrescriptionPacks(lines: ClinicScanLine[], products: ClinicS
       .map(product => ({
         product,
         packQuantity: line.unitsNeededCount / product.quantity,
-        totalPence: curaleafPricePence(product.patientPackPrice) * (line.unitsNeededCount / product.quantity),
+        totalPence: curaleafMoneyPence(product.patientPackPrice, 'patient pack price') * (line.unitsNeededCount / product.quantity),
       }))
       .sort((left, right) => left.packQuantity - right.packQuantity || left.totalPence - right.totalPence || left.product.id.localeCompare(right.product.id));
     if (!candidates.length) {
@@ -917,11 +929,49 @@ app.post('/v1/portal/orders', async (request, response, next) => {
     if (prescribedItems.length && !samePackQuantities(packQuantities(input.lineItems), packQuantities(prescribedItems))) {
       throw new HttpError(400, 'The order lines must exactly match the products and quantities assigned to its prescriptions.', 'ORDER_ITEM_MISMATCH');
     }
-    const productPage = await curaleafList<{ id: string; formulaId: string; formulaName: string; patientPackPrice: string; state: string }>(organisationId, '/v1/products/', 'products');
+    const [productPage, rawQuote] = await Promise.all([
+      curaleafList<{ id: string; formulaId: string; formulaName: string; patientPackPrice: string; state: string }>(organisationId, '/v1/products/', 'products'),
+      curaleafRequest<unknown>(organisationId, '/v1/quotes/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: input.lineItems }),
+      }),
+    ]);
+    const parsedQuote = curaleafQuoteSchema.safeParse(rawQuote);
+    if (!parsedQuote.success) {
+      throw new HttpError(502, 'Curaleaf returned an invalid quote response.', 'INVALID_SUPPLIER_QUOTE');
+    }
+    const quote = parsedQuote.data;
+    if (!samePackQuantities(packQuantities(input.lineItems), packQuantities(quote.items))) {
+      throw new HttpError(409, 'Curaleaf’s quote does not match the requested products and quantities. Refresh the catalogue and try again.', 'SUPPLIER_QUOTE_MISMATCH');
+    }
+    const quoteByPack = new Map<string, typeof quote.items[number]>();
+    quote.items.forEach(item => {
+      const prior = quoteByPack.get(item.packId);
+      if (prior && (
+        prior.patientPackPrice !== item.patientPackPrice
+        || prior.wholesalePackPrice !== item.wholesalePackPrice
+        || prior.inStock !== item.inStock
+      )) {
+        throw new HttpError(502, 'Curaleaf returned conflicting prices for the same pack.', 'INVALID_SUPPLIER_QUOTE');
+      }
+      quoteByPack.set(item.packId, item);
+    });
+    const unavailablePack = quote.items.find(item => !item.inStock);
+    if (unavailablePack) {
+      throw new HttpError(409, 'One or more selected Curaleaf packs are currently unavailable. Review the prescription before taking payment.', 'PRODUCT_OUT_OF_STOCK');
+    }
+    const shippingPence = curaleafMoneyPence(quote.shippingPrice, 'shipping price');
+    const taxRate = Number(quote.taxRate);
+    if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
+      throw new HttpError(502, 'Curaleaf returned an invalid tax rate.', 'INVALID_SUPPLIER_QUOTE');
+    }
     const products = new Map(productPage.records.map(product => [product.id, product]));
     const lineItems = input.lineItems.map(item => {
       const product = products.get(item.packId);
+      const quoted = quoteByPack.get(item.packId);
       if (!product) throw new HttpError(409, 'A selected Curaleaf product is no longer available. Refresh the catalogue and review the order.', 'PRODUCT_NOT_AVAILABLE');
+      if (!quoted) throw new HttpError(409, 'Curaleaf did not quote one of the selected products. Refresh the catalogue and review the order.', 'SUPPLIER_QUOTE_MISMATCH');
       if (product.state !== 'ACTIVE') throw new HttpError(409, `${product.formulaName} is no longer an active Curaleaf product.`, 'PRODUCT_NOT_AVAILABLE');
       if (prescribedItems.some(prescribed => prescribed.packId === item.packId && prescribed.formulaId !== product.formulaId)) {
         throw new HttpError(409, `${product.formulaName} no longer matches the selected Curaleaf formula. Refresh the catalogue and review the prescription.`, 'FORMULA_MISMATCH');
@@ -932,9 +982,15 @@ app.post('/v1/portal/orders', async (request, response, next) => {
         packId: product.id,
         name: product.formulaName,
         quantity: item.quantity,
-        unitPricePence: curaleafPricePence(product.patientPackPrice),
+        unitPricePence: curaleafMoneyPence(quoted.patientPackPrice, 'patient pack price'),
       };
     });
+    const quotedAt = timestamp();
+    const wholesaleProductPence = input.lineItems.reduce((total, item) => {
+      const quoted = quoteByPack.get(item.packId)!;
+      return total + curaleafMoneyPence(quoted.wholesalePackPrice, 'wholesale pack price') * item.quantity;
+    }, 0);
+    const productTotalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, 0);
     const totalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, input.dispensingFeePence);
     const { paymentRoute: _ignoredRequestedRoute, ...authoritativeInput } = input;
     const record = await createRecord('orders', {
@@ -945,11 +1001,28 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       organisationId,
       paymentRoute,
       paymentRouteSnapshotAt: timestamp(),
+      pricingQuote: {
+        ...quote,
+        quotedAt,
+        environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production',
+        productTotalPence,
+        wholesaleProductPence,
+        shippingPence,
+      },
       fulfilmentMethod: 'patient_collection',
       paymentStatus: 'pending',
       fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus,
     });
-    await audit(request, 'order.created', { organisationId, recordId: record.id, pricingSource: 'curaleaf', paymentRoute });
+    await audit(request, 'order.created', {
+      organisationId,
+      recordId: record.id,
+      pricingSource: 'curaleaf_quote',
+      quotedAt,
+      productTotalPence,
+      wholesaleProductPence,
+      shippingPence,
+      paymentRoute,
+    });
     response.status(201).json(record);
   } catch (error) { next(error); }
 });
@@ -1082,20 +1155,11 @@ app.get('/v1/portal/integrations/curaleaf/catalog', async (request, response, ne
 app.get('/v1/portal/integrations/curaleaf/activity', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.query.organisationId);
-    response.json(await cached(`curaleaf:activity:${organisationId}`, 30_000, async () => {
-      const [purchaseOrderPage, shipmentPage] = await Promise.all([
-        curaleafList<Record<string, unknown>>(organisationId, '/v1/purchase-orders/', 'purchaseOrders'),
-        curaleafList<Record<string, unknown>>(organisationId, '/v1/shipments/', 'shipments'),
-      ]);
-      return {
-        environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production',
-        fetchedAt: timestamp(),
-        purchaseOrders: purchaseOrderPage.records,
-        shipments: shipmentPage.records,
-        purchaseOrderTotal: purchaseOrderPage.totalRecordCount,
-        shipmentTotal: shipmentPage.totalRecordCount,
-      };
-    }));
+    response.json(await cached(
+      `curaleaf:activity:${organisationId}`,
+      30_000,
+      () => fetchCuraleafAccountSnapshot(organisationId),
+    ));
   } catch (error) { next(error); }
 });
 

@@ -4,6 +4,7 @@ import { app } from './app.js';
 import { reconcilePendingCuraleafOrders } from './curaleaf-reconciliation.js';
 import { accrueAnnualPatientFees } from './patient-finance.js';
 import { cleanupAbandonedPrescriptionFiles } from './prescription-file-cleanup.js';
+import { syncConnectedCuraleafAccounts } from './curaleaf-mirror.js';
 
 export const apiLondon = onRequest({
   region: 'europe-west2',
@@ -21,8 +22,11 @@ export const reconcileCuraleafOrdersLondon = onSchedule({
   maxInstances: 1,
   retryCount: 0,
 }, async () => {
-  const summary = await reconcilePendingCuraleafOrders();
-  console.log('Curaleaf reconciliation complete', summary);
+  const [reconciliation, accountMirror] = await Promise.all([
+    reconcilePendingCuraleafOrders(),
+    syncConnectedCuraleafAccounts(),
+  ]);
+  console.log('Curaleaf reconciliation complete', { reconciliation, accountMirror });
 });
 
 export const accrueAnnualPatientFeesLondon = onSchedule({

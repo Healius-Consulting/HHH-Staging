@@ -529,7 +529,8 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
     collected: 'collected',
     exception: 'awaiting-approval',
   } as Record<string, RxStatus>)[record.fulfilmentStatus] ?? 'awaiting-approval';
-  const quoteItems = new Map(record.curaleaf?.quote.items.map(item => [item.packId, item]));
+  const persistedQuote = record.pricingQuote ?? record.curaleaf?.quote;
+  const quoteItems = new Map(persistedQuote?.items.map(item => [item.packId, item]) ?? []);
   const orderItems = (items: Array<{ packId: string; formulaId: string; quantity: number; unitsNeededCount?: number }>): LineItem[] => items.map(item => {
     const persisted = record.lineItems.find(line => line.packId === item.packId);
     const quote = quoteItems.get(item.packId);

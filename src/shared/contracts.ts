@@ -117,6 +117,14 @@ export interface CuraleafQuote {
   items: CuraleafQuoteItem[];
 }
 
+export interface CuraleafPricingSnapshot extends CuraleafQuote {
+  quotedAt: string;
+  environment: 'test' | 'production';
+  productTotalPence: number;
+  wholesaleProductPence: number;
+  shippingPence: number;
+}
+
 export interface CuraleafQuoteRequestItem {
   packId: string;
   quantity: number;
@@ -171,11 +179,46 @@ export interface CuraleafShipment {
   items: CuraleafShipmentItem[];
 }
 
+export interface CuraleafPrescriber {
+  id: string;
+  name: string;
+  initials: string;
+  pin: string;
+  gmcNumber: number | null;
+  gphcNumber: string | null;
+  state: string;
+}
+
+export interface CuraleafPrescriptionItem {
+  id: string;
+  prescriptionId: string;
+  formulaId: string;
+  formulaName: string;
+  unit: string;
+  unitsAssignedCount: number;
+  unitsNeededCount: number;
+}
+
+export interface CuraleafPrescription {
+  id: string;
+  serialNumber: string;
+  issueDate: string;
+  expiryDate: string;
+  prescriberId: string;
+  prescriberName: string;
+  state: string;
+  items: CuraleafPrescriptionItem[];
+}
+
 export interface CuraleafActivity {
   environment: 'test' | 'production';
   fetchedAt: string;
+  prescribers: CuraleafPrescriber[];
+  prescriptions: CuraleafPrescription[];
   purchaseOrders: CuraleafPurchaseOrder[];
   shipments: CuraleafShipment[];
+  prescriberTotal: number;
+  prescriptionTotal: number;
   purchaseOrderTotal: number;
   shipmentTotal: number;
 }
@@ -253,6 +296,7 @@ export interface PortalOrderRecord {
   paymentStatus: string;
   fulfilmentStatus: string;
   paymentId?: string;
+  pricingQuote?: CuraleafPricingSnapshot;
   curaleaf?: {
     status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'purchase_order_submitted';
     prescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
@@ -264,7 +308,7 @@ export interface PortalOrderRecord {
     purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
     courier?: string;
     shipmentIds?: string[];
-    quote: CuraleafQuote;
+    quote?: CuraleafQuote;
   };
   createdAt: string;
   updatedAt: string;

@@ -5996,6 +5996,81 @@ html[data-reduced-motion='true'] .mobile-more-sheet { animation: none; }
 .supplier-filter-result { display: grid; min-width: 58px; min-height: 38px; align-content: center; justify-items: end; padding-left: 12px; border-left: 1px solid var(--border); }
 .supplier-filter-result strong { color: var(--text-primary); font-size: 15px; font-variant-numeric: tabular-nums; }
 .supplier-filter-result small { margin-top: 2px; color: var(--text-tertiary); font-size: 7px; letter-spacing: .06em; text-transform: uppercase; }
+.curaleaf-account-records {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-surface);
+}
+.curaleaf-account-records__header {
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tenant-primary) 5%, var(--bg-surface));
+}
+.curaleaf-account-records__header > span,
+.curaleaf-account-records__header :is(small, strong, em) { display: block; }
+.curaleaf-account-records__header small,
+.curaleaf-record-group > header small {
+  color: var(--tenant-primary-strong);
+  font-size: 8px;
+  font-weight: 730;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.curaleaf-account-records__header strong { margin-top: 3px; color: var(--text-primary); font-size: 15px; }
+.curaleaf-account-records__header em { margin-top: 3px; color: var(--text-secondary); font-size: 9px; font-style: normal; }
+.curaleaf-account-records > .provider-notice { margin: 14px 16px 0; }
+.curaleaf-account-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+.curaleaf-account-summary > div { padding: 13px 16px; border-right: 1px solid var(--border); }
+.curaleaf-account-summary > div:last-child { border-right: 0; }
+.curaleaf-account-summary dt { color: var(--text-tertiary); font-size: 8px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.curaleaf-account-summary dd { margin: 4px 0 0; color: var(--text-primary); font-size: 18px; font-weight: 740; font-variant-numeric: tabular-nums; }
+.curaleaf-account-records__groups { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(340px, .8fr); }
+.curaleaf-record-group { min-width: 0; }
+.curaleaf-record-group + .curaleaf-record-group { border-left: 1px solid var(--border); }
+.curaleaf-record-group > header { display: flex; min-height: 55px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--border); }
+.curaleaf-record-group > header strong { display: block; margin-top: 2px; color: var(--text-primary); font-size: 11px; }
+.curaleaf-record-list { display: grid; }
+.curaleaf-record-row {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.curaleaf-record-row:last-child { border-bottom: 0; }
+.curaleaf-record-row--prescription { grid-template-columns: minmax(190px, 1fr) minmax(110px, .6fr) minmax(220px, 1.4fr) minmax(150px, .8fr) auto; }
+.curaleaf-record-row--purchase-order { grid-template-columns: minmax(170px, 1fr) 88px 40px 100px 95px auto; }
+.curaleaf-record-row > span { min-width: 0; }
+.curaleaf-record-row > span:not(.pill) :is(small, strong, em) { display: block; }
+.curaleaf-record-row > span:not(.pill) small { color: var(--text-tertiary); font-size: 7px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.curaleaf-record-row > span:not(.pill) strong { margin-top: 3px; overflow-wrap: anywhere; color: var(--text-primary); font-size: 9px; line-height: 1.35; }
+.curaleaf-record-row__identity em { margin-top: 3px; overflow-wrap: anywhere; color: var(--text-tertiary); font-size: 7px; font-style: normal; }
+.curaleaf-record-row > .pill { justify-self: end; }
+.curaleaf-record-empty { margin: 0; padding: 20px 16px; color: var(--text-secondary); font-size: 9px; }
+.curaleaf-account-records > footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-tertiary);
+  background: var(--bg-elevated);
+  font-size: 8px;
+  line-height: 1.45;
+}
+.curaleaf-account-records > footer span:last-child { max-width: 520px; text-align: right; }
 .supplier-command-bar {
   display: grid;
   grid-template-columns: minmax(230px, .7fr) minmax(0, 1.3fr);
@@ -6163,6 +6238,8 @@ tbody tr:hover { background: var(--bg-elevated); }
 }
 
 @media (max-width: 1280px) {
+  .curaleaf-account-records__groups { grid-template-columns: 1fr; }
+  .curaleaf-record-group + .curaleaf-record-group { border-top: 1px solid var(--border); border-left: 0; }
   .supplier-command-bar { grid-template-columns: 1fr; }
   .supplier-command-bar > div:first-child { padding-bottom: 0; }
   .order-stage-tabs { margin-inline: -18px; }
@@ -6173,6 +6250,8 @@ tbody tr:hover { background: var(--bg-elevated); }
 }
 
 @media (max-width: 900px) {
+  .curaleaf-record-row--prescription { grid-template-columns: minmax(170px, 1fr) minmax(110px, .7fr) minmax(220px, 1.3fr) auto; }
+  .curaleaf-record-row--prescription > span:nth-child(4) { grid-column: 1 / 4; }
   .rx-record-evidence { display: block; }
   .rx-record-evidence__heading { margin-bottom: 13px; }
   .rx-record-evidence .rx-prescriber-field { margin-top: 14px; }
@@ -6188,6 +6267,16 @@ tbody tr:hover { background: var(--bg-elevated); }
 }
 
 @media (max-width: 760px) {
+  .curaleaf-account-records__header { align-items: flex-start; }
+  .curaleaf-account-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .curaleaf-account-summary > div:nth-child(2) { border-right: 0; }
+  .curaleaf-account-summary > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
+  .curaleaf-record-row--prescription,
+  .curaleaf-record-row--purchase-order { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .curaleaf-record-row--prescription > span:nth-child(4) { grid-column: auto; }
+  .curaleaf-record-row > .pill { justify-self: start; }
+  .curaleaf-account-records > footer { flex-direction: column; gap: 5px; }
+  .curaleaf-account-records > footer span:last-child { max-width: none; text-align: left; }
   .unified-admin-shell .admin-content { padding: 22px 16px calc(94px + env(safe-area-inset-bottom)); }
   .admin-workspace-toolbar { align-items: flex-start; flex-direction: column; }
   .admin-workspace-toolbar > .pill, .admin-workspace-toolbar > .btn { align-self: flex-start; }
@@ -6218,6 +6307,9 @@ tbody tr:hover { background: var(--bg-elevated); }
 }
 
 @media (max-width: 600px) {
+  .curaleaf-account-records__header { flex-direction: column; gap: 11px; }
+  .curaleaf-record-row--prescription,
+  .curaleaf-record-row--purchase-order { grid-template-columns: 1fr; }
   .summary-tile { grid-template-columns: auto minmax(0, 1fr) 16px; }
   .summary-tile__detail { line-height: 1.2; }
   .rx-line-editor__heading { align-items: flex-start; flex-direction: column; gap: 5px; }
