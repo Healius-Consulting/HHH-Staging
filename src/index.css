@@ -2485,6 +2485,15 @@ tr:hover td {
 .staff-login-input { display: flex; align-items: center; gap: 10px; margin-top: 7px; padding: 0 13px; border: 1px solid var(--border); background: var(--bg-elevated); border-radius: var(--radius-md); color: var(--text-tertiary); transition: var(--transition-fast); }
 .staff-login-input:focus-within { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--tenant-focus-ring); }
 .staff-login-input input { width: 100%; padding: 12px 0; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; }
+.auth-password-toggle { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.auth-password-toggle:hover { background: var(--bg-subtle); color: var(--text-primary); }
+.auth-password-toggle:focus-visible { outline: 3px solid var(--tenant-focus-ring); outline-offset: 1px; }
+.password-reset-card form { display: grid; gap: 16px; }
+.auth-password-guidance { display: block; margin-top: -8px; color: var(--text-tertiary); line-height: 1.5; }
+.auth-reset-status { display: flex; align-items: center; gap: 10px; padding: 24px 0; color: var(--text-secondary); }
+.auth-reset-success { display: flex; gap: 14px; align-items: center; padding: 18px; border: 1px solid var(--green-500); border-radius: var(--radius-md); background: var(--green-50); color: var(--green-700); }
+.auth-reset-success div { display: grid; gap: 3px; }
+.auth-reset-success span { font-size: 13px; }
 .staff-login-submit { width: 100%; justify-content: center; padding: 12px; margin-top: 4px; }
 .staff-login-note { color: var(--text-faint); text-align: center; font-size: 10px; margin-top: 14px; }
 .staff-demo-accounts { margin-top: 20px; display: flex; flex-direction: column; gap: 7px; }
@@ -6633,6 +6642,11 @@ html[data-reduced-motion='true'] :is(.summary-tile, .supplier-queue-row, .rx-pre
 .admin-referral-register td,
 .pharmacy-referral-register td,
 .admin-master-patients td { min-width: 0; overflow: hidden; }
+.admin-patient-filters { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(170px, 1fr) minmax(145px, .75fr) minmax(145px, .75fr) auto; gap: 12px; align-items: end; padding: 0 20px 18px; }
+.admin-patient-filters label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.admin-patient-filters .btn { min-height: 42px; }
+@media (max-width: 1100px) { .admin-patient-filters { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 680px) { .admin-patient-filters { grid-template-columns: 1fr; } }
 
 /* Overlay layer system. Application chrome stays below every blocking surface,
    and drawers own their scrolling rather than slipping under sticky headers. */

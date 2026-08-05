@@ -441,6 +441,10 @@ export interface CreateOrganisationInput {
   tradingName: string;
   gphcNumber: string;
   superintendent: string;
+  companyNumber?: string;
+  mainContactName?: string;
+  mainContactPhone?: string;
+  mainContactEmail?: string;
   address: string;
   primaryColour: string;
   logoText: string;
@@ -462,6 +466,10 @@ export interface UpdateOrganisationInput {
   tradingName?: string;
   gphcNumber?: string;
   superintendent?: string;
+  companyNumber?: string;
+  mainContactName?: string;
+  mainContactPhone?: string;
+  mainContactEmail?: string;
   address?: string;
   primaryColour?: string;
   logoText?: string;
@@ -525,6 +533,11 @@ export interface PortalOrganisation {
   logoText: string;
   gphcNumber: string;
   superintendent: string;
+  companyNumber?: string;
+  mainContactName?: string;
+  mainContactPhone?: string;
+  mainContactEmail?: string;
+  curaleafPharmacyCode?: string;
   address: string;
   websiteDomains?: string[];
   primaryColour: string;

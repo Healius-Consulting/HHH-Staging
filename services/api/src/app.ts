@@ -31,6 +31,17 @@ const firebaseAuthErrorCode = (error: unknown) => {
   return typeof candidate.code === 'string' ? candidate.code : typeof candidate.errorInfo?.code === 'string' ? candidate.errorInfo.code : null;
 };
 
+const firstPartyPasswordResetLink = (firebaseLink: string) => {
+  const source = new URL(firebaseLink);
+  const destination = new URL(config.APP_BASE_URL);
+  destination.searchParams.set('mode', 'resetPassword');
+  for (const key of ['oobCode', 'apiKey', 'lang']) {
+    const value = source.searchParams.get(key);
+    if (value) destination.searchParams.set(key, value);
+  }
+  return destination.toString();
+};
+
 const tenantModulesSchema = z.object({
   intake: z.boolean(),
   rx: z.boolean(),
@@ -45,6 +56,10 @@ const organisationDetailsSchema = z.object({
   tradingName: z.string().trim().min(1).max(200),
   gphcNumber: z.string().trim().min(1).max(50),
   superintendent: z.string().trim().min(1).max(200),
+  companyNumber: z.string().trim().max(50),
+  mainContactName: z.string().trim().min(1).max(200),
+  mainContactPhone: z.string().trim().max(50),
+  mainContactEmail: z.email().max(254),
   address: z.string().trim().min(1).max(500),
   primaryColour: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   logoText: z.string().trim().min(1).max(4),
@@ -1359,10 +1374,17 @@ app.patch('/v1/portal/shipments/:id/status', async (request, response, next) => 
 app.get('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (request, response, next) => {
   try {
     const organisations = await cached('admin:organisations', 15_000, async () => {
-      const snapshot = await firestore.collection('organisations').limit(500).get();
+      const [snapshot, connections] = await Promise.all([
+        firestore.collection('organisations').limit(500).get(),
+        firestore.collection('integrationConnections').where('integration', '==', 'curaleaf').limit(500).get(),
+      ]);
+      const curaleafCodes = new Map(connections.docs.map(document => [document.data().organisationId, document.data().maskedIdentifier]));
       return snapshot.docs
-        .map(document => document.data())
-        .sort((a, b) => String(a.tradingName ?? a.name).localeCompare(String(b.tradingName ?? b.name)));
+        .map(document => {
+          const data = document.data();
+          return { ...data, name: String(data.name ?? ''), tradingName: String(data.tradingName ?? data.name ?? ''), curaleafPharmacyCode: curaleafCodes.get(document.id) };
+        })
+        .sort((a, b) => a.tradingName.localeCompare(b.tradingName));
     });
     response.json(organisations);
   } catch (error) { next(error); }
@@ -1370,12 +1392,14 @@ app.get('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (reque
 
 app.post('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (request, response, next) => {
   try {
-    const input = z.object({ name: z.string().min(1).max(200), tradingName: z.string().min(1).max(200), gphcNumber: z.string().min(1).max(50), superintendent: z.string().min(1).max(200), address: z.string().min(1).max(500), primaryColour: z.string().regex(/^#[0-9a-fA-F]{6}$/), logoText: z.string().min(1).max(4), websiteDomains: z.array(z.string().trim().min(1).max(253)).max(20).default([]), status: z.literal('onboarding').default('onboarding') }).parse(request.body);
+    const input = z.object({ name: z.string().min(1).max(200), tradingName: z.string().min(1).max(200), gphcNumber: z.string().min(1).max(50), superintendent: z.string().min(1).max(200), companyNumber: z.string().trim().max(50).optional().default(''), mainContactName: z.string().trim().max(200).optional(), mainContactPhone: z.string().trim().max(50).optional().default(''), mainContactEmail: z.email().max(254).optional(), address: z.string().min(1).max(500), primaryColour: z.string().regex(/^#[0-9a-fA-F]{6}$/), logoText: z.string().min(1).max(4), websiteDomains: z.array(z.string().trim().min(1).max(253)).max(20).default([]), status: z.literal('onboarding').default('onboarding') }).parse(request.body);
     const rawReferralToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
     const record = await createRecord('organisations', {
       ...input,
+      mainContactName: input.mainContactName ?? input.superintendent,
+      mainContactEmail: input.mainContactEmail ?? '',
       platformFeeMonthly: null,
-      portalName: `${input.tradingName} Patient Services`,
+      portalName: input.name,
       modules: tenantModulesSchema.parse({ intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true }),
       worldpayEnabled: false,
       defaultPaymentRoute: 'manual',
@@ -1429,7 +1453,7 @@ app.get('/v1/portal/admin/staff', requireRole('hhh_admin'), async (request, resp
       const snapshot = await firestore.collection('staffUsers').where('organisationId', '==', organisationId).limit(500).get();
       const staff = snapshot.docs
         .map(document => document.data())
-        .filter(record => record.role === 'pharmacy_staff')
+        .filter(record => record.role === 'pharmacy_staff' && !record.deletedAt)
         .sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')));
       const ownerUid = staff.find(record => record.contactRole === 'owner')?.id ?? staff[0]?.id;
       return staff.map(record => ({
@@ -1444,6 +1468,21 @@ app.get('/v1/portal/admin/staff', requireRole('hhh_admin'), async (request, resp
       }));
     });
     response.json(records);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/patient-exports', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const input = z.object({
+      query: z.string().max(300).default(''),
+      organisationId: z.union([idSchema, z.literal('all')]).default('all'),
+      status: z.string().max(100).default('all'),
+      from: z.iso.date().nullable().default(null),
+      to: z.iso.date().nullable().default(null),
+      resultCount: z.number().int().nonnegative().max(100_000),
+    }).parse(request.body);
+    await audit(request, 'patient_register.exported', input);
+    response.status(202).json({ audited: true });
   } catch (error) { next(error); }
 });
 
@@ -1522,12 +1561,31 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
       invalidateCache('admin:organisations');
     }
 
-    // The default Firebase action handler needs no authorised continue URL.
-    // The frontend also asks Firebase to email this setup action directly.
-    const actionLink = await auth.generatePasswordResetLink(input.email);
+    const firebaseLink = await auth.generatePasswordResetLink(input.email, {
+      url: `${config.APP_BASE_URL.replace(/\/$/, '')}/?mode=reset-password`,
+      handleCodeInApp: true,
+    });
+    const actionLink = firstPartyPasswordResetLink(firebaseLink);
     await createRecord('notificationOutbox', { organisationId: input.organisationId, kind: 'staff_invitation', recipient: input.email, templateData: { displayName: input.displayName, actionLink, contactRole }, status: 'pending' });
     await audit(request, 'staff.invited', { organisationId: input.organisationId, staffUid: user.uid, role: input.role, contactRole });
     response.status(201).json({ uid: user.uid, email: input.email, displayName: input.displayName, role: input.role, organisationId: input.organisationId, contactRole, status: 'invited', createdAt, invitationQueued: true, actionLink });
+  } catch (error) { next(error); }
+});
+
+app.delete('/v1/portal/admin/staff/:uid', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const uid = idSchema.parse(request.params.uid);
+    const profileRef = firestore.collection('staffUsers').doc(uid);
+    const profileSnapshot = await profileRef.get();
+    if (!profileSnapshot.exists) throw new HttpError(404, 'Staff account not found.', 'STAFF_NOT_FOUND');
+    const profile = profileSnapshot.data()!;
+    if (profile.role !== 'pharmacy_staff' || !profile.organisationId) throw new HttpError(409, 'Only pharmacy staff can be removed here.', 'INVALID_STAFF_ROLE');
+    if (profile.contactRole === 'owner') throw new HttpError(409, 'The pharmacy owner account cannot be removed.', 'OWNER_ACCOUNT_PROTECTED');
+    await auth.updateUser(uid, { disabled: true });
+    await profileRef.update({ status: 'disabled', deletedAt: timestamp(), deletedBy: identity(request).uid, updatedAt: timestamp() });
+    invalidateCache(`admin:staff:${profile.organisationId}`);
+    await audit(request, 'staff.removed', { organisationId: profile.organisationId, staffUid: uid, retainedForAudit: true });
+    response.status(204).send();
   } catch (error) { next(error); }
 });
 

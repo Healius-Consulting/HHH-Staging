@@ -303,6 +303,13 @@ export function getAdminReferralFinance(filters: { from?: string; to?: string; o
   return apiRequest<AdminReferralFinanceReport>(`/v1/portal/admin/finance/referrals${suffix}`);
 }
 
+export function recordPatientRegisterExport(input: { query: string; organisationId: string; status: string; from: string | null; to: string | null; resultCount: number }) {
+  return apiRequest<{ audited: true }>('/v1/portal/admin/patient-exports', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export function updateOrganisation(organisationId: string, input: UpdateOrganisationInput) {
   return apiRequest<PortalOrganisation>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}`, {
     method: 'PATCH',
@@ -319,6 +326,10 @@ export function createPharmacyStaffInvitation(input: CreatePharmacyStaffInput) {
     method: 'POST',
     body: JSON.stringify({ ...input, role: 'pharmacy_staff' }),
   });
+}
+
+export function removePharmacyStaff(uid: string) {
+  return apiRequest<void>(`/v1/portal/admin/staff/${encodeURIComponent(uid)}`, { method: 'DELETE' });
 }
 
 export function getPharmacySetupStatus(organisationId: string) {

@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   Copy,
   CreditCard,
+  Download,
   ExternalLink,
   FileArchive,
   Globe2,
@@ -40,7 +41,8 @@ import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
-import { activateCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminReferralFinance, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordReferralDecision, updateOrganisation } from '../shared/api';
+import { passwordResetActionSettings } from '../auth/passwordReset';
+import { activateCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminReferralFinance, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removePharmacyStaff, updateOrganisation } from '../shared/api';
 import type { AdminReferralFinanceReport, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
@@ -96,6 +98,19 @@ function referralFinanceDateRange(period: 'all' | 'month' | 'year', month: strin
     return { from: `${year}-01-01`, to: `${year}-12-31` };
   }
   return {};
+}
+
+function londonDateKey(value: Date | string | null) {
+  const date = toValidDate(value);
+  if (!date) return '';
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 const MODULE_LABELS: Record<TenantModule, string> = {
@@ -155,6 +170,10 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
   const [tradingName, setTradingName] = useState('');
   const [gphcNumber, setGphcNumber] = useState('');
   const [superintendent, setSuperintendent] = useState('');
+  const [companyNumber, setCompanyNumber] = useState('');
+  const [mainContactName, setMainContactName] = useState('');
+  const [mainContactPhone, setMainContactPhone] = useState('');
+  const [mainContactEmail, setMainContactEmail] = useState('');
   const [address, setAddress] = useState('');
   const [domain, setDomain] = useState('');
   const [primary, setPrimary] = useState('#0f766e');
@@ -171,11 +190,11 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
     const logoText = (tradingName || name).split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
     const websiteDomains = domain ? [domain.replace(/^https?:\/\//, '').replace(/\/$/, '')] : [];
     try {
-      const created = await createOrganisation({ name, tradingName, gphcNumber, superintendent, address, websiteDomains, primaryColour: primary, logoText, status: 'onboarding' });
+      const created = await createOrganisation({ name, tradingName, gphcNumber, superintendent, companyNumber, mainContactName, mainContactPhone, mainContactEmail, address, websiteDomains, primaryColour: primary, logoText, status: 'onboarding' });
       const organisation: PharmacyTenant = {
-        id: created.id, slug, referralToken: created.referralToken, name, tradingName, logoText, gphcNumber, superintendent, address, websiteDomains,
+        id: created.id, slug, referralToken: created.referralToken, name, tradingName, logoText, gphcNumber, superintendent, companyNumber, mainContactName, mainContactPhone, mainContactEmail, address, websiteDomains,
         status: 'onboarding', staffCount: 0, platformFeeMonthly: null, defaultPaymentRoute: 'manual',
-        brand: { primary, portalName: `${tradingName} Patient Services` }, modules: defaultModules,
+        brand: { primary, portalName: name }, modules: defaultModules,
         worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
       };
       dispatch({ type: 'ADD_ORGANISATION', organisation });
@@ -195,9 +214,12 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
         <form className="drawer-body onboarding-form" onSubmit={submit}>
           <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Legal and GPhC identity used for compliance evidence.</small></div></div>
           <label>Registered pharmacy name<input className="input" value={name} onChange={event => setName(event.target.value)} required /></label>
-          <label>Trading name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
+          <label>Company name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
           <div className="form-grid-two"><label>GPhC number<input className="input" value={gphcNumber} onChange={event => setGphcNumber(event.target.value)} required /></label><label>Superintendent pharmacist<input className="input" value={superintendent} onChange={event => setSuperintendent(event.target.value)} required /></label></div>
-          <label>Registered premises address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
+          <label>Company registration number<input className="input" value={companyNumber} onChange={event => setCompanyNumber(event.target.value)} required /></label>
+          <label>Registered office address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
+          <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
+          <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
           <label>Approved website domain<input className="input" type="text" value={domain} onChange={event => setDomain(event.target.value)} placeholder="pharmacy.co.uk" /></label>
 
           <div className="form-section-heading"><span>02</span><div><strong>Workspace identity</strong><small>The colour is applied consistently across that pharmacy’s workspace.</small></div></div>
@@ -217,12 +239,15 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
   const [tradingName, setTradingName] = useState(organisation.tradingName);
   const [gphcNumber, setGphcNumber] = useState(organisation.gphcNumber);
   const [superintendent, setSuperintendent] = useState(organisation.superintendent);
+  const [companyNumber, setCompanyNumber] = useState(organisation.companyNumber ?? '');
+  const [mainContactName, setMainContactName] = useState(organisation.mainContactName ?? organisation.superintendent);
+  const [mainContactPhone, setMainContactPhone] = useState(organisation.mainContactPhone ?? '');
+  const [mainContactEmail, setMainContactEmail] = useState(organisation.mainContactEmail ?? '');
   const [address, setAddress] = useState(organisation.address);
   const [domains, setDomains] = useState(organisation.websiteDomains.join('\n'));
   const [status, setStatus] = useState(organisation.status);
-  const [logoText, setLogoText] = useState(organisation.logoText);
+  const [logoText] = useState(organisation.logoText);
   const [primaryColour, setPrimaryColour] = useState(organisation.brand.primary);
-  const [portalName, setPortalName] = useState(organisation.brand.portalName);
   const [platformFee, setPlatformFee] = useState(organisation.platformFeeMonthly?.toString() ?? '');
   const [modules, setModules] = useState({ ...organisation.modules });
   const [busy, setBusy] = useState(false);
@@ -236,15 +261,15 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
     setError(null);
     const websiteDomains = [...new Set(domains.split(/[\n,]+/).map(value => value.trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase()).filter(Boolean))];
     const input: UpdateOrganisationInput = {
-      name, tradingName, gphcNumber, superintendent, address, websiteDomains, status, logoText: logoText.toUpperCase(),
-      primaryColour, portalName, platformFeeMonthly: platformFee === '' ? null : Number(platformFee), modules,
+      name, tradingName, gphcNumber, superintendent, companyNumber, mainContactName, mainContactPhone, mainContactEmail, address, websiteDomains, status, logoText: logoText.toUpperCase(),
+      primaryColour, portalName: name.trim(), platformFeeMonthly: platformFee === '' ? null : Number(platformFee), modules,
     };
     try {
       await updateOrganisation(organisation.id, input);
       onSaved({
-        name: name.trim(), tradingName: tradingName.trim(), gphcNumber: gphcNumber.trim(), superintendent: superintendent.trim(), address: address.trim(),
+        name: name.trim(), tradingName: tradingName.trim(), gphcNumber: gphcNumber.trim(), superintendent: superintendent.trim(), companyNumber: companyNumber.trim(), mainContactName: mainContactName.trim(), mainContactPhone: mainContactPhone.trim(), mainContactEmail: mainContactEmail.trim(), address: address.trim(),
         websiteDomains, status, logoText: logoText.trim().toUpperCase(), platformFeeMonthly: input.platformFeeMonthly,
-        brand: { primary: primaryColour, portalName: portalName.trim() }, modules,
+        brand: { primary: primaryColour, portalName: name.trim() }, modules,
         slug: slugify(tradingName || name),
       });
       onClose();
@@ -262,14 +287,17 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
         <form className="drawer-body onboarding-form" onSubmit={submit}>
           <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Corrections are saved to Firebase and added to the audit trail.</small></div></div>
           <label>Registered pharmacy name<input className="input" value={name} onChange={event => setName(event.target.value)} required /></label>
-          <label>Trading name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
+          <label>Company name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
           <div className="form-grid-two"><label>GPhC number<input className="input" value={gphcNumber} onChange={event => setGphcNumber(event.target.value)} required /></label><label>Superintendent pharmacist<input className="input" value={superintendent} onChange={event => setSuperintendent(event.target.value)} required /></label></div>
-          <label>Registered premises address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
+          <label>Company registration number<input className="input" value={companyNumber} onChange={event => setCompanyNumber(event.target.value)} required /></label>
+          <label>Registered office address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
+          <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
+          <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
           <label>Approved website domains<textarea className="input" value={domains} onChange={event => setDomains(event.target.value)} placeholder={'pharmacy.co.uk\nanother-domain.co.uk'} /><small>Enter one domain per line. Protocols and page paths are removed automatically.</small></label>
           <div className="form-grid-two"><label>Account status<select className="input" value={status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option><option value="live">Live</option><option value="paused">Paused</option></select></label><label>Monthly HHH platform fee (£)<input className="input" type="number" min="0" max="100000" step="0.01" value={platformFee} onChange={event => setPlatformFee(event.target.value)} placeholder="Not set" /></label></div>
 
-          <div className="form-section-heading"><span>02</span><div><strong>Brand and portal identity</strong><small>These details appear in the pharmacy workspace and eligibility form.</small></div></div>
-          <div className="form-grid-two"><label>Portal name<input className="input" value={portalName} onChange={event => setPortalName(event.target.value)} required /></label><label>Logo initials<input className="input" value={logoText} onChange={event => setLogoText(event.target.value.slice(0, 4))} minLength={1} maxLength={4} required /></label></div>
+          <div className="form-section-heading"><span>02</span><div><strong>Brand Customisation</strong><small>The portal name follows the pharmacy name automatically.</small></div></div>
+          <div className="form-grid-two"><label>Pharmacy name<input className="input" value={name} readOnly /><small>Also used as the portal name.</small></label><label>Add logo<button className="btn" type="button" disabled>Choose logo file</button><small>Upload requirements are awaiting approval.</small></label></div>
           <div className="brand-colour-field"><input type="color" value={primaryColour} onChange={event => setPrimaryColour(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primaryColour.toUpperCase()} · accessible palette generated automatically</small></div><div className="onboarding-palette"><i style={{ background: editTheme.primary }} /><i style={{ background: editTheme.secondary }} /><i style={{ background: editTheme.primarySoft }} /></div></div>
 
           <div className="form-section-heading"><span>03</span><div><strong>Available modules</strong><small>Choose the areas pharmacy staff can access.</small></div></div>
@@ -295,6 +323,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
   const [emailDelivery, setEmailDelivery] = useState<'sent' | 'failed' | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [deletingUid, setDeletingUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -346,7 +375,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
           dispatch({ type: 'ADD_TOAST', message: 'Local preview account created. No email was sent.', toastType: 'success' });
           return;
         }
-        await sendPasswordResetEmail(requireFirebaseAuth(), created.email);
+        await sendPasswordResetEmail(requireFirebaseAuth(), created.email, passwordResetActionSettings());
         setEmailDelivery('sent');
         dispatch({ type: 'ADD_TOAST', message: `${created.displayName} was added and Firebase sent their setup email.`, toastType: 'success' });
       } catch {
@@ -366,6 +395,23 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     dispatch({ type: 'ADD_TOAST', message: 'Secure account setup link copied.', toastType: 'success' });
   };
 
+  const removeStaff = async (account: PharmacyStaffAccount) => {
+    if (account.contactRole === 'owner' || !window.confirm(`Remove ${account.displayName}'s access? Their account history will be retained in the audit trail.`)) return;
+    setDeletingUid(account.uid);
+    setError(null);
+    try {
+      if (!isLocalPortalPreview) await removePharmacyStaff(account.uid);
+      const updated = staff.filter(item => item.uid !== account.uid);
+      setStaff(updated);
+      onCountChange(updated.length);
+      dispatch({ type: 'ADD_TOAST', message: `${account.displayName}'s access was removed. Audit history was retained.`, toastType: 'success' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The staff account could not be removed.');
+    } finally {
+      setDeletingUid(null);
+    }
+  };
+
   return (
     <section className="card admin-staff-card">
       <div className="admin-directory-head"><div><p className="section-label">Account access</p><h2>Pharmacy staff</h2><p>Create staff access for this pharmacy. The first account is tagged Owner only to identify the main contact; it receives no additional permissions.</p></div><span className="pill pill-info"><Users size={13} /> {staff.length} account{staff.length === 1 ? '' : 's'}</span></div>
@@ -379,7 +425,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
       <div className="admin-staff-list">
         {loading && <div className="empty-state">Loading staff accounts…</div>}
         {!loading && staff.length === 0 && <div className="empty-state">No pharmacy staff accounts yet. The first person added will be tagged Owner.</div>}
-        {staff.map(account => <div className="admin-staff-row" key={account.uid}><div className="staff-avatar">{account.displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()}</div><div><strong>{account.displayName}</strong><span>{account.email}</span></div><span className={`pill ${account.contactRole === 'owner' ? 'pill-info' : 'pill-neutral'}`}>{account.contactRole === 'owner' ? 'Owner' : 'Staff'}</span><span className={`pill ${account.status === 'active' ? 'pill-green' : account.status === 'disabled' ? 'pill-red' : 'pill-amber'}`}>{account.status}</span></div>)}
+        {staff.map(account => <div className="admin-staff-row" key={account.uid}><div className="staff-avatar">{account.displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()}</div><div><strong>{account.displayName}</strong><span>{account.email}</span></div><span className={`pill ${account.contactRole === 'owner' ? 'pill-info' : 'pill-neutral'}`}>{account.contactRole === 'owner' ? 'Owner' : 'Staff'}</span><span className={`pill ${account.status === 'active' ? 'pill-green' : account.status === 'disabled' ? 'pill-red' : 'pill-amber'}`}>{account.status}</span><button className="icon-btn" type="button" disabled={account.contactRole === 'owner' || deletingUid === account.uid} title={account.contactRole === 'owner' ? 'Owner account is protected' : 'Remove staff access'} aria-label={account.contactRole === 'owner' ? `${account.displayName} is the protected owner account` : `Remove ${account.displayName}`} onClick={() => void removeStaff(account)}><UserX size={16} /></button></div>)}
       </div>
     </section>
   );
@@ -389,6 +435,12 @@ export default function AdminPortal() {
   const { state, dispatch } = useApp();
   const [view, setView] = useState<AdminView>('overview');
   const [query, setQuery] = useState('');
+  const [patientOrganisationId, setPatientOrganisationId] = useState('all');
+  const [patientStatus, setPatientStatus] = useState('all');
+  const [patientFrom, setPatientFrom] = useState('');
+  const [patientTo, setPatientTo] = useState('');
+  const [patientExportBusy, setPatientExportBusy] = useState(false);
+  const [patientExportError, setPatientExportError] = useState<string | null>(null);
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
@@ -685,10 +737,51 @@ export default function AdminPortal() {
   }, [financePatientKey, financePatients]);
 
   const filteredOrganisations = state.organisations.filter(org => `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase()));
+  const patientStatuses = [...new Set(allPatients.map(patient => patient.stage))].sort((a, b) => onboardingStatusLabel(a).localeCompare(onboardingStatusLabel(b)));
   const filteredPatients = allPatients.filter(patient => {
     const org = state.organisations.find(item => item.id === patient.organisationId);
-    return `${patient.name} ${patient.email} ${patient.mobile} ${patient.dob} ${formatPatientDob(patient.dob)} ${org?.name ?? ''}`.toLowerCase().includes(query.toLowerCase());
+    const searchMatches = `${patient.name} ${patient.email} ${patient.mobile} ${patient.dob} ${formatPatientDob(patient.dob)} ${org?.name ?? ''} ${org?.tradingName ?? ''}`.toLowerCase().includes(query.trim().toLowerCase());
+    if (!searchMatches) return false;
+    if (patientOrganisationId !== 'all' && patient.organisationId !== patientOrganisationId) return false;
+    if (patientStatus !== 'all' && patient.stage !== patientStatus) return false;
+    const date = londonDateKey(patient.date);
+    if (patientFrom && (!date || date < patientFrom)) return false;
+    if (patientTo && (!date || date > patientTo)) return false;
+    return true;
   });
+
+  const exportPatients = async () => {
+    setPatientExportBusy(true);
+    setPatientExportError(null);
+    try {
+      if (!isLocalPortalPreview) {
+        await recordPatientRegisterExport({ query: query.trim(), organisationId: patientOrganisationId, status: patientStatus, from: patientFrom || null, to: patientTo || null, resultCount: filteredPatients.length });
+      }
+      const header = ['Patient', 'Attributed pharmacy', 'Current stage', 'Last recorded'];
+      const rows = filteredPatients.map(patient => {
+        const organisation = state.organisations.find(item => item.id === patient.organisationId);
+        return [
+          `${patient.name} | ${patient.email} | ${patient.mobile || '—'} | DOB ${formatPatientDob(patient.dob)}`,
+          organisation?.tradingName ?? 'Unknown pharmacy',
+          onboardingStatusLabel(patient.stage),
+          patient.date ? new Date(patient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—',
+        ];
+      });
+      const csv = [header, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
+      const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `hhh-patient-register-${londonDateKey(new Date())}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      dispatch({ type: 'ADD_TOAST', message: `Exported ${filteredPatients.length} filtered patient record${filteredPatients.length === 1 ? '' : 's'}.`, toastType: 'success' });
+    } catch (error) {
+      setPatientExportError(error instanceof Error ? error.message : 'The patient register could not be exported.');
+    } finally {
+      setPatientExportBusy(false);
+    }
+  };
   const liveCount = state.organisations.filter(org => org.status === 'live').length;
   const remainingSetupSteps = Object.values(setupByOrganisation).reduce((total, status) => total + status.requiredCount - status.completedCount, 0);
   const pendingAdminDecisions = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review').length;
@@ -722,19 +815,19 @@ export default function AdminPortal() {
         <a className="skip-link" href="#admin-main-content">Skip to main content</a>
         <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
         <div className="app-main">
-          <WorkspacePageHeader section="Pharmacy workspace" context="HHH administration" title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} contextControl={<div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div>} />
+          <WorkspacePageHeader section="Pharmacy workspace" context="HHH administration" title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} contextControl={!setupStatus?.completed ? <div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div> : undefined} />
           <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
-          <button className="btn btn-sm admin-detail-back" onClick={() => setSelectedOrganisationId(null)}><ArrowLeft size={14} /> Back to pharmacy directory</button>
+          <button className="btn btn-sm admin-detail-back" onClick={() => setSelectedOrganisationId(null)}><ArrowLeft size={14} /> {view === 'patients' ? 'Back to patient register' : 'Back to pharmacy directory'}</button>
 
           <section className="admin-client-heading">
             <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Pharmacy account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
-            <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><strong>{readiness.percent}% setup complete</strong><button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
+            <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span>{!setupStatus?.completed && <strong>{readiness.percent}% setup complete</strong>}<button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
           </section>
 
           <SummaryTiles className="summary-tiles--compact" label="Pharmacy account summary" items={[
             { label: 'Patients', value: new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size, detail: 'attributed records' },
             { label: 'Access', value: selectedOrganisation.staffCount, detail: 'staff accounts' },
-            { label: 'Readiness', value: `${readiness.ready}/${readiness.total}`, detail: 'steps complete' },
+            ...(!setupStatus?.completed ? [{ label: 'Readiness', value: `${readiness.ready}/${readiness.total}`, detail: 'steps complete' }] : []),
             { label: 'Platform fee', value: selectedOrganisation.platformFeeMonthly == null ? '—' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`, detail: 'per month' },
           ]} />
 
@@ -744,18 +837,23 @@ export default function AdminPortal() {
             <section className="card admin-detail-card">
               <div className="admin-detail-card-title"><Building2 size={18} /><h2>Registered details</h2></div>
               <div className="admin-detail-list">
-                <div><span>Display name</span><strong>{selectedOrganisation.name}</strong></div>
+                <div><span>Pharmacy name</span><strong>{selectedOrganisation.name}</strong></div>
+                <div><span>Curaleaf ID (PHAR code)</span><strong>{selectedOrganisation.curaleafPharmacyCode ?? (setupStatus?.tasks.find(task => task.id === 'curaleaf_account')?.completed ? 'Connected securely' : 'Not connected')}</strong></div>
+                <div><span>Company name</span><strong>{selectedOrganisation.tradingName}</strong></div>
+                <div><span>Company registration number</span><strong>{selectedOrganisation.companyNumber || 'Not supplied'}</strong></div>
                 <div><span>GPhC number</span><strong>{selectedOrganisation.gphcNumber}</strong></div>
-                <div><span>Superintendent</span><strong>{selectedOrganisation.superintendent}</strong></div>
-                <div><span>Address</span><strong><MapPin size={13} /> {selectedOrganisation.address}</strong></div>
+                <div><span>Main contact name</span><strong>{selectedOrganisation.mainContactName || selectedOrganisation.superintendent}</strong></div>
+                <div><span>Main contact number</span><strong>{selectedOrganisation.mainContactPhone || 'Not supplied'}</strong></div>
+                <div><span>Main contact email</span><strong>{selectedOrganisation.mainContactEmail || 'Not supplied'}</strong></div>
+                <div><span>Registered office address</span><strong><MapPin size={13} /> {selectedOrganisation.address}</strong></div>
                 <div><span>Approved domains</span><strong><Globe2 size={13} /> {selectedOrganisation.websiteDomains.join(', ') || 'Not supplied'}</strong></div>
                 <div><span>Monthly HHH platform fee</span><strong>{selectedOrganisation.platformFeeMonthly == null ? 'Not set' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`}</strong></div>
               </div>
             </section>
 
             <section className="card admin-detail-card tenant-brand-editor">
-              <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Brand and portal identity</h2></div>
-              <label>Portal name<input className="input" value={selectedOrganisation.brand.portalName} readOnly /></label>
+              <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Brand Customisation</h2></div>
+              <label>Pharmacy name<input className="input" value={selectedOrganisation.name} readOnly /></label>
               <div className="brand-editor-row">
                 <label>Primary colour<span><input type="color" value={selectedOrganisation.brand.primary} disabled /><code>{selectedOrganisation.brand.primary}</code></span></label>
                 <label>Automatic secondary<span className="derived-colour"><i style={{ background: tenantTheme.secondary }} /><code>{tenantTheme.secondary}</code><small>Derived from primary</small></span></label>
@@ -783,11 +881,11 @@ export default function AdminPortal() {
             </section>
           </div>
 
-          <section className="card admin-patient-table admin-client-compliance">
+          {!setupStatus?.completed && <section className="card admin-patient-table admin-client-compliance">
             <div className="admin-directory-head"><div><p className="section-label">Go-live checklist</p><h2>Pharmacy setup</h2><p>The pharmacy completes its operational steps in Settings; HHH completes Curaleaf activation.</p></div><span className="pill pill-info">{readiness.ready} of {readiness.total} complete</span></div>
             {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
             <div className="compliance-table table-wrap"><table><thead><tr><th>Setup step</th><th>Owner</th><th>Evidence</th><th>Status</th></tr></thead><tbody>{SETUP_TASKS.map(definition => { const task = setupStatus?.tasks.find(item => item.id === definition.id); return <tr key={definition.id}><td><strong>{definition.title}</strong><small>{definition.description}</small></td><td><span className={`setup-owner-tag${definition.owner === 'hhh_admin' ? ' setup-owner-tag--admin' : ''}`}>{definition.owner === 'hhh_admin' ? 'HHH admin' : 'Pharmacy'}</span></td><td>{task?.evidence || 'Not supplied yet'}</td><td><span className={`pill ${task?.completed ? 'pill-green' : 'pill-amber'}`}>{task?.completed ? 'Complete' : 'Waiting'}</span></td></tr>; })}</tbody></table></div>
-          </section>
+          </section>}
 
           {showPharmacyEditor && <EditPharmacy key={selectedOrganisation.id} organisation={selectedOrganisation} onClose={() => setShowPharmacyEditor(false)} onSaved={updates => {
             dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisation.id, updates });
@@ -892,10 +990,18 @@ export default function AdminPortal() {
 
   const renderPatients = () => (
     <>
-      <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-pharmacy register</p><strong>Patient index</strong><small>Operational oversight of pharmacy attribution.</small></span><span className="pill pill-info"><Users size={13} /> {allPatients.length} unique records</span></div>
+      <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-pharmacy register</p><strong>Patient index</strong></span><div className="flex gap-sm flex-wrap"><span className="pill pill-info"><Users size={13} /> {filteredPatients.length} of {allPatients.length} records</span><button className="btn btn-sm" type="button" onClick={() => void exportPatients()} disabled={patientExportBusy}><Download size={14} /> {patientExportBusy ? 'Preparing CSV…' : 'Export filtered CSV'}</button></div></div>
       <section className="card admin-patient-table admin-master-patients">
-        <div className="admin-directory-head"><div><h2>Patient register</h2><p>Operational oversight only. Every access must be authenticated and audited in production.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB or pharmacy" /></label></div>
-        <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Acquisition source</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown pharmacy'}</button><small>{org?.gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.source}</td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB') : '—'}</td></tr>; })}</tbody></table></div>
+        <div className="admin-directory-head"><div><h2>Patient register</h2></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB or pharmacy" /></label></div>
+        <div className="admin-patient-filters" aria-label="Patient register filters">
+          <label>Pharmacy<select className="input" value={patientOrganisationId} onChange={event => setPatientOrganisationId(event.target.value)}><option value="all">All pharmacies</option>{state.organisations.map(organisation => <option key={organisation.id} value={organisation.id}>{organisation.tradingName}</option>)}</select></label>
+          <label>Eligibility status<select className="input" value={patientStatus} onChange={event => setPatientStatus(event.target.value)}><option value="all">All statuses</option>{patientStatuses.map(status => <option key={status} value={status}>{onboardingStatusLabel(status)}</option>)}</select></label>
+          <label>From date<input className="input" type="date" value={patientFrom} max={patientTo || undefined} onChange={event => setPatientFrom(event.target.value)} /></label>
+          <label>To date<input className="input" type="date" value={patientTo} min={patientFrom || undefined} onChange={event => setPatientTo(event.target.value)} /></label>
+          <button className="btn btn-sm" type="button" onClick={() => { setQuery(''); setPatientOrganisationId('all'); setPatientStatus('all'); setPatientFrom(''); setPatientTo(''); }}>Clear filters</button>
+        </div>
+        {patientExportError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {patientExportError}</div>}
+        {filteredPatients.length === 0 ? <div className="empty-state">No patient records match the current search and filters.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown pharmacy'}</button><small>{org?.gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—'}</td></tr>; })}</tbody></table></div>}
       </section>
     </>
   );

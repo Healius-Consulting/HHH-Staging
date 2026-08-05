@@ -24,6 +24,7 @@ import { firebaseConfiguration, mfaRequired, readAppCheckToken, requireFirebaseA
 import { AuthContext, type AuthContextValue } from './AuthContext';
 import type { AuthState, AuthenticatedStaff, StaffRole } from './types';
 import { isLocalPortalPreview, localPreviewStaff } from '../dev/localPortalPreview';
+import { passwordResetActionSettings } from './passwordReset';
 
 const IDLE_LIMIT_MS = 15 * 60 * 1000;
 const ABSOLUTE_LIMIT_MS = 8 * 60 * 60 * 1000;
@@ -286,7 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendPasswordReset = useCallback(async (email: string) => {
-    await sendPasswordResetEmail(requireFirebaseAuth(), email.trim());
+    await sendPasswordResetEmail(requireFirebaseAuth(), email.trim(), passwordResetActionSettings());
   }, []);
 
   const value = useMemo<AuthContextValue>(() => ({

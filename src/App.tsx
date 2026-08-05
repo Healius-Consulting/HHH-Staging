@@ -24,6 +24,7 @@ import {
   EmailVerificationGate,
   MfaChallenge,
   MfaEnrollmentGate,
+  PasswordResetScreen,
   StaffLogin,
 } from './auth/AuthScreens';
 import { PharmacySetupWizard } from './onboarding/PharmacySetupWizard';
@@ -45,13 +46,18 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
     logoText: record.logoText,
     gphcNumber: record.gphcNumber,
     superintendent: record.superintendent,
+    companyNumber: record.companyNumber,
+    mainContactName: record.mainContactName,
+    mainContactPhone: record.mainContactPhone,
+    mainContactEmail: record.mainContactEmail,
+    curaleafPharmacyCode: record.curaleafPharmacyCode,
     address: record.address,
     websiteDomains: record.websiteDomains ?? [],
     status: record.status,
     staffCount: 0,
     platformFeeMonthly: record.platformFeeMonthly ?? null,
     defaultPaymentRoute: record.defaultPaymentRoute ?? 'manual',
-    brand: { primary: record.primaryColour, portalName: record.portalName ?? `${record.tradingName} Patient Services` },
+    brand: { primary: record.primaryColour, portalName: record.portalName ?? record.name },
     modules: record.modules ?? { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: {
       enabled: record.defaultPaymentRoute === 'worldpay',
@@ -221,6 +227,9 @@ function StaffWorkspace() {
 
 function AppContent() {
   const { state: authState } = useAuth();
+  const urlMode = new URLSearchParams(window.location.search).get('mode');
+
+  if (urlMode === 'resetPassword' || urlMode === 'reset-password') return <PasswordResetScreen />;
 
   return (
     <>

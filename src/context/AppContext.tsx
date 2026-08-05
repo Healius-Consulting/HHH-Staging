@@ -174,6 +174,11 @@ export interface PharmacyTenant {
   logoText: string;
   gphcNumber: string;
   superintendent: string;
+  companyNumber?: string;
+  mainContactName?: string;
+  mainContactPhone?: string;
+  mainContactEmail?: string;
+  curaleafPharmacyCode?: string;
   address: string;
   websiteDomains: string[];
   status: 'live' | 'onboarding' | 'paused';
@@ -284,24 +289,24 @@ export const ORGANISATIONS: PharmacyTenant[] = [
   {
     id: '11111111-1111-4111-8111-111111111111', slug: 'hhh-leeds', referralToken: 'hhh-leeds-7x4p9k',
     name: 'Holistic Health Hub Pharmacy — Leeds', tradingName: 'HHH Leeds', logoText: 'HH',
-    gphcNumber: '9012345', superintendent: 'Shaylen Patel',
+    gphcNumber: '9012345', superintendent: 'Shaylen Patel', companyNumber: '12345678', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'shaylen@hhh.health', curaleafPharmacyCode: 'PHAR••••LEEDS',
     address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['hhh.health'],
     status: 'onboarding', staffCount: 4,
     platformFeeMonthly: null,
     defaultPaymentRoute: 'worldpay',
-    brand: { primary: '#0f766e', portalName: 'HHH Leeds Patient Services' },
+    brand: { primary: '#0f766e', portalName: 'Holistic Health Hub Pharmacy — Leeds' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: true, status: 'connected', environment: 'sandbox', merchantId: 'WP-DEMO-LEEDS', merchantName: 'HHH Leeds', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
   },
   {
     id: '22222222-2222-4222-8222-222222222222', slug: 'east-midlands-lincoln', referralToken: 'emp-lincoln-3m8q2v',
     name: 'East Midlands Pharmacy Lincoln', tradingName: 'EMP Lincoln', logoText: 'EM',
-    gphcNumber: '9019876', superintendent: 'A. Pharmacist',
+    gphcNumber: '9019876', superintendent: 'A. Pharmacist', companyNumber: '87654321', mainContactName: 'A. Pharmacist', mainContactPhone: '01522 000 000', mainContactEmail: 'contact@eastmidlandspharmacy.co.uk',
     address: 'Lincoln, Lincolnshire, United Kingdom', websiteDomains: ['eastmidlandspharmacy.co.uk'],
     status: 'onboarding', staffCount: 2,
     platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
-    brand: { primary: '#315b7d', portalName: 'EMP Lincoln Patient Services' },
+    brand: { primary: '#315b7d', portalName: 'East Midlands Pharmacy Lincoln' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: false, patients: true, resources: true },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
