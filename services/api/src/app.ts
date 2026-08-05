@@ -4,7 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import { z } from 'zod';
-import { CONDITION_IDS, normaliseConditionId } from '@hhh/domain';
+import { CONDITION_IDS, normaliseConditionId, type ConditionId } from './conditions.js';
 import type { DocumentReference } from 'firebase-admin/firestore';
 import { audit } from './audit.js';
 import { identity, requireRole, requireStaff, tenantFor } from './auth.js';
@@ -105,7 +105,7 @@ const eligibilitySchema = z.object({
 
 function conditionSet(record: Record<string, unknown>) {
   const conditions = Array.isArray(record.conditions)
-    ? [...new Set(record.conditions.map(normaliseConditionId).filter((value): value is string => Boolean(value)))].slice(0, 3)
+    ? [...new Set(record.conditions.map(normaliseConditionId).filter((value): value is ConditionId => Boolean(value)))].slice(0, 3)
     : [];
   const legacy = normaliseConditionId(record.condition);
   if (conditions.length === 0 && legacy) conditions.push(legacy);

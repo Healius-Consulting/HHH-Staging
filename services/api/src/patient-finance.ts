@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { normaliseConditionId } from '@hhh/domain';
+import { normaliseConditionId, type ConditionId } from './conditions.js';
 import type { DocumentData, DocumentReference } from 'firebase-admin/firestore';
 import { firestore } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
@@ -102,7 +102,7 @@ export async function completeReferral(submissionId: string, actorUid: string, n
     );
     const feeSnapshot = await transaction.get(feeRef);
     const conditions = Array.isArray(current.conditions)
-      ? [...new Set(current.conditions.map(normaliseConditionId).filter((value): value is string => Boolean(value)))].slice(0, 3)
+      ? [...new Set(current.conditions.map(normaliseConditionId).filter((value): value is ConditionId => Boolean(value)))].slice(0, 3)
       : [];
     const legacyCondition = normaliseConditionId(current.condition);
     if (conditions.length === 0 && legacyCondition) conditions.push(legacyCondition);
