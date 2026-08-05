@@ -19,7 +19,8 @@ Production must start with empty patient, referral and order collections. The Re
 - Deploy the Firestore indexes/rules, Storage rules and Functions from the repository root.
 - Grant the Functions runtime service account the minimum Secret Manager accessor role for the named integration secrets.
 - Never put Curaleaf API keys or Worldpay merchant secrets in `VITE_*` variables.
-- The API can be deployed before Curaleaf supplies HHH’s keys, so eligibility and onboarding testing are not blocked. Once the keys arrive, create `CURALEAF_READ_API_KEY` and `CURALEAF_WRITE_API_KEY` in Secret Manager and grant the Functions runtime service account access to those named secrets. Read requests use the least-privilege key; mutations use the read/write key. Pharmacy activation then stores only that pharmacy’s customer ID and returned portal email in its Europe-hosted secret. `CURALEAF_API_KEY` remains a temporary fallback for legacy deployments.
+- The API can be deployed before Curaleaf supplies pharmacy keys, so eligibility and onboarding testing are not blocked. Pharmacy activation stores that pharmacy’s internal customer ID, portal email, required read/write key and optional read-only key in its own Europe-hosted secret. Live tenant requests never fall back to a platform or another pharmacy’s key; legacy customer-ID-only connections show `credential_update_required` until rotated.
+- Enable Cloud Tasks and grant the Functions runtime service account `cloudtasks.tasks.create` plus permission to invoke `pollCuraleafEventsLondon`. Keep `CURALEAF_EVENT_POLLING_ENABLED=false` through the first deployment, enter and verify per-pharmacy keys, then set it to `true` and redeploy.
 
 Example deployment after selecting the correct Firebase project:
 
@@ -51,7 +52,8 @@ Firebase Auth, verified ID tokens, role/organisation claims, App Check and tenan
 
 - Create users through the HHH admin process only; there is no patient sign-up.
 - Confirm an unactivated pharmacy sees the training banner and dummy records, can practise every workflow, and loses all dummy mutations on refresh without any patient/order writes in Firestore.
-- Submit the external Curaleaf onboarding form, then have an HHH administrator enter the returned customer ID and portal email. The pharmacy must not receive an API-key field.
+- Submit the external Curaleaf onboarding form, then have an HHH administrator enter the returned internal customer/PHAR ID, portal email and pharmacy API key(s) through the admin-only integration form. Pharmacy staff never receive or view those fields.
+- Confirm each connected pharmacy has a fresh event-worker heartbeat, ten-second cursor movement, 1.1-second supplier request spacing and tested `429` recovery.
 - Verify every staff email before granting workspace access. For the initial staging demo, set `VITE_REQUIRE_MFA=false` and `REQUIRE_MFA=false`; enable both together when mandatory TOTP is introduced.
 - Test that a pharmacy user cannot read or mutate another organisation by changing request identifiers.
 - Confirm setup-incomplete staff can open Dashboard, Setup and Resources but cannot submit orders, access patient records or configure live payment actions.

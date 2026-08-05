@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { createHash } from 'node:crypto';
 import { curaleafList } from './curaleaf.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
@@ -25,6 +26,10 @@ const mirrorCollections = {
   shipments: 'curaleafShipments',
 } as const;
 
+function tenantRecordId(organisationId: string, supplierId: string) {
+  return createHash('sha256').update(`${organisationId}:${supplierId}`).digest('hex');
+}
+
 function authenticRecords(records: Array<Record<string, unknown>>, label: string): CuraleafRecord[] {
   return records.map(record => {
     if (typeof record.id !== 'string' || !record.id) {
@@ -43,9 +48,10 @@ export async function persistCuraleafAccountSnapshot(
     [keyof typeof mirrorCollections, string]
   >) {
     for (const record of snapshot[key]) {
-      writer.set(firestore.collection(collection).doc(record.id), {
+      writer.set(firestore.collection(collection).doc(tenantRecordId(organisationId, record.id)), {
         ...record,
         organisationId,
+        supplierId: record.id,
         source: 'curaleaf',
         sourceEnvironment: snapshot.environment,
         syncedAt: snapshot.fetchedAt,

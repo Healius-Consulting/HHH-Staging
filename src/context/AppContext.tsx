@@ -116,6 +116,7 @@ export interface PatientOrder {
     manualRecordedBy: string | null;
   };
   prescriptions: Prescription[];
+  quoteReview?: PortalOrderRecord['quoteReview'];
 }
 
 export type SubmissionStatus = 'New' | 'Under HHH review' | 'Approved' | 'Declined';
@@ -610,6 +611,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
       manualRecordedBy: null,
     },
     prescriptions,
+    quoteReview: record.quoteReview,
   };
 }
 

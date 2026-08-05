@@ -12,7 +12,7 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   },
   formulary: {
     title: 'Curaleaf catalogue',
-    subtitle: 'Review Curaleaf products, pack sizes and the patient prices supplied for this pharmacy.',
+    subtitle: 'Review Curaleaf products, pack sizes and recommended patient prices for this pharmacy.',
   },
   create: {
     title: 'Prescription workspace',

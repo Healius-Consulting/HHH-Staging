@@ -178,7 +178,8 @@ Separate worker process (same codebase, different entrypoint):
 
 | Job | Schedule / trigger | Purpose |
 |-----|-------------------|---------|
-| Shipment poller | Every 5 min per active order | `GET /shipments` — Rocky has no webhooks |
+| Curaleaf event poller | Every 10 sec per connected pharmacy | Poll `product-`, `prescription-`, `purchase-order-` and `shipment-events`; fetch changed entities by ID |
+| Curaleaf repair mirror | Hourly | Full account snapshot to repair missed or malformed event state |
 | Payment reconciliation | On webhook + hourly sweep | Match Worldpay refs to sub-orders |
 | Notification dispatcher | Event-driven | Payment link, paid confirmation, ready for collection |
 | Draft order expiry | Daily | Clear stale draft orders (>24h per TRD F-26) |
@@ -406,7 +407,7 @@ sequenceDiagram
     WP->>API: Webhook payment.confirmed
     API->>R: POST /prescription (per sub-order)
     API->>R: POST /purchase-order
-    W->>R: GET /shipments (poll every 5 min)
+    W->>R: GET /*-events?after=cursor (poll every 10 sec)
     W->>API: Update fulfillment status
     S->>API: Confirm goods-in
     API->>P: SMS ready for collection
@@ -418,7 +419,7 @@ sequenceDiagram
 | Rocky `GET /products` | API → Rocky | Per-tenant API key | Cache 15 min |
 | Rocky `POST /prescription` | API → Rocky | Per-tenant | Sequential per TRD F-25 |
 | Rocky `POST /purchase-order` | API → Rocky | Per-tenant | Gated on payment + scan |
-| Rocky `GET /shipments` | Worker → Rocky | Per-tenant | Poll; no webhooks |
+| Rocky `GET /*-events` | Worker → Rocky | Per-tenant | Ten-second cursored polling; 1.1-second request spacing and 429 backoff |
 | Worldpay | API ↔ Worldpay | One connected merchant relationship per pharmacy | Hosted checkout only; tenant attribution, verified webhooks and direct settlement to the pharmacy |
 | Postmark / Twilio | Worker → provider | API keys | Templates per tenant branding |
 

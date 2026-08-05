@@ -101,7 +101,7 @@ export default function AwaitingPayment() {
         });
         dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
         const pendingAcceptance = await submitLiveOrder({ ...order, payment: { ...order.payment, status: 'paid' } });
-        dispatch({ type: 'ADD_TOAST', message: pendingAcceptance ? `Payment recorded. ${pendingAcceptance} prescription${pendingAcceptance === 1 ? ' is' : 's are'} awaiting Curaleaf acceptance before purchase ordering.` : 'Payment recorded and Curaleaf purchase orders submitted.', toastType: 'success' });
+        dispatch({ type: 'ADD_TOAST', message: pendingAcceptance ? `Payment recorded. ${pendingAcceptance} prescription${pendingAcceptance === 1 ? ' is' : 's are'} awaiting Curaleaf credential validation or supplier review before purchase ordering.` : 'Payment recorded and Curaleaf purchase orders submitted.', toastType: 'success' });
       } else {
         dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
         dispatch({ type: 'PLACE_ORDER', orderId: order.id });
@@ -119,7 +119,7 @@ export default function AwaitingPayment() {
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live') {
         const pendingAcceptance = await submitLiveOrder(order);
-        dispatch({ type: 'ADD_TOAST', message: pendingAcceptance ? `${pendingAcceptance} prescription${pendingAcceptance === 1 ? ' is' : 's are'} awaiting Curaleaf acceptance before purchase ordering.` : 'Curaleaf purchase orders submitted.', toastType: 'success' });
+        dispatch({ type: 'ADD_TOAST', message: pendingAcceptance ? `${pendingAcceptance} prescription${pendingAcceptance === 1 ? ' is' : 's are'} awaiting Curaleaf credential validation or supplier review before purchase ordering.` : 'Curaleaf purchase orders submitted.', toastType: 'success' });
       } else {
         dispatch({ type: 'PLACE_ORDER', orderId: order.id });
         dispatch({ type: 'ADD_TOAST', message: 'Training Curaleaf submission simulated locally. Nothing was sent.', toastType: 'info' });

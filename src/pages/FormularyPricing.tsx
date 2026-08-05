@@ -29,19 +29,19 @@ export default function FormularyPricing() {
           <span className="pricing-brief__icon"><ShieldCheck size={18} /></span>
           <span>
             <small>Curaleaf-managed catalogue</small>
-            <strong>Patient prices are supplied by Curaleaf and are read-only.</strong>
+            <strong>Recommended patient prices are supplied by Curaleaf and are read-only.</strong>
             <em>Wholesale cost and stock availability are confirmed for the selected pack quantities when a quote is requested in the prescription workspace.</em>
           </span>
         </div>
         <dl className="pricing-position" aria-label="Curaleaf catalogue position">
           <div><dt>Products</dt><dd>{state.catalogue.length}</dd></div>
           <div><dt>Active</dt><dd>{activeCount}</dd></div>
-          <div><dt>Patient prices</dt><dd>{pricedCount}</dd></div>
+          <div><dt>Recommended patient prices</dt><dd>{pricedCount}</dd></div>
         </dl>
       </section>
 
       {state.catalogueLoading ? (
-        <ProviderStatusNotice state="loading" title="Refreshing Curaleaf catalogue" detail="The latest products and patient prices are being retrieved." />
+        <ProviderStatusNotice state="loading" title="Refreshing Curaleaf catalogue" detail="The latest products and recommended patient prices are being retrieved." />
       ) : state.catalogueError ? (
         <ProviderStatusNotice
           title="Curaleaf information is temporarily delayed"
@@ -80,12 +80,12 @@ export default function FormularyPricing() {
           ))}
         </div>
 
-        <div className="pricing-table pricing-table--readonly" role="table" aria-label="Curaleaf products and patient prices">
+        <div className="pricing-table pricing-table--readonly" role="table" aria-label="Curaleaf products and recommended patient prices">
           <div className="pricing-table__head" role="row">
             <span role="columnheader">Product</span>
             <span role="columnheader">Pack</span>
             <span role="columnheader">Product state</span>
-            <span role="columnheader">Patient price</span>
+            <span role="columnheader">Recommended patient price</span>
             <span role="columnheader">Wholesale</span>
           </div>
           {products.length === 0 ? (

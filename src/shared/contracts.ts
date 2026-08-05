@@ -67,6 +67,8 @@ export interface EligibilitySubmissionReceipt {
 export interface CuraleafConnectionStatus {
   configured: boolean;
   connected: boolean;
+  writeConfigured?: boolean;
+  status?: 'not_configured' | 'credential_update_required' | 'connected' | 'attention';
   environment: 'test' | 'production';
   checkedAt: string;
   message?: string;
@@ -319,8 +321,18 @@ export interface PortalOrderRecord {
   fulfilmentStatus: string;
   paymentId?: string;
   pricingQuote?: CuraleafPricingSnapshot;
+  quoteReview?: {
+    status: 'required' | 'approved' | 'recreate_required';
+    type: 'out_of_stock' | 'patient_price_changed' | 'supplier_cost_changed';
+    fingerprint: string;
+    latestQuote: CuraleafQuote;
+    differences: Array<{ category: 'stock' | 'patient_price' | 'supplier_cost'; field: string; packId?: string; previous: string | boolean; latest: string | boolean }>;
+    checkedAt: string;
+    approvedAt?: string;
+    approvalNote?: string;
+  };
   curaleaf?: {
-    status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'purchase_order_submitted';
+    status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'quote_review_required' | 'purchase_order_submitted';
     prescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
     prescriptionId?: string;
     prescriberId?: string;
@@ -339,7 +351,8 @@ export interface PortalOrderRecord {
 export interface PrescriptionUploadRequest {
   organisationId: string;
   filename: string;
-  contentType: 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp';
+  contentType: 'application/pdf' | 'image/jpeg' | 'image/png';
+  sizeBytes: number;
 }
 
 export interface PrescriptionUploadTarget {
@@ -372,7 +385,7 @@ export interface CuraleafManualPrescriptionInput {
 }
 
 export interface CuraleafSubmissionResult {
-  status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'purchase_order_submitted';
+  status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'quote_review_required' | 'purchase_order_submitted';
   prescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
   prescriptionId?: string;
   prescriberId?: string;
@@ -438,6 +451,28 @@ export interface CuraleafActivationInput {
   organisationId: string;
   customerId: string;
   portalEmail: string;
+  writeApiKey: string;
+  readApiKey?: string;
+}
+
+export type CuraleafSupportReason = 'prescription_exception' | 'purchase_order_cancellation' | 'quote_review' | 'supplier_exception';
+export type CuraleafSupportStatus = 'open' | 'contacted' | 'resolved';
+
+export interface CuraleafSupportCase {
+  id: string;
+  organisationId: string;
+  orderId: string;
+  reason: CuraleafSupportReason;
+  status: CuraleafSupportStatus;
+  note: string;
+  prescriptionId: string | null;
+  purchaseOrderId: string | null;
+  openedBy: string;
+  openedByRole: 'hhh_admin' | 'pharmacy_staff';
+  openedAt: string;
+  contactedAt?: string;
+  resolvedAt?: string;
+  updatedAt: string;
 }
 
 export interface WorldpayConnectionInput {

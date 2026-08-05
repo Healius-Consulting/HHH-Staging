@@ -25,6 +25,8 @@ const idSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 const tokenSchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/);
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const timestamp = () => nowIso();
+const MAX_PRESCRIPTION_FILE_BYTES = 16_000_000;
+const PRESCRIPTION_CONTENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'] as const;
 const firebaseAuthErrorCode = (error: unknown) => {
   if (!error || typeof error !== 'object') return null;
   const candidate = error as { code?: unknown; errorInfo?: { code?: unknown } };
@@ -233,16 +235,20 @@ function maskedIdentifier(value: string) {
 
 async function uploadedFile(organisationId: string, fileId: string) {
   const record = await getTenantRecord('prescriptionFiles', fileId, organisationId);
-  if (record.status !== 'uploaded' && record.status !== 'upload_pending') throw new HttpError(409, 'Prescription file is unavailable.', 'FILE_UNAVAILABLE');
+  if (record.status !== 'uploaded') throw new HttpError(409, 'Complete and verify the prescription file upload first.', 'UPLOAD_INCOMPLETE');
   const object = storage.bucket().file(record.storagePath as string);
   const [exists] = await object.exists();
   if (!exists) throw new HttpError(409, 'Complete the prescription file upload first.', 'UPLOAD_INCOMPLETE');
   const [metadata] = await object.getMetadata();
-  if (metadata.size && Number(metadata.size) > 10 * 1024 * 1024) throw new HttpError(400, 'Prescription files must be 10 MB or smaller.', 'FILE_TOO_LARGE');
+  if (!metadata.size || Number(metadata.size) > MAX_PRESCRIPTION_FILE_BYTES) throw new HttpError(400, 'Prescription files must be 16 MB or smaller.', 'FILE_TOO_LARGE');
   const [bytes] = await object.download();
-  await firestore.collection('prescriptionFiles').doc(fileId).update({ status: 'uploaded', updatedAt: timestamp() });
-  invalidateCollectionCache('prescriptionFiles', fileId);
   return { bytes, contentType: record.contentType as string, filename: record.filename as string };
+}
+
+export function validPrescriptionSignature(contentType: typeof PRESCRIPTION_CONTENT_TYPES[number], bytes: Buffer) {
+  if (contentType === 'application/pdf') return bytes.subarray(0, 5).equals(Buffer.from('%PDF-'));
+  if (contentType === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  return bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 }
 
 async function startOperation(organisationId: string, orderId: string, kind: 'manual' | 'barcode', subOrderId?: string) {
@@ -785,6 +791,113 @@ function curaleafMoneyPence(value: unknown, field = 'price') {
   return Number(pence);
 }
 
+type ParsedCuraleafQuote = z.infer<typeof curaleafQuoteSchema>;
+type QuoteDifference = {
+  category: 'stock' | 'patient_price' | 'supplier_cost';
+  field: string;
+  packId?: string;
+  previous: string | boolean;
+  latest: string | boolean;
+};
+
+export function normalisedQuote(quote: ParsedCuraleafQuote) {
+  return {
+    shippingPence: curaleafMoneyPence(quote.shippingPrice, 'shipping price'),
+    taxRate: Number(quote.taxRate),
+    items: [...quote.items].sort((left, right) => left.packId.localeCompare(right.packId)).map(item => ({
+      packId: item.packId,
+      quantity: item.quantity,
+      inStock: item.inStock,
+      wholesalePence: curaleafMoneyPence(item.wholesalePackPrice, 'wholesale pack price'),
+      patientPence: curaleafMoneyPence(item.patientPackPrice, 'patient pack price'),
+    })),
+  };
+}
+
+export function quoteFingerprint(quote: ParsedCuraleafQuote) {
+  return createHash('sha256').update(JSON.stringify(normalisedQuote(quote))).digest('hex');
+}
+
+export function compareQuotes(baseline: ParsedCuraleafQuote, latest: ParsedCuraleafQuote): QuoteDifference[] {
+  const differences: QuoteDifference[] = [];
+  const prior = normalisedQuote(baseline);
+  const next = normalisedQuote(latest);
+  const priorItems = new Map(prior.items.map(item => [item.packId, item]));
+  for (const item of next.items) {
+    const earlier = priorItems.get(item.packId);
+    if (!earlier) continue;
+    if (item.inStock !== earlier.inStock) differences.push({ category: 'stock', field: 'inStock', packId: item.packId, previous: earlier.inStock, latest: item.inStock });
+    if (item.patientPence !== earlier.patientPence) differences.push({ category: 'patient_price', field: 'patientPackPrice', packId: item.packId, previous: String(earlier.patientPence), latest: String(item.patientPence) });
+    if (item.wholesalePence !== earlier.wholesalePence) differences.push({ category: 'supplier_cost', field: 'wholesalePackPrice', packId: item.packId, previous: String(earlier.wholesalePence), latest: String(item.wholesalePence) });
+  }
+  if (prior.shippingPence !== next.shippingPence) differences.push({ category: 'supplier_cost', field: 'shippingPrice', previous: String(prior.shippingPence), latest: String(next.shippingPence) });
+  if (prior.taxRate !== next.taxRate) differences.push({ category: 'supplier_cost', field: 'taxRate', previous: String(prior.taxRate), latest: String(next.taxRate) });
+  return differences;
+}
+
+async function finalCuraleafQuote(organisationId: string, items: Array<{ packId: string; quantity: number }>) {
+  const raw = await curaleafRequest<unknown>(organisationId, '/v1/quotes/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  });
+  const parsed = curaleafQuoteSchema.safeParse(raw);
+  if (!parsed.success) throw new HttpError(502, 'Curaleaf returned an invalid final quote.', 'INVALID_SUPPLIER_QUOTE');
+  if (!samePackQuantities(packQuantities(items), packQuantities(parsed.data.items))) {
+    throw new HttpError(409, 'Curaleaf’s final quote does not match this order.', 'SUPPLIER_QUOTE_MISMATCH');
+  }
+  return parsed.data;
+}
+
+async function requireApprovedFinalQuote(request: Request, organisationId: string, orderId: string, order: Record<string, unknown>, items: Array<{ packId: string; quantity: number }>) {
+  const latest = await finalCuraleafQuote(organisationId, items);
+  const baselineResult = curaleafQuoteSchema.safeParse(order.pricingQuote);
+  const fingerprint = quoteFingerprint(latest);
+  const existingReview = order.quoteReview && typeof order.quoteReview === 'object' ? order.quoteReview as Record<string, unknown> : {};
+  const differences = baselineResult.success ? compareQuotes(baselineResult.data, latest) : [{ category: 'patient_price' as const, field: 'missingOriginalQuote', previous: 'missing', latest: 'present' }];
+  const outOfStock = latest.items.some(item => !item.inStock);
+  if (!outOfStock && differences.length === 0) return latest;
+  const reviewType = outOfStock ? 'out_of_stock' : differences.some(item => item.category === 'patient_price') ? 'patient_price_changed' : 'supplier_cost_changed';
+  if (reviewType === 'supplier_cost_changed' && existingReview.status === 'approved' && existingReview.approvedFingerprint === fingerprint) return latest;
+  const quoteReview = {
+    status: reviewType === 'patient_price_changed' ? 'recreate_required' : 'required',
+    type: reviewType,
+    fingerprint,
+    latestQuote: latest,
+    differences,
+    checkedAt: timestamp(),
+  };
+  await firestore.collection('orders').doc(orderId).update({ quoteReview, integrationStatus: 'quote_review_required', updatedAt: timestamp() });
+  const supportCaseId = createHash('sha256').update(`${organisationId}:${orderId}:quote_review:${fingerprint}`).digest('hex');
+  const supportCase = firestore.collection('curaleafSupportCases').doc(supportCaseId);
+  if (!(await supportCase.get()).exists) {
+    await supportCase.create({
+      id: supportCaseId,
+      schemaVersion: 1,
+      organisationId,
+      orderId,
+      reason: 'quote_review',
+      status: 'open',
+      note: reviewType === 'patient_price_changed' ? 'The patient price changed after payment; cancel/refund and recreate this order.' : reviewType === 'out_of_stock' ? 'Curaleaf reports an out-of-stock pack.' : 'Curaleaf supplier costs changed after payment and require approval.',
+      prescriptionId: null,
+      purchaseOrderId: null,
+      openedBy: identity(request).uid,
+      openedByRole: identity(request).role,
+      openedAt: timestamp(),
+      createdAt: timestamp(),
+      updatedAt: timestamp(),
+    });
+  }
+  invalidateCollectionCache('orders', orderId);
+  await audit(request, 'curaleaf.quote_review_required', { organisationId, orderId, reviewType, fingerprint, differences });
+  const message = reviewType === 'out_of_stock'
+    ? 'Curaleaf reports that one or more packs are out of stock. The supplier order has not been placed.'
+    : reviewType === 'patient_price_changed'
+      ? 'Curaleaf’s patient price changed after payment. Cancel or refund this order and recreate it before supplier placement.'
+      : 'Curaleaf’s supplier cost changed after payment. Review and approve the latest quote before placement.';
+  throw new HttpError(409, message, 'QUOTE_REVIEW_REQUIRED');
+}
+
 type ClinicScanProduct = {
   id: string;
   formulaId: string;
@@ -1083,15 +1196,49 @@ app.post('/v1/portal/orders', async (request, response, next) => {
 
 app.post('/v1/portal/prescription-files/upload-url', async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), filename: z.string().min(1).max(180), contentType: z.enum(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']) }).parse(request.body);
+    const input = z.object({ organisationId: idSchema.optional(), filename: z.string().min(1).max(180), contentType: z.enum(PRESCRIPTION_CONTENT_TYPES), sizeBytes: z.number().int().positive().max(MAX_PRESCRIPTION_FILE_BYTES) }).parse(request.body);
     const organisationId = tenantFor(request, input.organisationId);
     const id = randomUUID();
     const filename = safeFilename(input.filename);
     const storagePath = `prescriptions/${organisationId}/${id}/${filename}`;
     const [url] = await storage.bucket().file(storagePath).getSignedUrl({ version: 'v4', action: 'write', expires: Date.now() + 15 * 60 * 1000, contentType: input.contentType });
-    const record = await createRecord('prescriptionFiles', { organisationId, filename, contentType: input.contentType, storagePath, status: 'upload_pending', createdBy: identity(request).uid }, id);
-    await audit(request, 'prescription_file.upload_authorised', { organisationId, recordId: id });
+    const record = await createRecord('prescriptionFiles', { organisationId, filename, contentType: input.contentType, expectedSizeBytes: input.sizeBytes, storagePath, status: 'upload_pending', createdBy: identity(request).uid }, id);
+    await audit(request, 'prescription_file.upload_authorised', { organisationId, recordId: id, sizeBytes: input.sizeBytes, contentType: input.contentType });
     response.status(201).json({ id: record.id, uploadUrl: url, expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), requiredHeaders: { 'Content-Type': input.contentType } });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/prescription-files/:id/complete', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.body.organisationId);
+    const fileId = idSchema.parse(request.params.id);
+    const record = await getTenantRecord('prescriptionFiles', fileId, organisationId);
+    if (record.status === 'uploaded') return response.json({ id: fileId, status: 'uploaded' });
+    if (record.status !== 'upload_pending') throw new HttpError(409, 'This prescription upload cannot be completed.', 'FILE_UNAVAILABLE');
+    const contentType = z.enum(PRESCRIPTION_CONTENT_TYPES).parse(record.contentType);
+    const object = storage.bucket().file(record.storagePath as string);
+    const [exists] = await object.exists();
+    if (!exists) throw new HttpError(409, 'Complete the prescription file upload first.', 'UPLOAD_INCOMPLETE');
+    const [metadata] = await object.getMetadata();
+    const actualSizeBytes = Number(metadata.size ?? 0);
+    const expectedSizeBytes = Number(record.expectedSizeBytes ?? 0);
+    const [signature] = await object.download({ start: 0, end: 7 });
+    const valid = actualSizeBytes > 0
+      && actualSizeBytes <= MAX_PRESCRIPTION_FILE_BYTES
+      && actualSizeBytes === expectedSizeBytes
+      && metadata.contentType === contentType
+      && validPrescriptionSignature(contentType, signature);
+    if (!valid) {
+      await object.delete({ ignoreNotFound: true });
+      await firestore.collection('prescriptionFiles').doc(fileId).update({ status: 'rejected', rejectedAt: timestamp(), updatedAt: timestamp() });
+      invalidateCollectionCache('prescriptionFiles', fileId);
+      await audit(request, 'prescription_file.rejected', { organisationId, recordId: fileId, expectedSizeBytes, actualSizeBytes, contentType });
+      throw new HttpError(400, 'The uploaded prescription did not match the declared PDF, JPEG or PNG file.', 'INVALID_PRESCRIPTION_FILE');
+    }
+    await firestore.collection('prescriptionFiles').doc(fileId).update({ status: 'uploaded', sizeBytes: actualSizeBytes, verifiedAt: timestamp(), updatedAt: timestamp() });
+    invalidateCollectionCache('prescriptionFiles', fileId);
+    await audit(request, 'prescription_file.upload_completed', { organisationId, recordId: fileId, sizeBytes: actualSizeBytes, contentType });
+    response.json({ id: fileId, status: 'uploaded' });
   } catch (error) { next(error); }
 });
 
@@ -1099,6 +1246,7 @@ app.get('/v1/portal/prescription-files/:id/download-url', async (request, respon
   try {
     const organisationId = tenantFor(request, request.query.organisationId);
     const record = await getTenantRecord('prescriptionFiles', idSchema.parse(request.params.id), organisationId);
+    if (record.status !== 'uploaded') throw new HttpError(409, 'Only verified prescription files can be downloaded.', 'FILE_UNAVAILABLE');
     const [url] = await storage.bucket().file(record.storagePath as string).getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + 5 * 60 * 1000 });
     await audit(request, 'prescription_file.read_authorised', { organisationId, recordId: record.id });
     response.json({ downloadUrl: url, expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() });
@@ -1112,7 +1260,12 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
     if (integration === 'curaleaf' && identity(request).role !== 'hhh_admin') throw new HttpError(403, 'Only HHH administrators can connect Curaleaf.', 'FORBIDDEN');
     const organisationId = tenantFor(request, request.body.organisationId);
     const credential = integration === 'curaleaf'
-      ? z.object({ customerId: z.string().min(1).max(128), portalEmail: z.email().max(254) }).parse(request.body)
+      ? z.object({
+        customerId: z.string().trim().min(1).max(128),
+        portalEmail: z.email().max(254),
+        writeApiKey: z.string().trim().min(16).max(500),
+        readApiKey: z.string().trim().min(16).max(500).optional(),
+      }).parse(request.body)
       : z.object({
         username: z.string().trim().min(1).max(500),
         password: z.string().min(8).max(1_000),
@@ -1142,7 +1295,7 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
         updatedAt: timestamp(),
       }, { merge: true });
       invalidateCache(`setup:${organisationId}`);
-      await firestore.collection('integrationConnections').doc(id).set({ status: status.connected ? 'connected' : 'attention', updatedAt: timestamp() }, { merge: true });
+      await firestore.collection('integrationConnections').doc(id).set({ status: status.connected ? 'connected' : status.status === 'credential_update_required' ? 'credential_update_required' : 'attention', updatedAt: timestamp() }, { merge: true });
     }
     await audit(request, 'integration.credentials_rotated', { organisationId, integration });
     response.json({ ...status, activated: integration === 'curaleaf' ? status.connected : false, maskedIdentifier: safeIdentifier });
@@ -1221,6 +1374,102 @@ app.post('/v1/portal/integrations/curaleaf/quote', async (request, response, nex
   try { const input = z.object({ organisationId: idSchema.optional(), items: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); response.json(await curaleafRequest(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: input.items }) })); } catch (error) { next(error); }
 });
 
+app.post('/v1/portal/orders/:id/curaleaf-quote-review/approve', async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), note: z.string().trim().min(1).max(1000) }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Only a paid order can have a final quote approved.', 'PAYMENT_REQUIRED');
+    const items = z.array(orderLineItemSchema).parse(order.lineItems).map(item => ({ packId: item.packId, quantity: item.quantity }));
+    const latest = await finalCuraleafQuote(organisationId, items);
+    const baseline = curaleafQuoteSchema.safeParse(order.pricingQuote);
+    const differences = baseline.success ? compareQuotes(baseline.data, latest) : [];
+    const fingerprint = quoteFingerprint(latest);
+    const currentReview = order.quoteReview && typeof order.quoteReview === 'object' ? order.quoteReview as Record<string, unknown> : {};
+    const releasable = latest.items.every(item => item.inStock) && (differences.length === 0 || differences.every(item => item.category === 'supplier_cost'));
+    if (!releasable || currentReview.fingerprint !== fingerprint) {
+      await requireApprovedFinalQuote(request, organisationId, orderId, order, items);
+      throw new HttpError(409, 'The quote changed again and requires a fresh review.', 'QUOTE_CHANGED_AGAIN');
+    }
+    const quoteReview = { ...currentReview, status: 'approved', approvedFingerprint: fingerprint, approvedAt: timestamp(), approvedBy: identity(request).uid, approvalNote: input.note };
+    await firestore.collection('orders').doc(orderId).update({ quoteReview, updatedAt: timestamp() });
+    const operationSnapshot = await firestore.collection('integrationOperations').where('orderId', '==', orderId).get();
+    await Promise.all(operationSnapshot.docs.filter(document => document.data().organisationId === organisationId && document.data().status === 'quote_review_required').map(document => document.ref.update({
+      status: document.data().kind === 'barcode' ? 'awaiting_clinic_prescription' : 'awaiting_prescription_approval',
+      errorCode: null,
+      updatedAt: timestamp(),
+    })));
+    invalidateCollectionCache('orders', orderId);
+    await audit(request, 'curaleaf.quote_review_approved', { organisationId, orderId, fingerprint, note: input.note });
+    response.json({ orderId, quoteReview });
+  } catch (error) { next(error); }
+});
+
+const curaleafSupportReasonSchema = z.enum(['prescription_exception', 'purchase_order_cancellation', 'quote_review', 'supplier_exception']);
+const curaleafSupportStatusSchema = z.enum(['open', 'contacted', 'resolved']);
+
+app.get('/v1/portal/curaleaf/support-cases', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    const orderId = request.query.orderId === undefined ? undefined : idSchema.parse(request.query.orderId);
+    const cases = await listTenantRecords('curaleafSupportCases', organisationId);
+    response.json(orderId ? cases.filter(record => record.orderId === orderId) : cases);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/curaleaf/support-cases', async (request, response, next) => {
+  try {
+    const input = z.object({
+      organisationId: idSchema.optional(),
+      orderId: idSchema,
+      reason: curaleafSupportReasonSchema,
+      note: z.string().trim().min(1).max(2000),
+      prescriptionId: idSchema.optional(),
+      purchaseOrderId: idSchema.optional(),
+    }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const order = await getTenantRecord('orders', input.orderId, organisationId);
+    if (input.reason === 'purchase_order_cancellation') {
+      const curaleaf = order.curaleaf && typeof order.curaleaf === 'object' ? order.curaleaf as Record<string, unknown> : {};
+      if (curaleaf.purchaseOrderState !== 'CREATED') throw new HttpError(409, 'Curaleaf customer service can only be asked to cancel a purchase order while it remains CREATED.', 'PURCHASE_ORDER_NOT_CANCELLABLE');
+    }
+    const record = await createRecord('curaleafSupportCases', {
+      organisationId,
+      orderId: input.orderId,
+      reason: input.reason,
+      status: 'open',
+      note: input.note,
+      prescriptionId: input.prescriptionId ?? null,
+      purchaseOrderId: input.purchaseOrderId ?? null,
+      openedBy: identity(request).uid,
+      openedByRole: identity(request).role,
+      openedAt: timestamp(),
+    });
+    await audit(request, 'curaleaf.support_case_opened', { organisationId, orderId: input.orderId, recordId: record.id, reason: input.reason });
+    response.status(201).json(record);
+  } catch (error) { next(error); }
+});
+
+app.patch('/v1/portal/curaleaf/support-cases/:id', async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), status: curaleafSupportStatusSchema, note: z.string().trim().min(1).max(2000) }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const caseId = idSchema.parse(request.params.id);
+    await getTenantRecord('curaleafSupportCases', caseId, organisationId);
+    const updated = await updateTenantRecord('curaleafSupportCases', caseId, organisationId, {
+      status: input.status,
+      note: input.note,
+      lastUpdatedBy: identity(request).uid,
+      lastUpdatedByRole: identity(request).role,
+      ...(input.status === 'contacted' ? { contactedAt: timestamp(), contactedBy: identity(request).uid } : {}),
+      ...(input.status === 'resolved' ? { resolvedAt: timestamp(), resolvedBy: identity(request).uid } : {}),
+    });
+    await audit(request, 'curaleaf.support_case_updated', { organisationId, recordId: caseId, status: input.status });
+    response.json(updated);
+  } catch (error) { next(error); }
+});
+
 const manualPrescriptionSchema = z.object({
   organisationId: idSchema.optional(), orderId: idSchema, subOrderId: idSchema.optional(), fileId: idSchema, serialNumber: z.string().min(1).max(200), issueDate: z.iso.date(),
   prescriber: z.object({ pin: z.string().min(1).max(100), gmcNumber: z.number().int().positive().nullable(), gphcNumber: z.string().max(100).nullable(), name: z.string().min(1).max(200), initials: z.string().min(1).max(20) }),
@@ -1249,9 +1498,10 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
       prescriber: storedPrescription.prescriber,
       items: storedPrescription.items,
     } : input;
+    const quote = await requireApprovedFinalQuote(request, organisationId, input.orderId, order, authoritativeInput.items.map(({ packId, quantity }) => ({ packId, quantity })));
     operation = await startOperation(organisationId, input.orderId, 'manual', input.subOrderId);
     const file = await uploadedFile(organisationId, authoritativeInput.fileId);
-    const result = await submitManualPrescription(organisationId, { ...authoritativeInput, customerReference: operation.reference, file });
+    const result = await submitManualPrescription(organisationId, { ...authoritativeInput, customerReference: operation.reference, file, quote });
     const fulfilmentStatus: FulfilmentStatus = result.status === 'prescription_pending' ? 'supplier_pending' : 'supplier_processing';
     const operationStatus = result.status === 'prescription_pending' ? 'awaiting_prescription_approval' : 'purchase_order_submitted';
     await operation.document.update({
@@ -1282,6 +1532,7 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
     const storedPrescriptions = z.array(orderPrescriptionSchema).parse(order.prescriptions);
     const storedPrescription = storedPrescriptions.find(prescription => prescription.fileId === input.fileId || prescription.serialNumber === input.serialNumber);
     if (!storedPrescription) throw new HttpError(409, 'The submitted Clinic prescription is not part of this saved order.', 'ORDER_PRESCRIPTION_MISMATCH');
+    const quote = await requireApprovedFinalQuote(request, organisationId, input.orderId, order, storedPrescription.items.map(({ packId, quantity }) => ({ packId, quantity })));
     operation = await startOperation(organisationId, input.orderId, 'barcode', input.subOrderId);
     const file = storedPrescription.curaleafPrescriptionId ? undefined : await uploadedFile(organisationId, storedPrescription.fileId);
     const result = await submitClinicPrescription(organisationId, {
@@ -1292,6 +1543,7 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
       expectedItems: storedPrescription.items.map(({ formulaId, unitsNeededCount }) => ({ formulaId, unitsNeededCount })),
       customerReference: operation.reference,
       quoteItems: storedPrescription.items.map(({ packId, quantity }) => ({ packId, quantity })),
+      quote,
       file,
     });
     const needsAttention = ['prescription_mismatch', 'reconciliation_required', 'prescription_closed'].includes(result.status);
@@ -1700,7 +1952,13 @@ app.delete('/v1/portal/admin/staff/:uid', requireRole('hhh_admin'), async (reque
 
 app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
   if (error instanceof z.ZodError) return response.status(400).json({ code: 'VALIDATION_ERROR', message: 'The request data is invalid.', issues: error.issues });
-  if (error instanceof HttpError) return response.status(error.status).json({ code: error.code, message: error.message, reconciliationRequired: error instanceof CuraleafRequestError ? error.ambiguousWrite : undefined });
+  if (error instanceof HttpError) {
+    if (error instanceof CuraleafRequestError) {
+      if (error.retryAfterSeconds !== null) response.setHeader('Retry-After', String(error.retryAfterSeconds));
+      for (const [name, value] of Object.entries(error.rateLimit)) response.setHeader(name, value);
+    }
+    return response.status(error.status).json({ code: error.code, message: error.message, reconciliationRequired: error instanceof CuraleafRequestError ? error.ambiguousWrite : undefined });
+  }
   console.error(error);
   response.status(500).json({ code: 'INTERNAL_ERROR', message: 'Internal server error.' });
 });

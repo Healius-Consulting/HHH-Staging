@@ -218,6 +218,10 @@ export async function uploadPrescriptionFile(input: PrescriptionUploadRequest, f
     body: file,
   });
   if (!response.ok) throw new Error(`Prescription upload failed with status ${response.status}.`);
+  await apiRequest(`/v1/portal/prescription-files/${encodeURIComponent(target.id)}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ organisationId: input.organisationId }),
+  });
   return target;
 }
 
@@ -271,6 +275,31 @@ export function activateCuraleafPharmacy(input: CuraleafActivationInput) {
     method: 'PUT',
     body: JSON.stringify(input),
   });
+}
+
+export function getCuraleafSupportCases(organisationId: string, orderId?: string) {
+  const query = new URLSearchParams({ organisationId });
+  if (orderId) query.set('orderId', orderId);
+  return apiRequest<import('./contracts').CuraleafSupportCase[]>(`/v1/portal/curaleaf/support-cases?${query}`);
+}
+
+export function createCuraleafSupportCase(input: {
+  organisationId: string;
+  orderId: string;
+  reason: import('./contracts').CuraleafSupportReason;
+  note: string;
+  prescriptionId?: string;
+  purchaseOrderId?: string;
+}) {
+  return apiRequest<import('./contracts').CuraleafSupportCase>('/v1/portal/curaleaf/support-cases', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateCuraleafSupportCase(caseId: string, input: { organisationId: string; status: import('./contracts').CuraleafSupportStatus; note: string }) {
+  return apiRequest<import('./contracts').CuraleafSupportCase>(`/v1/portal/curaleaf/support-cases/${encodeURIComponent(caseId)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function approveCuraleafQuoteReview(orderId: string, input: { organisationId: string; note: string }) {
+  return apiRequest(`/v1/portal/orders/${encodeURIComponent(orderId)}/curaleaf-quote-review/approve`, { method: 'POST', body: JSON.stringify(input) });
 }
 
 export function connectWorldpayPharmacy(input: WorldpayConnectionInput) {

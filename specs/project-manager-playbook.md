@@ -388,20 +388,15 @@ I confirm UAT sections applicable to our go-live phase have been tested and pass
 
 ## 9. Curaleaf open items to chase (TRD §9)
 
-Email / call **Mike Baker** (cc **Phil Jones**). Block full Rocky order flow until resolved.
+Phil answered Q1–Q13 on 5 August 2026. Keep only the externally owned gates below open and block full production Rocky order flow until they are resolved.
 
 | # | What to confirm | Why it matters |
 |---|-----------------|----------------|
-| 1 | `GET /products` and `POST /prescription` API exposure + timeline | Formulary and prescription upload |
-| 2 | Auth header scheme for Rocky (API key + username) | Integration |
-| 3 | Full request/response schemas for all endpoints | Build |
-| 4 | Max file size for prescription scan uploads | Platform limits |
-| 5 | Stock status field values (green/amber/red) | UI |
-| 6 | **`POST /purchase-order` — one PO with multiple prescription refs?** | **Critical architecture decision** |
-| 7 | Invoice delivery (shipments vs separate endpoint) | Orders tab |
-| 8 | Shipment status values + polling rate limits | Tracking |
-| 9 | Per-pharmacy **test credentials** for staging | UAT |
-| 10 | DPA with Curaleaf (I-03) | Legal |
+| 1 | Ellis confirmation on whether HHH receives customer-specific catalogue/pricing | Catalogue operating model |
+| 2 | Stocked products in the development environment | Quote, PO and shipment UAT |
+| 3 | Existing sandbox key plus a second dev-pharmacy key | Two-tenant isolation UAT |
+| 4 | Written approval for direct-to-live onboarding after initial integration acceptance | Pharmacy onboarding runbook |
+| 5 | DPA/data-sharing terms and prescription-scan retention rules | Legal production gate |
 
 ---
 

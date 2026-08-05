@@ -1,18 +1,82 @@
 import { config } from './config.js';
+import { firestore } from './firebase.js';
 import { HttpError } from './http.js';
 import { readIntegrationSecret, readPlatformSecret } from './secrets.js';
 
 const REQUEST_TIMEOUT_MS = 12_000;
+const TENANT_REQUEST_SPACING_MS = 1_100;
 
-type CuraleafCredential = { customerId: string; portalEmail: string };
+export type CuraleafCredential = {
+  customerId: string;
+  portalEmail: string;
+  writeApiKey: string;
+  readApiKey?: string;
+};
 type CuraleafResult = Record<string, unknown> | unknown[] | null;
 const READ_METHODS = new Set(['GET', 'HEAD']);
 
 export class CuraleafRequestError extends HttpError {
-  constructor(status: number, message: string, public readonly ambiguousWrite = false) {
+  constructor(
+    status: number,
+    message: string,
+    public readonly ambiguousWrite = false,
+    public readonly retryAfterSeconds: number | null = null,
+    public readonly rateLimit: Record<string, string> = {},
+  ) {
     super(status, message, 'CURALEAF_REQUEST_FAILED');
     this.name = 'CuraleafRequestError';
   }
+}
+
+function retryAfterSeconds(response: Response) {
+  const value = response.headers.get('retry-after');
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, Math.ceil((date - Date.now()) / 1_000)) : null;
+}
+
+function rateLimitHeaders(response: Response) {
+  const result: Record<string, string> = {};
+  for (const name of ['retry-after', 'ratelimit-limit', 'ratelimit-remaining', 'ratelimit-reset', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset']) {
+    const value = response.headers.get(name);
+    if (value) result[name] = value;
+  }
+  return result;
+}
+
+async function wait(milliseconds: number) {
+  if (milliseconds <= 0) return;
+  await new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+async function reserveTenantRequestSlot(organisationId: string) {
+  const document = firestore.collection('curaleafRateLimits').doc(organisationId);
+  const now = Date.now();
+  const slot = await firestore.runTransaction(async transaction => {
+    const snapshot = await transaction.get(document);
+    const data = snapshot.data();
+    const nextAllowedAt = Number(data?.nextAllowedAt ?? 0);
+    const blockedUntil = Number(data?.blockedUntil ?? 0);
+    const reservedAt = Math.max(now, nextAllowedAt, blockedUntil);
+    transaction.set(document, {
+      organisationId,
+      nextAllowedAt: reservedAt + TENANT_REQUEST_SPACING_MS,
+      updatedAt: new Date(now).toISOString(),
+    }, { merge: true });
+    return reservedAt;
+  });
+  await wait(slot - Date.now());
+}
+
+async function blockTenantRequests(organisationId: string, seconds: number) {
+  const blockedUntil = Date.now() + Math.max(1, seconds) * 1_000;
+  await firestore.collection('curaleafRateLimits').doc(organisationId).set({
+    organisationId,
+    blockedUntil,
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
 }
 
 function customerIds(value: unknown): string[] {
@@ -37,6 +101,11 @@ async function curaleafApiKey(method: string): Promise<string> {
 export async function curaleafPlatformRequest<T = CuraleafResult>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase();
   const apiKey = await curaleafApiKey(method);
+  return curaleafFetch<T>(path, init, apiKey);
+}
+
+async function curaleafFetch<T = CuraleafResult>(path: string, init: RequestInit, apiKey: string, organisationId?: string): Promise<T> {
+  const method = (init.method ?? 'GET').toUpperCase();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -47,8 +116,23 @@ export async function curaleafPlatformRequest<T = CuraleafResult>(path: string, 
       headers: { Accept: 'application/json', 'X-API-Key': apiKey, ...init.headers },
     });
     const text = await response.text();
-    const body = text ? JSON.parse(text) as T : null as T;
-    if (!response.ok) throw new CuraleafRequestError(response.status, `Curaleaf rejected the request (${response.status}).`);
+    let body: T;
+    try {
+      body = text ? JSON.parse(text) as T : null as T;
+    } catch {
+      throw new CuraleafRequestError(502, 'Curaleaf returned an invalid JSON response.');
+    }
+    if (!response.ok) {
+      const retryAfter = retryAfterSeconds(response);
+      if (response.status === 429 && organisationId) await blockTenantRequests(organisationId, retryAfter ?? 60);
+      throw new CuraleafRequestError(
+        response.status,
+        `Curaleaf rejected the request (${response.status}).`,
+        false,
+        retryAfter,
+        rateLimitHeaders(response),
+      );
+    }
     return body;
   } catch (error) {
     if (error instanceof CuraleafRequestError) throw error;
@@ -62,8 +146,14 @@ export async function curaleafPlatformRequest<T = CuraleafResult>(path: string, 
 }
 
 export async function curaleafRequest<T = CuraleafResult>(organisationId: string, path: string, init: RequestInit = {}): Promise<T> {
-  const credential = await readIntegrationSecret<CuraleafCredential>(organisationId, 'curaleaf');
-  const body = await curaleafPlatformRequest<T>(path, init);
+  const credential = await readIntegrationSecret<Record<string, string>>(organisationId, 'curaleaf');
+  if (!credential.customerId || !credential.portalEmail || !credential.writeApiKey) {
+    throw new HttpError(409, 'This pharmacy must update its Curaleaf API keys before the integration can be used.', 'CREDENTIAL_UPDATE_REQUIRED');
+  }
+  const method = (init.method ?? 'GET').toUpperCase();
+  const apiKey = READ_METHODS.has(method) ? credential.readApiKey || credential.writeApiKey : credential.writeApiKey;
+  await reserveTenantRequestSlot(organisationId);
+  const body = await curaleafFetch<T>(path, init, apiKey, organisationId);
   const unexpectedCustomer = customerIds(body).find(id => id !== credential.customerId);
   if (unexpectedCustomer) throw new CuraleafRequestError(502, 'Curaleaf returned data for a different pharmacy customer.');
   return body;
@@ -99,17 +189,15 @@ export function curaleafList<T>(organisationId: string, path: string, collection
 
 export async function curaleafConnectionStatus(organisationId: string) {
   try {
-    const response = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/formulas/?pageSize=1');
-    let writeConfigured = true;
-    try {
-      await curaleafApiKey('POST');
-    } catch {
-      writeConfigured = false;
+    const credential = await readIntegrationSecret<Record<string, string>>(organisationId, 'curaleaf');
+    if (!credential.customerId || !credential.portalEmail || !credential.writeApiKey) {
+      return { configured: true, connected: false, writeConfigured: false, status: 'credential_update_required' as const, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: 'Enter this pharmacy’s Curaleaf API key to restore the connection.' };
     }
-    return { configured: true, connected: true, writeConfigured, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: 'Curaleaf pharmacy access verified.', sampleAvailable: Boolean(response) };
+    const response = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/formulas/?pageSize=1');
+    return { configured: true, connected: true, writeConfigured: true, status: 'connected' as const, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: 'Curaleaf pharmacy access verified.', sampleAvailable: Boolean(response) };
   } catch (error) {
-    const missingConfiguration = error instanceof HttpError && ['INTEGRATION_NOT_CONNECTED', 'PLATFORM_INTEGRATION_NOT_CONNECTED'].includes(error.code);
-    return { configured: !missingConfiguration, connected: false, writeConfigured: false, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: error instanceof Error ? error.message : 'Connection check failed.' };
+    const missingConfiguration = error instanceof HttpError && error.code === 'INTEGRATION_NOT_CONNECTED';
+    return { configured: !missingConfiguration, connected: false, writeConfigured: false, status: missingConfiguration ? 'not_configured' as const : 'attention' as const, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: error instanceof Error ? error.message : 'Connection check failed.' };
   }
 }
 
@@ -126,6 +214,7 @@ export type ManualPrescriptionInput = {
   items: Array<{ formulaId: string; unitsNeededCount: number; packId: string; quantity: number }>;
   customerReference: string;
   file: { bytes: Buffer; contentType: string; filename: string };
+  quote: Record<string, unknown>;
 };
 
 export type CuraleafPrescriptionState = 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
@@ -364,9 +453,8 @@ export async function submitManualPrescription(organisationId: string, input: Ma
   });
   const prescription = await prescriptionBySerial(organisationId, input.serialNumber);
   await uploadCuraleafFile(organisationId, `/v1/prescriptions/${prescription.id}/file/`, input.file.bytes, input.file.contentType, input.file.filename);
-  const quote = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: input.items.map(({ packId, quantity }) => ({ packId, quantity })) }) });
   if (prescription.state !== 'ACTIVE') {
-    return { status: 'prescription_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id, prescriberId: prescriber.id, customerReference: input.customerReference, quote };
+    return { status: 'prescription_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id, prescriberId: prescriber.id, customerReference: input.customerReference, quote: input.quote };
   }
   const purchaseOrder = await ensurePurchaseOrder(organisationId, input.customerReference, input.items);
   return {
@@ -377,7 +465,7 @@ export async function submitManualPrescription(organisationId: string, input: Ma
     customerReference: input.customerReference,
     purchaseOrderId: purchaseOrder?.id ?? null,
     purchaseOrderState: purchaseOrder?.state ?? null,
-    quote,
+    quote: input.quote,
   };
 }
 
@@ -523,13 +611,8 @@ export async function reconcileClinicPrescription(
 
 export async function submitClinicPrescription(
   organisationId: string,
-  input: ClinicPrescriptionInput & { file?: { bytes: Buffer; contentType: string; filename: string } },
+  input: ClinicPrescriptionInput & { file?: { bytes: Buffer; contentType: string; filename: string }; quote: Record<string, unknown> },
 ) {
-  const quote = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/quotes/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items: input.quoteItems }),
-  });
   let prescriptionId = input.prescriptionId;
   if (!prescriptionId) {
     if (!input.file) throw new HttpError(400, 'Attach the Curaleaf Clinic prescription before submitting.', 'PRESCRIPTION_FILE_REQUIRED');
@@ -537,5 +620,5 @@ export async function submitClinicPrescription(
     prescriptionId = upload && typeof upload.id === 'string' ? upload.id : undefined;
   }
   const reconciliation = await reconcileClinicPrescription(organisationId, { ...input, prescriptionId, allowPurchaseOrderCreate: true });
-  return { ...reconciliation, customerReference: input.customerReference, quote };
+  return { ...reconciliation, customerReference: input.customerReference, quote: input.quote };
 }

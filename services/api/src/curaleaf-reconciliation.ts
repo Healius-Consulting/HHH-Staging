@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { z } from 'zod';
 import {
+  curaleafRequest,
   findCuraleafPurchaseOrder,
   findCuraleafShipments,
   reconcileClinicPrescription,
@@ -32,6 +34,58 @@ type SavedPrescription = {
   serialNumber?: unknown;
   items?: unknown;
 };
+
+const placementQuoteSchema = z.object({
+  shippingPrice: z.string(),
+  taxRate: z.string(),
+  items: z.array(z.object({ packId: z.string(), quantity: z.number().int().positive(), inStock: z.boolean(), wholesalePackPrice: z.string(), patientPackPrice: z.string() })).min(1),
+});
+
+function pricePence(value: unknown) {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(String(value ?? '').trim());
+  if (!match || match[2]?.slice(2).match(/[1-9]/)) throw new Error('Curaleaf returned an invalid placement price.');
+  return Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0').slice(0, 2));
+}
+
+function normalisedPlacementQuote(quote: z.infer<typeof placementQuoteSchema>) {
+  return {
+    shippingPence: pricePence(quote.shippingPrice),
+    taxRate: Number(quote.taxRate),
+    items: [...quote.items].sort((left, right) => left.packId.localeCompare(right.packId)).map(item => ({ packId: item.packId, quantity: item.quantity, inStock: item.inStock, wholesalePence: pricePence(item.wholesalePackPrice), patientPence: pricePence(item.patientPackPrice) })),
+  };
+}
+
+async function reconciliationQuoteGate(organisationId: string, orderId: string, order: Record<string, unknown>, items: Array<{ packId: string; quantity: number }>) {
+  const raw = await curaleafRequest<unknown>(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+  const latestResult = placementQuoteSchema.safeParse(raw);
+  const baselineResult = placementQuoteSchema.safeParse(order.pricingQuote);
+  if (!latestResult.success || !baselineResult.success) throw new Error('A valid original and final Curaleaf quote are required before purchase ordering.');
+  const latest = normalisedPlacementQuote(latestResult.data);
+  const baseline = normalisedPlacementQuote(baselineResult.data);
+  const requested = new Map(items.map(item => [item.packId, item.quantity]));
+  if (latest.items.length !== requested.size || latest.items.some(item => requested.get(item.packId) !== item.quantity)) throw new Error('Curaleaf’s final quote does not match the prescription order.');
+  const baselineItems = new Map(baseline.items.map(item => [item.packId, item]));
+  const differences: Array<{ category: 'stock' | 'patient_price' | 'supplier_cost'; field: string; packId?: string; previous: string | boolean; latest: string | boolean }> = [];
+  for (const item of latest.items) {
+    const prior = baselineItems.get(item.packId);
+    if (!prior) continue;
+    if (item.inStock !== prior.inStock) differences.push({ category: 'stock', field: 'inStock', packId: item.packId, previous: prior.inStock, latest: item.inStock });
+    if (item.patientPence !== prior.patientPence) differences.push({ category: 'patient_price', field: 'patientPackPrice', packId: item.packId, previous: String(prior.patientPence), latest: String(item.patientPence) });
+    if (item.wholesalePence !== prior.wholesalePence) differences.push({ category: 'supplier_cost', field: 'wholesalePackPrice', packId: item.packId, previous: String(prior.wholesalePence), latest: String(item.wholesalePence) });
+  }
+  if (latest.shippingPence !== baseline.shippingPence) differences.push({ category: 'supplier_cost', field: 'shippingPrice', previous: String(baseline.shippingPence), latest: String(latest.shippingPence) });
+  if (latest.taxRate !== baseline.taxRate) differences.push({ category: 'supplier_cost', field: 'taxRate', previous: String(baseline.taxRate), latest: String(latest.taxRate) });
+  const fingerprint = createHash('sha256').update(JSON.stringify(latest)).digest('hex');
+  const review = order.quoteReview && typeof order.quoteReview === 'object' ? order.quoteReview as Record<string, unknown> : {};
+  const outOfStock = latest.items.some(item => !item.inStock);
+  const type = outOfStock ? 'out_of_stock' : differences.some(item => item.category === 'patient_price') ? 'patient_price_changed' : 'supplier_cost_changed';
+  const approved = differences.length === 0 && !outOfStock || type === 'supplier_cost_changed' && review.status === 'approved' && review.approvedFingerprint === fingerprint;
+  if (approved) return true;
+  const quoteReview = { status: type === 'patient_price_changed' ? 'recreate_required' : 'required', type, fingerprint, latestQuote: latestResult.data, differences, checkedAt: nowIso() };
+  await firestore.collection('orders').doc(orderId).update({ quoteReview, integrationStatus: 'quote_review_required', updatedAt: nowIso() });
+  await ensureSupportCase(organisationId, orderId, 'supplier_exception', type === 'out_of_stock' ? 'Curaleaf reports an out-of-stock pack.' : type === 'patient_price_changed' ? 'The Curaleaf patient price changed after payment; cancel/refund and recreate the order.' : 'Curaleaf supplier costs changed after payment and require approval.');
+  return false;
+}
 
 function orderItems(value: unknown) {
   if (!Array.isArray(value)) return [];
@@ -109,6 +163,28 @@ async function saveShipments(organisationId: string, shipments: CuraleafShipment
   return ids;
 }
 
+async function ensureSupportCase(organisationId: string, orderId: string, reason: 'prescription_exception' | 'supplier_exception', note: string, prescriptionId?: string, purchaseOrderId?: string) {
+  const id = createHash('sha256').update(`${organisationId}:${orderId}:${reason}:${prescriptionId ?? ''}:${purchaseOrderId ?? ''}`).digest('hex');
+  const document = firestore.collection('curaleafSupportCases').doc(id);
+  if ((await document.get()).exists) return;
+  await document.create({
+    id,
+    schemaVersion: 1,
+    organisationId,
+    orderId,
+    reason,
+    status: 'open',
+    note,
+    prescriptionId: prescriptionId ?? null,
+    purchaseOrderId: purchaseOrderId ?? null,
+    openedBy: 'system',
+    openedByRole: 'hhh_admin',
+    openedAt: nowIso(),
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+}
+
 async function reconcileOperation(document: QueryDocumentSnapshot) {
   const operation = document.data() as OperationRecord;
   if (typeof operation.organisationId !== 'string' || typeof operation.orderId !== 'string' || typeof operation.customerReference !== 'string') {
@@ -137,7 +213,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     await document.ref.update({ status: 'reconciliation_required', errorCode: 'CLINIC_VERIFICATION_METADATA_MISSING', updatedAt: nowIso() });
     return 'attention';
   }
-  const reconciliation = clinicOperation
+  let reconciliation = clinicOperation
       ? await reconcileClinicPrescription(operation.organisationId, {
         prescriptionId: typeof operation.prescriptionId === 'string' ? operation.prescriptionId : undefined,
         serialNumber: input.serialNumber,
@@ -145,13 +221,13 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
         quoteItems: input.items,
         expectedPrescriberPin: input.prescriberPin,
         expectedItems: input.prescriptionItems,
-        allowPurchaseOrderCreate: operation.status === 'awaiting_clinic_prescription',
+        allowPurchaseOrderCreate: false,
       })
     : await reconcileManualPrescription(operation.organisationId, {
         serialNumber: input.serialNumber,
         customerReference: operation.customerReference,
         items: input.items,
-        allowPurchaseOrderCreate: operation.status === 'awaiting_prescription_approval',
+        allowPurchaseOrderCreate: false,
       });
   if (reconciliation.status === 'prescription_processing') {
     await document.ref.update({ status: 'awaiting_clinic_prescription', lastError: null, lastCheckedAt: nowIso(), updatedAt: nowIso() });
@@ -168,6 +244,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
       updatedAt: nowIso(),
     });
     await orderRef.update({ fulfilmentStatus: 'exception' satisfies FulfilmentStatus, integrationStatus: 'attention', updatedAt: nowIso() });
+    await ensureSupportCase(operation.organisationId, operation.orderId, 'prescription_exception', 'Curaleaf reported a prescription mismatch. Customer-service review is required; no decline reason has been assumed.', reconciliation.prescriptionId);
     invalidateCollectionCache('orders', operation.orderId);
     return 'failed';
   }
@@ -195,6 +272,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
       integrationStatus: 'attention',
       updatedAt: nowIso(),
     });
+    await ensureSupportCase(operation.organisationId, operation.orderId, 'prescription_exception', `Curaleaf reported the prescription state ${reconciliation.prescriptionState}. Customer-service review is required; this does not assume the prescription was declined.`, reconciliation.prescriptionId);
     invalidateCollectionCache('orders', operation.orderId);
     return 'failed';
   }
@@ -209,16 +287,32 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     return 'attention';
   }
   if (reconciliation.status === 'purchase_order_confirmation_pending') {
-    await document.ref.update({
-      status: operation.status === 'reconciliation_required' ? 'reconciliation_required' : 'purchase_order_submitted',
-      prescriptionId: reconciliation.prescriptionId,
-      prescriptionState: reconciliation.prescriptionState,
-      lastError: null,
-      lastCheckedAt: nowIso(),
-      updatedAt: nowIso(),
-    });
-    await activatePatientForOrder(operation.orderId);
-    return 'submitted';
+    const quoteApproved = await reconciliationQuoteGate(operation.organisationId, operation.orderId, order, input.items);
+    if (!quoteApproved) {
+      await document.ref.update({ status: 'quote_review_required', errorCode: 'QUOTE_REVIEW_REQUIRED', lastCheckedAt: nowIso(), updatedAt: nowIso() });
+      invalidateCollectionCache('orders', operation.orderId);
+      return 'attention';
+    }
+    reconciliation = clinicOperation
+      ? await reconcileClinicPrescription(operation.organisationId, {
+        prescriptionId: typeof operation.prescriptionId === 'string' ? operation.prescriptionId : undefined,
+        serialNumber: input.serialNumber,
+        customerReference: operation.customerReference,
+        quoteItems: input.items,
+        expectedPrescriberPin: input.prescriberPin,
+        expectedItems: input.prescriptionItems,
+        allowPurchaseOrderCreate: true,
+      })
+      : await reconcileManualPrescription(operation.organisationId, {
+        serialNumber: input.serialNumber,
+        customerReference: operation.customerReference,
+        items: input.items,
+        allowPurchaseOrderCreate: true,
+      });
+    if (reconciliation.status === 'purchase_order_confirmation_pending') {
+      await document.ref.update({ status: 'reconciliation_required', errorCode: 'PURCHASE_ORDER_CONFIRMATION_PENDING', lastCheckedAt: nowIso(), updatedAt: nowIso() });
+      return 'attention';
+    }
   }
 
   const purchaseOrder = reconciliation.purchaseOrderId
@@ -273,18 +367,21 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     integrationStatus: purchaseOrder.state === 'CANCELLED' ? 'attention' : 'submitted',
     updatedAt: nowIso(),
   });
+  if (purchaseOrder.state === 'CANCELLED') {
+    await ensureSupportCase(operation.organisationId, operation.orderId, 'supplier_exception', 'Curaleaf confirmed that the purchase order is cancelled. Review the patient payment and next action.', reconciliation.prescriptionId, purchaseOrder.id);
+  }
   invalidateCollectionCache('orders', operation.orderId);
   if (purchaseOrder.state !== 'CANCELLED') await activatePatientForOrder(operation.orderId);
   return shipments.length ? 'dispatched' : 'processing';
 }
 
-export async function reconcilePendingCuraleafOrders() {
+export async function reconcilePendingCuraleafOrders(organisationId?: string) {
   const statuses = ['awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'reconciliation_required'];
-  const snapshots = await Promise.all(statuses.map(status =>
-    firestore.collection('integrationOperations').where('status', '==', status).limit(100).get()
-  ));
-  const documents = [...new Map(snapshots
-    .flatMap(snapshot => snapshot.docs)
+  const snapshots = organisationId
+    ? [await firestore.collection('integrationOperations').where('organisationId', '==', organisationId).limit(500).get()]
+    : await Promise.all(statuses.map(status => firestore.collection('integrationOperations').where('status', '==', status).limit(100).get()));
+  const documents = [...new Map(snapshots.flatMap(snapshot => snapshot.docs)
+    .filter(document => statuses.includes(String(document.data().status)))
     .filter(document => document.data().integration === 'curaleaf' && ['manual', 'barcode'].includes(document.data().kind))
     .map(document => [document.id, document])).values()];
   const summary: Record<string, number> = {};

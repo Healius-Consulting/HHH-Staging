@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react';
-import { CheckCircle, Clock, Download, FileText, Package, Printer, RefreshCw, Search, Truck, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type RefObject } from 'react';
+import { AlertCircle, CheckCircle, Clock, Download, FileText, Package, Printer, RefreshCw, Search, Truck, X } from 'lucide-react';
 import { PHARMACY, RX_STATUS_LABELS, lineRevenue, money, useApp, type Prescription, type RxStatus } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import { useCuraleafActivity } from '../integrations/useCuraleafActivity';
-import type { CuraleafActivity } from '../shared/contracts';
+import { approveCuraleafQuoteReview, createCuraleafSupportCase, getCuraleafSupportCases, updateCuraleafSupportCase } from '../shared/api';
+import type { CuraleafActivity, CuraleafPurchaseOrder, CuraleafSupportCase } from '../shared/contracts';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
 
@@ -48,6 +49,7 @@ export default function Orders() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [printingRx, setPrintingRx] = useState<{ rx: Prescription; patientName: string } | null>(null);
   const [receiptDrafts, setReceiptDrafts] = useState<Record<string, Record<string, number>>>({});
+  const [supportCases, setSupportCases] = useState<CuraleafSupportCase[]>([]);
   const printDialogRef = useModalFocus<HTMLDivElement>(Boolean(printingRx), () => setPrintingRx(null));
   const {
     activity: curaleafActivity,
@@ -56,6 +58,13 @@ export default function Orders() {
     loading: curaleafLoading,
     refresh: refreshCuraleafActivity,
   } = useCuraleafActivity(state.currentOrganisationId, state.workspaceMode);
+
+  const refreshSupportCases = useCallback(async () => {
+    if (state.workspaceMode !== 'live') return;
+    try { setSupportCases(await getCuraleafSupportCases(state.currentOrganisationId)); } catch { /* Account feed notice covers supplier availability. */ }
+  }, [state.currentOrganisationId, state.workspaceMode]);
+
+  useEffect(() => { void refreshSupportCases(); }, [refreshSupportCases]);
 
   const allSubOrders = useMemo(() => {
     const list: FlatSubOrder[] = [];
@@ -90,6 +99,26 @@ export default function Orders() {
     dispatch({ type: 'RECORD_GOODS_RECEIPT', orderId: item.orderId, rxId: item.rx.id, lines: item.rx.items.map(line => ({ productId: line.productId, quantityReceived: receiveAll ? line.qty : values[line.productId] ?? 0 })) });
   };
 
+  const requestCancellation = async (purchaseOrder: CuraleafPurchaseOrder) => {
+    const localOrder = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.prescriptions.some(rx => rx.poRef === purchaseOrder.customerReference));
+    if (!localOrder?.backendId) {
+      dispatch({ type: 'ADD_TOAST', message: 'The matching HHH order could not be identified. Contact an HHH administrator with the Curaleaf reference.', toastType: 'error' });
+      return;
+    }
+    try {
+      await createCuraleafSupportCase({ organisationId: state.currentOrganisationId, orderId: localOrder.backendId, reason: 'purchase_order_cancellation', note: 'Cancellation requested from the supplier-orders workspace. Contact Curaleaf customer service using the established pharmacy account channel.', purchaseOrderId: purchaseOrder.id });
+      await refreshSupportCases();
+      dispatch({ type: 'ADD_TOAST', message: 'Cancellation request recorded. The order remains active until Curaleaf confirms cancellation.', toastType: 'warning' });
+    } catch (error) { dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The cancellation request could not be recorded.', toastType: 'error' }); }
+  };
+
+  const changeSupportStatus = async (supportCase: CuraleafSupportCase, status: 'contacted' | 'resolved') => {
+    try {
+      const updated = await updateCuraleafSupportCase(supportCase.id, { organisationId: state.currentOrganisationId, status, note: supportCase.note });
+      setSupportCases(current => current.map(item => item.id === updated.id ? updated : item));
+    } catch (error) { dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The support case could not be updated.', toastType: 'error' }); }
+  };
+
   return (
     <div className="page-body supplier-workbench">
       <section className="operations-brief supplier-brief">
@@ -102,8 +131,11 @@ export default function Orders() {
           error={curaleafError}
           loading={curaleafLoading}
           onRefresh={() => void refreshCuraleafActivity()}
+          onRequestCancellation={purchaseOrder => void requestCancellation(purchaseOrder)}
         />
       ) : null}
+
+      {showCuraleafAccount && supportCases.length > 0 ? <CuraleafSupportCases cases={supportCases} onStatus={changeSupportStatus} /> : null}
 
       <section className="supplier-filter-bar" aria-label="Filter supplier orders">
         <label className="supplier-search"><Search size={15} /><input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB, order or supplier reference" aria-label="Search supplier orders" /></label>
@@ -136,6 +168,14 @@ export default function Orders() {
             onPrint={() => setPrintingRx({ rx: selected.rx, patientName: selected.patientName })}
             onDispatch={action => dispatch({ type: action, orderId: selected.orderId, rxId: selected.rx.id })}
             onInvoice={() => dispatch({ type: 'ADD_TOAST', message: `Invoice ${selected.rx.invoiceRef ?? ''} is ready for the document service integration.`, toastType: 'info' })}
+            onApproveQuote={async note => {
+              const localOrder = state.orders.find(order => order.id === selected.orderId);
+              if (!localOrder?.backendId) return;
+              try {
+                await approveCuraleafQuoteReview(localOrder.backendId, { organisationId: state.currentOrganisationId, note });
+                dispatch({ type: 'ADD_TOAST', message: 'Latest Curaleaf supplier cost approved. Retry supplier placement from the payment workspace.', toastType: 'success' });
+              } catch (error) { dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The latest quote could not be approved.', toastType: 'error' }); }
+            }}
           />}
         </div>
       )}
@@ -165,11 +205,13 @@ function CuraleafAccountRecords({
   error,
   loading,
   onRefresh,
+  onRequestCancellation,
 }: {
   activity: CuraleafActivity | null;
   error: boolean;
   loading: boolean;
   onRefresh: () => void;
+  onRequestCancellation: (purchaseOrder: CuraleafPurchaseOrder) => void;
 }) {
   const purchaseOrders = activity?.purchaseOrders ?? [];
   const orderedPacks = purchaseOrders.flatMap(order => order.items).reduce((total, item) => total + item.packsOrderedCount, 0);
@@ -229,6 +271,7 @@ function CuraleafAccountRecords({
                 <span><small>Allocation</small><strong>{allocated} / {ordered} packs</strong></span>
                 <span><small>Courier</small><strong>{order.courier.replaceAll('_', ' ')}</strong></span>
                 <span className={`pill ${providerStateClass(order.state)}`}>{order.state}</span>
+                {order.state === 'CREATED' ? <button type="button" className="btn btn-sm" onClick={() => onRequestCancellation(order)}>Request cancellation</button> : null}
               </article>;
             })}
           </div> : <p className="curaleaf-record-empty">No purchase orders were returned for this pharmacy account.</p>}
@@ -236,14 +279,26 @@ function CuraleafAccountRecords({
       </div>
 
       <footer>
-        <span>Last refreshed {fetchedAt}. Purchase-order records are also mirrored to Firebase every five minutes.</span>
+        <span>Last refreshed {fetchedAt}. Curaleaf changes are polled server-side every ten seconds, with an hourly repair mirror.</span>
         <span>Only orders belonging to this pharmacy’s configured Curaleaf customer are accepted.</span>
       </footer>
     </> : null}
   </section>;
 }
 
-function SupplierOrderDetail({ item, values, onQuantity, onRecordReceipt, onPrint, onDispatch, onInvoice }: {
+function CuraleafSupportCases({ cases, onStatus }: { cases: CuraleafSupportCase[]; onStatus: (supportCase: CuraleafSupportCase, status: 'contacted' | 'resolved') => void }) {
+  return <section className="card" aria-labelledby="curaleaf-support-title">
+    <header className="admin-directory-head"><div><p className="section-label">Customer-service workflow</p><h2 id="curaleaf-support-title">Curaleaf cases</h2><p>Use the pharmacy’s established Curaleaf support channel. A local request never cancels a supplier order by itself.</p></div><AlertCircle size={20} /></header>
+    <div className="curaleaf-record-list">{cases.map(supportCase => <article className="curaleaf-record-row" key={supportCase.id}>
+      <span className="curaleaf-record-row__identity"><small>{supportCase.reason.replaceAll('_', ' ')}</small><strong>Order {supportCase.orderId}</strong><em>{supportCase.note}</em></span>
+      <span className={`pill ${supportCase.status === 'resolved' ? 'pill-green' : supportCase.status === 'contacted' ? 'pill-info' : 'pill-amber'}`}>{supportCase.status}</span>
+      {supportCase.status === 'open' ? <button type="button" className="btn btn-sm" onClick={() => onStatus(supportCase, 'contacted')}>Mark contacted</button> : null}
+      {supportCase.status !== 'resolved' ? <button type="button" className="btn btn-sm" onClick={() => onStatus(supportCase, 'resolved')}>Mark resolved</button> : null}
+    </article>)}</div>
+  </section>;
+}
+
+function SupplierOrderDetail({ item, values, onQuantity, onRecordReceipt, onPrint, onDispatch, onInvoice, onApproveQuote }: {
   item: FlatSubOrder;
   values: Record<string, number>;
   onQuantity: (productId: string, value: number) => void;
@@ -251,8 +306,12 @@ function SupplierOrderDetail({ item, values, onQuantity, onRecordReceipt, onPrin
   onPrint: () => void;
   onDispatch: (action: 'MARK_READY_FOR_COLLECTION' | 'HANDOVER_TO_PATIENT') => void;
   onInvoice: () => void;
+  onApproveQuote: (note: string) => Promise<void>;
 }) {
   const { rx } = item;
+  const { state } = useApp();
+  const order = state.orders.find(candidate => candidate.id === item.orderId);
+  const [quoteApprovalNote, setQuoteApprovalNote] = useState('Reviewed the latest Curaleaf supplier cost and approved placement.');
   const readyDays = rx.status === 'ready' && rx.readyAt ? Math.floor((Date.now() - new Date(rx.readyAt).getTime()) / 86400000) : 0;
   const done = completedStep(rx.status);
   const canReceive = rx.status === 'dispatched' || rx.status === 'partially-received';
@@ -264,6 +323,8 @@ function SupplierOrderDetail({ item, values, onQuantity, onRecordReceipt, onPrin
     </header>
 
     {readyDays >= 10 && <div className="supplier-alert"><Clock size={16} /><span><strong>Collection follow-up required</strong><small>Ready for {readyDays} days.</small></span></div>}
+
+    {order?.quoteReview?.status !== 'approved' ? order?.quoteReview?.type === 'supplier_cost_changed' ? <div className="supplier-alert"><AlertCircle size={16} /><span><strong>Supplier cost changed after payment</strong><small>Review the latest wholesale, shipping or tax difference before placement.</small><input className="input" value={quoteApprovalNote} onChange={event => setQuoteApprovalNote(event.target.value)} /><button type="button" className="btn btn-sm" disabled={!quoteApprovalNote.trim()} onClick={() => void onApproveQuote(quoteApprovalNote.trim())}>Approve latest supplier cost</button></span></div> : order?.quoteReview ? <div className="supplier-alert"><AlertCircle size={16} /><span><strong>{order.quoteReview.type === 'out_of_stock' ? 'Curaleaf pack out of stock' : 'Patient price changed after payment'}</strong><small>{order.quoteReview.type === 'out_of_stock' ? 'Wait for a fresh in-stock quote or cancel the order.' : 'Cancel/refund and recreate this order at the new patient price.'}</small></span></div> : null : null}
 
     <section className="supplier-progress" aria-label="Fulfilment progress">
       {TRACK_STEPS.map((step, index) => <div key={step} className={index < done || rx.status === 'collected' ? 'complete' : index === done ? 'current' : ''}><span>{index < done || rx.status === 'collected' ? <CheckCircle size={13} /> : index + 1}</span><small>{step}</small></div>)}

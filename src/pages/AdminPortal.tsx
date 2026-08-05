@@ -451,6 +451,8 @@ export default function AdminPortal() {
   const [setupError, setSetupError] = useState<string | null>(null);
   const [curaleafOrganisationId, setCuraleafOrganisationId] = useState(state.organisations[0]?.id ?? '');
   const [curaleafCustomerId, setCuraleafCustomerId] = useState('');
+  const [curaleafWriteApiKey, setCuraleafWriteApiKey] = useState('');
+  const [curaleafReadApiKey, setCuraleafReadApiKey] = useState('');
   const [curaleafPortalEmail, setCuraleafPortalEmail] = useState('');
   const [curaleafBusy, setCuraleafBusy] = useState(false);
   const [curaleafError, setCuraleafError] = useState<string | null>(null);
@@ -1141,6 +1143,8 @@ export default function AdminPortal() {
         organisationId: curaleafOrganisationId,
         customerId: curaleafCustomerId.trim(),
         portalEmail: curaleafPortalEmail.trim(),
+        writeApiKey: curaleafWriteApiKey.trim(),
+        ...(curaleafReadApiKey.trim() ? { readApiKey: curaleafReadApiKey.trim() } : {}),
       });
       if (!status.connected) throw new Error(status.message || 'The credentials were stored but Curaleaf verification did not succeed.');
       const pharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
@@ -1149,6 +1153,8 @@ export default function AdminPortal() {
       dispatch({ type: 'ADD_TOAST', message: `${pharmacy?.tradingName ?? 'Pharmacy'} activated with Curaleaf ${status.maskedIdentifier ?? ''}.`, toastType: 'success' });
       setCuraleafCustomerId('');
       setCuraleafPortalEmail('');
+      setCuraleafWriteApiKey('');
+      setCuraleafReadApiKey('');
     } catch (error) {
       setCuraleafError(error instanceof Error ? error.message : 'Curaleaf activation failed.');
     } finally {
@@ -1165,9 +1171,11 @@ export default function AdminPortal() {
         <div className="form-grid-two">
           <label>Pharmacy<select className="input" value={curaleafOrganisationId} onChange={event => setCuraleafOrganisationId(event.target.value)} required>{state.organisations.map(org => <option value={org.id} key={org.id}>{org.tradingName}</option>)}</select></label>
           <label>Curaleaf portal email<input className="input" type="email" autoComplete="off" value={curaleafPortalEmail} onChange={event => setCuraleafPortalEmail(event.target.value)} required /></label>
-          <label>Curaleaf customer ID<input className="input" autoComplete="off" value={curaleafCustomerId} onChange={event => setCuraleafCustomerId(event.target.value)} required /></label>
+          <label>Curaleaf internal pharmacy / PHAR ID<input className="input" autoComplete="off" value={curaleafCustomerId} onChange={event => setCuraleafCustomerId(event.target.value)} required /></label>
+          <label>Pharmacy read/write API key<input className="input" type="password" autoComplete="new-password" value={curaleafWriteApiKey} onChange={event => setCuraleafWriteApiKey(event.target.value)} required /></label>
+          <label>Pharmacy read-only API key (optional)<input className="input" type="password" autoComplete="new-password" value={curaleafReadApiKey} onChange={event => setCuraleafReadApiKey(event.target.value)} /></label>
         </div>
-        <div className="setup-security-note"><ShieldCheck size={16} /><span>HHH’s least-privilege Curaleaf read key and read/write key are held as Firebase Functions deployment secrets. This form stores only this pharmacy’s customer ID and portal email in a Europe-hosted Secret Manager secret; Firestore receives a masked identifier only.</span></div>
+        <div className="setup-security-note"><ShieldCheck size={16} /><span>Each pharmacy’s keys are stored only in its own Europe-hosted Secret Manager secret. The portal never stores or displays them after activation; Firestore receives a masked Curaleaf identifier only.</span></div>
         {curaleafError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div>}
         <div className="drawer-actions"><button className="btn btn-primary" type="submit" disabled={curaleafBusy || !curaleafOrganisationId}>{curaleafBusy ? 'Verifying securely…' : 'Verify and activate pharmacy'}</button></div>
       </form>

@@ -99,7 +99,7 @@ export default function ProviderPrescriptions() {
         items={[
           { label: 'Returned', value: activity?.prescriptionTotal ?? prescriptions.length, detail: 'provider prescriptions' },
           { label: 'Active', value: active, detail: 'available to order' },
-          { label: 'Pending', value: pending, detail: 'awaiting provider action' },
+          { label: 'Pending', value: pending, detail: 'Curaleaf credential validation / supplier review' },
           { label: 'Expired', value: expired, detail: 'no longer orderable' },
         ]}
       />

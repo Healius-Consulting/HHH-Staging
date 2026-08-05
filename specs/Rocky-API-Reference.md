@@ -5,7 +5,8 @@ Source: Curaleaf's published OpenAPI 3.1 specification, captured by the `main` b
 ## Authentication
 
 - Header: `X-API-Key: <your key>` on every request.
-- Rate-limit values remain to be confirmed with Curaleaf.
+- Curaleaf confirmed a soft limit of one request per second per pharmacy key, a substantially higher hard limit, and `429` responses with rate-limit headers. HHH spaces requests by at least 1.1 seconds and honours `Retry-After`.
+- There is no master/partner key. Every pharmacy uses its own server-side key; a separate read-only key is optional.
 
 ## Core concepts
 
@@ -35,15 +36,25 @@ For the HHH prescription-gated sub-order model, submit one purchase order per pr
 
 ## Stock and price gate
 
-- `GET /v1/products/` includes stock quantity and patient pack price.
+- `GET /v1/products/` includes stock quantity and Curaleaf’s recommended patient pack price.
 - `POST /v1/quotes/` returns live in-stock state, wholesale price, patient price, tax and shipping.
-- Re-run the quote immediately before placement and hold the order for staff review if stock or price has changed.
+- Re-run the quote immediately before placement. Out-of-stock items remain blocked; supplier-cost-only changes require audited approval; patient-price changes require cancellation/refund and order recreation.
 
 ## Delivery and polling
 
 - Rocky provides dispatch/shipment data but not courier-sourced delivery confirmation.
 - “Ready for collection” therefore remains a pharmacy staff goods-in action.
 - Poll the relevant `*-events/` routes with `after=<ISO datetime>`; Rocky does not provide webhooks for these changes.
+- Curaleaf recommends a ten-second interval. Poll product, prescription, purchase-order and shipment events with per-route cursors and overlapping deduplication windows.
+
+## Confirmed operational constraints — 5 August 2026
+
+- `customerId` is Curaleaf’s internal stable identifier for a pharmacy; it is not treated as a GPhC mapping.
+- Prescription uploads are limited to 16,000,000 bytes. HHH accepts server-verified PDF, JPEG and PNG files.
+- A prescriber is required for every prescription. HHH searches or creates the prescriber before prescription creation; Curaleaf validates credentials before shipping.
+- Prescription review exceptions and purchase-order cancellation requests are handled through Curaleaf customer service; there is no formal cancellation API.
+- After initial integration acceptance and Ellis approval, later pharmacies may be allowed to go directly live. This remains disabled until written approval.
+- Stocked dev products, two dev-pharmacy keys, catalogue applicability for HHH, and the DPA/scan-retention terms remain open external dependencies.
 
 ## Important corrections to earlier assumptions
 
