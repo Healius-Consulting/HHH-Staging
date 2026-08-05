@@ -17,7 +17,8 @@ export interface EligibilitySubmissionInput {
   mobile: string;
   email: string;
   postcode: string;
-  condition: string;
+  conditions: string[];
+  primaryCondition: string;
   tried2: boolean;
   psychExclusion: boolean;
   consentReferral: boolean;
@@ -271,6 +272,7 @@ export interface PortalPatientRecord {
   address: string;
   postcode: string;
   status: 'referred' | 'active' | 'inactive';
+  conditions?: string[];
   primaryCondition?: string | null;
   createdAt: string;
   updatedAt: string;

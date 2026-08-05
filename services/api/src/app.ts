@@ -4,6 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import { z } from 'zod';
+import { CONDITION_IDS, normaliseConditionId } from '@hhh/domain';
 import type { DocumentReference } from 'firebase-admin/firestore';
 import { audit } from './audit.js';
 import { identity, requireRole, requireStaff, tenantFor } from './auth.js';
@@ -65,6 +66,7 @@ const setupDefinitions = [
   { id: 'operational_readiness', title: 'Complete operational readiness walkthrough', required: true },
 ] as const;
 
+const conditionIdSchema = z.enum(CONDITION_IDS);
 const eligibilitySchema = z.object({
   referralToken: tokenSchema,
   firstName: z.string().trim().min(1).max(100),
@@ -73,14 +75,29 @@ const eligibilitySchema = z.object({
   mobile: z.string().trim().min(7).max(30),
   email: z.email().max(254),
   postcode: z.string().trim().min(2).max(16),
-  condition: z.string().trim().min(1).max(160),
+  conditions: z.array(conditionIdSchema).min(1).max(3).refine(values => new Set(values).size === values.length, 'Conditions must be unique.'),
+  primaryCondition: conditionIdSchema,
   tried2: z.boolean(),
   psychExclusion: z.boolean(),
   consentReferral: z.literal(true),
   consentShare: z.literal(true),
   marketing: z.boolean().default(false),
   source: z.string().trim().max(100).default(''),
+}).refine(input => input.conditions.includes(input.primaryCondition), {
+  path: ['primaryCondition'],
+  message: 'Primary condition must be one of the selected conditions.',
 });
+
+function conditionSet(record: Record<string, unknown>) {
+  const conditions = Array.isArray(record.conditions)
+    ? [...new Set(record.conditions.map(normaliseConditionId).filter((value): value is string => Boolean(value)))].slice(0, 3)
+    : [];
+  const legacy = normaliseConditionId(record.condition);
+  if (conditions.length === 0 && legacy) conditions.push(legacy);
+  const requestedPrimary = normaliseConditionId(record.primaryCondition);
+  const primaryCondition = requestedPrimary && conditions.includes(requestedPrimary) ? requestedPrimary : conditions[0] ?? null;
+  return { conditions, primaryCondition };
+}
 
 const preferencesSchema = z.object({
   theme: z.enum(['clinical-light', 'clinical-dark', 'high-contrast', 'warm-low-glare']),
@@ -296,7 +313,8 @@ app.post('/v1/public/eligibility-submissions', publicSubmissionLimit, requirePub
   try {
     const input = eligibilitySchema.parse(request.body);
     const { token, organisation } = await resolveReferralToken(input.referralToken);
-    const record = await createRecord('eligibilitySubmissions', {
+    const submittedAt = timestamp();
+    const submissionFields = {
       organisationId: organisation.id,
       referralTokenId: token.id,
       firstName: input.firstName,
@@ -305,23 +323,35 @@ app.post('/v1/public/eligibility-submissions', publicSubmissionLimit, requirePub
       mobile: input.mobile,
       email: input.email.toLowerCase(),
       postcode: input.postcode.toUpperCase(),
-      condition: input.condition,
+      conditions: input.conditions,
+      primaryCondition: input.primaryCondition,
       triedTwoTreatments: input.tried2,
       psychosisExclusion: input.psychExclusion,
       consentReferral: input.consentReferral,
       consentShare: input.consentShare,
       marketingConsent: input.marketing,
       source: input.source,
-      consentCapturedAt: timestamp(),
+      consentCapturedAt: submittedAt,
       requestIp: request.ip,
       requestUserAgent: request.get('user-agent') ?? null,
+    };
+    const existing = (await listTenantRecords('eligibilitySubmissions', organisation.id, 500))
+      .find(record => String(record.email).toLowerCase() === input.email.toLowerCase());
+    const record = existing
+      ? await updateTenantRecord('eligibilitySubmissions', String(existing.id), organisation.id, {
+        ...submissionFields,
+        duplicateSubmissionCount: Number(existing.duplicateSubmissionCount ?? 0) + 1,
+        lastSubmittedAt: submittedAt,
+      })
+      : await createRecord('eligibilitySubmissions', {
+      ...submissionFields,
       status: 'new',
       recordsCheck: { status: 'pending', notes: null, completedAt: null, completedBy: null },
       referral: { status: 'pending', notes: null, completedAt: null, completedBy: null },
       emailDelivery: { status: 'not_sent', queuedAt: null, sentAt: null, failedAt: null },
     });
-    await audit(request, 'eligibility.submitted', { organisationId: organisation.id, recordId: record.id });
-    response.status(201).json({ id: record.id, organisationId: organisation.id, pharmacyName: organisation.name, submittedAt: record.createdAt });
+    await audit(request, existing ? 'eligibility.resubmitted' : 'eligibility.submitted', { organisationId: organisation.id, recordId: record.id });
+    response.status(existing ? 200 : 201).json({ id: record.id, organisationId: organisation.id, pharmacyName: organisation.name, submittedAt: record.updatedAt ?? record.createdAt });
   } catch (error) { next(error); }
 });
 
@@ -454,10 +484,12 @@ app.get('/v1/portal/eligibility-submissions', async (request, response, next) =>
     const organisationId = tenantFor(request, request.query.organisationId);
     const [records, organisation] = await Promise.all([listTenantRecords('eligibilitySubmissions', organisationId, 500), getRecord('organisations', organisationId)]);
     const statusLabels: Record<string, string> = { new: 'New', reviewing: 'Under HHH review', approved: 'Approved', declined: 'Declined' };
-    response.json(records.map(record => ({
+    response.json(records.map(record => {
+      const { conditions, primaryCondition } = conditionSet(record);
+      return {
       id: record.id, organisationId, pharmacyName: organisation.name,
       firstName: record.firstName, surname: record.surname, dob: record.dob, mobile: record.mobile, email: record.email,
-      postcode: record.postcode, condition: record.condition, tried2: record.triedTwoTreatments,
+      postcode: record.postcode, conditions, primaryCondition, tried2: record.triedTwoTreatments,
       psychExclusion: record.psychosisExclusion, consentReferral: record.consentReferral, consentShare: record.consentShare,
       marketing: record.marketingConsent, source: record.source, status: statusLabels[String(record.status)] ?? 'New',
       reviewedAt: record.reviewedAt ?? null, reviewedBy: record.reviewedBy ?? null, decisionNote: record.decisionNote ?? null,
@@ -470,8 +502,8 @@ app.get('/v1/portal/eligibility-submissions', async (request, response, next) =>
       },
       emailDelivery: record.emailDelivery ?? { status: 'not_sent', queuedAt: null, sentAt: null, failedAt: null },
       patientId: record.patientId ?? null,
-      submittedAt: record.createdAt,
-    })));
+      submittedAt: record.lastSubmittedAt ?? record.createdAt,
+    }; }));
   }
   catch (error) { next(error); }
 });
@@ -607,7 +639,8 @@ const patientSchema = z.object({
   address: z.string().trim().max(500),
   postcode: z.string().trim().max(16),
   status: z.enum(['referred', 'active', 'inactive']).default('active'),
-  primaryCondition: z.string().trim().max(160).nullable().optional(),
+  conditions: z.array(conditionIdSchema).max(3).optional(),
+  primaryCondition: conditionIdSchema.nullable().optional(),
 });
 app.get('/v1/portal/patients', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('patients', organisationId); response.json(records); } catch (error) { next(error); } });
 app.post('/v1/portal/patients', async (request, response, next) => {

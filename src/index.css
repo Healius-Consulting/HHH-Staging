@@ -2534,6 +2534,11 @@ tr:hover td {
 .admin-patient-table table { width: 100%; border-collapse: collapse; }
 .admin-patient-table th, .admin-patient-table td { text-align: left; padding: 13px 12px; border-bottom: 1px solid var(--border); font-size: var(--font-sm); }
 .admin-patient-table th { color: var(--text-tertiary); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.condition-list { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.condition-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 260px; padding: 5px 8px; border-radius: 999px; font-size: 11px; line-height: 1.25; }
+.condition-pill.primary { color: var(--tenant-primary-strong); background: var(--tenant-primary-soft); border: 1px solid var(--tenant-primary-muted); font-weight: 700; }
+.condition-pill.secondary { color: var(--text-secondary); background: var(--bg-elevated); border: 1px solid var(--border); }
+.condition-pill small { padding-left: 5px; border-left: 1px solid currentColor; color: inherit; font-size: 8px; text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
 .admin-platform-integrations { margin-top: 24px; }
 .secure-integration-form { margin: 20px 0; padding: 22px; }
 .secure-integration-form .admin-directory-head { align-items: flex-start; }
@@ -2583,6 +2588,17 @@ tr:hover td {
 .eligibility-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .eligibility-choice label { padding: 11px 14px; background: #f5f8f6; border: 1px solid #d7e2dd; border-radius: 10px; cursor: pointer; }
 .eligibility-choice input { margin-right: 7px; accent-color: #059669; }
+.eligibility-condition-field { gap: 6px !important; }
+.eligibility-condition-menu { border: 1px solid #cfdcd6; border-radius: 10px; background: #f9fbfa; }
+.eligibility-condition-menu summary { padding: 11px 13px; cursor: pointer; color: #172033; font-size: 13px; font-weight: 500; }
+.eligibility-condition-options { max-height: 280px; overflow-y: auto; padding: 6px; border-top: 1px solid #dbe5e0; display: grid; gap: 2px; }
+.eligibility-condition-options label { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 7px; font-weight: 500; cursor: pointer; }
+.eligibility-condition-options label:hover { background: #edf5f1; }
+.eligibility-condition-options label.disabled { color: #89958f; cursor: not-allowed; }
+.eligibility-condition-options input { accent-color: var(--tenant-primary); }
+.eligibility-condition-field > small { color: #607067; font-size: 11px; }
+.eligibility-condition-field.has-error .eligibility-condition-menu { border-color: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,.1); }
+.eligibility-field-error { color: #b91c1c; font-size: 12px; font-weight: 600; }
 .eligibility-consents { display: flex; flex-direction: column; gap: 12px; padding: 17px; background: #f4f8f6; border-radius: 12px; }
 .eligibility-consents label { display: flex; align-items: flex-start; gap: 9px; font-weight: 500; line-height: 1.45; }
 .eligibility-consents input { margin-top: 3px; accent-color: var(--tenant-primary); }

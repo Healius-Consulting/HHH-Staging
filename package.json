@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "workspaces": [
-    "services/api"
+    "services/api",
+    "packages/domain"
   ],
   "scripts": {
     "dev": "vite",
@@ -18,6 +19,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@hhh/domain": "0.1.0",
     "firebase": "^12.16.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.22.0",

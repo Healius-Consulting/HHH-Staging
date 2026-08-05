@@ -14,6 +14,7 @@
     "serve": "firebase emulators:start --only functions,firestore,storage"
   },
   "dependencies": {
+    "@hhh/domain": "0.1.0",
     "@google-cloud/secret-manager": "^6.1.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { normaliseConditionId } from '@hhh/domain';
 import type { DocumentData, DocumentReference } from 'firebase-admin/firestore';
 import { firestore } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
@@ -100,6 +101,13 @@ export async function completeReferral(submissionId: string, actorUid: string, n
       feeEventId(patientId, 'new_referral', effectiveCompletedAt.slice(0, 10)),
     );
     const feeSnapshot = await transaction.get(feeRef);
+    const conditions = Array.isArray(current.conditions)
+      ? [...new Set(current.conditions.map(normaliseConditionId).filter((value): value is string => Boolean(value)))].slice(0, 3)
+      : [];
+    const legacyCondition = normaliseConditionId(current.condition);
+    if (conditions.length === 0 && legacyCondition) conditions.push(legacyCondition);
+    const requestedPrimary = normaliseConditionId(current.primaryCondition);
+    const primaryCondition = requestedPrimary && conditions.includes(requestedPrimary) ? requestedPrimary : conditions[0] ?? null;
 
     transaction.set(patientRef, {
       id: patientId,
@@ -114,7 +122,8 @@ export async function completeReferral(submissionId: string, actorUid: string, n
       address: patientSnapshot.data()?.address ?? '',
       status: patientSnapshot.data()?.status === 'active' ? 'active' : 'referred',
       statusChangedAt: patientSnapshot.data()?.statusChangedAt ?? effectiveCompletedAt,
-      primaryCondition: current.condition,
+      conditions,
+      primaryCondition,
       sourceReferralId: submissionId,
       referralCompletedAt: patientSnapshot.data()?.referralCompletedAt ?? effectiveCompletedAt,
       createdAt: patientSnapshot.data()?.createdAt ?? effectiveCompletedAt,

@@ -29,6 +29,7 @@ export interface CRMPatient {
   mobile: string;
   dob?: string;
   address?: string;
+  conditions?: string[];
   primaryCondition?: string | null;
   status: 'Referred' | 'HHH approved' | 'Suspended';
   interactions?: { ts: Date | string; type: string; detail: string }[];
@@ -126,7 +127,8 @@ export interface EligibilitySubmission {
   mobile: string;
   email: string;
   postcode: string;
-  condition: string;
+  conditions: string[];
+  primaryCondition: string;
   tried2: boolean;
   psychExclusion: boolean;
   consentReferral: boolean;
@@ -610,22 +612,22 @@ function buildSeedSubmissions(): EligibilitySubmission[] {
   const base = { tried2: true, psychExclusion: false, consentReferral: true, consentShare: true, organisationId: '11111111-1111-4111-8111-111111111111', pharmacyName: 'Holistic Health Hub Pharmacy — Leeds', referralToken: 'hhh-leeds-7x4p9k' };
   const s1: EligibilitySubmission = {
     id: 1, name: 'Tom Hughes', dob: '1989-04-12', mobile: '07700 900501', email: 't.hughes@email.com',
-    postcode: 'LS1 6PJ', condition: 'Chronic Pain', ...base, marketing: false, source: 'Google',
+    postcode: 'LS1 6PJ', conditions: ['chronic-pain', 'neuropathic-pain', 'arthritis'], primaryCondition: 'chronic-pain', ...base, marketing: false, source: 'Google',
     status: 'New', calls: [], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(),
   };
   const s2: EligibilitySubmission = {
     id: 2, name: 'Rebecca Allen', dob: '1994-11-02', mobile: '07700 900502', email: 'r.allen@email.com',
-    postcode: 'LS2 8PQ', condition: 'Anxiety', ...base, marketing: true, source: 'Word of mouth',
+    postcode: 'LS2 8PQ', conditions: ['anxiety'], primaryCondition: 'anxiety', ...base, marketing: true, source: 'Website',
     status: 'Under HHH review', calls: [{ ts: new Date(Date.now() - 24 * 60 * 60 * 1000) }], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
   };
   const s3: EligibilitySubmission = {
     id: 3, name: 'Daniel Price', dob: '1977-07-23', mobile: '07700 900503', email: 'd.price@email.com',
-    postcode: 'LS2 7DR', condition: 'Chronic Pain', ...base, marketing: false, source: 'Poster / Leaflet',
+    postcode: 'LS2 7DR', conditions: ['chronic-pain', 'low-back-pain-and-sciatica'], primaryCondition: 'chronic-pain', ...base, marketing: false, source: 'Poster',
     status: 'Approved', calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Approved for programme onboarding after telephone review.', submittedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
   };
   const s4: EligibilitySubmission = {
     id: 4, name: 'Sara Knight', dob: '1985-02-15', mobile: '07700 900504', email: 's.knight@email.com',
-    postcode: 'LS1 5DA', condition: 'Insomnia', ...base, marketing: false, source: 'Text',
+    postcode: 'LS1 5DA', conditions: ['insomnia'], primaryCondition: 'insomnia', ...base, marketing: false, source: 'Text',
     status: 'Declined', calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Not onboarded following HHH review.', submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
   };
   s3.organisationId = '22222222-2222-4222-8222-222222222222';
@@ -1024,7 +1026,7 @@ function reducer(state: AppState, action: Action): AppState {
       const approvedAt = new Date();
       return {
         ...state,
-        crm: existing ? state.crm.map(patient => patient.id === existing.id ? { ...patient, dob: sub.dob, status: 'HHH approved' as const } : patient) : [...state.crm, {
+        crm: existing ? state.crm.map(patient => patient.id === existing.id ? { ...patient, dob: sub.dob, conditions: sub.conditions, primaryCondition: sub.primaryCondition, status: 'HHH approved' as const } : patient) : [...state.crm, {
           id: patientId,
           organisationId: sub.organisationId,
           name: sub.name,
@@ -1032,6 +1034,8 @@ function reducer(state: AppState, action: Action): AppState {
           mobile: sub.mobile,
           dob: sub.dob,
           address: sub.postcode,
+          conditions: sub.conditions,
+          primaryCondition: sub.primaryCondition,
           status: 'HHH approved' as const,
           interactions: [{ ts: approvedAt, type: 'HHH onboarding approved', detail: `${approvedBy} approved programme onboarding after patient review.` }],
         }],
@@ -1439,7 +1443,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           mobile: record.mobile,
           dob: record.dob,
           address: [record.address, record.postcode].filter(Boolean).join(', '),
-          primaryCondition: record.primaryCondition ?? null,
+          conditions: record.conditions ?? (record.primaryCondition ? [record.primaryCondition] : []),
+          primaryCondition: record.primaryCondition ?? record.conditions?.[0] ?? null,
           status: record.status === 'active' ? 'HHH approved' : record.status === 'referred' ? 'Referred' : 'Suspended',
         })),
       });
@@ -1485,7 +1490,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             mobile: record.mobile,
             email: record.email,
             postcode: record.postcode,
-            condition: record.condition,
+            conditions: record.conditions,
+            primaryCondition: record.primaryCondition,
             tried2: record.tried2,
             psychExclusion: record.psychExclusion,
             consentReferral: record.consentReferral,

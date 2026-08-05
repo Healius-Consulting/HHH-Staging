@@ -6,6 +6,8 @@ import { useModalFocus } from '../accessibility/useModalFocus';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
+import { conditionLabel } from '@hhh/domain';
+import ConditionList from '../components/ConditionList';
 
 /* ── Unified patient row model ── */
 interface UnifiedPatient {
@@ -176,7 +178,8 @@ export default function Patients() {
           p.email.toLowerCase().includes(q) ||
           p.mobile.includes(q) ||
           p.dob.toLowerCase().includes(q) ||
-          formatPatientDob(p.dob).toLowerCase().includes(q)
+          formatPatientDob(p.dob).toLowerCase().includes(q) ||
+          (p.submission?.conditions ?? p.crmPatient?.conditions ?? []).some(condition => conditionLabel(condition).toLowerCase().includes(q))
       );
     }
 
@@ -288,7 +291,7 @@ export default function Patients() {
           <Search size={16} />
           <input
             className="input"
-            placeholder="Search by name, DOB, email, or mobile..."
+            placeholder="Search by name, condition, DOB, email, or mobile..."
             aria-label="Search patient directory"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -405,6 +408,10 @@ export default function Patients() {
                 <div>
                   <span className="section-label">Patient record</span>
                   <h3 id="patient-drawer-title">{selectedPatient.name}</h3>
+                  {(selectedPatient.submission || selectedPatient.crmPatient?.primaryCondition) && <ConditionList
+                    conditions={selectedPatient.submission?.conditions ?? selectedPatient.crmPatient?.conditions ?? [selectedPatient.crmPatient?.primaryCondition ?? '']}
+                    primaryCondition={selectedPatient.submission?.primaryCondition ?? selectedPatient.crmPatient?.primaryCondition ?? ''}
+                  />}
                   <span className={`pill patient-record-drawer__status ${deriveStatus(selectedPatient).pill}`}>
                     {deriveStatus(selectedPatient).label}
                   </span>
@@ -504,8 +511,8 @@ export default function Patients() {
 
                   <div className="patient-eligibility-grid">
                     <div className="kv-line">
-                      <span className="text-secondary">Target Condition:</span>
-                      <span className="font-semibold text-primary">{selectedPatient.submission.condition}</span>
+                      <span className="text-secondary">Selected conditions:</span>
+                      <ConditionList conditions={selectedPatient.submission.conditions} primaryCondition={selectedPatient.submission.primaryCondition} />
                     </div>
                     <div className="kv-line">
                       <span className="text-secondary">HHH onboarding decision:</span>

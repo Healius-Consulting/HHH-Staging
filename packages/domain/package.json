@@ -1,0 +1,12 @@
+{
+  "name": "@hhh/domain",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./conditions.d.ts",
+      "default": "./conditions.js"
+    }
+  }
+}

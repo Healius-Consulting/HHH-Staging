@@ -5,6 +5,7 @@ import { eligibilityUrl } from '../utils/pharmacyResources';
 import { onboardingStatusLabel } from '../utils/onboardingStatus';
 import SummaryTiles from '../components/SummaryTiles';
 import CompactPatientCell from '../components/CompactPatientCell';
+import ConditionList from '../components/ConditionList';
 
 const STATUS_META: Record<SubmissionStatus, { label: string; pill: string; icon: React.ReactNode }> = {
   New: { label: onboardingStatusLabel('New'), pill: 'pill-info', icon: <Clock3 size={13} /> },
@@ -64,7 +65,7 @@ export default function Referrals() {
           const meta = STATUS_META[submission.status];
           const recordsComplete = submission.recordsCheck?.status === 'completed' || submission.calls.length > 0;
           const emailStatus = submission.emailDelivery?.status ?? 'not_sent';
-          return <tr key={submission.id}><td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} /></td><td>{new Date(submission.submittedAt).toLocaleDateString('en-GB')}<small>Source: {submission.source}</small></td><td><strong>{submission.condition}</strong><small>Recorded from the eligibility form</small></td><td><strong>{recordsComplete ? 'Completed' : 'Pending'}</strong><small>{recordsComplete ? 'Recorded by HHH' : 'Awaiting HHH'}</small></td><td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${meta.pill}`}>{meta.icon}{meta.label}</span></div></td><td><strong>{emailStatus === 'not_sent' ? 'Not sent' : emailStatus.charAt(0).toUpperCase() + emailStatus.slice(1)}</strong><small>{emailStatus === 'queued' ? 'Awaiting delivery provider' : 'HHH communication'}</small></td></tr>;
+          return <tr key={submission.id}><td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} /></td><td>{new Date(submission.submittedAt).toLocaleDateString('en-GB')}<small>Source: {submission.source}</small></td><td><ConditionList conditions={submission.conditions} primaryCondition={submission.primaryCondition} /><small>Recorded from the eligibility form</small></td><td><strong>{recordsComplete ? 'Completed' : 'Pending'}</strong><small>{recordsComplete ? 'Recorded by HHH' : 'Awaiting HHH'}</small></td><td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${meta.pill}`}>{meta.icon}{meta.label}</span></div></td><td><strong>{emailStatus === 'not_sent' ? 'Not sent' : emailStatus.charAt(0).toUpperCase() + emailStatus.slice(1)}</strong><small>{emailStatus === 'queued' ? 'Awaiting delivery provider' : 'HHH communication'}</small></td></tr>;
         })}</tbody></table></div>}
       </section>
     </div>

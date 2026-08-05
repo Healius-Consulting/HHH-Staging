@@ -52,6 +52,7 @@ import CommandPalette, { type CommandDefinition } from '../components/CommandPal
 import SummaryTiles from '../components/SummaryTiles';
 import CompactPatientCell from '../components/CompactPatientCell';
 import { formatPatientDob } from '../utils/patientDob';
+import ConditionList from '../components/ConditionList';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'finance' | 'compliance' | 'integrations';
 
@@ -795,7 +796,7 @@ export default function AdminPortal() {
 
           <section className="card admin-patient-table">
             <div className="admin-directory-head"><div><h2>Patients attributed to this pharmacy</h2><p>Attribution is derived from the pharmacy token and retained on the patient record.</p></div></div>
-            {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Condition</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><CompactPatientCell name={sub.name} email={sub.email} dob={sub.dob} /></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td>{sub.condition}</td><td>{sub.source}</td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(sub.status)}`}>{onboardingStatusLabel(sub.status)}</span></td></tr>)}</tbody></table></div>}
+            {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Conditions</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><CompactPatientCell name={sub.name} email={sub.email} dob={sub.dob} /></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td><ConditionList conditions={sub.conditions} primaryCondition={sub.primaryCondition} /></td><td>{sub.source}</td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(sub.status)}`}>{onboardingStatusLabel(sub.status)}</span></td></tr>)}</tbody></table></div>}
           </section>
           </div>
         </div>
@@ -858,7 +859,7 @@ export default function AdminPortal() {
         <tr key={submission.id}>
           <td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} /></td>
           <td><strong>{organisation?.tradingName ?? submission.pharmacyName}</strong><small>Token-attributed pharmacy</small></td>
-          <td><strong>{submission.condition}</strong><small>{submission.tried2 ? 'Two treatments reported' : 'Treatment history requires review'} · {submission.psychExclusion ? 'Exclusion flagged' : 'No psychosis exclusion reported'}</small></td>
+          <td><ConditionList conditions={submission.conditions} primaryCondition={submission.primaryCondition} /><small>{submission.tried2 ? 'Two treatments reported' : 'Treatment history requires review'} · {submission.psychExclusion ? 'Exclusion flagged' : 'No psychosis exclusion reported'}</small></td>
           <td><strong>{recordsComplete ? 'Completed' : 'Pending'}</strong><small>{submission.recordsCheck?.completedAt ? new Date(submission.recordsCheck.completedAt).toLocaleDateString('en-GB') : 'Patient call and records check required'}</small></td>
           <td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(submission.status)}`}>{onboardingStatusLabel(submission.status)}</span>{submission.reviewedBy && <small>{submission.reviewedBy} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</div></td>
           <td>

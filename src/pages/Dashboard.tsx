@@ -2,6 +2,7 @@ import { Activity, ArrowRight, ListTodo, History, FileText, Plus } from 'lucide-
 import { orderRevenue, useApp } from '../context/AppContext';
 import SummaryTiles from '../components/SummaryTiles';
 import { compactPatientName } from '../utils/patientName';
+import { conditionLabel } from '@hhh/domain';
 
 export default function Dashboard() {
   const { state, dispatch } = useApp();
@@ -87,7 +88,7 @@ export default function Dashboard() {
       type: 'intake' as const,
       id: `intake-${s.id}`,
       patientName: s.name,
-      condition: s.condition,
+      condition: conditionLabel(s.primaryCondition),
       subId: s.id,
       days: Math.floor((Date.now() - new Date(s.submittedAt).getTime()) / (1000 * 60 * 60 * 24)),
     }));

@@ -1,8 +1,8 @@
 # Holistic Health Hub × Curaleaf — Medical Cannabis Platform
 
-Working **prototype and technical specification** for the Holistic Health Hub (HHH) medical-cannabis service platform, which integrates with Curaleaf Laboratories' **"Rocky"** REST API for B2B ordering. This repository is the brief for building the production application.
+Working **prototype and technical specification** for the Holistic Health Hub (HHH) medical-cannabis service platform, which integrates with Curaleaf Laboratories' **"Rocky"** REST API for B2B ordering.
 
-> **Status:** Prototype + requirements. The `.html` files are clickable, **in-memory mockups (no backend)** that serve as the functional spec. The production app is still to be built.
+> **Status:** The React applications and API are now the executable source of truth. The `.html` files are historical clickable, **in-memory mockups (no backend)** and must not be used as runtime data-model definitions. Shared domain values such as condition IDs live in `packages/domain`.
 
 ## The end-to-end journey
 
