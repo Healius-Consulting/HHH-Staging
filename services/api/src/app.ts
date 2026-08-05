@@ -1471,18 +1471,116 @@ app.get('/v1/portal/admin/staff', requireRole('hhh_admin'), async (request, resp
   } catch (error) { next(error); }
 });
 
+const patientRegisterFiltersSchema = z.object({
+  query: z.string().max(300).default(''),
+  organisationId: z.union([idSchema, z.literal('all')]).default('all'),
+  status: z.string().max(100).default('all'),
+  from: z.iso.date().nullable().default(null),
+  to: z.iso.date().nullable().default(null),
+});
+
+async function adminPatientRegister(input: z.infer<typeof patientRegisterFiltersSchema>) {
+    const [patientSnapshot, submissionSnapshot, organisationSnapshot] = await Promise.all([
+      firestore.collection('patients').limit(20_001).get(),
+      firestore.collection('eligibilitySubmissions').limit(20_001).get(),
+      firestore.collection('organisations').limit(500).get(),
+    ]);
+    if (patientSnapshot.size > 20_000 || submissionSnapshot.size > 20_000) {
+      throw new HttpError(413, 'The patient register is too large for a single CSV export. Narrow the filters and try again.', 'EXPORT_SCOPE_TOO_LARGE');
+    }
+    const organisations = new Map(organisationSnapshot.docs.map(document => {
+      const record = document.data();
+      return [document.id, { name: String(record.name ?? ''), tradingName: String(record.tradingName ?? record.name ?? ''), gphcNumber: String(record.gphcNumber ?? '') }];
+    }));
+    type ExportRow = { id: string; name: string; email: string; mobile: string; dob: string; organisationId: string; pharmacyName: string; gphcNumber: string; stage: string; date: string | null };
+    const records = new Map<string, ExportRow>();
+    patientSnapshot.docs.forEach(document => {
+      const record = document.data();
+      const organisationId = String(record.organisationId ?? '');
+      const email = String(record.email ?? '');
+      if (!organisationId || !email) return;
+      const organisation = organisations.get(organisationId);
+      const status = record.status === 'active' ? 'HHH approved' : record.status === 'referred' ? 'Referred' : 'Suspended';
+      records.set(`${organisationId}:${email.toLowerCase()}`, {
+        id: document.id,
+        name: `${String(record.firstName ?? '')} ${String(record.surname ?? '')}`.trim(),
+        email,
+        mobile: String(record.mobile ?? ''),
+        dob: String(record.dob ?? ''),
+        organisationId,
+        pharmacyName: organisation?.tradingName ?? organisation?.name ?? 'Unknown pharmacy',
+        gphcNumber: organisation?.gphcNumber ?? '',
+        stage: status,
+        date: typeof record.updatedAt === 'string' ? record.updatedAt : typeof record.createdAt === 'string' ? record.createdAt : null,
+      });
+    });
+    const submissionStatus: Record<string, string> = { new: 'New', reviewing: 'Under HHH review', approved: 'Approved', declined: 'Declined' };
+    submissionSnapshot.docs.forEach(document => {
+      const record = document.data();
+      const organisationId = String(record.organisationId ?? '');
+      const email = String(record.email ?? '');
+      if (!organisationId || !email) return;
+      const key = `${organisationId}:${email.toLowerCase()}`;
+      const existing = records.get(key);
+      const organisation = organisations.get(organisationId);
+      records.set(key, {
+        id: existing?.id ?? `sub-${document.id}`,
+        name: `${String(record.firstName ?? '')} ${String(record.surname ?? '')}`.trim(),
+        email,
+        mobile: String(record.mobile ?? existing?.mobile ?? ''),
+        dob: String(record.dob ?? existing?.dob ?? ''),
+        organisationId,
+        pharmacyName: organisation?.tradingName ?? organisation?.name ?? 'Unknown pharmacy',
+        gphcNumber: organisation?.gphcNumber ?? '',
+        stage: submissionStatus[String(record.status)] ?? 'New',
+        date: typeof record.lastSubmittedAt === 'string' ? record.lastSubmittedAt : typeof record.createdAt === 'string' ? record.createdAt : null,
+      });
+    });
+    const londonKey = (value: string | null) => {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+      const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? '';
+      return `${part('year')}-${part('month')}-${part('day')}`;
+    };
+    const query = input.query.trim().toLowerCase();
+    const rows = [...records.values()].filter(record => {
+      if (input.organisationId !== 'all' && record.organisationId !== input.organisationId) return false;
+      if (input.status !== 'all' && record.stage !== input.status) return false;
+      const date = londonKey(record.date);
+      if (input.from && (!date || date < input.from)) return false;
+      if (input.to && (!date || date > input.to)) return false;
+      const formattedDob = /^\d{4}-\d{2}-\d{2}$/.test(record.dob) ? record.dob.split('-').reverse().join('/') : record.dob;
+      return !query || `${record.name} ${record.email} ${record.mobile} ${record.dob} ${formattedDob} ${record.pharmacyName}`.toLowerCase().includes(query);
+    }).sort((left, right) => left.name.localeCompare(right.name));
+    const recordScopeHash = createHash('sha256').update(rows.map(row => `${row.organisationId}:${row.id}`).sort().join('|')).digest('hex');
+    return { rows, resultCount: rows.length, generatedAt: timestamp(), recordScopeHash };
+}
+
+app.get('/v1/portal/admin/patient-register', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const input = patientRegisterFiltersSchema.parse({
+      query: request.query.query,
+      organisationId: request.query.organisationId,
+      status: request.query.status,
+      from: request.query.from ?? null,
+      to: request.query.to ?? null,
+    });
+    response.json(await adminPatientRegister(input));
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/admin/patient-exports', requireRole('hhh_admin'), async (request, response, next) => {
   try {
-    const input = z.object({
-      query: z.string().max(300).default(''),
-      organisationId: z.union([idSchema, z.literal('all')]).default('all'),
-      status: z.string().max(100).default('all'),
-      from: z.iso.date().nullable().default(null),
-      to: z.iso.date().nullable().default(null),
-      resultCount: z.number().int().nonnegative().max(100_000),
-    }).parse(request.body);
-    await audit(request, 'patient_register.exported', input);
-    response.status(202).json({ audited: true });
+    const input = patientRegisterFiltersSchema.extend({ expectedScopeHash: z.string().regex(/^[a-f0-9]{64}$/) }).parse(request.body);
+    const { expectedScopeHash, ...filters } = input;
+    const result = await adminPatientRegister(filters);
+    if (result.recordScopeHash !== expectedScopeHash) {
+      throw new HttpError(409, 'The patient register changed after it was displayed. Refresh the results before exporting.', 'EXPORT_SCOPE_CHANGED');
+    }
+    await audit(request, 'patient_register.exported', { ...filters, resultCount: result.resultCount, recordScopeHash: result.recordScopeHash });
+    response.json(result);
   } catch (error) { next(error); }
 });
 
@@ -1566,9 +1664,8 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
       handleCodeInApp: true,
     });
     const actionLink = firstPartyPasswordResetLink(firebaseLink);
-    await createRecord('notificationOutbox', { organisationId: input.organisationId, kind: 'staff_invitation', recipient: input.email, templateData: { displayName: input.displayName, actionLink, contactRole }, status: 'pending' });
-    await audit(request, 'staff.invited', { organisationId: input.organisationId, staffUid: user.uid, role: input.role, contactRole });
-    response.status(201).json({ uid: user.uid, email: input.email, displayName: input.displayName, role: input.role, organisationId: input.organisationId, contactRole, status: 'invited', createdAt, invitationQueued: true, actionLink });
+    await audit(request, 'staff.invited', { organisationId: input.organisationId, staffUid: user.uid, role: input.role, contactRole, deliveryMode: 'firebase_client' });
+    response.status(201).json({ uid: user.uid, email: input.email, displayName: input.displayName, role: input.role, organisationId: input.organisationId, contactRole, status: 'invited', createdAt, invitationQueued: false, actionLink });
   } catch (error) { next(error); }
 });
 
@@ -1580,7 +1677,19 @@ app.delete('/v1/portal/admin/staff/:uid', requireRole('hhh_admin'), async (reque
     if (!profileSnapshot.exists) throw new HttpError(404, 'Staff account not found.', 'STAFF_NOT_FOUND');
     const profile = profileSnapshot.data()!;
     if (profile.role !== 'pharmacy_staff' || !profile.organisationId) throw new HttpError(409, 'Only pharmacy staff can be removed here.', 'INVALID_STAFF_ROLE');
-    if (profile.contactRole === 'owner') throw new HttpError(409, 'The pharmacy owner account cannot be removed.', 'OWNER_ACCOUNT_PROTECTED');
+    const [organisationSnapshot, staffSnapshot] = await Promise.all([
+      firestore.collection('organisations').doc(profile.organisationId).get(),
+      firestore.collection('staffUsers').where('organisationId', '==', profile.organisationId).limit(500).get(),
+    ]);
+    if (!organisationSnapshot.exists) throw new HttpError(404, 'Pharmacy account not found.', 'ORGANISATION_NOT_FOUND');
+    const activeStaff = staffSnapshot.docs
+      .map(document => document.data())
+      .filter(record => record.role === 'pharmacy_staff' && !record.deletedAt)
+      .sort((left, right) => String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? '')));
+    const canonicalOwnerUid = organisationSnapshot.data()?.primaryContactUid
+      ?? activeStaff.find(record => record.contactRole === 'owner')?.id
+      ?? activeStaff[0]?.id;
+    if (profile.contactRole === 'owner' || canonicalOwnerUid === uid) throw new HttpError(409, 'The pharmacy owner account cannot be removed.', 'OWNER_ACCOUNT_PROTECTED');
     await auth.updateUser(uid, { disabled: true });
     await profileRef.update({ status: 'disabled', deletedAt: timestamp(), deletedBy: identity(request).uid, updatedAt: timestamp() });
     invalidateCache(`admin:staff:${profile.organisationId}`);

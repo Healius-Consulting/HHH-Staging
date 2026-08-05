@@ -35,6 +35,7 @@ import type {
   WorldpayConnectionInput,
   WorldpayConnectionStatus,
   AdminReferralFinanceReport,
+  PatientRegisterExportResult,
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -303,11 +304,18 @@ export function getAdminReferralFinance(filters: { from?: string; to?: string; o
   return apiRequest<AdminReferralFinanceReport>(`/v1/portal/admin/finance/referrals${suffix}`);
 }
 
-export function recordPatientRegisterExport(input: { query: string; organisationId: string; status: string; from: string | null; to: string | null; resultCount: number }) {
-  return apiRequest<{ audited: true }>('/v1/portal/admin/patient-exports', {
+export function recordPatientRegisterExport(input: { query: string; organisationId: string; status: string; from: string | null; to: string | null; expectedScopeHash: string }) {
+  return apiRequest<PatientRegisterExportResult>('/v1/portal/admin/patient-exports', {
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export function getAdminPatientRegister(input: { query: string; organisationId: string; status: string; from: string | null; to: string | null }) {
+  const query = new URLSearchParams({ query: input.query, organisationId: input.organisationId, status: input.status });
+  if (input.from) query.set('from', input.from);
+  if (input.to) query.set('to', input.to);
+  return apiRequest<PatientRegisterExportResult>(`/v1/portal/admin/patient-register?${query.toString()}`);
 }
 
 export function updateOrganisation(organisationId: string, input: UpdateOrganisationInput) {

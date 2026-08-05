@@ -278,6 +278,26 @@ export interface PortalPatientRecord {
   updatedAt: string;
 }
 
+export interface PatientRegisterExportRow {
+  id: string;
+  name: string;
+  email: string;
+  mobile: string;
+  dob: string;
+  organisationId: string;
+  pharmacyName: string;
+  gphcNumber: string;
+  stage: string;
+  date: string | null;
+}
+
+export interface PatientRegisterExportResult {
+  rows: PatientRegisterExportRow[];
+  resultCount: number;
+  generatedAt: string;
+  recordScopeHash: string;
+}
+
 export interface PortalOrderRecord {
   id: string;
   organisationId: string;

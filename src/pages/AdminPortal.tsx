@@ -42,8 +42,8 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { activateCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminReferralFinance, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removePharmacyStaff, updateOrganisation } from '../shared/api';
-import type { AdminReferralFinanceReport, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
+import { activateCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removePharmacyStaff, updateOrganisation } from '../shared/api';
+import type { AdminReferralFinanceReport, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -109,7 +109,8 @@ function londonDateKey(value: Date | string | null) {
 }
 
 function csvCell(value: unknown) {
-  const text = String(value ?? '');
+  const raw = String(value ?? '');
+  const text = /^[\t\r ]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
@@ -361,7 +362,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     setEmailDelivery(null);
     try {
       const created = isLocalPortalPreview
-        ? { uid: `preview-${Date.now()}`, organisationId: organisation.id, displayName, email, role: 'pharmacy_staff' as const, contactRole: staff.length ? 'staff' as const : 'owner' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: true, actionLink: '#local-preview' }
+        ? { uid: `preview-${Date.now()}`, organisationId: organisation.id, displayName, email, role: 'pharmacy_staff' as const, contactRole: staff.length ? 'staff' as const : 'owner' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: false, actionLink: '#local-preview' }
         : await createPharmacyStaffInvitation({ organisationId: organisation.id, displayName, email });
       const updated = [...staff, created];
       setStaff(updated);
@@ -441,6 +442,8 @@ export default function AdminPortal() {
   const [patientTo, setPatientTo] = useState('');
   const [patientExportBusy, setPatientExportBusy] = useState(false);
   const [patientExportError, setPatientExportError] = useState<string | null>(null);
+  const [serverPatientRegister, setServerPatientRegister] = useState<PatientRegisterExportResult | null>(null);
+  const [patientRegisterLoading, setPatientRegisterLoading] = useState(false);
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
@@ -736,6 +739,32 @@ export default function AdminPortal() {
     }
   }, [financePatientKey, financePatients]);
 
+  useEffect(() => {
+    if (isLocalPortalPreview || view !== 'patients') {
+      setPatientRegisterLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPatientRegisterLoading(true);
+    const timer = window.setTimeout(() => {
+      void getAdminPatientRegister({ query: query.trim(), organisationId: patientOrganisationId, status: patientStatus, from: patientFrom || null, to: patientTo || null })
+        .then(result => {
+          if (!cancelled) {
+            setServerPatientRegister(result);
+            setPatientExportError(null);
+          }
+        })
+        .catch(error => {
+          if (!cancelled) {
+            setServerPatientRegister(null);
+            setPatientExportError(error instanceof Error ? error.message : 'The patient register could not be loaded.');
+          }
+        })
+        .finally(() => { if (!cancelled) setPatientRegisterLoading(false); });
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [patientFrom, patientOrganisationId, patientStatus, patientTo, query, view]);
+
   const filteredOrganisations = state.organisations.filter(org => `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase()));
   const patientStatuses = [...new Set(allPatients.map(patient => patient.stage))].sort((a, b) => onboardingStatusLabel(a).localeCompare(onboardingStatusLabel(b)));
   const filteredPatients = allPatients.filter(patient => {
@@ -749,24 +778,25 @@ export default function AdminPortal() {
     if (patientTo && (!date || date > patientTo)) return false;
     return true;
   });
+  const displayedPatients = isLocalPortalPreview ? filteredPatients : serverPatientRegister?.rows ?? [];
 
   const exportPatients = async () => {
     setPatientExportBusy(true);
     setPatientExportError(null);
     try {
-      if (!isLocalPortalPreview) {
-        await recordPatientRegisterExport({ query: query.trim(), organisationId: patientOrganisationId, status: patientStatus, from: patientFrom || null, to: patientTo || null, resultCount: filteredPatients.length });
-      }
+      const exportRows = isLocalPortalPreview
+        ? filteredPatients.map(patient => {
+            const organisation = state.organisations.find(item => item.id === patient.organisationId);
+            return { ...patient, pharmacyName: organisation?.tradingName ?? 'Unknown pharmacy' };
+          })
+        : (await recordPatientRegisterExport({ query: query.trim(), organisationId: patientOrganisationId, status: patientStatus, from: patientFrom || null, to: patientTo || null, expectedScopeHash: serverPatientRegister?.recordScopeHash ?? '' })).rows;
       const header = ['Patient', 'Attributed pharmacy', 'Current stage', 'Last recorded'];
-      const rows = filteredPatients.map(patient => {
-        const organisation = state.organisations.find(item => item.id === patient.organisationId);
-        return [
+      const rows = exportRows.map(patient => [
           `${patient.name} | ${patient.email} | ${patient.mobile || '—'} | DOB ${formatPatientDob(patient.dob)}`,
-          organisation?.tradingName ?? 'Unknown pharmacy',
+          patient.pharmacyName,
           onboardingStatusLabel(patient.stage),
           patient.date ? new Date(patient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—',
-        ];
-      });
+        ]);
       const csv = [header, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
       const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -775,7 +805,7 @@ export default function AdminPortal() {
       link.download = `hhh-patient-register-${londonDateKey(new Date())}.csv`;
       link.click();
       URL.revokeObjectURL(url);
-      dispatch({ type: 'ADD_TOAST', message: `Exported ${filteredPatients.length} filtered patient record${filteredPatients.length === 1 ? '' : 's'}.`, toastType: 'success' });
+      dispatch({ type: 'ADD_TOAST', message: `Exported ${exportRows.length} server-scoped patient record${exportRows.length === 1 ? '' : 's'}.`, toastType: 'success' });
     } catch (error) {
       setPatientExportError(error instanceof Error ? error.message : 'The patient register could not be exported.');
     } finally {
@@ -821,13 +851,12 @@ export default function AdminPortal() {
 
           <section className="admin-client-heading">
             <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Pharmacy account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
-            <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span>{!setupStatus?.completed && <strong>{readiness.percent}% setup complete</strong>}<button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
+            <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
           </section>
 
           <SummaryTiles className="summary-tiles--compact" label="Pharmacy account summary" items={[
             { label: 'Patients', value: new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size, detail: 'attributed records' },
             { label: 'Access', value: selectedOrganisation.staffCount, detail: 'staff accounts' },
-            ...(!setupStatus?.completed ? [{ label: 'Readiness', value: `${readiness.ready}/${readiness.total}`, detail: 'steps complete' }] : []),
             { label: 'Platform fee', value: selectedOrganisation.platformFeeMonthly == null ? '—' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`, detail: 'per month' },
           ]} />
 
@@ -882,7 +911,7 @@ export default function AdminPortal() {
           </div>
 
           {!setupStatus?.completed && <section className="card admin-patient-table admin-client-compliance">
-            <div className="admin-directory-head"><div><p className="section-label">Go-live checklist</p><h2>Pharmacy setup</h2><p>The pharmacy completes its operational steps in Settings; HHH completes Curaleaf activation.</p></div><span className="pill pill-info">{readiness.ready} of {readiness.total} complete</span></div>
+            <div className="admin-directory-head"><div><p className="section-label">Go-live checklist</p><h2>Pharmacy setup</h2><p>The pharmacy completes its operational steps in Settings; HHH completes Curaleaf activation.</p></div></div>
             {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
             <div className="compliance-table table-wrap"><table><thead><tr><th>Setup step</th><th>Owner</th><th>Evidence</th><th>Status</th></tr></thead><tbody>{SETUP_TASKS.map(definition => { const task = setupStatus?.tasks.find(item => item.id === definition.id); return <tr key={definition.id}><td><strong>{definition.title}</strong><small>{definition.description}</small></td><td><span className={`setup-owner-tag${definition.owner === 'hhh_admin' ? ' setup-owner-tag--admin' : ''}`}>{definition.owner === 'hhh_admin' ? 'HHH admin' : 'Pharmacy'}</span></td><td>{task?.evidence || 'Not supplied yet'}</td><td><span className={`pill ${task?.completed ? 'pill-green' : 'pill-amber'}`}>{task?.completed ? 'Complete' : 'Waiting'}</span></td></tr>; })}</tbody></table></div>
           </section>}
@@ -990,7 +1019,7 @@ export default function AdminPortal() {
 
   const renderPatients = () => (
     <>
-      <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-pharmacy register</p><strong>Patient index</strong></span><div className="flex gap-sm flex-wrap"><span className="pill pill-info"><Users size={13} /> {filteredPatients.length} of {allPatients.length} records</span><button className="btn btn-sm" type="button" onClick={() => void exportPatients()} disabled={patientExportBusy}><Download size={14} /> {patientExportBusy ? 'Preparing CSV…' : 'Export filtered CSV'}</button></div></div>
+      <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-pharmacy register</p><strong>Patient index</strong></span><div className="flex gap-sm flex-wrap"><span className="pill pill-info"><Users size={13} /> {displayedPatients.length}{isLocalPortalPreview ? ` of ${allPatients.length}` : ''} records</span><button className="btn btn-sm" type="button" onClick={() => void exportPatients()} disabled={patientExportBusy || patientRegisterLoading || (!isLocalPortalPreview && !serverPatientRegister)}><Download size={14} /> {patientExportBusy ? 'Preparing CSV…' : patientRegisterLoading ? 'Loading scope…' : 'Export filtered CSV'}</button></div></div>
       <section className="card admin-patient-table admin-master-patients">
         <div className="admin-directory-head"><div><h2>Patient register</h2></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB or pharmacy" /></label></div>
         <div className="admin-patient-filters" aria-label="Patient register filters">
@@ -1001,7 +1030,7 @@ export default function AdminPortal() {
           <button className="btn btn-sm" type="button" onClick={() => { setQuery(''); setPatientOrganisationId('all'); setPatientStatus('all'); setPatientFrom(''); setPatientTo(''); }}>Clear filters</button>
         </div>
         {patientExportError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {patientExportError}</div>}
-        {filteredPatients.length === 0 ? <div className="empty-state">No patient records match the current search and filters.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Last recorded</th></tr></thead><tbody>{filteredPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{org?.tradingName ?? 'Unknown pharmacy'}</button><small>{org?.gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—'}</td></tr>; })}</tbody></table></div>}
+        {patientRegisterLoading && !isLocalPortalPreview ? <div className="empty-state">Loading the protected patient register…</div> : displayedPatients.length === 0 ? <div className="empty-state">No patient records match the current search and filters.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Last recorded</th></tr></thead><tbody>{displayedPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); const pharmacyName = 'pharmacyName' in patient ? patient.pharmacyName : org?.tradingName; const gphcNumber = 'gphcNumber' in patient ? patient.gphcNumber : org?.gphcNumber; return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{pharmacyName ?? 'Unknown pharmacy'}</button><small>{gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—'}</td></tr>; })}</tbody></table></div>}
       </section>
     </>
   );

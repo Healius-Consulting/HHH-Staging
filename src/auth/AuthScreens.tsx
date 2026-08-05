@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth';
+import { FirebaseError } from 'firebase/app';
 import { AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, LogIn, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
 import { firebaseConfiguration, mfaRequired } from './firebase';
 import { requireFirebaseAuth } from './firebase';
@@ -22,6 +23,19 @@ function AuthShell({ children }: { children: React.ReactNode }) {
       <section className="staff-login-panel">{children}</section>
     </div>
   );
+}
+
+function passwordResetErrorMessage(cause: unknown) {
+  if (!(cause instanceof FirebaseError)) return 'Your password could not be updated. Check your connection and try again.';
+  if (cause.code === 'auth/expired-action-code' || cause.code === 'auth/invalid-action-code') return 'This reset link has expired or has already been used. Request a new one.';
+  if (cause.code === 'auth/network-request-failed') return 'The password could not be updated because the network connection was interrupted. Try again.';
+  if (cause.code === 'auth/too-many-requests') return 'Too many attempts were made. Wait a few minutes, then try again.';
+  if (cause.code === 'auth/user-disabled' || cause.code === 'auth/user-not-found') return 'This staff account is no longer available. Contact an HHH administrator.';
+  if (cause.code === 'auth/weak-password' || cause.code === 'auth/password-does-not-meet-requirements') {
+    const detail = cause.message.replace(/^Firebase:\s*/i, '').replace(/\s*\(auth\/[^)]+\)\.?$/i, '').trim();
+    return detail || 'The new password does not meet the account password policy. Use a longer, unique passphrase and try again.';
+  }
+  return 'Your password could not be updated. Try again or request a new reset link.';
 }
 
 export function ConfigurationRequired() {
@@ -117,8 +131,8 @@ export function PasswordResetScreen() {
     try {
       await confirmPasswordReset(requireFirebaseAuth(), oobCode, password);
       setPhase('complete');
-    } catch {
-      setError('This reset link has expired or has already been used. Request a new one.');
+    } catch (cause) {
+      setError(passwordResetErrorMessage(cause));
       setPhase('ready');
     }
   };
