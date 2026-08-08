@@ -288,8 +288,8 @@ export interface AppState {
 
 export const ORGANISATIONS: PharmacyTenant[] = [
   {
-    id: '70913a30-71c3-4a41-952e-d532927af58c', slug: 'k-chem-pharmacy', referralToken: 'kchem-7x4p9k',
-    name: 'K-Chem Pharmacy', tradingName: 'K-Chem Pharmacy', logoText: 'KC',
+    id: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126', slug: 'k-chem-pharmacy', referralToken: 'kchem-7x4p9k',
+    name: 'K-Chem Pharmacy', tradingName: 'K-Chem Ltd', logoText: 'KC',
     gphcNumber: '1099224', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'shaylen@kchempharmacy.co.uk', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
     address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['kchempharmacy.co.uk'],
     status: 'live', staffCount: 4,
@@ -300,8 +300,8 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     worldpay: { enabled: true, status: 'connected', environment: 'sandbox', merchantId: 'WP-KCHEM', merchantName: 'K-Chem Pharmacy', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
   },
   {
-    id: 'f486a221-2236-44a5-b072-f06de399ab0e', slug: 'eastwood-health-pharmacy', referralToken: 'eastwood-3m8q2v',
-    name: 'Eastwood Health Pharmacy', tradingName: 'Eastwood Health Pharmacy', logoText: 'EH',
+    id: '6d0176bb-89a0-4e32-9bce-c934c9557c42', slug: 'eastwood-health-pharmacy', referralToken: 'eastwood-3m8q2v',
+    name: 'Eastwood Health Pharmacy', tradingName: 'Eastwood Health Ltd', logoText: 'EH',
     gphcNumber: '9012726', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'contact@eastwoodhealthpharmacy.co.uk', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
     address: 'Nottinghamshire, United Kingdom', websiteDomains: ['eastwoodhealthpharmacy.co.uk'],
     status: 'live', staffCount: 2,
@@ -311,7 +311,32 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
+  {
+    id: '70913a30-71c3-4a41-952e-d532927af58c', slug: 'healius-training-pharmacy', referralToken: 'healius-tr-9k2p',
+    name: 'Healius Training Pharmacy', tradingName: 'Healius Training Pharmacy', logoText: 'HT',
+    gphcNumber: 'TRAINING-PHARM1', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'shaylen@healius.co.uk', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
+    address: 'Training Branch 1, United Kingdom', websiteDomains: ['training-pharm1.co.uk'],
+    status: 'live', staffCount: 2,
+    platformFeeMonthly: null,
+    defaultPaymentRoute: 'manual',
+    brand: { primary: '#0f766e', portalName: 'Healius Training Pharmacy' },
+    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
+    worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+  },
+  {
+    id: 'f486a221-2236-44a5-b072-f06de399ab0e', slug: 'testpharm-dispensary', referralToken: 'testpharm-tr-4b1',
+    name: 'TestPharm Dispensary', tradingName: 'TestPharm Dispensary', logoText: 'TP',
+    gphcNumber: 'TRAINING-PHARM2', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'testpharm@local.pharmacy', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
+    address: 'Training Branch 2, United Kingdom', websiteDomains: ['training-pharm2.co.uk'],
+    status: 'live', staffCount: 2,
+    platformFeeMonthly: null,
+    defaultPaymentRoute: 'manual',
+    brand: { primary: '#315b7d', portalName: 'TestPharm Dispensary' },
+    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
+    worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
+  },
 ];
+
 
 const SEED_CRM: CRMPatient[] = [
   { id: 'P-1001', organisationId: ORGANISATIONS[0].id, name: 'James Doe',        email: 'j.doe@email.com',      mobile: '07700 900111', dob: '1988-06-14', address: '12 High St, Leeds LS1 4AB',     status: 'HHH approved' },
