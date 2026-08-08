@@ -4,7 +4,9 @@ import { HttpError } from './http.js';
 import { readIntegrationSecret, readPlatformSecret } from './secrets.js';
 
 const REQUEST_TIMEOUT_MS = 12_000;
-const TENANT_REQUEST_SPACING_MS = 1_100;
+const TENANT_REQUEST_SPACING_MS = 150;
+
+
 
 export type CuraleafCredential = {
   customerId: string;
