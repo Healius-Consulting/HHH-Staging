@@ -249,75 +249,45 @@ export default function Patients() {
   const onOrderCount = patients.filter(p => p.crmPatient && p.orders.some(o => o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))).length;
 
   return (
-    <div className="page-body" style={{ position: 'relative' }}>
+    <div className="page-body patients-page">
       <div className="filter-grid" role="group" aria-label="Filter patient directory">
-        <button type="button" aria-pressed={activeTab === 'all'} className={`card card-surface filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
-          <div className="filter-card__head">
-            <span>All Patients</span>
-            <Users size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} />
-          </div>
+        <button type="button" aria-pressed={activeTab === 'all'} className={`filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
+          <div className="filter-card__head"><span>All patients</span><Users size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} /></div>
           <span className="filter-card__value">{patients.length}</span>
         </button>
-
-        <button type="button" aria-pressed={activeTab === 'enquiries'} className={`card card-surface filter-card ${activeTab === 'enquiries' ? 'active' : ''}`} onClick={() => setActiveTab('enquiries')}>
-          <div className="filter-card__head">
-            <span>Enquiries</span>
-            <Clipboard size={14} className={activeTab === 'enquiries' ? 'text-red' : 'text-muted'} />
-          </div>
+        <button type="button" aria-pressed={activeTab === 'enquiries'} className={`filter-card ${activeTab === 'enquiries' ? 'active' : ''}`} onClick={() => setActiveTab('enquiries')}>
+          <div className="filter-card__head"><span>Enquiries</span><Clipboard size={14} className={activeTab === 'enquiries' ? 'text-red' : 'text-muted'} /></div>
           <span className="filter-card__value">{activeEnquiries}</span>
         </button>
-
-        <button type="button" aria-pressed={activeTab === 'active'} className={`card card-surface filter-card ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
-          <div className="filter-card__head">
-            <span>Active Treatments</span>
-            <CheckCircle size={14} className={activeTab === 'active' ? 'text-green' : 'text-muted'} />
-          </div>
+        <button type="button" aria-pressed={activeTab === 'active'} className={`filter-card ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
+          <div className="filter-card__head"><span>Active</span><CheckCircle size={14} className={activeTab === 'active' ? 'text-green' : 'text-muted'} /></div>
           <span className="filter-card__value">{totalCRM}</span>
         </button>
-
-        <button type="button" aria-pressed={activeTab === 'on-order'} className={`card card-surface filter-card ${activeTab === 'on-order' ? 'active' : ''}`} onClick={() => setActiveTab('on-order')}>
-          <div className="filter-card__head">
-            <span>On Order</span>
-            <Package size={14} className={activeTab === 'on-order' ? 'text-amber' : 'text-muted'} />
-          </div>
+        <button type="button" aria-pressed={activeTab === 'on-order'} className={`filter-card ${activeTab === 'on-order' ? 'active' : ''}`} onClick={() => setActiveTab('on-order')}>
+          <div className="filter-card__head"><span>On order</span><Package size={14} className={activeTab === 'on-order' ? 'text-amber' : 'text-muted'} /></div>
           <span className="filter-card__value">{onOrderCount}</span>
         </button>
       </div>
 
-      <div className="toolbar-row">
-        <div className="search-row">
+      <div className="filter-toolbar">
+        <div className="search-box">
           <Search size={16} />
           <input
-            className="input"
+            type="search"
             placeholder="Search by name, condition, DOB, email, or mobile..."
             aria-label="Search patient directory"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-
-        {/* Sort selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-          <span className="text-muted font-semibold">Sort by:</span>
-          <select
-            aria-label="Sort patient directory"
-            value={sortKey}
-            onChange={e => setSortKey(e.target.value as SortKey)}
-            style={{
-              padding: '6px 12px',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border)',
-              borderRadius: '6px',
-              color: 'var(--text-primary)',
-              fontFamily: 'inherit',
-              outline: 'none'
-            }}
-          >
-            <option value="name">Name (A-Z)</option>
+        <label className="sort-control">
+          <span>Sort</span>
+          <select aria-label="Sort patient directory" value={sortKey} onChange={e => setSortKey(e.target.value as SortKey)}>
+            <option value="name">Name (A–Z)</option>
             <option value="status">Status</option>
-            <option value="id">Newest Created</option>
+            <option value="id">Newest</option>
           </select>
-        </div>
+        </label>
       </div>
 
       {/* ══ Patients directory list ══ */}

@@ -180,9 +180,9 @@ function StaffWorkspace() {
 
   if (!organisation) return <AuthLoading />;
 
-  const setupComplete = Boolean(setup.status?.completed);
+  const setupComplete = isLocalPortalPreview || Boolean(setup.status?.completed);
   const unrestrictedScreens = new Set(['home', 'formulary', 'resources', 'settings']);
-  const isRestricted = curaleafActivated && !setupComplete && !unrestrictedScreens.has(state.screen);
+  const isRestricted = !isLocalPortalPreview && curaleafActivated && !setupComplete && !unrestrictedScreens.has(state.screen);
 
   const renderScreen = () => {
     if (isRestricted) return <SetupRequired onOpenSetup={() => dispatch({ type: 'SET_SCREEN', screen: 'settings' })} />;

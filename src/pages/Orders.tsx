@@ -150,62 +150,35 @@ export default function Orders() {
   const fmtDate = (date: Date) => new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const rxTotal = (rx: Prescription) => rx.items.reduce((total, item) => total + lineRevenue(item), 0);
 
+  const needsActionCount = allSubOrders.filter(
+    i => i.placementState === 'HELD_PRICE' || i.placementState === 'HELD_STOCK' || i.placementState === 'CANCELLATION_PENDING_REFUND'
+  ).length;
+  const activeCount = allSubOrders.filter(i => !i.isExpired && i.placementState !== 'CANCELLED_REFUNDED').length;
+  const archivedCount = allSubOrders.filter(i => i.isExpired).length;
+  const rejectedCount = allSubOrders.filter(i => i.placementState === 'CANCELLED_REFUNDED' || i.rejectionReason !== undefined).length;
+
   return (
     <div className="page-body orders-page">
-      <nav className="orders-workspace-tabs" aria-label="Customer Orders Views">
-        <button
-          type="button"
-          className={`orders-tab-btn ${activeTab === 'needs-action' ? 'active' : ''}`}
-          onClick={() => setActiveTab('needs-action')}
-        >
-          <AlertTriangle size={16} />
-          <span>Needs Action</span>
-          <span className="tab-badge warning">
-            {
-              allSubOrders.filter(
-                i => i.placementState === 'HELD_PRICE' || i.placementState === 'HELD_STOCK' || i.placementState === 'CANCELLATION_PENDING_REFUND'
-              ).length
-            }
-          </span>
+      <div className="filter-grid" role="group" aria-label="Customer order views">
+        <button type="button" aria-pressed={activeTab === 'needs-action'} className={`filter-card ${activeTab === 'needs-action' ? 'active' : ''}`} onClick={() => setActiveTab('needs-action')}>
+          <div className="filter-card__head"><span>Needs action</span><AlertTriangle size={14} className={activeTab === 'needs-action' ? 'text-amber' : 'text-muted'} /></div>
+          <span className="filter-card__value">{needsActionCount}</span>
         </button>
-
-        <button
-          type="button"
-          className={`orders-tab-btn ${activeTab === 'active' ? 'active' : ''}`}
-          onClick={() => setActiveTab('active')}
-        >
-          <Clock size={16} />
-          <span>Active</span>
-          <span className="tab-badge info">
-            {allSubOrders.filter(i => !i.isExpired && i.placementState !== 'CANCELLED_REFUNDED').length}
-          </span>
+        <button type="button" aria-pressed={activeTab === 'active'} className={`filter-card ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
+          <div className="filter-card__head"><span>Active</span><Clock size={14} className={activeTab === 'active' ? 'text-info' : 'text-muted'} /></div>
+          <span className="filter-card__value">{activeCount}</span>
         </button>
-
-        <button
-          type="button"
-          className={`orders-tab-btn ${activeTab === 'archived' ? 'active' : ''}`}
-          onClick={() => setActiveTab('archived')}
-        >
-          <Archive size={16} />
-          <span>Archived (Expired 28d)</span>
-          <span className="tab-badge neutral">{allSubOrders.filter(i => i.isExpired).length}</span>
+        <button type="button" aria-pressed={activeTab === 'archived'} className={`filter-card ${activeTab === 'archived' ? 'active' : ''}`} onClick={() => setActiveTab('archived')}>
+          <div className="filter-card__head"><span>Archived</span><Archive size={14} className={activeTab === 'archived' ? 'text-muted' : 'text-muted'} /></div>
+          <span className="filter-card__value">{archivedCount}</span>
         </button>
-
-        <button
-          type="button"
-          className={`orders-tab-btn ${activeTab === 'rejected' ? 'active' : ''}`}
-          onClick={() => setActiveTab('rejected')}
-        >
-          <XCircle size={16} />
-          <span>Rejected & Cancelled</span>
-          <span className="tab-badge danger">
-            {allSubOrders.filter(i => i.placementState === 'CANCELLED_REFUNDED' || i.rejectionReason !== undefined).length}
-          </span>
+        <button type="button" aria-pressed={activeTab === 'rejected'} className={`filter-card ${activeTab === 'rejected' ? 'active' : ''}`} onClick={() => setActiveTab('rejected')}>
+          <div className="filter-card__head"><span>Rejected</span><XCircle size={14} className={activeTab === 'rejected' ? 'text-red' : 'text-muted'} /></div>
+          <span className="filter-card__value">{rejectedCount}</span>
         </button>
-      </nav>
+      </div>
 
-      {/* Controls */}
-      <section className="orders-controls">
+      <section className="filter-toolbar">
         <div className="search-box">
           <Search size={16} />
           <input
@@ -213,6 +186,7 @@ export default function Orders() {
             placeholder="Search by patient, order ID, PO reference or reason..."
             value={query}
             onChange={e => setQuery(e.target.value)}
+            aria-label="Search customer orders"
           />
         </div>
       </section>

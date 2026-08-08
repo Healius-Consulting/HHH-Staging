@@ -1,152 +1,40 @@
 .pharmacy-finance {
-  display: grid;
-  gap: 18px;
-}
-
-.pharmacy-finance__intro {
   display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 28px;
-  padding: 26px 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background:
-    radial-gradient(circle at 90% 20%, color-mix(in srgb, var(--primary) 12%, transparent), transparent 34%),
-    var(--bg-surface);
+  flex-direction: column;
+  gap: 20px;
 }
 
-.pharmacy-finance__intro h2 {
-  max-width: 720px;
-  margin: 4px 0 7px;
-  color: var(--text-primary);
-  font-size: clamp(1.45rem, 2.3vw, 2rem);
-  letter-spacing: -.035em;
+.pharmacy-finance__periods .filter-card__value--text {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.3;
+  text-transform: none;
+  color: #475569;
 }
 
-.pharmacy-finance__intro p:last-child {
-  max-width: 760px;
-  margin: 0;
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-
-.pharmacy-finance__period {
-  display: grid;
-  flex: 0 0 210px;
-  gap: 7px;
-}
-
-.pharmacy-finance__period span {
-  color: var(--text-secondary);
-  font-size: .68rem;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.pharmacy-finance__period select {
-  min-height: 44px;
-  padding: 0 36px 0 13px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  outline: none;
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font: inherit;
-  font-weight: 700;
-}
-
-.pharmacy-finance__period select:focus-visible {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+.pharmacy-finance__periods .filter-card.active .filter-card__value--text {
+  color: #0f172a;
 }
 
 .pharmacy-finance__tiles {
-  display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-surface);
 }
 
-.pharmacy-finance__tiles article {
-  display: flex;
-  min-width: 0;
-  gap: 12px;
-  padding: 21px 18px;
-  border-right: 1px solid var(--border);
-}
-
-.pharmacy-finance__tiles article:last-child {
-  border-right: 0;
-}
-
-.pharmacy-finance__tile-icon {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  color: var(--primary);
-}
-
-.pharmacy-finance__tiles article > div {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-
-.pharmacy-finance__tiles small {
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: .68rem;
-  font-weight: 800;
-  letter-spacing: .045em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.pharmacy-finance__tiles strong {
-  color: var(--text-primary);
-  font-size: clamp(1.3rem, 1.9vw, 1.7rem);
-  letter-spacing: -.035em;
-}
-
-.pharmacy-finance__tiles article > div > span {
-  color: var(--text-muted);
-  font-size: .72rem;
-  line-height: 1.35;
-}
-
-.pharmacy-finance__tiles .pharmacy-finance__tile--primary {
-  background: color-mix(in srgb, var(--primary) 7%, var(--bg-surface));
-}
-
-.pharmacy-finance__tile--primary .pharmacy-finance__tile-icon {
-  background: var(--primary);
-  color: #fff;
+.pharmacy-finance__tiles .summary-tile--accent {
+  border-color: color-mix(in srgb, var(--tenant-primary) 35%, #e2e8f0) !important;
+  background: color-mix(in srgb, var(--tenant-primary) 6%, #ffffff) !important;
 }
 
 .pharmacy-finance__notice {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 26%, var(--border));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--bg-surface));
-  color: var(--text-secondary);
 }
 
 .pharmacy-finance__notice > svg {
   flex: 0 0 auto;
   margin-top: 2px;
-  color: var(--warning, #9a6700);
 }
 
 .pharmacy-finance__notice div {
@@ -155,55 +43,17 @@
 }
 
 .pharmacy-finance__notice strong {
-  color: var(--text-primary);
-  font-size: .82rem;
+  font-size: 0.875rem;
 }
 
 .pharmacy-finance__notice span {
-  font-size: .78rem;
-  line-height: 1.5;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  opacity: 0.9;
 }
 
 .pharmacy-finance__ledger {
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-
-.pharmacy-finance__ledger > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 20px 22px;
-  border-bottom: 1px solid var(--border);
-}
-
-.pharmacy-finance__ledger h3 {
-  margin: 3px 0 0;
-  color: var(--text-primary);
-  font-size: 1.05rem;
-}
-
-.pharmacy-finance__formula {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 11px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: .7rem;
-  white-space: nowrap;
-}
-
-.pharmacy-finance__formula b {
-  color: var(--text-muted);
-}
-
-.pharmacy-finance__formula strong {
-  color: var(--primary);
 }
 
 .pharmacy-finance__table-wrap {
@@ -213,20 +63,14 @@
 
 .pharmacy-finance__table-wrap table {
   width: 100%;
-  min-width: 900px;
+  min-width: 860px;
   border-collapse: collapse;
+  border: 0 !important;
+  border-radius: 0 !important;
 }
 
 .pharmacy-finance__table-wrap th {
-  padding: 11px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--text-muted);
-  font-size: .65rem;
-  font-weight: 800;
-  letter-spacing: .06em;
   text-align: right;
-  text-transform: uppercase;
 }
 
 .pharmacy-finance__table-wrap th:first-child {
@@ -234,186 +78,67 @@
 }
 
 .pharmacy-finance__table-wrap td {
-  padding: 15px 16px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-primary);
-  font-size: .8rem;
-  font-variant-numeric: tabular-nums;
-  font-weight: 750;
   text-align: right;
-}
-
-.pharmacy-finance__table-wrap tbody tr:last-child td {
-  border-bottom: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .pharmacy-finance__table-wrap td:first-child {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   text-align: left;
+  font-weight: 400;
 }
 
 .pharmacy-finance__table-wrap td:first-child strong {
-  font-size: .82rem;
+  font-size: 0.875rem;
+  color: #1e293b;
 }
 
 .pharmacy-finance__table-wrap td:first-child span {
-  max-width: 280px;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: .7rem;
-  font-weight: 550;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pharmacy-finance__table-wrap tbody tr:hover {
-  background: color-mix(in srgb, var(--primary) 3%, transparent);
+  color: #94a3b8;
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .pharmacy-finance__contribution {
-  color: var(--primary) !important;
+  color: var(--tenant-primary) !important;
 }
 
 .pharmacy-finance__pending {
-  color: var(--text-muted);
-  font-size: .7rem;
-  font-weight: 650;
-}
-
-.pharmacy-finance__empty {
-  display: grid;
-  min-height: 230px;
-  place-items: center;
-  align-content: center;
-  gap: 7px;
-  color: var(--text-muted);
-  text-align: center;
-}
-
-.pharmacy-finance__empty svg {
-  margin-bottom: 3px;
-  color: var(--primary);
-}
-
-.pharmacy-finance__empty strong {
-  color: var(--text-primary);
-  font-size: .9rem;
-}
-
-.pharmacy-finance__empty span {
-  max-width: 360px;
-  font-size: .77rem;
-  line-height: 1.5;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .pharmacy-finance__footnote {
-  margin: -4px 2px 6px;
-  color: var(--text-muted);
-  font-size: .72rem;
-  line-height: 1.55;
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 .pharmacy-finance__footnote strong {
-  color: var(--text-secondary);
+  color: #64748b;
 }
 
 @media (max-width: 1180px) {
   .pharmacy-finance__tiles {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .pharmacy-finance__tiles article {
-    grid-column: span 2;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .pharmacy-finance__tiles article:nth-child(3) {
-    border-right: 0;
-  }
-
-  .pharmacy-finance__tiles article:nth-child(4),
-  .pharmacy-finance__tiles article:nth-child(5) {
-    grid-column: span 3;
-    border-bottom: 0;
+  .pharmacy-finance__tiles .summary-tile--accent {
+    grid-column: 1 / -1;
   }
 }
 
-@media (max-width: 820px) {
-  .pharmacy-finance__intro {
-    align-items: stretch;
-    flex-direction: column;
-    padding: 22px;
-  }
-
-  .pharmacy-finance__period {
-    flex: auto;
-    width: min(100%, 300px);
-  }
-
-  .pharmacy-finance__ledger > header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .pharmacy-finance__formula {
-    max-width: 100%;
-    white-space: normal;
-  }
-}
-
-@media (max-width: 620px) {
-  .pharmacy-finance {
-    gap: 14px;
-  }
-
-  .pharmacy-finance__intro {
-    padding: 19px 17px;
+@media (max-width: 720px) {
+  .pharmacy-finance__periods {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .pharmacy-finance__tiles {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .pharmacy-finance__tiles article,
-  .pharmacy-finance__tiles article:nth-child(4),
-  .pharmacy-finance__tiles article:nth-child(5) {
-    grid-column: auto;
-    padding: 17px 14px;
-    border-right: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .pharmacy-finance__tiles article:nth-child(even) {
-    border-right: 0;
-  }
-
-  .pharmacy-finance__tiles article:last-child {
-    grid-column: 1 / -1;
-    border: 0;
-  }
-
-  .pharmacy-finance__tile-icon {
-    display: none;
-  }
-
-  .pharmacy-finance__ledger > header {
-    padding: 17px;
-  }
-
-  .pharmacy-finance__formula {
-    display: grid;
-    width: 100%;
-    grid-template-columns: 1fr auto;
-    border-radius: var(--radius-md);
-  }
-
-  .pharmacy-finance__formula b {
-    display: none;
-  }
-
-  .pharmacy-finance__formula strong {
-    text-align: right;
+    grid-template-columns: 1fr;
   }
 
   .pharmacy-finance__table-wrap {
@@ -436,53 +161,35 @@
   .pharmacy-finance__table-wrap tr {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    padding: 15px 17px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .pharmacy-finance__table-wrap tbody tr:last-child {
-    border-bottom: 0;
+    padding: 14px 16px;
+    border-bottom: 1px solid #f1f5f9;
   }
 
   .pharmacy-finance__table-wrap td,
   .pharmacy-finance__table-wrap td:first-child {
-    display: grid;
-    gap: 3px;
-    padding: 9px 0;
-    border: 0;
+    padding: 8px 0;
+    border: 0 !important;
     text-align: left;
   }
 
   .pharmacy-finance__table-wrap td:first-child {
     grid-column: 1 / -1;
-    padding-top: 0;
-    border-bottom: 1px dashed var(--border);
+    padding-bottom: 10px;
+    border-bottom: 1px dashed #e2e8f0 !important;
   }
 
   .pharmacy-finance__table-wrap td::before {
     content: attr(data-label);
-    color: var(--text-muted);
-    font-size: .61rem;
-    font-weight: 800;
-    letter-spacing: .05em;
+    display: block;
+    margin-bottom: 2px;
+    color: #94a3b8;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
   }
 
   .pharmacy-finance__table-wrap td:first-child::before {
     content: none;
-  }
-
-  .pharmacy-finance__contribution {
-    text-align: right !important;
-  }
-
-  .pharmacy-finance__footnote {
-    padding-inline: 4px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pharmacy-finance__table-wrap tbody tr {
-    transition: none;
   }
 }
