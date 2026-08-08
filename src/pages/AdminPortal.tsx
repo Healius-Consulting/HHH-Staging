@@ -462,6 +462,7 @@ export default function AdminPortal() {
   const [curaleafApproveBusy, setCuraleafApproveBusy] = useState(false);
   const [curaleafError, setCuraleafError] = useState<string | null>(null);
   const [curaleafResult, setCuraleafResult] = useState<CuraleafConnectionStatus | null>(null);
+  const [showCuraleafDrawer, setShowCuraleafDrawer] = useState(false);
   const [financeOrganisationId, setFinanceOrganisationId] = useState('all');
   const [financePatientKey, setFinancePatientKey] = useState('all');
   const [financePeriod, setFinancePeriod] = useState<'all' | 'month' | 'year'>('all');
@@ -1269,7 +1270,7 @@ export default function AdminPortal() {
   };
 
   useEffect(() => {
-    if (!curaleafOrganisationId || platformTab !== 'curaleaf') return;
+    if (!showCuraleafDrawer || !curaleafOrganisationId) return;
     let cancelled = false;
     void getCuraleafConnectionStatus(curaleafOrganisationId)
       .then(status => {
@@ -1279,7 +1280,23 @@ export default function AdminPortal() {
         if (!cancelled) setCuraleafResult(null);
       });
     return () => { cancelled = true; };
-  }, [curaleafOrganisationId, platformTab]);
+  }, [curaleafOrganisationId, showCuraleafDrawer]);
+
+  const openCuraleafDrawer = (organisationId: string) => {
+    setCuraleafOrganisationId(organisationId);
+    setCuraleafCustomerId('');
+    setCuraleafWriteApiKey('');
+    setCuraleafReadApiKey('');
+    setCuraleafResult(null);
+    setCuraleafError(null);
+    setShowCuraleafDrawer(true);
+  };
+
+  const closeCuraleafDrawer = () => {
+    if (curaleafBusy || curaleafApproveBusy) return;
+    setShowCuraleafDrawer(false);
+    setCuraleafError(null);
+  };
 
   const curaleafValidation: CuraleafValidationReport | undefined = curaleafResult?.validation;
   const curaleafApproved = Boolean(
@@ -1318,6 +1335,8 @@ export default function AdminPortal() {
     }
   };
 
+  const curaleafPharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
+
   const submitCuraleafApproval = async () => {
     if (!curaleafOrganisationId) return;
     setCuraleafApproveBusy(true);
@@ -1338,6 +1357,7 @@ export default function AdminPortal() {
           : `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf approved. Remaining setup steps still required before live.`,
         toastType: 'success',
       });
+      setShowCuraleafDrawer(false);
     } catch (error) {
       setCuraleafError(error instanceof Error ? error.message : 'Curaleaf approval failed.');
     } finally {
@@ -1449,12 +1469,7 @@ export default function AdminPortal() {
                             <button
                               type="button"
                               className="btn btn-sm"
-                              onClick={() => {
-                                setCuraleafOrganisationId(organisation.id);
-                                setCuraleafResult(null);
-                                setCuraleafError(null);
-                                document.getElementById('curaleaf-activation-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                              }}
+                              onClick={() => openCuraleafDrawer(organisation.id)}
                             >
                               {approved ? 'Rotate keys' : 'Connect'}
                             </button>
@@ -1467,84 +1482,6 @@ export default function AdminPortal() {
               </div>
             )}
           </section>
-
-          <form id="curaleaf-activation-form" className="card secure-integration-form" onSubmit={submitCuraleafTestAndSave}>
-            <div className="admin-directory-head">
-              <div>
-                <p className="section-label">HHH administrator only</p>
-                <h2>Test & save Curaleaf credentials</h2>
-                <p>Enter the pharmacy PHAR / customer ID and API key. Validation must pass before you can approve the Curaleaf setup step.</p>
-              </div>
-              <LockKeyhole size={22} />
-            </div>
-            <div className="form-grid-two">
-              <label>Pharmacy
-                <select
-                  className="input"
-                  value={curaleafOrganisationId}
-                  onChange={event => {
-                    setCuraleafOrganisationId(event.target.value);
-                    setCuraleafResult(null);
-                    setCuraleafError(null);
-                  }}
-                  required
-                >
-                  {state.organisations.map(org => <option value={org.id} key={org.id}>{org.tradingName}</option>)}
-                </select>
-              </label>
-              <label>Curaleaf internal pharmacy / PHAR ID
-                <input className="input" autoComplete="off" value={curaleafCustomerId} onChange={event => setCuraleafCustomerId(event.target.value)} required />
-                <small className="field-help">Curaleaf’s internal customer UUID for this pharmacy — not the HHH organisation id.</small>
-              </label>
-              <label>Pharmacy read/write API key
-                <input className="input" type="password" autoComplete="new-password" value={curaleafWriteApiKey} onChange={event => setCuraleafWriteApiKey(event.target.value)} required />
-              </label>
-              <label>Pharmacy read-only API key (optional)
-                <input className="input" type="password" autoComplete="new-password" value={curaleafReadApiKey} onChange={event => setCuraleafReadApiKey(event.target.value)} />
-              </label>
-            </div>
-            <div className="setup-security-note">
-              <ShieldCheck size={16} />
-              <span>Each pharmacy’s keys are stored only in its own Europe-hosted Secret Manager secret. The portal never stores or displays them after save; Firestore receives a masked Curaleaf identifier only.</span>
-            </div>
-            {curaleafError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div>}
-            {curaleafValidation && (
-              <div className={`banner ${curaleafValidation.passed ? 'banner-green' : 'banner-amber'}`} role="status">
-                <ClipboardCheck size={16} />
-                <span>
-                  <strong>{curaleafValidation.passed ? 'Validation passed' : 'Validation failed'}</strong>
-                  <small>{curaleafValidation.message}</small>
-                  {curaleafValidation.observedCustomerId && <small>Observed customer ID: {curaleafValidation.observedCustomerId}</small>}
-                </span>
-              </div>
-            )}
-            {curaleafValidation?.checks?.length ? (
-              <div className="filter-grid admin-gate-grid" aria-label="Curaleaf validation checks">
-                {curaleafValidation.checks.map(check => (
-                  <div key={check.id} className="filter-card admin-gate-card">
-                    <div className="filter-card__head">
-                      <span>{check.label}</span>
-                      <span className={`pill ${check.passed ? 'pill-green' : 'pill-amber'}`}>{check.passed ? 'Pass' : 'Fail'}</span>
-                    </div>
-                    <span className="filter-card__value text-xs">{check.detail}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <div className="drawer-actions">
-              <button className="btn btn-primary" type="submit" disabled={curaleafBusy || curaleafApproveBusy || !curaleafOrganisationId}>
-                {curaleafBusy ? 'Testing…' : 'Test & save'}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                disabled={curaleafBusy || curaleafApproveBusy || !curaleafOrganisationId || !curaleafValidation?.passed || curaleafApproved}
-                onClick={() => void submitCuraleafApproval()}
-              >
-                {curaleafApproveBusy ? 'Approving…' : curaleafApproved ? 'Curaleaf approved' : 'Approve Curaleaf'}
-              </button>
-            </div>
-          </form>
         </>
       )}
     </>
@@ -1586,6 +1523,86 @@ export default function AdminPortal() {
               {referralError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {referralError}</div>}
               <div className="drawer-actions"><button type="button" className="btn" disabled={referralBusy} onClick={() => setReferralDialog(null)}>Cancel</button><button type="button" className={`btn ${referralDialog.action === 'decline' ? 'btn-danger' : 'btn-primary'}`} disabled={referralBusy || (referralDialog.action === 'records' && !referralNotes.trim())} onClick={() => void runReferralAction()}>{referralBusy ? 'Saving…' : referralDialog.action === 'records' ? 'Save check' : referralDialog.action === 'complete' ? 'Complete referral' : referralDialog.action === 'decline' ? 'Record decline' : 'Queue patient email'}</button></div>
             </div>
+          </aside>
+        </div>
+      )}
+      {showCuraleafDrawer && (
+        <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation" onClick={closeCuraleafDrawer}>
+          <aside
+            className="drawer admin-referral-drawer secure-integration-form"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="curaleaf-drawer-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="drawer-header">
+              <div>
+                <p className="section-label">HHH administrator only</p>
+                <h2 id="curaleaf-drawer-title">{curaleafApproved ? 'Rotate Curaleaf keys' : 'Connect Curaleaf'}</h2>
+              </div>
+              <button className="icon-btn" disabled={curaleafBusy || curaleafApproveBusy} onClick={closeCuraleafDrawer} aria-label="Close"><X size={18} /></button>
+            </div>
+            <form className="drawer-body onboarding-form" onSubmit={submitCuraleafTestAndSave}>
+              <div className="integration-boundary">
+                <LockKeyhole size={17} />
+                <div>
+                  <strong>{curaleafPharmacy?.tradingName ?? 'Pharmacy'}</strong>
+                  <p>Test & save runs API and PHAR-match checks. Approve Curaleaf completes that setup step only.</p>
+                </div>
+              </div>
+              <label>Curaleaf internal pharmacy / PHAR ID
+                <input className="input" autoComplete="off" value={curaleafCustomerId} onChange={event => setCuraleafCustomerId(event.target.value)} required />
+                <small className="field-help">Curaleaf’s internal customer UUID for this pharmacy — not the HHH organisation id.</small>
+              </label>
+              <label>Pharmacy read/write API key
+                <input className="input" type="password" autoComplete="new-password" value={curaleafWriteApiKey} onChange={event => setCuraleafWriteApiKey(event.target.value)} required />
+              </label>
+              <label>Pharmacy read-only API key (optional)
+                <input className="input" type="password" autoComplete="new-password" value={curaleafReadApiKey} onChange={event => setCuraleafReadApiKey(event.target.value)} />
+              </label>
+              <div className="setup-security-note">
+                <ShieldCheck size={16} />
+                <span>Keys are stored only in this pharmacy’s Europe-hosted Secret Manager secret. The portal never displays them after save.</span>
+              </div>
+              {curaleafError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div>}
+              {curaleafValidation && (
+                <div className={`banner ${curaleafValidation.passed ? 'banner-green' : 'banner-amber'}`} role="status">
+                  <ClipboardCheck size={16} />
+                  <span>
+                    <strong>{curaleafValidation.passed ? 'Validation passed' : 'Validation failed'}</strong>
+                    <small>{curaleafValidation.message}</small>
+                    {curaleafValidation.observedCustomerId && <small>Observed customer ID: {curaleafValidation.observedCustomerId}</small>}
+                  </span>
+                </div>
+              )}
+              {curaleafValidation?.checks?.length ? (
+                <div className="filter-grid admin-gate-grid" aria-label="Curaleaf validation checks">
+                  {curaleafValidation.checks.map(check => (
+                    <div key={check.id} className="filter-card admin-gate-card">
+                      <div className="filter-card__head">
+                        <span>{check.label}</span>
+                        <span className={`pill ${check.passed ? 'pill-green' : 'pill-amber'}`}>{check.passed ? 'Pass' : 'Fail'}</span>
+                      </div>
+                      <span className="filter-card__value text-xs">{check.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="drawer-actions">
+                <button type="button" className="btn" disabled={curaleafBusy || curaleafApproveBusy} onClick={closeCuraleafDrawer}>Cancel</button>
+                <button className="btn btn-primary" type="submit" disabled={curaleafBusy || curaleafApproveBusy || !curaleafOrganisationId}>
+                  {curaleafBusy ? 'Testing…' : 'Test & save'}
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={curaleafBusy || curaleafApproveBusy || !curaleafOrganisationId || !curaleafValidation?.passed || curaleafApproved}
+                  onClick={() => void submitCuraleafApproval()}
+                >
+                  {curaleafApproveBusy ? 'Approving…' : curaleafApproved ? 'Curaleaf approved' : 'Approve Curaleaf'}
+                </button>
+              </div>
+            </form>
           </aside>
         </div>
       )}

@@ -282,6 +282,74 @@ body{
   color: var(--color-primary);
 }
 
+.sidebar-menu{
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px 12px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sidebar-menu::-webkit-scrollbar{ display: none; }
+
+.sidebar-footer{
+  flex: 0 0 auto;
+  padding: 20px;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.user-profile-card{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-profile-avatar{
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--tenant-primary);
+  color: var(--tenant-on-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: var(--font-sm);
+  flex: 0 0 auto;
+}
+
+.user-profile-info{
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.user-profile-name{
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-profile-role{
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+}
+
+.sidebar-exit{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .app-header{
   display: flex;
   align-items: center;
@@ -1337,9 +1405,15 @@ td.font-semibold{
 
 .sidebar .sidebar-item.active svg{ color: var(--tenant-primary); }
 
+.sidebar-footer{ background: color-mix(in srgb, var(--tenant-sidebar) 82%, #000); border-color: var(--tenant-sidebar-border); }
+
 .sidebar .user-profile-role{ color: #93a4b7; }
 
 .app-shell .sidebar-logo, .app-shell .user-profile-avatar{ background: var(--tenant-primary); color: var(--tenant-on-primary); box-shadow: none; }
+
+.sidebar-exit{ color: #d8e0e8; background: var(--tenant-sidebar-hover); border-color: var(--tenant-sidebar-border); }
+
+.sidebar-exit:hover:not(:disabled){ background: color-mix(in srgb, var(--tenant-sidebar-hover) 78%, #fff); color: #fff; }
 
 .drawer-header{ background: #f7f9fb; }
 
@@ -2713,6 +2787,8 @@ body{ background: var(--bg-app); }
 
 .sidebar-menu-label--spaced{ margin-top: 20px; }
 
+.sidebar-menu{ padding: 23px 12px 18px; gap: 2px; }
+
 .sidebar-item{
   min-height: 42px;
   padding: 0 10px;
@@ -2744,6 +2820,31 @@ body{ background: var(--bg-app); }
 .sidebar .sidebar-item.active svg{ color: color-mix(in srgb, var(--tenant-primary) 60%, #fff); }
 
 .nav-queue-count{ margin-left: 8px; color: #d9e6e1; font-size: 10px; font-variant-numeric: tabular-nums; }
+
+.sidebar-footer{
+  padding: 18px 16px;
+  border-color: rgba(255,255,255,.1);
+  background: #0d1d1a;
+}
+
+.user-profile-card{ padding: 0 2px 14px; }
+
+.user-profile-avatar{ width: 31px; height: 31px; border-radius: 6px; font-size: 10px; }
+
+.user-profile-name{ font-size: 11px; }
+
+.user-profile-role{ color: #7e938b !important; font-size: 9px; letter-spacing: .02em; }
+
+.sidebar-exit{
+  justify-content: flex-start;
+  width: 100%;
+  margin-top: 0;
+  padding: 8px 9px;
+  color: #a9b9b3;
+  background: transparent;
+  border-color: rgba(255,255,255,.1);
+  font-size: 10px;
+}
 
 .app-header{
   min-height: 116px;
@@ -2902,10 +3003,15 @@ body{ background: var(--bg-app); }
 @media (max-width: 820px) {
 .sidebar{ width: 76px; }
 .sidebar-header{ min-height: 86px; justify-content: center; padding-inline: 12px; }
-.sidebar-brand > span, .sidebar-menu-label, .sidebar-item-content span, .nav-queue-count{ display: none; }
+.sidebar-brand > span, .sidebar-menu-label, .sidebar-item-content span, .nav-queue-count, .user-profile-info{ display: none; }
 .sidebar-item{ justify-content: center; width: 44px; padding: 0; }
 .sidebar-item-content{ gap: 0; }
+.sidebar-menu{ align-items: center; padding-inline: 10px; }
 .sidebar-menu-label--spaced{ display: block; width: 24px; height: 1px; margin: 14px 0 10px; padding: 0; overflow: hidden; background: rgba(255,255,255,.12); color: transparent; }
+.sidebar-footer{ display: grid; place-items: center; padding: 15px 10px; }
+.user-profile-card{ padding: 0; }
+.sidebar-exit{ display: flex; width: 40px; height: 40px; justify-content: center; margin-top: 10px; padding: 0; }
+.sidebar-exit > span{ position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .app-header{ padding-inline: 22px; }
 .app-header__actions .header-context{ display: none; }
 .page-container{ padding: 24px 20px 70px; }
