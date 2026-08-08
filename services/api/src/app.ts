@@ -144,11 +144,12 @@ const publicSubmissionLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, st
 const webhookLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const healthLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const portalKey = (request: Request) => identity(request).uid;
-const portalReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 120, keyGenerator: portalKey, skip: request => request.method !== 'GET', standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
-const portalWriteLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, keyGenerator: portalKey, skip: request => ['GET', 'HEAD', 'OPTIONS'].includes(request.method), standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
+// Staff ops console: allow denser admin/setup traffic (Curaleaf test/approve, multi-pharmacy setup reads).
+const portalReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, keyGenerator: portalKey, skip: request => request.method !== 'GET', standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
+const portalWriteLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 180, keyGenerator: portalKey, skip: request => ['GET', 'HEAD', 'OPTIONS'].includes(request.method), standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const externalProviderLimit = rateLimit({
   windowMs: 60 * 1000,
-  limit: 10,
+  limit: 30,
   keyGenerator: portalKey,
   skip: request => ['GET', 'HEAD', 'OPTIONS'].includes(request.method),
   standardHeaders: 'draft-8',
