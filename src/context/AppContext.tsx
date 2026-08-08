@@ -290,7 +290,7 @@ export const ORGANISATIONS: PharmacyTenant[] = [
   {
     id: '11111111-1111-4111-8111-111111111111', slug: 'hhh-leeds', referralToken: 'hhh-leeds-7x4p9k',
     name: 'Holistic Health Hub Pharmacy — Leeds', tradingName: 'HHH Leeds', logoText: 'HH',
-    gphcNumber: 'TRAINING-PHARM1', superintendent: 'Shaylen Patel', companyNumber: '12345678', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'shaylen@hhh.health', curaleafPharmacyCode: 'PHAR••••LEEDS',
+    gphcNumber: '9012345', superintendent: 'Shaylen Patel', companyNumber: '12345678', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'shaylen@hhh.health', curaleafPharmacyCode: 'PHAR••••LEEDS',
     address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['hhh.health'],
     status: 'onboarding', staffCount: 4,
     platformFeeMonthly: null,
@@ -302,8 +302,7 @@ export const ORGANISATIONS: PharmacyTenant[] = [
   {
     id: '22222222-2222-4222-8222-222222222222', slug: 'east-midlands-lincoln', referralToken: 'emp-lincoln-3m8q2v',
     name: 'East Midlands Pharmacy Lincoln', tradingName: 'EMP Lincoln', logoText: 'EM',
-    gphcNumber: 'TRAINING-PHARM2', superintendent: 'A. Pharmacist', companyNumber: '87654321', mainContactName: 'A. Pharmacist', mainContactPhone: '01522 000 000', mainContactEmail: 'contact@eastmidlandspharmacy.co.uk',
-
+    gphcNumber: '9019876', superintendent: 'A. Pharmacist', companyNumber: '87654321', mainContactName: 'A. Pharmacist', mainContactPhone: '01522 000 000', mainContactEmail: 'contact@eastmidlandspharmacy.co.uk',
     address: 'Lincoln, Lincolnshire, United Kingdom', websiteDomains: ['eastmidlandspharmacy.co.uk'],
     status: 'onboarding', staffCount: 2,
     platformFeeMonthly: null,
