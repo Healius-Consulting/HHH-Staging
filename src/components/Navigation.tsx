@@ -1,4 +1,5 @@
-import { ArrowUpRight, BadgePoundSterling, FileCheck2, FilePlus, Home, LogOut, Package, QrCode, Settings, Tags, UserSearch, Users } from 'lucide-react';
+import { ArrowUpRight, BadgePoundSterling, FilePlus, Home, LogOut, Package, Settings, Tags, Users } from 'lucide-react';
+
 
 import { useAuth } from '../auth/useAuth';
 import { useApp, type Screen } from '../context/AppContext';
@@ -25,24 +26,21 @@ export default function Navigation() {
       label: 'Operations',
       items: [
         { key: 'home', label: 'Overview', icon: <Home size={17} /> },
-        { key: 'referrals', label: 'Patient onboarding', shortLabel: 'Onboarding', icon: <Users size={17} />, count: counts.referrals },
-        { key: 'create', label: 'Prescription workspace', shortLabel: 'Rx', icon: <FilePlus size={17} />, count: counts.create },
+        { key: 'create', label: 'Prescriptions', shortLabel: 'Rx', icon: <FilePlus size={17} />, count: counts.create },
         { key: 'orders', label: 'Customer Orders', shortLabel: 'Orders', icon: <Package size={17} />, count: counts.orders },
-        ...(organisation.modules.rx ? [{ key: 'provider-prescriptions' as const, label: 'Provider prescriptions', icon: <FileCheck2 size={17} /> }] : []),
-        ...(organisation.modules.patients ? [{ key: 'patients' as const, label: 'Patient directory', icon: <UserSearch size={17} /> }] : []),
+        { key: 'patients', label: 'Patients Hub', shortLabel: 'Patients', icon: <Users size={17} />, count: counts.referrals },
       ],
-
     },
     {
       label: 'Workspace',
       items: [
-        { key: 'finance', label: 'Prescription financials', shortLabel: 'Financials', icon: <BadgePoundSterling size={17} /> },
-        ...(organisation.modules.rx ? [{ key: 'formulary' as const, label: 'Curaleaf catalogue', shortLabel: 'Catalogue', icon: <Tags size={17} /> }] : []),
-        ...(organisation.modules.resources ? [{ key: 'resources' as const, label: 'Forms & resources', icon: <QrCode size={17} /> }] : []),
-        { key: 'settings', label: 'Organisation', icon: <Settings size={17} /> },
+        { key: 'formulary', label: 'Catalogue', shortLabel: 'Catalogue', icon: <Tags size={17} /> },
+        { key: 'finance', label: 'Financials', shortLabel: 'Financials', icon: <BadgePoundSterling size={17} /> },
+        { key: 'settings', label: 'Settings & Assets', icon: <Settings size={17} /> },
       ],
     },
   ];
+
 
   return (
     <WorkspaceNavigation

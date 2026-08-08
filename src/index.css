@@ -81,11 +81,27 @@
   --radius-xl: 20px;
   --radius-full: 9999px;
 
+  /* Neumorphic & Special Case Design Tokens */
+  --neu-flat: 4px 4px 12px rgba(15, 23, 42, 0.05), -4px -4px 12px #ffffff;
+  --neu-pressed: inset 2px 2px 6px rgba(15, 23, 42, 0.07), inset -2px -2px 6px #ffffff;
+  --neu-card: 6px 6px 16px rgba(15, 23, 42, 0.06), -6px -6px 16px #ffffff;
+  --neu-card-hover: 8px 8px 20px rgba(15, 23, 42, 0.09), -8px -8px 20px #ffffff;
+
+  --case-emerald: #0f766e;
+  --case-emerald-bg: #f0fdf4;
+  --case-amber: #d97706;
+  --case-amber-bg: #fffbeb;
+  --case-crimson: #e11d48;
+  --case-crimson-bg: #fff1f2;
+  --case-violet: #4f46e5;
+  --case-violet-bg: #f5f3ff;
+
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
-  --shadow-md: 0 8px 22px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 20px 45px rgba(15, 23, 42, 0.14);
+  --shadow-md: var(--neu-card);
+  --shadow-lg: var(--neu-card-hover);
   --shadow-glow: 0 0 0 2px var(--color-primary-soft);
+
 
   /* Motion */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);

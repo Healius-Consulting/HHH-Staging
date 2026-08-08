@@ -4,17 +4,15 @@ import { AppProvider, useApp, type PharmacyTenant, type StaffSession } from './c
 import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
-import Referrals from './pages/Referrals';
 import CreateOrder from './pages/CreateOrder';
 import AwaitingPayment from './pages/AwaitingPayment';
 import Orders from './pages/Orders';
-import ProviderPrescriptions from './pages/ProviderPrescriptions';
 import FormularyPricing from './pages/FormularyPricing';
 import Patients from './pages/Patients';
 import AdminPortal from './pages/AdminPortal';
-import PharmacyResources from './pages/PharmacyResources';
 import PharmacySettings from './pages/PharmacySettings';
 import PharmacyFinance from './pages/PharmacyFinance';
+
 import { tenantThemeVariables } from './utils/tenantTheme';
 import { AuthProvider } from './auth/AuthProvider';
 import { useAuth } from './auth/useAuth';
@@ -190,19 +188,20 @@ function StaffWorkspace() {
     if (isRestricted) return <SetupRequired onOpenSetup={() => dispatch({ type: 'SET_SCREEN', screen: 'settings' })} />;
     switch (state.screen) {
       case 'home': return <Dashboard />;
-      case 'referrals': return <Referrals />;
+      case 'referrals': return <Patients />;
       case 'formulary': return <FormularyPricing />;
       case 'create': return <CreateOrder />;
       case 'review': return <AwaitingPayment />;
-      case 'provider-prescriptions': return <ProviderPrescriptions />;
+      case 'provider-prescriptions': return <Orders />;
       case 'orders': return <Orders />;
       case 'patients': return <Patients />;
       case 'finance': return <PharmacyFinance />;
-      case 'resources': return <PharmacyResources />;
+      case 'resources': return setupComplete ? <PharmacySettings /> : <PharmacySetupWizard organisation={organisation} setup={setup} />;
       case 'settings': return setupComplete ? <PharmacySettings /> : <PharmacySetupWizard organisation={organisation} setup={setup} />;
       default: return <Dashboard />;
     }
   };
+
 
   return (
     <div className="app-shell" style={tenantStyle}>
