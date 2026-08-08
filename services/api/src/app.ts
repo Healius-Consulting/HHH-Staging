@@ -22,8 +22,8 @@ import { activatePatientForOrder, completeReferral } from './patient-finance.js'
 import { adminReferralFinance, pharmacyPrescriptionFinance } from './finance-reporting.js';
 import { allocateDispensingFee, calculateExpiryBoundaryDate, calculatePrescriptionExpiry, recordPlacementLedgerEvent, rankSubstitutions, satisfiesMarginFloor } from './placement-engine.js';
 import { refundAdapter } from './refund-adapter.js';
-import { runCompanyPharmacyMigration } from './migrations/company-pharmacy-migration.js';
 import type { Company, CuraleafValidationRecord, PortalOrganisation, PrescriptionPlacement } from './types.js';
+
 
 
 
@@ -893,13 +893,8 @@ app.post('/v1/portal/admin/pharmacies/:id/validate-curaleaf', requireRole('hhh_a
   } catch (error) { next(error); }
 });
 
-app.post('/v1/portal/admin/migration/company-pharmacy', requireRole('hhh_admin'), async (request, response, next) => {
-  try {
-    const summary = await runCompanyPharmacyMigration();
-    await audit(request, 'migration.company_pharmacy_executed', { summary });
-    response.json(summary);
-  } catch (error) { next(error); }
-});
+
+
 
 
 const orderLineItemSchema = z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) });
