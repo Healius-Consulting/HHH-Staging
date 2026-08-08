@@ -12,7 +12,8 @@ import { syncConnectedCuraleafAccounts } from './curaleaf-mirror.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
 
-const EVENT_POLL_INTERVAL_SECONDS = 10;
+/** HHH cadence: 1 minute (Curaleaf recommends 10s; we poll slower to stay under ~1 req/s). */
+const EVENT_POLL_INTERVAL_SECONDS = 60;
 const eventPollingEnabled = config.CURALEAF_EVENT_POLLING_ENABLED === 'true';
 
 async function enqueueCuraleafPoll(organisationId: string, delaySeconds: number) {

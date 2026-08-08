@@ -398,7 +398,7 @@ Phil answered Q1–Q13 on 5 August 2026. Keep only the externally owned gates be
 | 4 | Written approval for direct-to-live onboarding after initial integration acceptance | Pharmacy onboarding runbook | Open (Q6 — needs Ellis + written OK) |
 | 5 | DPA/data-sharing terms and prescription-scan retention rules | Legal production gate | Open (Q13 — Curaleaf legal) |
 
-**Closed via Phil (5 Aug 2026) — do not re-chase:** `customerId` meaning; 16MB upload limit; ~1 req/s + 10s polling; mandatory `prescriberId`; wholesale via quotes; CS-only PO cancel / declined scripts; no partner master key yet.
+**Closed via Phil (5 Aug 2026) — do not re-chase:** `customerId` meaning; 16MB upload limit; ~1 req/s + Curaleaf’s 10s poll recommendation (HHH uses 60s); mandatory `prescriberId`; wholesale via quotes; CS-only PO cancel / declined scripts; no partner master key yet.
 
 ---
 

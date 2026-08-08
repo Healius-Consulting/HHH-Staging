@@ -51,7 +51,7 @@ Pharmacy-token eligibility intake → Shaylen/HHH telephone review and programme
 
 ## Open items (Curaleaf — remaining external gates)
 
-Phil answered Q1–Q13 on **5 August 2026** (see `Curaleaf-OpenItems-Email-and-Agenda.docx` and `Rocky-API-Reference.md` “Confirmed operational constraints”). Confirmed: `customerId` internal; ~1 req/s + 10s poll; 16MB uploads; prescriber required; wholesale via quotes; PO cancel / declined scripts via CS; no partner master key yet.
+Phil answered Q1–Q13 on **5 August 2026** (see `Curaleaf-OpenItems-Email-and-Agenda.docx` and `Rocky-API-Reference.md` “Confirmed operational constraints”). Confirmed: `customerId` internal; ~1 req/s + Curaleaf’s 10s poll recommendation (HHH uses 60s); 16MB uploads; prescriber required; wholesale via quotes; PO cancel / declined scripts via CS; no partner master key yet.
 
 **Still chasing Curaleaf / Ellis / legal:**
 

@@ -53,7 +53,7 @@ Firebase Auth, verified ID tokens, role/organisation claims, App Check and tenan
 - Create users through the HHH admin process only; there is no patient sign-up.
 - Confirm an unactivated pharmacy sees the training banner and dummy records, can practise every workflow, and loses all dummy mutations on refresh without any patient/order writes in Firestore.
 - Submit the external Curaleaf onboarding form, then have an HHH administrator enter the returned internal customer/PHAR ID, portal email and pharmacy API key(s) through the admin-only integration form. Pharmacy staff never receive or view those fields.
-- Confirm each connected pharmacy has a fresh event-worker heartbeat, ten-second cursor movement, 1.1-second supplier request spacing and tested `429` recovery.
+- Confirm each connected pharmacy has a fresh event-worker heartbeat, ~60-second cursor movement, 1.1-second supplier request spacing and tested `429` recovery.
 - Verify every staff email before granting workspace access. For the initial staging demo, set `VITE_REQUIRE_MFA=false` and `REQUIRE_MFA=false`; enable both together when mandatory TOTP is introduced.
 - Test that a pharmacy user cannot read or mutate another organisation by changing request identifiers.
 - Confirm setup-incomplete staff can open Dashboard, Setup and Resources but cannot submit orders, access patient records or configure live payment actions.

@@ -25,21 +25,30 @@ export async function writeIntegrationSecret(pharmacyId: string, integration: In
   const parent = `projects/${projectId()}`;
   const name = secretPath(pharmacyId, integration);
   try {
-    await client.getSecret({ name });
-  } catch (error) {
-    if ((error as { code?: number }).code !== 5) throw error;
-    await client.createSecret({
-      parent,
-      secretId: secretId(pharmacyId, integration),
-      secret: { replication: { userManaged: { replicas: [{ location: SECRET_REGION }] } }, labels: { application: 'hhh', integration, region: SECRET_REGION } },
-    });
-  }
+    try {
+      await client.getSecret({ name });
+    } catch (error) {
+      if ((error as { code?: number }).code !== 5) throw error;
+      await client.createSecret({
+        parent,
+        secretId: secretId(pharmacyId, integration),
+        secret: { replication: { userManaged: { replicas: [{ location: SECRET_REGION }] } }, labels: { application: 'hhh', integration, region: SECRET_REGION } },
+      });
+    }
 
-  const [version] = await client.addSecretVersion({
-    parent: name,
-    payload: { data: Buffer.from(JSON.stringify(value), 'utf8') },
-  });
-  return { secretName: name, version: version.name?.split('/').at(-1) ?? 'latest' };
+    const [version] = await client.addSecretVersion({
+      parent: name,
+      payload: { data: Buffer.from(JSON.stringify(value), 'utf8') },
+    });
+    return { secretName: name, version: version.name?.split('/').at(-1) ?? 'latest' };
+  } catch (error) {
+    const code = (error as { code?: number }).code;
+    const details = String((error as { details?: string }).details ?? (error as Error).message ?? '');
+    if (code === 7 || /PERMISSION_DENIED|secretmanager/i.test(details)) {
+      throw new HttpError(503, 'Curaleaf credentials could not be stored: Secret Manager permission is missing on the API runtime. Grant roles/secretmanager.admin (or create + accessor) to the Cloud Functions service account.', 'SECRET_MANAGER_DENIED');
+    }
+    throw error;
+  }
 }
 
 export async function readIntegrationSecret<T extends Record<string, string>>(pharmacyId: string, integration: IntegrationName): Promise<T> {

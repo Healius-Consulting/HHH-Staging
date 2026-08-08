@@ -45,7 +45,7 @@ For the HHH prescription-gated sub-order model, submit one purchase order per pr
 - Rocky provides dispatch/shipment data but not courier-sourced delivery confirmation.
 - “Ready for collection” therefore remains a pharmacy staff goods-in action.
 - Poll the relevant `*-events/` routes with `after=<ISO datetime>`; Rocky does not provide webhooks for these changes.
-- Curaleaf recommends a ten-second interval. Poll product, prescription, purchase-order and shipment events with per-route cursors and overlapping deduplication windows.
+- Curaleaf recommends a ten-second interval. HHH polls every **60 seconds** per connected pharmacy (gentler on the ~1 req/s soft limit). Poll product, prescription, purchase-order and shipment events with per-route cursors and overlapping deduplication windows.
 
 ## Confirmed operational constraints — 5 August 2026 (Phil Jones)
 
@@ -53,7 +53,7 @@ For the HHH prescription-gated sub-order model, submit one purchase order per pr
 - Catalogues **can** be customer-specific; Phil does not believe this applies to HHH today. Ellis to confirm operating model. Prefer per-pharmacy keys and quote-time pricing.
 - **No partner/master API key** yet. Every pharmacy uses its own server-side key (optional separate read-only key). Curaleaf may revisit partner keys later.
 - Prescription uploads are limited to **16MB**. HHH accepts server-verified PDF, JPEG and PNG (`MAX_PRESCRIPTION_FILE_BYTES = 16_000_000`).
-- Soft rate limit ≈ **1 request/second** per key (higher hard limit). `429` responses include rate-limit headers. Recommended event polling interval: **10 seconds**. HHH spaces outbound Curaleaf calls by ≥1s and honours `Retry-After`.
+- Soft rate limit ≈ **1 request/second** per key (higher hard limit). `429` responses include rate-limit headers. Curaleaf-recommended event polling interval: **10 seconds**; HHH uses **60 seconds**. HHH spaces outbound Curaleaf calls by ≥1s and honours `Retry-After`.
 - A **prescriber is required** for every prescription (including manual). Search or `POST /v1/prescribers/` first; Curaleaf validates credentials before shipping.
 - Wholesale / live stock for a specific order: use **`POST /v1/quotes/`** (pack IDs + quantities). Catalogue exposes recommended patient pack price and quantity; quotes are pack-based with no prescription linkage.
 - Declined prescription review and **purchase-order cancellation** are **customer-service processes** today (no formal CANCELLED reason payload / no cancel API). HHH opens an internal support case and does not call `DELETE /v1/purchase-orders/:id`.

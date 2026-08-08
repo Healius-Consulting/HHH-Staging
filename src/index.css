@@ -7049,6 +7049,19 @@ td{
   opacity: 0.88;
 }
 
+.admin-detail-tabs{
+  margin: 4px 0 18px;
+}
+
+.secure-integration-form .field-help{
+  display: block;
+  margin-top: 6px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 .admin-finance-period-grid{
   margin-bottom: 4px;
 }
