@@ -24,7 +24,15 @@ export default function FormularyPricing() {
 
   return (
     <div className="page-body formulary-pricing-workspace">
+      <header className="page-header-block">
+        <div>
+          <h1>Curaleaf Catalogue</h1>
+          <p>Browse products, pack sizes, and recommended patient prices supplied directly by Curaleaf.</p>
+        </div>
+      </header>
+
       <section className="pricing-brief pricing-brief--readonly">
+
         <div className="pricing-brief__copy">
           <span className="pricing-brief__icon"><ShieldCheck size={18} /></span>
           <span>

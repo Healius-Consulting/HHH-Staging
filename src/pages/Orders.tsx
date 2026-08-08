@@ -152,12 +152,13 @@ export default function Orders() {
 
   return (
     <div className="orders-page">
-      <header className="page-header">
+      <header className="page-header-block">
         <div>
           <h1>Customer Orders Workspace</h1>
           <p>Monitor real-time post-payment placement, margin holds, stock retries, expired prescriptions, and cancellations.</p>
         </div>
       </header>
+
 
       {/* Primary Customer Orders Tabs */}
       <nav className="orders-workspace-tabs" aria-label="Customer Orders Views">

@@ -115,7 +115,15 @@ export default function PharmacyFinance() {
 
   return (
     <div className="page-body pharmacy-finance">
+      <header className="page-header-block">
+        <div>
+          <h1>Prescription Financials</h1>
+          <p>Track prescription revenue, wholesale margin performance, and dispensing fees retained by this pharmacy.</p>
+        </div>
+      </header>
+
       <section className="pharmacy-finance__intro">
+
         <div>
           <p className="section-label">Pharmacy financials</p>
           <h2>Understand the contribution from paid prescriptions</h2>

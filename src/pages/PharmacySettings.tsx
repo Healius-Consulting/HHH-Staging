@@ -63,7 +63,15 @@ export default function PharmacySettings() {
 
   return (
     <div className="page-body settings-page">
+      <header className="page-header-block">
+        <div>
+          <h1>Settings & Assets</h1>
+          <p>Manage pharmacy profile, payment routes, operational readiness, and intake QR assets.</p>
+        </div>
+      </header>
+
       <section className="settings-identity card">
+
         <div className="tenant-mark" style={brandSwatchStyle(organisation.brand.primary)}>{organisation.logoText}</div>
         <div>
           <p className="section-label">Organisation profile</p>

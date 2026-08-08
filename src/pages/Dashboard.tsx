@@ -115,15 +115,18 @@ export default function Dashboard() {
 
   return (
     <div className="page-body operations-dashboard">
-      <section className="operations-brief">
-        <div className="operations-brief__lead">
-          <p className="section-label">Operations overview</p>
-          <h2>Manage today’s pharmacy workload</h2>
-          <p>{totalUrgent > 0 ? `${totalUrgent} item${totalUrgent === 1 ? '' : 's'} require attention. Start with the priority queue, then continue through the normal workflow.` : 'There are no overdue clinical, payment or collection actions at the moment.'}</p>
+      <header className="page-header-block">
+        <div>
+          <h1>Pharmacy Overview</h1>
+          <p>{totalUrgent > 0 ? `${totalUrgent} urgent item${totalUrgent === 1 ? '' : 's'} require attention today.` : 'Daily operational position and active pharmacy workload.'}</p>
         </div>
-        <button className="btn btn-primary operations-brief__action" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'create' })}>
-          <Plus size={15} /> Start prescription
+        <button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'create' })}>
+          <Plus size={15} /> Start new prescription
         </button>
+      </header>
+
+      <section className="operations-brief">
+
         <SummaryTiles label="Pharmacy workflow summary" items={[
           { label: 'Patient review', value: newReferrals, detail: 'awaiting decisions', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'referrals' }) },
           { label: 'Payments', value: awaitingPayment, detail: 'awaiting action', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'review' }) },
