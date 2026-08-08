@@ -148,15 +148,18 @@ export default function ManualPrescriptionEditor({
           </header>
 
           <section className="manual-rx-field-group">
-            <header><FileText size={15} /><span><small>Section 1</small><strong>Prescription identifiers</strong><em>Reference and issue date</em></span></header>
+            <header><FileText size={15} /><span><small>Section 1</small><strong>Prescription dates</strong><em>Issue date and 28-day expiry</em></span></header>
             <div className="manual-rx-fields">
-              <label>
-                <span>Prescription serial</span>
-                <input className="input" value={prescription.serialNumber ?? ''} maxLength={200} onChange={event => onMetadataChange('serialNumber', event.target.value)} />
-              </label>
               <ManualDateField label="Issue date" value={prescription.issueDate} onChange={issueDate => onMetadataChange('issueDate', issueDate)} />
+              {prescription.issueDate ? (
+                <label>
+                  <span>Derived 28-day expiry</span>
+                  <input className="input" disabled value={new Date(new Date(prescription.issueDate).setDate(new Date(prescription.issueDate).getDate() + 28)).toISOString().split('T')[0]} />
+                </label>
+              ) : null}
             </div>
           </section>
+
 
           <section className="manual-rx-field-group">
             <header><Stethoscope size={15} /><span><small>Section 2</small><strong>Prescriber verification</strong><em>Name, PIN and registration</em></span></header>

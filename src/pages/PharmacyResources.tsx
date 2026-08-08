@@ -15,13 +15,14 @@ export default function PharmacyResources() {
   const copyLink = async () => { await navigator.clipboard.writeText(formUrl); notify('Pharmacy eligibility link copied to clipboard.'); };
 
   return (
-    <div className="page-body resource-page">
+    <div className="page-body resource-page" style={{ maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
       <div className="banner banner-green resource-banner">
         <Link2 size={18} />
         <div><strong>Every submission from this link is attributed to {organisation.name}</strong><span>Keep this token pharmacy-specific. Generate a new token if it is ever exposed to another organisation.</span></div>
       </div>
-      <div className="resource-grid">
+      <div className="resource-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
         <section className="card resource-link-card">
+
           <div className="resource-icon"><Link2 size={20} /></div>
           <p className="section-label">Unique patient intake link</p>
           <h2>Share the eligibility form</h2>

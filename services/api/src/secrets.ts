@@ -12,25 +12,25 @@ function projectId() {
   return value;
 }
 
-function secretId(organisationId: string, integration: IntegrationName) {
-  const safeId = organisationId.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 180);
+function secretId(pharmacyId: string, integration: IntegrationName) {
+  const safeId = pharmacyId.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 180);
   return `hhh-${integration}-${safeId}-${SECRET_REGION}`;
 }
 
-function secretPath(organisationId: string, integration: IntegrationName) {
-  return `projects/${projectId()}/secrets/${secretId(organisationId, integration)}`;
+function secretPath(pharmacyId: string, integration: IntegrationName) {
+  return `projects/${projectId()}/secrets/${secretId(pharmacyId, integration)}`;
 }
 
-export async function writeIntegrationSecret(organisationId: string, integration: IntegrationName, value: Record<string, string>) {
+export async function writeIntegrationSecret(pharmacyId: string, integration: IntegrationName, value: Record<string, string>) {
   const parent = `projects/${projectId()}`;
-  const name = secretPath(organisationId, integration);
+  const name = secretPath(pharmacyId, integration);
   try {
     await client.getSecret({ name });
   } catch (error) {
     if ((error as { code?: number }).code !== 5) throw error;
     await client.createSecret({
       parent,
-      secretId: secretId(organisationId, integration),
+      secretId: secretId(pharmacyId, integration),
       secret: { replication: { userManaged: { replicas: [{ location: SECRET_REGION }] } }, labels: { application: 'hhh', integration, region: SECRET_REGION } },
     });
   }
@@ -42,15 +42,25 @@ export async function writeIntegrationSecret(organisationId: string, integration
   return { secretName: name, version: version.name?.split('/').at(-1) ?? 'latest' };
 }
 
-export async function readIntegrationSecret<T extends Record<string, string>>(organisationId: string, integration: IntegrationName): Promise<T> {
+export async function readIntegrationSecret<T extends Record<string, string>>(pharmacyId: string, integration: IntegrationName): Promise<T> {
   try {
-    const [version] = await client.accessSecretVersion({ name: `${secretPath(organisationId, integration)}/versions/latest` });
+    const [version] = await client.accessSecretVersion({ name: `${secretPath(pharmacyId, integration)}/versions/latest` });
     const raw = version.payload?.data?.toString();
     if (!raw) throw new Error('Secret payload is empty.');
     return JSON.parse(raw) as T;
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    throw new HttpError(503, `${integration === 'curaleaf' ? 'Curaleaf' : 'Worldpay'} is not connected for this pharmacy.`, 'INTEGRATION_NOT_CONNECTED');
+    // Fallback: try legacy 'curaleaf' integration name if curaleaf_test/live requested
+    if (integration === 'curaleaf_test' || integration === 'curaleaf_live') {
+      try {
+        const [version] = await client.accessSecretVersion({ name: `${secretPath(pharmacyId, 'curaleaf')}/versions/latest` });
+        const raw = version.payload?.data?.toString();
+        if (raw) return JSON.parse(raw) as T;
+      } catch {
+        // Fallthrough
+      }
+    }
+    throw new HttpError(503, `${integration.includes('curaleaf') ? 'Curaleaf' : 'Worldpay'} is not connected for this pharmacy.`, 'INTEGRATION_NOT_CONNECTED');
   }
 }
 

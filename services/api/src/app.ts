@@ -20,6 +20,12 @@ import type { FulfilmentStatus, IntegrationName, PaymentStatus } from './types.j
 import { createHostedPaymentSession, reconcileWorldpayPayment, type WorldpayCredential, verifyWorldpaySignature } from './worldpay.js';
 import { activatePatientForOrder, completeReferral } from './patient-finance.js';
 import { adminReferralFinance, pharmacyPrescriptionFinance } from './finance-reporting.js';
+import { allocateDispensingFee, calculateExpiryBoundaryDate, calculatePrescriptionExpiry, recordPlacementLedgerEvent, rankSubstitutions, satisfiesMarginFloor } from './placement-engine.js';
+import { refundAdapter } from './refund-adapter.js';
+import { runCompanyPharmacyMigration } from './migrations/company-pharmacy-migration.js';
+import type { Company, CuraleafValidationRecord, PortalOrganisation, PrescriptionPlacement } from './types.js';
+
+
 
 const idSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 const tokenSchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/);
@@ -702,6 +708,200 @@ app.get('/v1/portal/admin/finance/referrals', requireRole('hhh_admin'), async (r
   } catch (error) { next(error); }
 });
 
+/* ========================================================================== */
+/* Company & Pharmacy Admin Routes                                           */
+/* ========================================================================== */
+
+app.get('/v1/portal/admin/companies', requireRole('hhh_admin'), async (_request, response, next) => {
+  try {
+    const companiesSnap = await firestore.collection('companies').get();
+    const companies = companiesSnap.docs.map(doc => doc.data() as Company);
+    response.json(companies);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/companies', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const schema = z.object({
+      legalName: z.string().trim().min(1).max(200),
+      companyNumber: z.string().trim().min(1).max(50),
+      registeredAddress: z.string().trim().min(1).max(500),
+      ownerContact: z.object({
+        name: z.string().trim().min(1).max(200),
+        email: z.string().email(),
+        phone: z.string().trim().min(1).max(50),
+      }),
+      superintendent: z.object({
+        name: z.string().trim().min(1).max(200),
+        gphcNumber: z.string().trim().min(1).max(50),
+      }),
+      notes: z.string().trim().max(1000).optional(),
+    });
+    const input = schema.parse(request.body);
+    const docRef = firestore.collection('companies').doc();
+    const company: Company = {
+      id: docRef.id,
+      ...input,
+      gdprConfirmed: false,
+      gdprDocUrl: null,
+      gdprConfirmedAt: null,
+      gdprConfirmedBy: null,
+      gdprComplianceFlag: false,
+      branchesOwned: [],
+      notes: input.notes ?? null,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    await docRef.set(company);
+    invalidateCollectionCache('companies');
+    await audit(request, 'company.created', { companyId: company.id, legalName: company.legalName });
+    response.status(201).json(company);
+  } catch (error) { next(error); }
+});
+
+app.patch('/v1/portal/admin/companies/:id', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const companyId = idSchema.parse(request.params.id);
+    const companyRef = firestore.collection('companies').doc(companyId);
+    const snap = await companyRef.get();
+    if (!snap.exists) throw new HttpError(404, 'Company not found.', 'NOT_FOUND');
+    const updates = request.body as Partial<Company>;
+    const updated = { ...snap.data(), ...updates, updatedAt: nowIso() };
+    await companyRef.set(updated, { merge: true });
+    invalidateCollectionCache('companies', companyId);
+    await audit(request, 'company.updated', { companyId });
+    response.json(updated);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/companies/:id/gdpr/confirm', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const companyId = idSchema.parse(request.params.id);
+    const { gdprDocUrl } = z.object({ gdprDocUrl: z.string().url() }).parse(request.body);
+    
+    // Validate Google Drive/Docs HTTPS URL
+    if (!gdprDocUrl.startsWith('https://drive.google.com/') && !gdprDocUrl.startsWith('https://docs.google.com/')) {
+      throw new HttpError(400, 'GDPR evidence URL must be an HTTPS Google Drive or Google Docs URL.', 'INVALID_GDPR_URL');
+    }
+
+    const companyRef = firestore.collection('companies').doc(companyId);
+    const snap = await companyRef.get();
+    if (!snap.exists) throw new HttpError(404, 'Company not found.', 'NOT_FOUND');
+
+    const confirmedAt = nowIso();
+    const confirmedBy = identity(request).uid;
+
+    await companyRef.update({
+      gdprConfirmed: true,
+      gdprDocUrl,
+      gdprConfirmedAt: confirmedAt,
+      gdprConfirmedBy: confirmedBy,
+      gdprComplianceFlag: false,
+      updatedAt: confirmedAt,
+    });
+    invalidateCollectionCache('companies', companyId);
+    await audit(request, 'company.gdpr_confirmed', { companyId, gdprDocUrl, confirmedBy });
+    response.json({ success: true, companyId, gdprConfirmed: true, gdprDocUrl });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/companies/:id/gdpr/clear', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const companyId = idSchema.parse(request.params.id);
+    z.object({ confirm: z.literal(true) }).parse(request.body);
+
+    const companyRef = firestore.collection('companies').doc(companyId);
+    const snap = await companyRef.get();
+    if (!snap.exists) throw new HttpError(404, 'Company not found.', 'NOT_FOUND');
+    const company = snap.data() as Company;
+
+    const clearedAt = nowIso();
+    await companyRef.update({
+      gdprConfirmed: false,
+      gdprDocUrl: null,
+      updatedAt: clearedAt,
+    });
+
+    // Handle owned branches:
+    // Non-live branches are re-blocked. Already-live branches remain operational but get gdprComplianceFlag.
+    for (const pharmacyId of company.branchesOwned || []) {
+      const pharmRef = firestore.collection('pharmacies').doc(pharmacyId);
+      const pharmSnap = await pharmRef.get();
+      if (pharmSnap.exists) {
+        const pharmData = pharmSnap.data() as PortalOrganisation;
+        if (pharmData.status === 'live') {
+          await pharmRef.update({ gdprComplianceFlag: true, updatedAt: clearedAt });
+        } else {
+          await pharmRef.update({ status: 'onboarding', updatedAt: clearedAt });
+        }
+      }
+    }
+
+    invalidateCollectionCache('companies', companyId);
+    await audit(request, 'company.gdpr_cleared', { companyId, priorDocUrl: company.gdprDocUrl });
+    response.json({ success: true, companyId, gdprConfirmed: false });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/pharmacies/:id/validate-curaleaf', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const pharmacyId = idSchema.parse(request.params.id);
+    const { environment, apiKey } = z.object({
+      environment: z.enum(['test', 'production']),
+      apiKey: z.string().min(16),
+    }).parse(request.body);
+
+    // Call Curaleaf API to validate key and derive customerId
+    const baseUrl = environment === 'test' ? 'https://api.curaleaflaboratories.dev' : config.CURALEAF_BASE_URL;
+    const res = await fetch(`${baseUrl}/v1/products/?pageSize=1`, {
+      headers: { Accept: 'application/json', 'X-API-Key': apiKey },
+    });
+
+    if (!res.ok) {
+      throw new HttpError(400, `Curaleaf key validation failed with status ${res.status}.`, 'CURALEAF_VALIDATION_FAILED');
+    }
+
+    const body = (await res.json()) as Record<string, unknown>;
+    let observedCustomerId: string | null = null;
+    if (Array.isArray(body.products) && body.products[0] && typeof body.products[0].customerId === 'string') {
+      observedCustomerId = body.products[0].customerId;
+    }
+
+    const maskedKey = `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
+    const validationRecord: CuraleafValidationRecord = {
+      environment,
+      validatedAt: nowIso(),
+      actor: identity(request).uid,
+      maskedKey,
+      observedCustomerId,
+    };
+
+    const pharmRef = firestore.collection('pharmacies').doc(pharmacyId);
+    const fieldToUpdate = environment === 'test' ? 'curaleafTestValidation' : 'curaleafLiveValidation';
+    await pharmRef.set({ [fieldToUpdate]: validationRecord, updatedAt: nowIso() }, { merge: true });
+
+    // Store key in Secret Manager
+    const secretIntegration = environment === 'test' ? 'curaleaf_test' : 'curaleaf_live';
+    await writeIntegrationSecret(pharmacyId, secretIntegration, {
+      writeApiKey: apiKey,
+      customerId: observedCustomerId || '',
+    });
+
+    invalidateCollectionCache('pharmacies', pharmacyId);
+    await audit(request, 'pharmacy.curaleaf_validated', { pharmacyId, environment, maskedKey, observedCustomerId });
+    response.json({ success: true, pharmacyId, validationRecord });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/migration/company-pharmacy', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const summary = await runCompanyPharmacyMigration();
+    await audit(request, 'migration.company_pharmacy_executed', { summary });
+    response.json(summary);
+  } catch (error) { next(error); }
+});
+
+
 const orderLineItemSchema = z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) });
 const curaleafQuoteSchema = z.object({
   shippingPrice: z.string().trim().min(1).max(40),
@@ -718,9 +918,10 @@ const orderPrescriptionSchema = z.object({
   fileId: idSchema,
   clinicScanId: idSchema.optional(),
   curaleafPrescriptionId: idSchema.optional(),
-  serialNumber: z.string().min(1).max(200),
+  serialNumber: z.string().max(200).optional().default(''),
   issueDate: z.iso.date(),
   expiryDate: z.iso.date().optional(),
+
   patient: z.object({
     name: z.string().trim().min(1).max(200),
     dob: z.iso.date(),
@@ -1193,6 +1394,281 @@ app.post('/v1/portal/orders', async (request, response, next) => {
     response.status(201).json(record);
   } catch (error) { next(error); }
 });
+
+/* ========================================================================== */
+/* Post-Payment Placement Engine & Refund Routes                              */
+/* ========================================================================== */
+
+app.post('/v1/portal/orders/:id/placement/absorb', async (request, response, next) => {
+  try {
+    const pharmacyId = tenantFor(request, request.body.pharmacyId);
+    const orderId = idSchema.parse(request.params.id);
+    const { lineId } = z.object({ lineId: idSchema }).parse(request.body);
+
+    const placementSnap = await firestore
+      .collection('prescriptionPlacements')
+      .where('orderId', '==', orderId)
+      .get();
+
+    if (placementSnap.empty) {
+      throw new HttpError(404, 'Placement record not found for this order.', 'NOT_FOUND');
+    }
+
+    let targetPlacementDoc: DocumentReference | null = null;
+    let targetPlacement: PrescriptionPlacement | null = null;
+
+    for (const doc of placementSnap.docs) {
+      const p = doc.data() as PrescriptionPlacement;
+      if (p.lines.some(l => l.id === lineId)) {
+        targetPlacementDoc = doc.ref;
+        targetPlacement = p;
+        break;
+      }
+    }
+
+    if (!targetPlacementDoc || !targetPlacement) {
+      throw new HttpError(404, 'Line placement not found.', 'NOT_FOUND');
+    }
+
+    const updatedLines = targetPlacement.lines.map(line => {
+      if (line.id === lineId) {
+        return {
+          ...line,
+          placementState: 'PLACED' as const,
+          updatedAt: nowIso(),
+        };
+      }
+      return line;
+    });
+
+    const allPlaced = updatedLines.every(l => l.placementState === 'PLACED');
+    const newOverallState = allPlaced ? ('PLACED' as const) : targetPlacement.overallState;
+
+    await targetPlacementDoc.update({
+      lines: updatedLines,
+      overallState: newOverallState,
+      updatedAt: nowIso(),
+    });
+
+    await recordPlacementLedgerEvent({
+      pharmacyId,
+      orderId,
+      prescriptionId: targetPlacement.prescriptionId,
+      lineId,
+      eventType: 'absorbed_placed',
+      actor: identity(request).uid,
+      details: { lineId, action: 'absorb_and_place' },
+    });
+
+    invalidateCollectionCache('prescriptionPlacements');
+    response.json({ success: true, lineId, placementState: 'PLACED', overallState: newOverallState });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/orders/:id/placement/substitute', async (request, response, next) => {
+  try {
+    const pharmacyId = tenantFor(request, request.body.pharmacyId);
+    const orderId = idSchema.parse(request.params.id);
+    const { lineId, substitutePackId } = z.object({ lineId: idSchema, substitutePackId: idSchema }).parse(request.body);
+
+    const placementSnap = await firestore
+      .collection('prescriptionPlacements')
+      .where('orderId', '==', orderId)
+      .get();
+
+    let targetDoc: DocumentReference | null = null;
+    let targetPlacement: PrescriptionPlacement | null = null;
+
+    for (const doc of placementSnap.docs) {
+      const p = doc.data() as PrescriptionPlacement;
+      if (p.lines.some(l => l.id === lineId)) {
+        targetDoc = doc.ref;
+        targetPlacement = p;
+        break;
+      }
+    }
+
+    if (!targetDoc || !targetPlacement) {
+      throw new HttpError(404, 'Line placement not found.', 'NOT_FOUND');
+    }
+
+    const updatedLines = targetPlacement.lines.map(line => {
+      if (line.id === lineId) {
+        return {
+          ...line,
+          packId: substitutePackId,
+          placementState: 'PLACED' as const,
+          updatedAt: nowIso(),
+        };
+      }
+      return line;
+    });
+
+    const allPlaced = updatedLines.every(l => l.placementState === 'PLACED');
+    await targetDoc.update({
+      lines: updatedLines,
+      overallState: allPlaced ? 'PLACED' : targetPlacement.overallState,
+      updatedAt: nowIso(),
+    });
+
+    await recordPlacementLedgerEvent({
+      pharmacyId,
+      orderId,
+      prescriptionId: targetPlacement.prescriptionId,
+      lineId,
+      eventType: 'substituted',
+      actor: identity(request).uid,
+      details: { lineId, substitutePackId },
+    });
+
+    invalidateCollectionCache('prescriptionPlacements');
+    response.json({ success: true, lineId, substitutePackId, placementState: 'PLACED' });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/orders/:id/placement/cancel-line', async (request, response, next) => {
+  try {
+    const pharmacyId = tenantFor(request, request.body.pharmacyId);
+    const orderId = idSchema.parse(request.params.id);
+    const { lineId, reason } = z.object({ lineId: idSchema, reason: z.string().trim().min(1).max(500) }).parse(request.body);
+
+    const placementSnap = await firestore
+      .collection('prescriptionPlacements')
+      .where('orderId', '==', orderId)
+      .get();
+
+    let targetDoc: DocumentReference | null = null;
+    let targetPlacement: PrescriptionPlacement | null = null;
+
+    for (const doc of placementSnap.docs) {
+      const p = doc.data() as PrescriptionPlacement;
+      if (p.lines.some(l => l.id === lineId)) {
+        targetDoc = doc.ref;
+        targetPlacement = p;
+        break;
+      }
+    }
+
+    if (!targetDoc || !targetPlacement) {
+      throw new HttpError(404, 'Line placement not found.', 'NOT_FOUND');
+    }
+
+    const line = targetPlacement.lines.find(l => l.id === lineId)!;
+    const refundAmountPence = line.fixedPatientPricePence + line.allocatedDispensingFeePence;
+
+    // Create refund record via adapter
+    const refund = await refundAdapter.createRefundRecord({
+      orderId,
+      lineId,
+      pharmacyId,
+      amountPence: refundAmountPence,
+      originalPaymentRef: `PAY-${orderId}`,
+      paymentRoute: 'manual',
+      cause: reason,
+      idempotencyKey: `refund--${orderId}--${lineId}`,
+    });
+
+    const updatedLines = targetPlacement.lines.map(l => {
+      if (l.id === lineId) {
+        return {
+          ...l,
+          placementState: 'CANCELLATION_PENDING_REFUND' as const,
+          refundId: refund.id,
+          rejectionReason: reason,
+          updatedAt: nowIso(),
+        };
+      }
+      return l;
+    });
+
+    await targetDoc.update({
+      lines: updatedLines,
+      overallState: 'CANCELLATION_PENDING_REFUND',
+      updatedAt: nowIso(),
+    });
+
+    await recordPlacementLedgerEvent({
+      pharmacyId,
+      orderId,
+      prescriptionId: targetPlacement.prescriptionId,
+      lineId,
+      eventType: 'cancel_requested',
+      actor: identity(request).uid,
+      details: { lineId, reason, refundId: refund.id, refundAmountPence },
+    });
+
+    invalidateCollectionCache('prescriptionPlacements');
+    response.json({ success: true, lineId, placementState: 'CANCELLATION_PENDING_REFUND', refund });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/orders/:id/lines/:lineId/confirm-refund', async (request, response, next) => {
+  try {
+    const pharmacyId = tenantFor(request, request.body.pharmacyId);
+    const orderId = idSchema.parse(request.params.id);
+    const lineId = idSchema.parse(request.params.lineId);
+
+    const placementSnap = await firestore
+      .collection('prescriptionPlacements')
+      .where('orderId', '==', orderId)
+      .get();
+
+    let targetDoc: DocumentReference | null = null;
+    let targetPlacement: PrescriptionPlacement | null = null;
+
+    for (const doc of placementSnap.docs) {
+      const p = doc.data() as PrescriptionPlacement;
+      if (p.lines.some(l => l.id === lineId)) {
+        targetDoc = doc.ref;
+        targetPlacement = p;
+        break;
+      }
+    }
+
+    if (!targetDoc || !targetPlacement) {
+      throw new HttpError(404, 'Line placement not found.', 'NOT_FOUND');
+    }
+
+    const line = targetPlacement.lines.find(l => l.id === lineId)!;
+    if (line.refundId) {
+      await refundAdapter.confirmRefund(line.refundId, identity(request).uid);
+    }
+
+    const updatedLines = targetPlacement.lines.map(l => {
+      if (l.id === lineId) {
+        return {
+          ...l,
+          placementState: 'CANCELLED_REFUNDED' as const,
+          updatedAt: nowIso(),
+        };
+      }
+      return l;
+    });
+
+    const remainingLines = updatedLines.filter(l => l.placementState !== 'CANCELLED_REFUNDED');
+    const allRemainingPlaced = remainingLines.length > 0 && remainingLines.every(l => l.placementState === 'PLACED');
+
+    await targetDoc.update({
+      lines: updatedLines,
+      overallState: allRemainingPlaced ? 'PLACED' : remainingLines.length === 0 ? 'CANCELLED_REFUNDED' : 'PENDING_PLACEMENT',
+      updatedAt: nowIso(),
+    });
+
+    await recordPlacementLedgerEvent({
+      pharmacyId,
+      orderId,
+      prescriptionId: targetPlacement.prescriptionId,
+      lineId,
+      eventType: 'refund_confirmed',
+      actor: identity(request).uid,
+      details: { lineId, confirmedBy: identity(request).uid },
+    });
+
+    invalidateCollectionCache('prescriptionPlacements');
+    response.json({ success: true, lineId, placementState: 'CANCELLED_REFUNDED' });
+  } catch (error) { next(error); }
+});
+
 
 app.post('/v1/portal/prescription-files/upload-url', async (request, response, next) => {
   try {

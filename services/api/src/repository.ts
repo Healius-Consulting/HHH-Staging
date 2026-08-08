@@ -26,23 +26,31 @@ export async function getRecord(collection: string, id: string) {
   });
 }
 
-export async function getTenantRecord(collection: string, id: string, organisationId: string) {
+export async function getTenantRecord(collection: string, id: string, pharmacyId: string) {
   const record = await getRecord(collection, id);
-  if (record.organisationId !== organisationId) throw new HttpError(404, `${collection} record not found.`, 'NOT_FOUND');
+  const recordTenant = record.pharmacyId ?? record.organisationId;
+  if (recordTenant !== pharmacyId) throw new HttpError(404, `${collection} record not found.`, 'NOT_FOUND');
   return record;
 }
 
-export async function updateTenantRecord(collection: string, id: string, organisationId: string, updates: DocumentData) {
-  await getTenantRecord(collection, id, organisationId);
+export async function updateTenantRecord(collection: string, id: string, pharmacyId: string, updates: DocumentData) {
+  await getTenantRecord(collection, id, pharmacyId);
   const patch = { ...updates, updatedAt: nowIso() };
   await firestore.collection(collection).doc(id).update(patch);
   invalidateCollectionCache(collection, id);
   return { ...(await getRecord(collection, id)) };
 }
 
-export async function listTenantRecords(collection: string, organisationId: string, limit = 200) {
-  return cached(`list:${collection}:${organisationId}:${limit}`, LIST_TTL_MS, async () => {
-    const snapshot = await firestore.collection(collection).where('organisationId', '==', organisationId).limit(limit).get();
-    return snapshot.docs.map(document => document.data()).sort((a, b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? '')));
+export async function listTenantRecords(collection: string, pharmacyId: string, limit = 200) {
+  return cached(`list:${collection}:${pharmacyId}:${limit}`, LIST_TTL_MS, async () => {
+    // Try querying by pharmacyId first, fallback to organisationId
+    const snapshotByPharmacy = await firestore.collection(collection).where('pharmacyId', '==', pharmacyId).limit(limit).get();
+    let docs = snapshotByPharmacy.docs;
+    if (docs.length === 0) {
+      const snapshotByOrg = await firestore.collection(collection).where('organisationId', '==', pharmacyId).limit(limit).get();
+      docs = snapshotByOrg.docs;
+    }
+    return docs.map(document => document.data()).sort((a, b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? '')));
   });
 }
+

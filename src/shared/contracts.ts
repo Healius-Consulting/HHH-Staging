@@ -581,8 +581,109 @@ export interface StaffAccessibilityPreferences {
   underlineLinks: boolean;
 }
 
+export interface Company {
+  id: string;
+  legalName: string;
+  companyNumber: string;
+  registeredAddress: string;
+  ownerContact: {
+    name: string;
+    email: string;
+    phone: string;
+  };
+  superintendent: {
+    name: string;
+    gphcNumber: string;
+  };
+  gdprConfirmed: boolean;
+  gdprDocUrl: string | null;
+  gdprConfirmedAt: string | null;
+  gdprConfirmedBy: string | null;
+  gdprComplianceFlag?: boolean;
+  branchesOwned: string[];
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CuraleafValidationRecord {
+  environment: 'test' | 'production';
+  validatedAt: string;
+  actor: string;
+  maskedKey: string;
+  observedCustomerId: string | null;
+}
+
+export interface PlacementLineItem {
+  id: string;
+  prescriptionId: string;
+  orderId: string;
+  formulaId: string;
+  formulaName: string;
+  unit: string;
+  unitsNeededCount: number;
+  packId: string;
+  quantity: number;
+  fixedPatientPricePence: number;
+  allocatedDispensingFeePence: number;
+  lineMedicineRevenuePence: number;
+  linkSendWholesalePence: number;
+  latestWholesalePence: number;
+  placementState: 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'CANCELLATION_PENDING_REFUND' | 'PLACED' | 'CANCELLED_REFUNDED';
+  rejectionReason?: string;
+  holdEpisodeStartedAt?: string | null;
+  notifiedAt48h?: string | null;
+  boundaryScheduledAt?: string;
+  refundId?: string | null;
+  updatedAt: string;
+}
+
+export interface PrescriptionPlacement {
+  id: string;
+  prescriptionId: string;
+  orderId: string;
+  pharmacyId: string;
+  lines: PlacementLineItem[];
+  overallState: 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'CANCELLATION_PENDING_REFUND' | 'PLACED' | 'CANCELLED_REFUNDED';
+  purchaseOrderId?: string | null;
+  placedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RefundRecord {
+  id: string;
+  orderId: string;
+  lineId: string;
+  pharmacyId: string;
+  amountPence: number;
+  originalPaymentRef: string;
+  paymentRoute: 'manual' | 'worldpay';
+  cause: string;
+  status: 'pending_confirmation' | 'completed';
+  idempotencyKey: string;
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
+  createdAt: string;
+}
+
+export interface SubstitutionProposal {
+  id: string;
+  lineId: string;
+  originalPackId: string;
+  substitutePackId: string;
+  formulaId: string;
+  formulaName: string;
+  unitsTotal: number;
+  quantity: number;
+  wholesalePackPricePence: number;
+  wholesaleTotalPence: number;
+  rank: number;
+}
+
 export interface PortalOrganisation {
   id: string;
+  orgId: string; // Parent Company ID
   name: string;
   tradingName: string;
   logoText: string;
@@ -603,10 +704,13 @@ export interface PortalOrganisation {
   modules?: OrganisationModules;
   worldpayEnabled?: boolean;
   defaultPaymentRoute?: 'manual' | 'worldpay';
+  curaleafTestValidation?: CuraleafValidationRecord | null;
+  curaleafLiveValidation?: CuraleafValidationRecord | null;
 }
 
 export interface PaymentSettings {
   organisationId: string;
+  pharmacyId?: string;
   defaultPaymentRoute: 'manual' | 'worldpay';
   updatedAt: string;
 }
@@ -614,6 +718,7 @@ export interface PaymentSettings {
 export interface AdminReferralFinanceRow {
   id: string;
   organisationId: string;
+  pharmacyId?: string;
   pharmacyName: string;
   patientId: string;
   patientName?: string;
@@ -630,6 +735,7 @@ export interface AdminReferralFinanceReport {
   currency: 'GBP';
   range: { from: string | null; to: string | null };
   organisationId: string | null;
+  pharmacyId?: string | null;
   totals: {
     eventCount: number;
     newReferralCount: number;
@@ -638,6 +744,7 @@ export interface AdminReferralFinanceReport {
   };
   byPharmacy: Array<{
     organisationId: string;
+    pharmacyId?: string;
     pharmacyName: string;
     newReferralCount: number;
     annualPatientCount: number;
@@ -650,9 +757,11 @@ export interface PortalSession {
   uid: string;
   email: string | null;
   role: 'hhh_admin' | 'pharmacy_staff';
+  pharmacyId: string | null;
   organisationId: string | null;
   profile: Record<string, unknown> | null;
   organisation: PortalOrganisation | null;
+  company?: Company | null;
 }
 
 export interface PharmacyStaffAccount {
@@ -660,14 +769,16 @@ export interface PharmacyStaffAccount {
   email: string;
   displayName: string;
   role: 'pharmacy_staff';
-  organisationId: string;
+  pharmacyId: string;
+  organisationId?: string;
   contactRole: 'owner' | 'staff';
   status: 'invited' | 'active' | 'disabled';
   createdAt: string;
 }
 
 export interface CreatePharmacyStaffInput {
-  organisationId: string;
+  pharmacyId: string;
+  organisationId?: string;
   email: string;
   displayName: string;
 }
@@ -676,3 +787,4 @@ export interface PharmacyStaffInvitation extends PharmacyStaffAccount {
   invitationQueued: boolean;
   actionLink: string;
 }
+

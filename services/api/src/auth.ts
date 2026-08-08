@@ -26,14 +26,15 @@ export async function requireStaff(request: Request, _response: Response, next: 
     if (!decoded.email_verified) throw new HttpError(403, 'Verify your email before using the staff portal.', 'EMAIL_NOT_VERIFIED');
     const role = roleSchema.safeParse(decoded.role);
     if (!role.success) throw new HttpError(403, 'The account has no permitted staff role.', 'ROLE_REQUIRED');
-    const organisationId = typeof decoded.organisationId === 'string' ? decoded.organisationId : null;
-    if (role.data === 'pharmacy_staff' && !organisationId) throw new HttpError(403, 'The account is not assigned to a pharmacy.', 'TENANT_REQUIRED');
+    const pharmacyId = typeof decoded.pharmacyId === 'string' ? decoded.pharmacyId : (typeof decoded.organisationId === 'string' ? decoded.organisationId : null);
+    const organisationId = typeof decoded.organisationId === 'string' ? decoded.organisationId : pharmacyId;
+    if (role.data === 'pharmacy_staff' && !pharmacyId) throw new HttpError(403, 'The account is not assigned to a pharmacy.', 'TENANT_REQUIRED');
 
     const secondFactor = (decoded.firebase as Record<string, unknown> | undefined)?.sign_in_second_factor;
     if (config.REQUIRE_MFA === 'true' && !secondFactor) throw new HttpError(403, 'Multi-factor authentication is required.', 'MFA_REQUIRED');
     if (decoded.auth_time * 1000 < Date.now() - 8 * 60 * 60 * 1000) throw new HttpError(401, 'Your staff session has expired. Sign in again.', 'SESSION_EXPIRED');
 
-    request.identity = { uid: decoded.uid, email: decoded.email ?? null, role: role.data, organisationId, token: decoded };
+    request.identity = { uid: decoded.uid, email: decoded.email ?? null, role: role.data, pharmacyId, organisationId, token: decoded };
     next();
   } catch (error) {
     next(error instanceof HttpError ? error : new HttpError(401, 'The staff session is invalid or expired.', 'UNAUTHENTICATED'));
@@ -54,11 +55,12 @@ export function identity(request: Request): RequestIdentity {
 
 export function tenantFor(request: Request, requested?: unknown): string {
   const actor = identity(request);
+  const activePharmacyId = actor.pharmacyId ?? actor.organisationId;
   if (actor.role === 'pharmacy_staff') {
-    if (requested !== undefined && requested !== actor.organisationId) throw new HttpError(403, 'Cross-pharmacy access is not permitted.', 'TENANT_MISMATCH');
-    return actor.organisationId!;
+    if (requested !== undefined && requested !== activePharmacyId) throw new HttpError(403, 'Cross-pharmacy access is not permitted.', 'TENANT_MISMATCH');
+    return activePharmacyId!;
   }
   const parsed = organisationIdSchema.safeParse(requested);
-  if (!parsed.success) throw new HttpError(400, 'organisationId is required for this action.', 'TENANT_REQUIRED');
+  if (!parsed.success) throw new HttpError(400, 'pharmacyId is required for this action.', 'TENANT_REQUIRED');
   return parsed.data;
 }

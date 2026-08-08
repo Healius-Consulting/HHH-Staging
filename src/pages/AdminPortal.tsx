@@ -333,8 +333,8 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     setError(null);
     if (isLocalPortalPreview) {
       const records: PharmacyStaffAccount[] = [
-        { uid: `${organisation.id}-owner`, email: 'owner@pharmacy.example', displayName: 'Alex Morgan', role: 'pharmacy_staff', organisationId: organisation.id, contactRole: 'owner', status: 'active', createdAt: new Date().toISOString() },
-        { uid: `${organisation.id}-staff`, email: 'dispensary@pharmacy.example', displayName: 'Sam Reed', role: 'pharmacy_staff', organisationId: organisation.id, contactRole: 'staff', status: 'active', createdAt: new Date().toISOString() },
+        { uid: `${organisation.id}-owner`, email: 'owner@pharmacy.example', displayName: 'Alex Morgan', role: 'pharmacy_staff', pharmacyId: organisation.id, organisationId: organisation.id, contactRole: 'owner', status: 'active', createdAt: new Date().toISOString() },
+        { uid: `${organisation.id}-staff`, email: 'dispensary@pharmacy.example', displayName: 'Sam Reed', role: 'pharmacy_staff', pharmacyId: organisation.id, organisationId: organisation.id, contactRole: 'staff', status: 'active', createdAt: new Date().toISOString() },
       ];
       setStaff(records);
       onCountChange(records.length);
@@ -362,8 +362,9 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     setEmailDelivery(null);
     try {
       const created = isLocalPortalPreview
-        ? { uid: `preview-${Date.now()}`, organisationId: organisation.id, displayName, email, role: 'pharmacy_staff' as const, contactRole: staff.length ? 'staff' as const : 'owner' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: false, actionLink: '#local-preview' }
-        : await createPharmacyStaffInvitation({ organisationId: organisation.id, displayName, email });
+        ? { uid: `preview-${Date.now()}`, pharmacyId: organisation.id, organisationId: organisation.id, displayName, email, role: 'pharmacy_staff' as const, contactRole: staff.length ? 'staff' as const : 'owner' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: false, actionLink: '#local-preview' }
+        : await createPharmacyStaffInvitation({ pharmacyId: organisation.id, organisationId: organisation.id, displayName, email });
+
       const updated = [...staff, created];
       setStaff(updated);
       setInvitation(created);
@@ -445,7 +446,9 @@ export default function AdminPortal() {
   const [serverPatientRegister, setServerPatientRegister] = useState<PatientRegisterExportResult | null>(null);
   const [patientRegisterLoading, setPatientRegisterLoading] = useState(false);
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null);
+  const [directoryMode, setDirectoryMode] = useState<'flat' | 'by-company'>('flat');
   const [showOnboarding, setShowOnboarding] = useState(false);
+
   const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
   const [setupByOrganisation, setSetupByOrganisation] = useState<Record<string, PharmacySetupStatus>>({});
   const [setupError, setSetupError] = useState<string | null>(null);
@@ -950,26 +953,128 @@ export default function AdminPortal() {
       </section>}
 
       <section className="card admin-directory">
-        <div className="admin-directory-head"><div><h2>Pharmacy directory</h2><p>Account records, workspace configuration and patient attribution.</p></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or GPhC number" /></label></div>
+        <div className="admin-directory-head">
+          <div>
+            <h2>Pharmacy directory</h2>
+            <p>Account records, legal companies, workspace configuration and patient attribution.</p>
+          </div>
+          <div className="directory-view-toggle">
+            <button
+              type="button"
+              className={`btn btn-sm ${directoryMode === 'flat' ? 'btn-primary' : ''}`}
+              onClick={() => setDirectoryMode('flat')}
+            >
+              Flat Directory
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${directoryMode === 'by-company' ? 'btn-primary' : ''}`}
+              onClick={() => setDirectoryMode('by-company')}
+            >
+              By Company Group
+            </button>
+          </div>
+          <label className="admin-search">
+            <Search size={15} />
+            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or GPhC number" />
+          </label>
+        </div>
+
         <div className="admin-org-list">
-          {filteredOrganisations.length === 0 && <div className="empty-state">{state.organisations.length === 0 ? 'No pharmacies have been onboarded yet.' : 'No pharmacies match this search.'}</div>}
-          {filteredOrganisations.map(org => {
-            const submissions = submissionsByOrganisation.get(org.id) ?? [];
-            const patients = crmByOrganisation.get(org.id) ?? [];
-            const readiness = tenantReadiness(org.id);
-            return (
-              <article className="admin-org-row" key={org.id}>
-                <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(org.brand.primary)}>{org.logoText}</div><div><strong>{org.name}</strong><span>GPhC {org.gphcNumber} · {org.websiteDomains.join(', ') || 'domain pending'}</span></div></div>
-                <div className="admin-org-metric"><strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong><span>Patients</span></div>
-                <div className="readiness-cell"><div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} gates</span></div><div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div></div>
-                <div className="admin-org-actions"><span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button></div>
-              </article>
-            );
-          })}
+          {filteredOrganisations.length === 0 && (
+            <div className="empty-state">
+              {state.organisations.length === 0 ? 'No pharmacies have been onboarded yet.' : 'No pharmacies match this search.'}
+            </div>
+          )}
+
+          {directoryMode === 'flat' ? (
+            filteredOrganisations.map(org => {
+              const submissions = submissionsByOrganisation.get(org.id) ?? [];
+              const patients = crmByOrganisation.get(org.id) ?? [];
+              const readiness = tenantReadiness(org.id);
+              return (
+                <article className="admin-org-row" key={org.id}>
+                  <div className="admin-org-brand">
+                    <div className="tenant-mark" style={brandSwatchStyle(org.brand.primary)}>{org.logoText}</div>
+                    <div>
+                      <strong>{org.name}</strong>
+                      <span>GPhC {org.gphcNumber} · {org.websiteDomains.join(', ') || 'domain pending'}</span>
+                    </div>
+                  </div>
+                  <div className="admin-org-metric">
+                    <strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong>
+                    <span>Patients</span>
+                  </div>
+                  <div className="readiness-cell">
+                    <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} gates</span></div>
+                    <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
+                  </div>
+                  <div className="admin-org-actions">
+                    <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>
+                    <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button>
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            // By Company View Grouping
+            <div className="company-directory-groups">
+              {filteredOrganisations.map(org => {
+                const submissions = submissionsByOrganisation.get(org.id) ?? [];
+                const patients = crmByOrganisation.get(org.id) ?? [];
+                const readiness = tenantReadiness(org.id);
+                // Rollups: earning patients = unique patients with >=1 referral-fee event
+                const earningPatientsCount = new Set([...patients.map(p => p.email)]).size;
+                const accruedCommission = earningPatientsCount * 50;
+
+                return (
+                  <div className="company-group-card card" key={org.id} style={{ marginBottom: '1.25rem', padding: '1.25rem' }}>
+                    <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color, #e5e7eb)', paddingBottom: '0.75rem' }}>
+                      <div>
+                        <span className="pill pill-info" style={{ marginBottom: '0.25rem', display: 'inline-block' }}>Legal Company</span>
+                        <h3 style={{ margin: 0 }}>{org.tradingName || org.name}</h3>
+                        <small style={{ color: 'var(--text-muted, #6b7280)' }}>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span className="pill pill-green">GDPR Confirmed</span>
+                        <div style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
+                          <strong>{earningPatientsCount}</strong> Earning Patients · <strong>£{accruedCommission}</strong> Accrued Commission
+                        </div>
+                      </div>
+                    </header>
+
+                    {/* Branch card under company */}
+                    <article className="admin-org-row" style={{ background: 'var(--surface-tint, #f9fafb)', borderRadius: '6px' }}>
+                      <div className="admin-org-brand">
+                        <div className="tenant-mark" style={brandSwatchStyle(org.brand.primary)}>{org.logoText}</div>
+                        <div>
+                          <strong>{org.name} (Branch)</strong>
+                          <span>GPhC {org.gphcNumber} · {org.address}</span>
+                        </div>
+                      </div>
+                      <div className="admin-org-metric">
+                        <strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong>
+                        <span>Attributed Patients</span>
+                      </div>
+                      <div className="readiness-cell">
+                        <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} gates</span></div>
+                        <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
+                      </div>
+                      <div className="admin-org-actions">
+                        <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>
+                        <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage branch</button>
+                      </div>
+                    </article>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
     </>
   );
+
 
   const renderReferrals = () => {
     const pending = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review');

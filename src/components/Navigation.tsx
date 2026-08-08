@@ -1,4 +1,5 @@
-import { ArrowUpRight, BadgePoundSterling, Clock, FileCheck2, FilePlus, Home, LogOut, Package, QrCode, Settings, Tags, UserSearch, Users } from 'lucide-react';
+import { ArrowUpRight, BadgePoundSterling, FileCheck2, FilePlus, Home, LogOut, Package, QrCode, Settings, Tags, UserSearch, Users } from 'lucide-react';
+
 import { useAuth } from '../auth/useAuth';
 import { useApp, type Screen } from '../context/AppContext';
 import HhhBrandMark from './HhhBrandMark';
@@ -26,11 +27,11 @@ export default function Navigation() {
         { key: 'home', label: 'Overview', icon: <Home size={17} /> },
         { key: 'referrals', label: 'Patient onboarding', shortLabel: 'Onboarding', icon: <Users size={17} />, count: counts.referrals },
         { key: 'create', label: 'Prescription workspace', shortLabel: 'Rx', icon: <FilePlus size={17} />, count: counts.create },
-        { key: 'review', label: 'Payments', icon: <Clock size={17} />, count: counts.review },
+        { key: 'orders', label: 'Customer Orders', shortLabel: 'Orders', icon: <Package size={17} />, count: counts.orders },
         ...(organisation.modules.rx ? [{ key: 'provider-prescriptions' as const, label: 'Provider prescriptions', icon: <FileCheck2 size={17} /> }] : []),
-        ...(organisation.modules.supplierOrders ? [{ key: 'orders' as const, label: 'Supplier orders', icon: <Package size={17} />, count: counts.orders }] : []),
         ...(organisation.modules.patients ? [{ key: 'patients' as const, label: 'Patient directory', icon: <UserSearch size={17} /> }] : []),
       ],
+
     },
     {
       label: 'Workspace',
