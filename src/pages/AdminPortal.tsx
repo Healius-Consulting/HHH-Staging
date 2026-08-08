@@ -41,8 +41,8 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { activateCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removePharmacyStaff, updateOrganisation } from '../shared/api';
-import type { AdminReferralFinanceReport, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
+import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removePharmacyStaff, updateOrganisation } from '../shared/api';
+import type { AdminReferralFinanceReport, CuraleafConnectionStatus, CuraleafValidationReport, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -458,9 +458,10 @@ export default function AdminPortal() {
   const [curaleafCustomerId, setCuraleafCustomerId] = useState('');
   const [curaleafWriteApiKey, setCuraleafWriteApiKey] = useState('');
   const [curaleafReadApiKey, setCuraleafReadApiKey] = useState('');
-  const [curaleafPortalEmail, setCuraleafPortalEmail] = useState('');
   const [curaleafBusy, setCuraleafBusy] = useState(false);
+  const [curaleafApproveBusy, setCuraleafApproveBusy] = useState(false);
   const [curaleafError, setCuraleafError] = useState<string | null>(null);
+  const [curaleafResult, setCuraleafResult] = useState<CuraleafConnectionStatus | null>(null);
   const [financeOrganisationId, setFinanceOrganisationId] = useState('all');
   const [financePatientKey, setFinancePatientKey] = useState('all');
   const [financePeriod, setFinancePeriod] = useState<'all' | 'month' | 'year'>('all');
@@ -1267,7 +1268,26 @@ export default function AdminPortal() {
     );
   };
 
-  const submitCuraleafActivation = async (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    if (!curaleafOrganisationId || platformTab !== 'curaleaf') return;
+    let cancelled = false;
+    void getCuraleafConnectionStatus(curaleafOrganisationId)
+      .then(status => {
+        if (!cancelled) setCuraleafResult(status);
+      })
+      .catch(() => {
+        if (!cancelled) setCuraleafResult(null);
+      });
+    return () => { cancelled = true; };
+  }, [curaleafOrganisationId, platformTab]);
+
+  const curaleafValidation: CuraleafValidationReport | undefined = curaleafResult?.validation;
+  const curaleafApproved = Boolean(
+    curaleafResult?.approved
+    || setupByOrganisation[curaleafOrganisationId]?.tasks.find(task => task.id === 'curaleaf_account')?.completed,
+  );
+
+  const submitCuraleafTestAndSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCuraleafBusy(true);
     setCuraleafError(null);
@@ -1275,24 +1295,66 @@ export default function AdminPortal() {
       const status = await activateCuraleafPharmacy({
         organisationId: curaleafOrganisationId,
         customerId: curaleafCustomerId.trim(),
-        portalEmail: curaleafPortalEmail.trim(),
         writeApiKey: curaleafWriteApiKey.trim(),
         ...(curaleafReadApiKey.trim() ? { readApiKey: curaleafReadApiKey.trim() } : {}),
       });
-      if (!status.connected) throw new Error(status.message || 'The credentials were stored but Curaleaf verification did not succeed.');
+      setCuraleafResult(status);
       const pharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
       const updatedSetup = await getPharmacySetupStatus(curaleafOrganisationId);
       setSetupByOrganisation(current => ({ ...current, [curaleafOrganisationId]: updatedSetup }));
-      dispatch({ type: 'ADD_TOAST', message: `${pharmacy?.tradingName ?? 'Pharmacy'} activated with Curaleaf ${status.maskedIdentifier ?? ''}.`, toastType: 'success' });
-      setCuraleafCustomerId('');
-      setCuraleafPortalEmail('');
+      dispatch({
+        type: 'ADD_TOAST',
+        message: status.validation?.passed
+          ? `${pharmacy?.tradingName ?? 'Pharmacy'} credentials validated. Approve Curaleaf to complete this setup step.`
+          : `${pharmacy?.tradingName ?? 'Pharmacy'} credentials saved, but validation did not pass.`,
+        toastType: status.validation?.passed ? 'success' : 'error',
+      });
       setCuraleafWriteApiKey('');
       setCuraleafReadApiKey('');
     } catch (error) {
-      setCuraleafError(error instanceof Error ? error.message : 'Curaleaf activation failed.');
+      setCuraleafError(error instanceof Error ? error.message : 'Curaleaf test & save failed.');
     } finally {
       setCuraleafBusy(false);
     }
+  };
+
+  const submitCuraleafApproval = async () => {
+    if (!curaleafOrganisationId) return;
+    setCuraleafApproveBusy(true);
+    setCuraleafError(null);
+    try {
+      const status = await approveCuraleafPharmacy(curaleafOrganisationId);
+      setCuraleafResult(status);
+      const pharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
+      const updatedSetup = status.setup ?? await getPharmacySetupStatus(curaleafOrganisationId);
+      setSetupByOrganisation(current => ({ ...current, [curaleafOrganisationId]: updatedSetup }));
+      if (updatedSetup.completed) {
+        dispatch({ type: 'UPDATE_ORGANISATION', organisationId: curaleafOrganisationId, updates: { status: 'live' } });
+      }
+      dispatch({
+        type: 'ADD_TOAST',
+        message: updatedSetup.completed
+          ? `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf approved — all setup complete; pharmacy is live.`
+          : `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf approved. Remaining setup steps still required before live.`,
+        toastType: 'success',
+      });
+    } catch (error) {
+      setCuraleafError(error instanceof Error ? error.message : 'Curaleaf approval failed.');
+    } finally {
+      setCuraleafApproveBusy(false);
+    }
+  };
+
+  const curaleafStatusLabel = (organisationId: string) => {
+    const approved = Boolean(setupByOrganisation[organisationId]?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
+    if (approved) return { label: 'Approved', pill: 'pill-green' as const };
+    if (curaleafOrganisationId === organisationId && curaleafValidation?.passed) {
+      return { label: 'Validated — pending approval', pill: 'pill-amber' as const };
+    }
+    if (curaleafOrganisationId === organisationId && curaleafResult?.status === 'attention') {
+      return { label: 'Attention', pill: 'pill-neutral' as const };
+    }
+    return { label: 'Pending', pill: 'pill-amber' as const };
   };
 
   const renderPlatform = () => (
@@ -1304,7 +1366,7 @@ export default function AdminPortal() {
         </button>
         <button type="button" role="tab" aria-selected={platformTab === 'curaleaf'} className={`filter-card${platformTab === 'curaleaf' ? ' active' : ''}`} onClick={() => setPlatformTab('curaleaf')}>
           <div className="filter-card__head"><span>Curaleaf</span></div>
-          <span className="filter-card__value filter-card__value--text">Activate pharmacies</span>
+          <span className="filter-card__value filter-card__value--text">Validate & approve</span>
         </button>
       </div>
 
@@ -1344,7 +1406,7 @@ export default function AdminPortal() {
             </div>
           </section>
           <section className="card admin-patient-table compliance-register">
-            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Open a pharmacy to see its evidence. Pharmacy staff update their own steps; Curaleaf activation remains HHH-admin only.</p></div></div>
+            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Open a pharmacy to see its evidence. Pharmacy staff update their own steps; Curaleaf validate & approve remains HHH-admin only. Completing the last required step promotes the pharmacy to live.</p></div></div>
             {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
             {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Setup progress</th><th>Next action</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const status = setupByOrganisation[organisation.id]; const readiness = tenantReadiness(organisation.id); const nextTask = SETUP_TASKS.find(definition => !status?.tasks.find(task => task.id === definition.id)?.completed); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>{readiness.percent}% ready</small></td><td><strong>{nextTask?.title ?? 'No action required'}</strong>{nextTask?.owner === 'hhh_admin' ? <span className="setup-owner-tag setup-owner-tag--admin">HHH admin</span> : <small>{nextTask ? 'Pharmacy team' : 'Setup complete'}</small>}</td><td><span className={`pill ${status?.completed ? 'pill-green' : 'pill-amber'}`}>{status?.completed ? 'Ready' : 'In setup'}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
           </section>
@@ -1356,8 +1418,8 @@ export default function AdminPortal() {
           <section className="integration-boundary card">
             <ShieldCheck size={20} />
             <div>
-              <strong>Curaleaf activation only</strong>
-              <p>HHH administrators connect each pharmacy’s Curaleaf API keys here. Worldpay merchants, dispensing charges and patient payment routes stay in the pharmacy portal Settings — not in this console.</p>
+              <strong>Curaleaf validate, then approve</strong>
+              <p>Test & save runs API and PHAR-match checks. Approve Curaleaf completes that setup step only — the pharmacy goes live automatically when all six steps are done. Worldpay and payment routes stay in the pharmacy portal.</p>
             </div>
           </section>
 
@@ -1366,32 +1428,35 @@ export default function AdminPortal() {
               <div>
                 <p className="section-label">Per pharmacy</p>
                 <h2>Curaleaf connection status</h2>
-                <p>Connected pharmacies can leave training mode once their remaining setup steps are complete.</p>
+                <p>Approval completes the Curaleaf setup step. Live workspace unlocks when every required setup step is complete.</p>
               </div>
             </div>
             {state.organisations.length === 0 ? (
-              <div className="empty-state">Onboard a pharmacy before activating Curaleaf.</div>
+              <div className="empty-state">Onboard a pharmacy before connecting Curaleaf.</div>
             ) : (
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Pharmacy</th><th>Curaleaf</th><th /></tr></thead>
                   <tbody>
                     {state.organisations.map(organisation => {
-                      const connected = Boolean(setupByOrganisation[organisation.id]?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
+                      const statusMeta = curaleafStatusLabel(organisation.id);
+                      const approved = Boolean(setupByOrganisation[organisation.id]?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
                       return (
                         <tr key={organisation.id}>
                           <td><strong>{organisation.tradingName}</strong><small>{organisation.name}</small></td>
-                          <td><span className={`pill ${connected ? 'pill-green' : 'pill-amber'}`}>{connected ? 'Connected' : 'Pending'}</span></td>
+                          <td><span className={`pill ${statusMeta.pill}`}>{statusMeta.label}</span></td>
                           <td>
                             <button
                               type="button"
                               className="btn btn-sm"
                               onClick={() => {
                                 setCuraleafOrganisationId(organisation.id);
+                                setCuraleafResult(null);
+                                setCuraleafError(null);
                                 document.getElementById('curaleaf-activation-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                               }}
                             >
-                              {connected ? 'Rotate keys' : 'Activate'}
+                              {approved ? 'Rotate keys' : 'Connect'}
                             </button>
                           </td>
                         </tr>
@@ -1403,23 +1468,29 @@ export default function AdminPortal() {
             )}
           </section>
 
-          <form id="curaleaf-activation-form" className="card secure-integration-form" onSubmit={submitCuraleafActivation}>
+          <form id="curaleaf-activation-form" className="card secure-integration-form" onSubmit={submitCuraleafTestAndSave}>
             <div className="admin-directory-head">
               <div>
                 <p className="section-label">HHH administrator only</p>
-                <h2>Activate a pharmacy’s Curaleaf account</h2>
-                <p>After Curaleaf returns its onboarding email and internal customer ID, connect them here. Until this succeeds, the pharmacy stays in a session-only training workspace.</p>
+                <h2>Test & save Curaleaf credentials</h2>
+                <p>Enter the pharmacy PHAR / customer ID and API key. Validation must pass before you can approve the Curaleaf setup step.</p>
               </div>
               <LockKeyhole size={22} />
             </div>
             <div className="form-grid-two">
               <label>Pharmacy
-                <select className="input" value={curaleafOrganisationId} onChange={event => setCuraleafOrganisationId(event.target.value)} required>
+                <select
+                  className="input"
+                  value={curaleafOrganisationId}
+                  onChange={event => {
+                    setCuraleafOrganisationId(event.target.value);
+                    setCuraleafResult(null);
+                    setCuraleafError(null);
+                  }}
+                  required
+                >
                   {state.organisations.map(org => <option value={org.id} key={org.id}>{org.tradingName}</option>)}
                 </select>
-              </label>
-              <label>Curaleaf portal email
-                <input className="input" type="email" autoComplete="off" value={curaleafPortalEmail} onChange={event => setCuraleafPortalEmail(event.target.value)} required />
               </label>
               <label>Curaleaf internal pharmacy / PHAR ID
                 <input className="input" autoComplete="off" value={curaleafCustomerId} onChange={event => setCuraleafCustomerId(event.target.value)} required />
@@ -1434,12 +1505,43 @@ export default function AdminPortal() {
             </div>
             <div className="setup-security-note">
               <ShieldCheck size={16} />
-              <span>Each pharmacy’s keys are stored only in its own Europe-hosted Secret Manager secret. The portal never stores or displays them after activation; Firestore receives a masked Curaleaf identifier only.</span>
+              <span>Each pharmacy’s keys are stored only in its own Europe-hosted Secret Manager secret. The portal never stores or displays them after save; Firestore receives a masked Curaleaf identifier only.</span>
             </div>
             {curaleafError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div>}
+            {curaleafValidation && (
+              <div className={`banner ${curaleafValidation.passed ? 'banner-green' : 'banner-amber'}`} role="status">
+                <ClipboardCheck size={16} />
+                <span>
+                  <strong>{curaleafValidation.passed ? 'Validation passed' : 'Validation failed'}</strong>
+                  <small>{curaleafValidation.message}</small>
+                  {curaleafValidation.observedCustomerId && <small>Observed customer ID: {curaleafValidation.observedCustomerId}</small>}
+                </span>
+              </div>
+            )}
+            {curaleafValidation?.checks?.length ? (
+              <div className="filter-grid admin-gate-grid" aria-label="Curaleaf validation checks">
+                {curaleafValidation.checks.map(check => (
+                  <div key={check.id} className="filter-card admin-gate-card">
+                    <div className="filter-card__head">
+                      <span>{check.label}</span>
+                      <span className={`pill ${check.passed ? 'pill-green' : 'pill-amber'}`}>{check.passed ? 'Pass' : 'Fail'}</span>
+                    </div>
+                    <span className="filter-card__value text-xs">{check.detail}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="drawer-actions">
-              <button className="btn btn-primary" type="submit" disabled={curaleafBusy || !curaleafOrganisationId}>
-                {curaleafBusy ? 'Verifying securely…' : 'Verify and activate pharmacy'}
+              <button className="btn btn-primary" type="submit" disabled={curaleafBusy || curaleafApproveBusy || !curaleafOrganisationId}>
+                {curaleafBusy ? 'Testing…' : 'Test & save'}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={curaleafBusy || curaleafApproveBusy || !curaleafOrganisationId || !curaleafValidation?.passed || curaleafApproved}
+                onClick={() => void submitCuraleafApproval()}
+              >
+                {curaleafApproveBusy ? 'Approving…' : curaleafApproved ? 'Curaleaf approved' : 'Approve Curaleaf'}
               </button>
             </div>
           </form>
@@ -1453,7 +1555,7 @@ export default function AdminPortal() {
     referrals: { title: 'Patient onboarding decisions', subtitle: 'Record patient calls and release approved patients to their attributed pharmacy.' },
     patients: { title: 'Patients and pharmacy attribution', subtitle: 'Review the cross-pharmacy patient index and its pharmacy ownership.' },
     finance: { title: 'HHH referral finance', subtitle: 'Track £50 completed-referral fees and recurring £40 annual patient fees.' },
-    platform: { title: 'Platform', subtitle: 'Track pharmacy setup progress and activate each pharmacy’s Curaleaf account.' },
+    platform: { title: 'Platform', subtitle: 'Track pharmacy setup progress and validate each pharmacy’s Curaleaf connection.' },
   };
 
   return (

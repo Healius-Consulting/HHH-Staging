@@ -160,12 +160,16 @@ function StaffWorkspace() {
   const tenantStyle = tenantThemeVariables(organisation?.brand.primary ?? '#0f766e') as React.CSSProperties;
   const setup = usePharmacySetup(state.portalMode === 'admin' ? undefined : authState.staff?.organisationId);
   const curaleafActivated = Boolean(setup.status?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
-  const liveWorkspaceReady = organisation?.status === 'live' && curaleafActivated;
+  // Leave training only when all six setup steps are complete (including Curaleaf).
+  const liveWorkspaceReady = Boolean(setup.status?.completed);
 
   useEffect(() => {
-    if (authState.staff?.role !== 'pharmacy_staff' || !setup.status) return;
+    if (authState.staff?.role !== 'pharmacy_staff' || !setup.status || !authState.staff.organisationId) return;
     dispatch({ type: 'SET_WORKSPACE_MODE', mode: liveWorkspaceReady ? 'live' : 'training', organisationId: authState.staff.organisationId });
-  }, [authState.staff, dispatch, liveWorkspaceReady, setup.status]);
+    if (liveWorkspaceReady && organisation?.status === 'onboarding') {
+      dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { status: 'live' } });
+    }
+  }, [authState.staff, dispatch, liveWorkspaceReady, organisation?.id, organisation?.status, setup.status]);
 
   useEffect(() => {
     document.getElementById('pharmacy-main-content')?.scrollTo({ top: 0 });

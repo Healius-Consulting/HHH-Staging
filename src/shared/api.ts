@@ -148,8 +148,9 @@ export function queueReferralPatientEmail(submissionId: string, organisationId: 
   });
 }
 
-export function getCuraleafConnectionStatus() {
-  return apiRequest<CuraleafConnectionStatus>('/v1/portal/integrations/curaleaf/status');
+export function getCuraleafConnectionStatus(organisationId?: string) {
+  const query = organisationId ? `?organisationId=${encodeURIComponent(organisationId)}` : '';
+  return apiRequest<CuraleafConnectionStatus>(`/v1/portal/integrations/curaleaf/status${query}`);
 }
 
 export function getDevCuraleafCatalogue() {
@@ -304,6 +305,13 @@ export function activateCuraleafPharmacy(input: CuraleafActivationInput) {
     method: 'PUT',
     body: JSON.stringify(input),
   });
+}
+
+export function approveCuraleafPharmacy(organisationId: string) {
+  return apiRequest<CuraleafConnectionStatus & { setup?: import('./contracts').PharmacySetupStatus }>(
+    `/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/approve-curaleaf`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
 }
 
 export function getCuraleafSupportCases(organisationId: string, orderId?: string) {

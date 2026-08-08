@@ -136,7 +136,7 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
           )}
 
           {adminManaged ? (
-            <div className={`banner ${activeTask?.completed ? 'banner-green' : 'banner-blue'} setup-admin-managed`}><LockKeyhole size={16} /><span><strong>{activeTask?.completed ? 'Curaleaf account activated by HHH.' : 'No action is required from the pharmacy.'}</strong> {activeTask?.completed ? 'The secure customer connection is available; the portal never displays the customer ID or API key.' : 'You can continue exploring every workspace with temporary training data while HHH waits for Curaleaf and securely enters the returned account details.'}</span></div>
+            <div className={`banner ${activeTask?.completed ? 'banner-green' : 'banner-blue'} setup-admin-managed`}><LockKeyhole size={16} /><span><strong>{activeTask?.completed ? 'Curaleaf account approved by HHH.' : 'No action is required from the pharmacy.'}</strong> {activeTask?.completed ? 'The secure customer connection is available; the portal never displays the customer ID or API key.' : 'You can continue exploring every workspace with temporary training data while HHH validates and approves this pharmacy’s Curaleaf credentials.'}</span></div>
           ) : activeDefinition.id === 'payment_route' ? (
             <fieldset className="setup-payment-routes">
               <legend>{activeDefinition.evidenceLabel}</legend>

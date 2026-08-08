@@ -64,16 +64,35 @@ export interface EligibilitySubmissionReceipt {
   submittedAt: string;
 }
 
+export interface CuraleafValidationCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface CuraleafValidationReport {
+  passed: boolean;
+  checkedAt: string;
+  observedCustomerId: string | null;
+  productSampleCount: number;
+  checks: CuraleafValidationCheck[];
+  message: string;
+}
+
 export interface CuraleafConnectionStatus {
   configured: boolean;
   connected: boolean;
   writeConfigured?: boolean;
-  status?: 'not_configured' | 'credential_update_required' | 'connected' | 'attention';
+  approved?: boolean;
+  status?: 'not_configured' | 'credential_update_required' | 'validated' | 'connected' | 'attention';
   environment: 'test' | 'production';
   checkedAt: string;
   message?: string;
   activated?: boolean;
   maskedIdentifier?: string;
+  validation?: CuraleafValidationReport;
+  sampleAvailable?: boolean;
 }
 
 export interface CuraleafFormula {
@@ -494,9 +513,10 @@ export interface CuraleafClinicScan {
 export interface CuraleafActivationInput {
   organisationId: string;
   customerId: string;
-  portalEmail: string;
   writeApiKey: string;
   readApiKey?: string;
+  /** @deprecated No longer required; ignored by the API if sent. */
+  portalEmail?: string;
 }
 
 export type CuraleafSupportReason = 'prescription_exception' | 'purchase_order_cancellation' | 'quote_review' | 'supplier_exception';

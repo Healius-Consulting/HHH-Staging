@@ -11,9 +11,26 @@ export const TENANT_REQUEST_SPACING_MS = 1000;
 
 export type CuraleafCredential = {
   customerId: string;
-  portalEmail: string;
   writeApiKey: string;
   readApiKey?: string;
+  /** Legacy field; no longer required for connection or validation. */
+  portalEmail?: string;
+};
+
+export type CuraleafValidationCheck = {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+};
+
+export type CuraleafValidationReport = {
+  passed: boolean;
+  checkedAt: string;
+  observedCustomerId: string | null;
+  productSampleCount: number;
+  checks: CuraleafValidationCheck[];
+  message: string;
 };
 type CuraleafResult = Record<string, unknown> | unknown[] | null;
 const READ_METHODS = new Set(['GET', 'HEAD']);
@@ -150,7 +167,7 @@ async function curaleafFetch<T = CuraleafResult>(path: string, init: RequestInit
 
 export async function curaleafRequest<T = CuraleafResult>(organisationId: string, path: string, init: RequestInit = {}): Promise<T> {
   const credential = await readIntegrationSecret<Record<string, string>>(organisationId, 'curaleaf');
-  if (!credential.customerId || !credential.portalEmail || !credential.writeApiKey) {
+  if (!credential.customerId || !credential.writeApiKey) {
     throw new HttpError(409, 'This pharmacy must update its Curaleaf API keys before the integration can be used.', 'CREDENTIAL_UPDATE_REQUIRED');
   }
   const method = (init.method ?? 'GET').toUpperCase();
@@ -160,6 +177,127 @@ export async function curaleafRequest<T = CuraleafResult>(organisationId: string
   const unexpectedCustomer = customerIds(body).find(id => id !== credential.customerId);
   if (unexpectedCustomer) throw new CuraleafRequestError(502, 'Curaleaf returned data for a different pharmacy customer.');
   return body;
+}
+
+function environmentLabel() {
+  return config.CURALEAF_BASE_URL.includes('.dev') ? 'test' as const : 'production' as const;
+}
+
+/** Run API + customer-match checks against stored (or just-written) pharmacy credentials. */
+export async function validateCuraleafCredentials(organisationId: string): Promise<CuraleafValidationReport> {
+  const checkedAt = new Date().toISOString();
+  const checks: CuraleafValidationCheck[] = [];
+  let observedCustomerId: string | null = null;
+  let productSampleCount = 0;
+
+  let credential: Record<string, string>;
+  try {
+    credential = await readIntegrationSecret<Record<string, string>>(organisationId, 'curaleaf');
+  } catch {
+    return {
+      passed: false,
+      checkedAt,
+      observedCustomerId: null,
+      productSampleCount: 0,
+      checks: [{ id: 'credentials', label: 'Credentials present', passed: false, detail: 'No Curaleaf credentials are stored for this pharmacy.' }],
+      message: 'Store Curaleaf credentials before running validation.',
+    };
+  }
+
+  const expectedCustomerId = typeof credential.customerId === 'string' ? credential.customerId.trim() : '';
+  const writeApiKey = typeof credential.writeApiKey === 'string' ? credential.writeApiKey.trim() : '';
+  if (!expectedCustomerId || !writeApiKey) {
+    return {
+      passed: false,
+      checkedAt,
+      observedCustomerId: null,
+      productSampleCount: 0,
+      checks: [{ id: 'credentials', label: 'Credentials present', passed: false, detail: 'Customer ID and write API key are both required.' }],
+      message: 'Enter the pharmacy PHAR / customer ID and API key.',
+    };
+  }
+
+  try {
+    await reserveTenantRequestSlot(organisationId);
+    const productsPage = await curaleafFetch<{ products?: unknown[]; totalRecordCount?: number }>(
+      '/v1/products/?pageNumber=0&pageSize=25',
+      {},
+      writeApiKey,
+      organisationId,
+    );
+    const products = Array.isArray(productsPage.products) ? productsPage.products : null;
+    if (!products) {
+      checks.push({ id: 'api_key', label: 'API key accepted', passed: false, detail: 'Curaleaf returned an invalid products response.' });
+    } else {
+      productSampleCount = products.length;
+      checks.push({
+        id: 'api_key',
+        label: 'API key accepted',
+        passed: true,
+        detail: `Products endpoint returned ${productSampleCount} sample product${productSampleCount === 1 ? '' : 's'}.`,
+      });
+      const observedIds = [...new Set(products.flatMap(product => customerIds(product)))];
+      observedCustomerId = observedIds[0] ?? null;
+      if (productSampleCount === 0) {
+        checks.push({
+          id: 'customer_match',
+          label: 'Customer / PHAR match',
+          passed: false,
+          detail: 'Product catalogue was empty, so the customer ID could not be confirmed against Curaleaf data.',
+        });
+      } else if (!observedCustomerId) {
+        checks.push({
+          id: 'customer_match',
+          label: 'Customer / PHAR match',
+          passed: false,
+          detail: 'Products were returned without a customerId field to verify.',
+        });
+      } else if (observedIds.some(id => id !== expectedCustomerId)) {
+        checks.push({
+          id: 'customer_match',
+          label: 'Customer / PHAR match',
+          passed: false,
+          detail: `Curaleaf returned customer ${observedIds.find(id => id !== expectedCustomerId)} but the form has ${expectedCustomerId}.`,
+        });
+      } else {
+        checks.push({
+          id: 'customer_match',
+          label: 'Customer / PHAR match',
+          passed: true,
+          detail: `All sampled products belong to customer ${observedCustomerId}.`,
+        });
+      }
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Products request failed.';
+    checks.push({ id: 'api_key', label: 'API key accepted', passed: false, detail });
+    checks.push({ id: 'customer_match', label: 'Customer / PHAR match', passed: false, detail: 'Skipped because the products request failed.' });
+  }
+
+  try {
+    await reserveTenantRequestSlot(organisationId);
+    await curaleafFetch('/v1/formulas/?pageNumber=0&pageSize=1', {}, writeApiKey, organisationId);
+    checks.push({ id: 'formulas', label: 'Formulas connectivity', passed: true, detail: 'Formulas endpoint responded successfully.' });
+  } catch (error) {
+    checks.push({
+      id: 'formulas',
+      label: 'Formulas connectivity',
+      passed: false,
+      detail: error instanceof Error ? error.message : 'Formulas request failed.',
+    });
+  }
+
+  const passed = checks.length > 0 && checks.every(check => check.passed);
+  return {
+    passed,
+    checkedAt,
+    observedCustomerId,
+    productSampleCount,
+    checks,
+    message: passed
+      ? 'All Curaleaf validation checks passed. Approve the connection to complete setup.'
+      : 'One or more Curaleaf validation checks failed. Review the results before approving.',
+  };
 }
 
 async function readAllPages<T>(
@@ -191,16 +329,90 @@ export function curaleafList<T>(organisationId: string, path: string, collection
 }
 
 export async function curaleafConnectionStatus(organisationId: string) {
+  const environment = environmentLabel();
+  const connectionSnapshot = await firestore.collection('integrationConnections').doc(`${organisationId}--curaleaf`).get();
+  const connection = connectionSnapshot.data();
+  const storedValidation = connection?.lastValidation && typeof connection.lastValidation === 'object'
+    ? connection.lastValidation as CuraleafValidationReport
+    : undefined;
+  const connectionStatus = typeof connection?.status === 'string' ? connection.status : null;
+  const approved = connectionStatus === 'connected';
+
   try {
     const credential = await readIntegrationSecret<Record<string, string>>(organisationId, 'curaleaf');
-    if (!credential.customerId || !credential.portalEmail || !credential.writeApiKey) {
-      return { configured: true, connected: false, writeConfigured: false, status: 'credential_update_required' as const, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: 'Enter this pharmacy’s Curaleaf API key to restore the connection.' };
+    if (!credential.customerId || !credential.writeApiKey) {
+      return {
+        configured: true,
+        connected: false,
+        writeConfigured: false,
+        approved: false,
+        status: 'credential_update_required' as const,
+        environment,
+        checkedAt: new Date().toISOString(),
+        message: 'Enter this pharmacy’s Curaleaf API key to restore the connection.',
+        validation: storedValidation,
+        maskedIdentifier: typeof connection?.maskedIdentifier === 'string' ? connection.maskedIdentifier : undefined,
+      };
     }
-    const response = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/formulas/?pageSize=1');
-    return { configured: true, connected: true, writeConfigured: true, status: 'connected' as const, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: 'Curaleaf pharmacy access verified.', sampleAvailable: Boolean(response) };
+
+    if (approved) {
+      const response = await curaleafRequest<Record<string, unknown>>(organisationId, '/v1/formulas/?pageSize=1');
+      return {
+        configured: true,
+        connected: true,
+        writeConfigured: true,
+        approved: true,
+        status: 'connected' as const,
+        environment,
+        checkedAt: new Date().toISOString(),
+        message: 'Curaleaf pharmacy access verified and approved.',
+        sampleAvailable: Boolean(response),
+        validation: storedValidation,
+        maskedIdentifier: typeof connection?.maskedIdentifier === 'string' ? connection.maskedIdentifier : undefined,
+      };
+    }
+
+    if (connectionStatus === 'validated' && storedValidation?.passed) {
+      return {
+        configured: true,
+        connected: false,
+        writeConfigured: true,
+        approved: false,
+        status: 'validated' as const,
+        environment,
+        checkedAt: storedValidation.checkedAt ?? new Date().toISOString(),
+        message: 'Validation passed — approve Curaleaf to complete this setup step.',
+        validation: storedValidation,
+        maskedIdentifier: typeof connection?.maskedIdentifier === 'string' ? connection.maskedIdentifier : undefined,
+      };
+    }
+
+    return {
+      configured: true,
+      connected: false,
+      writeConfigured: true,
+      approved: false,
+      status: (connectionStatus === 'attention' ? 'attention' : 'validated') as 'attention' | 'validated',
+      environment,
+      checkedAt: storedValidation?.checkedAt ?? new Date().toISOString(),
+      message: storedValidation?.message ?? 'Credentials are stored. Run Test & save, then approve after checks pass.',
+      validation: storedValidation,
+      maskedIdentifier: typeof connection?.maskedIdentifier === 'string' ? connection.maskedIdentifier : undefined,
+    };
   } catch (error) {
     const missingConfiguration = error instanceof HttpError && error.code === 'INTEGRATION_NOT_CONNECTED';
-    return { configured: !missingConfiguration, connected: false, writeConfigured: false, status: missingConfiguration ? 'not_configured' as const : 'attention' as const, environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production', checkedAt: new Date().toISOString(), message: error instanceof Error ? error.message : 'Connection check failed.' };
+    return {
+      configured: !missingConfiguration,
+      connected: false,
+      writeConfigured: false,
+      approved: false,
+      status: missingConfiguration ? 'not_configured' as const : 'attention' as const,
+      environment,
+      checkedAt: new Date().toISOString(),
+      message: error instanceof Error ? error.message : 'Connection check failed.',
+      validation: storedValidation,
+      maskedIdentifier: typeof connection?.maskedIdentifier === 'string' ? connection.maskedIdentifier : undefined,
+    };
   }
 }
 

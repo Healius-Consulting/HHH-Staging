@@ -9,7 +9,7 @@ import type { DocumentReference } from 'firebase-admin/firestore';
 import { audit } from './audit.js';
 import { identity, requireRole, requireStaff, tenantFor } from './auth.js';
 import { allowedOrigins, config } from './config.js';
-import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, scanClinicPrescription, submitClinicPrescription, submitManualPrescription, uploadClinicPrescriptionImage } from './curaleaf.js';
+import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, scanClinicPrescription, submitClinicPrescription, submitManualPrescription, uploadClinicPrescriptionImage, validateCuraleafCredentials } from './curaleaf.js';
 import { fetchCuraleafAccountSnapshot } from './curaleaf-mirror.js';
 import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
@@ -235,6 +235,19 @@ async function setupStatus(organisationId: string) {
     const updatedAt = records.docs.map(document => String(document.data().updatedAt ?? '')).filter(Boolean).sort().at(-1) ?? timestamp();
     return { organisationId, completed: completedCount === requiredCount, completedCount, requiredCount, tasks, updatedAt };
   });
+}
+
+/** When all six setup steps are done, leave onboarding so the pharmacy workspace can go live. */
+async function promoteOrganisationToLiveIfReady(organisationId: string) {
+  const status = await setupStatus(organisationId);
+  if (!status.completed) return status;
+  const organisation = await getRecord('organisations', organisationId);
+  if (organisation.status === 'onboarding') {
+    await firestore.collection('organisations').doc(organisationId).set({ status: 'live', updatedAt: timestamp() }, { merge: true });
+    invalidateCollectionCache('organisations', organisationId);
+    invalidateCache('admin:organisations');
+  }
+  return status;
 }
 
 async function requireSetupComplete(organisationId: string) {
@@ -517,7 +530,7 @@ app.patch('/v1/portal/setup/:taskId', async (request, response, next) => {
     await firestore.collection('setupTasks').doc(docId).set({ id: docId, schemaVersion: 1, organisationId, taskId, completed: input.completed, evidence: input.evidence ?? null, completedAt: input.completed ? timestamp() : null, completedBy: input.completed ? identity(request).uid : null, updatedAt: timestamp() }, { merge: true });
     invalidateCache(`setup:${organisationId}`);
     await audit(request, 'setup.task_updated', { organisationId, taskId, completed: input.completed });
-    response.json(await setupStatus(organisationId));
+    response.json(await promoteOrganisationToLiveIfReady(organisationId));
   } catch (error) { next(error); }
 });
 
@@ -1931,9 +1944,9 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
     const credential = integration === 'curaleaf'
       ? z.object({
         customerId: z.string().trim().min(1).max(128),
-        portalEmail: z.email().max(254),
         writeApiKey: z.string().trim().min(16).max(500),
         readApiKey: z.string().trim().min(16).max(500).optional(),
+        portalEmail: z.email().max(254).optional(),
       }).parse(request.body)
       : z.object({
         username: z.string().trim().min(1).max(500),
@@ -1947,27 +1960,89 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
     const stored = await writeIntegrationSecret(organisationId, integration, credential);
     const id = `${organisationId}--${integration}`;
     await firestore.collection('integrationConnections').doc(id).set({ id, schemaVersion: 1, organisationId, integration, secretName: stored.secretName, secretVersion: stored.version, status: integration === 'worldpay' ? 'verification_required' : 'configured', maskedIdentifier: safeIdentifier, updatedAt: timestamp(), updatedBy: identity(request).uid }, { merge: true });
-    const status = integration === 'curaleaf'
-      ? await curaleafConnectionStatus(organisationId)
-      : { configured: true, connected: false, verificationRequired: true, status: 'verification_required' as const };
     if (integration === 'curaleaf') {
+      const validation = await validateCuraleafCredentials(organisationId);
+      const connectionStatus = validation.passed ? 'validated' : 'attention';
+      await firestore.collection('integrationConnections').doc(id).set({
+        status: connectionStatus,
+        lastValidation: validation,
+        updatedAt: timestamp(),
+        updatedBy: identity(request).uid,
+      }, { merge: true });
+      // Saving/re-testing keys never completes the setup task — admin must Approve Curaleaf.
       const taskId = `${organisationId}--curaleaf_account`;
       await firestore.collection('setupTasks').doc(taskId).set({
         id: taskId,
         schemaVersion: 1,
         organisationId,
         taskId: 'curaleaf_account',
-        completed: status.connected,
-        evidence: status.connected ? `Secure Curaleaf account connected (${safeIdentifier})` : 'Credentials saved; connection verification failed',
-        completedAt: status.connected ? timestamp() : null,
-        completedBy: status.connected ? identity(request).uid : null,
+        completed: false,
+        evidence: validation.passed
+          ? `Credentials validated (${safeIdentifier}); awaiting admin approval`
+          : `Credentials saved; validation failed (${safeIdentifier})`,
+        completedAt: null,
+        completedBy: null,
         updatedAt: timestamp(),
       }, { merge: true });
       invalidateCache(`setup:${organisationId}`);
-      await firestore.collection('integrationConnections').doc(id).set({ status: status.connected ? 'connected' : status.status === 'credential_update_required' ? 'credential_update_required' : 'attention', updatedAt: timestamp() }, { merge: true });
+      await audit(request, 'integration.credentials_rotated', { organisationId, integration, validationPassed: validation.passed });
+      const status = await curaleafConnectionStatus(organisationId);
+      return response.json({ ...status, activated: false, maskedIdentifier: safeIdentifier, validation });
     }
     await audit(request, 'integration.credentials_rotated', { organisationId, integration });
-    response.json({ ...status, activated: integration === 'curaleaf' ? status.connected : false, maskedIdentifier: safeIdentifier });
+    response.json({ configured: true, connected: false, verificationRequired: true, status: 'verification_required' as const, maskedIdentifier: safeIdentifier });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/organisations/:id/approve-curaleaf', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    ensureFreshAuthentication(request);
+    const organisationId = idSchema.parse(request.params.id);
+    await getRecord('organisations', organisationId);
+    const validation = await validateCuraleafCredentials(organisationId);
+    const connectionId = `${organisationId}--curaleaf`;
+    await firestore.collection('integrationConnections').doc(connectionId).set({
+      lastValidation: validation,
+      updatedAt: timestamp(),
+      updatedBy: identity(request).uid,
+    }, { merge: true });
+    if (!validation.passed) {
+      await firestore.collection('integrationConnections').doc(connectionId).set({ status: 'attention', updatedAt: timestamp() }, { merge: true });
+      throw new HttpError(409, validation.message || 'Curaleaf validation must pass before approval.', 'CURALEAF_VALIDATION_REQUIRED');
+    }
+    const connection = (await firestore.collection('integrationConnections').doc(connectionId).get()).data();
+    const safeIdentifier = typeof connection?.maskedIdentifier === 'string'
+      ? connection.maskedIdentifier
+      : maskedIdentifier(validation.observedCustomerId ?? 'curaleaf');
+    const taskId = `${organisationId}--curaleaf_account`;
+    await firestore.collection('setupTasks').doc(taskId).set({
+      id: taskId,
+      schemaVersion: 1,
+      organisationId,
+      taskId: 'curaleaf_account',
+      completed: true,
+      evidence: `Curaleaf connection approved (${safeIdentifier}) at ${validation.checkedAt}`,
+      completedAt: timestamp(),
+      completedBy: identity(request).uid,
+      updatedAt: timestamp(),
+    }, { merge: true });
+    await firestore.collection('integrationConnections').doc(connectionId).set({
+      status: 'connected',
+      approvedAt: timestamp(),
+      approvedBy: identity(request).uid,
+      updatedAt: timestamp(),
+    }, { merge: true });
+    invalidateCache(`setup:${organisationId}`);
+    const setup = await promoteOrganisationToLiveIfReady(organisationId);
+    await audit(request, 'integration.curaleaf_approved', { organisationId, maskedIdentifier: safeIdentifier });
+    response.json({
+      ...(await curaleafConnectionStatus(organisationId)),
+      activated: true,
+      approved: true,
+      setup,
+      maskedIdentifier: safeIdentifier,
+      validation,
+    });
   } catch (error) { next(error); }
 });
 
