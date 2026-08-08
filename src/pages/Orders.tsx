@@ -151,7 +151,7 @@ export default function Orders() {
   const rxTotal = (rx: Prescription) => rx.items.reduce((total, item) => total + lineRevenue(item), 0);
 
   return (
-    <div className="orders-page">
+    <div className="page-body orders-page">
       <header className="page-header-block">
         <div>
           <h1>Customer Orders Workspace</h1>
@@ -281,7 +281,7 @@ export default function Orders() {
                     Patient: <strong>{selected.patientName}</strong> · Placed {fmtDate(selected.date)}
                   </p>
                 </div>
-                <div className="detail-actions" style={{ display: 'flex', gap: '8px' }}>
+                <div className="detail-actions">
                   {(selected.isExpired || selected.placementState === 'CANCELLED_REFUNDED' || selected.rejectionReason) && (
                     <button
                       type="button"

@@ -610,12 +610,11 @@ export default function CreateOrder() {
 
           {/* Unresolved Expired / Rejected Orders Banner */}
           {patient && unresolvedOrderForPatient ? (
-            <div className="alert-box alert-warning" style={{ margin: '12px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div className="alert-box alert-warning" style={{ margin: '12px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
                 <AlertTriangle size={20} />
                 <div>
                   <strong>Unresolved Order #{unresolvedOrderForPatient.id} ({unresolvedOrderForPatient.quoteReview ? 'Curaleaf Exception / Rejected' : '28-Day Prescription Expired'})</strong>
-
                   <p style={{ margin: 0, fontSize: '0.85rem' }}>
                     {unresolvedOrderForPatient.prescriptions.flatMap(r => r.items).length} prescribed item(s) from previous cycle. Attach new prescription PDF for mandatory Curaleaf authentication.
                   </p>
