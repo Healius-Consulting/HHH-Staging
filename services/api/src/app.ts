@@ -942,10 +942,16 @@ const orderSchema = z.object({
   prescriptions: z.array(orderPrescriptionSchema).max(20).default([]),
   dispensingFeePence: z.number().int().nonnegative().max(10_000).default(0),
   currency: z.literal('GBP').default('GBP'),
-  // Accepted during the compatibility window, but never trusted. The server
-  // snapshots the pharmacy setting below.
   paymentRoute: z.enum(['manual', 'worldpay']).optional(),
+  redoContext: z.object({
+    originalOrderId: z.union([idSchema, z.number()]),
+    isPaidRedo: z.boolean().default(true),
+    originalTotalPence: z.number().int().nonnegative().optional(),
+    priceDifferencePence: z.number().int().default(0),
+    requireCuraleafAuth: z.boolean().default(true),
+  }).optional(),
 });
+
 
 function normalisedPatientName(value: string) {
   return value
@@ -1373,9 +1379,11 @@ app.post('/v1/portal/orders', async (request, response, next) => {
         shippingPence,
       },
       fulfilmentMethod: 'patient_collection',
-      paymentStatus: 'pending',
+      paymentStatus: input.redoContext?.isPaidRedo ? 'paid' : 'pending',
       fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus,
+      redoContext: input.redoContext,
     });
+
     await audit(request, 'order.created', {
       organisationId,
       recordId: record.id,
@@ -1390,9 +1398,72 @@ app.post('/v1/portal/orders', async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+app.get('/v1/portal/orders/:id/evaluate-28day-expiry', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId as string);
+    const orderId = request.params.id;
+    const order = await getTenantRecord('orders', orderId, organisationId);
+
+    const isPaid = order.paymentStatus === 'paid' || order.payment?.status === 'paid';
+    const isDispatched = ['dispatched', 'in_transit'].includes(order.fulfilmentStatus) || order.curaleafPoState === 'DISPATCHED';
+    const isArrivedAtPharmacy = order.fulfilmentStatus === 'received_at_pharmacy';
+
+    let recommendation: 'cancel_and_redo' | 'awaiting_delivery_redo' | 'ready_to_collect_redo' = 'cancel_and_redo';
+    if (isPaid) {
+      if (isArrivedAtPharmacy) recommendation = 'ready_to_collect_redo';
+      else if (isDispatched) recommendation = 'awaiting_delivery_redo';
+      else recommendation = 'cancel_and_redo';
+    }
+
+    response.json({
+      orderId,
+      isPaid,
+      isDispatched,
+      isArrivedAtPharmacy,
+      recommendation,
+      evaluatedAt: nowIso(),
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/orders/:id/cancel-and-archive', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.body.organisationId);
+    const orderId = request.params.id;
+    const orderRef = firestore.collection('orders').doc(orderId);
+    const orderSnap = await orderRef.get();
+
+    if (!orderSnap.exists) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+    const orderData = orderSnap.data()!;
+
+    // Cancel active Curaleaf purchase order if present and not dispatched
+    if (orderData.curaleafPurchaseOrderId && !['DISPATCHED', 'SHIPPED'].includes(orderData.curaleafPoState)) {
+      try {
+        await curaleafRequest(organisationId, `/v1/purchase-orders/${orderData.curaleafPurchaseOrderId}`, {
+          method: 'DELETE',
+        });
+      } catch (curaleafErr) {
+        console.warn(`Curaleaf purchase order deletion warning for order ${orderId}:`, curaleafErr);
+      }
+    }
+
+    await orderRef.update({
+      isExpired: true,
+      status: 'archived',
+      archivedAt: nowIso(),
+      archivedReason: '28-day prescription cycle expired',
+      updatedAt: nowIso(),
+    });
+
+    await audit(request, 'order.archived_28day_cycle', { organisationId, orderId });
+    response.json({ success: true, orderId, status: 'archived' });
+  } catch (error) { next(error); }
+});
+
 /* ========================================================================== */
 /* Post-Payment Placement Engine & Refund Routes                              */
 /* ========================================================================== */
+
 
 app.post('/v1/portal/orders/:id/placement/absorb', async (request, response, next) => {
   try {

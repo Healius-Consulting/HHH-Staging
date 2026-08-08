@@ -80,7 +80,8 @@ export default function CreateOrder() {
     { label: 'Approved patient linked', complete: Boolean(activeOrder.patientId) },
     { label: 'Prescription copies attached', complete: activeOrder.prescriptions.every(rx => Boolean(rx.copyFileName) && (!requiresLiveCuraleafEvidence || Boolean(rx.fileId))) },
     { label: 'Prescription source verified', complete: activeOrder.prescriptions.every(rx => rx.entryMode === 'manual' || Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
-    { label: 'Prescription details complete', complete: activeOrder.prescriptions.every(rx => Boolean(rx.serialNumber?.trim() && rx.issueDate && rx.prescriber.trim() && (rx.entryMode === 'manual' ? rx.prescriberPin?.trim() : rx.prescriberId))) },
+    { label: 'Prescription details complete', complete: activeOrder.prescriptions.every(rx => Boolean(rx.issueDate && rx.prescriber.trim() && (rx.entryMode === 'manual' ? rx.prescriberPin?.trim() : rx.prescriberId))) },
+
     { label: 'Patient identity matches', complete: Boolean(patient) && activeOrder.prescriptions.every(rx => checkPatientIdentity({ selectedName: patient!.name, selectedDob: patient!.dob, prescriptionName: rx.curaleafPatientName, prescriptionDob: rx.curaleafPatientDob }).status === 'match') },
     { label: 'Formulary medicines selected', complete: activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => item.formulaId && item.unitsNeededCount)) },
   ] : [];
@@ -417,7 +418,52 @@ export default function CreateOrder() {
     setPatientSearchOpen(false);
   };
 
+  const unresolvedOrderForPatient = useMemo(() => {
+    if (!patient) return null;
+    const now = new Date();
+    return state.orders.find(order => {
+      if (order.organisationId !== state.currentOrganisationId || order.patientId !== patient.id) return false;
+      const entryDate = new Date(order.date);
+      const expiryDate = new Date(entryDate);
+      expiryDate.setDate(expiryDate.getDate() + 28);
+      const isExpired = now > expiryDate;
+      const hasRejection = order.quoteReview !== undefined;
+      return isExpired || hasRejection;
+    }) ?? null;
+
+  }, [patient, state.currentOrganisationId, state.orders]);
+
+  const handleRedoPrescription = (unresolvedOrder: typeof unresolvedOrderForPatient) => {
+    if (!unresolvedOrder || !activeOrder) return;
+    const itemsToPrefill = unresolvedOrder.prescriptions.flatMap(rx => rx.items);
+    if (itemsToPrefill.length && activeOrder.prescriptions.length) {
+      const targetRx = activeOrder.prescriptions[0];
+      itemsToPrefill.forEach(item => {
+        dispatch({
+          type: 'ADD_ITEM_TO_RX',
+          orderId: activeOrder.id,
+          rxId: targetRx.id,
+          item: {
+            productId: item.productId,
+            formulaId: item.formulaId,
+            name: item.name,
+            qty: item.qty,
+            unitsNeededCount: item.unitsNeededCount,
+            cost: item.cost,
+            retail: item.retail,
+          },
+        });
+      });
+      dispatch({
+        type: 'ADD_TOAST',
+        message: `Pre-filled ${itemsToPrefill.length} prescribed items from Order #${unresolvedOrder.id}. Please attach the new prescription PDF for mandatory Curaleaf API authentication.`,
+        toastType: 'info',
+      });
+    }
+  };
+
   const beginPatientChange = () => {
+
     setPatientQuery('');
     setPatientActiveIndex(0);
     setPatientSearchOpen(true);
@@ -561,6 +607,31 @@ export default function CreateOrder() {
               </div>
             )}
           </section>
+
+          {/* Unresolved Expired / Rejected Orders Banner */}
+          {patient && unresolvedOrderForPatient ? (
+            <div className="alert-box alert-warning" style={{ margin: '12px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <AlertTriangle size={20} />
+                <div>
+                  <strong>Unresolved Order #{unresolvedOrderForPatient.id} ({unresolvedOrderForPatient.quoteReview ? 'Curaleaf Exception / Rejected' : '28-Day Prescription Expired'})</strong>
+
+                  <p style={{ margin: 0, fontSize: '0.85rem' }}>
+                    {unresolvedOrderForPatient.prescriptions.flatMap(r => r.items).length} prescribed item(s) from previous cycle. Attach new prescription PDF for mandatory Curaleaf authentication.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="button button-secondary button-sm"
+                onClick={() => handleRedoPrescription(unresolvedOrderForPatient)}
+              >
+                <RefreshCw size={14} />
+                <span>Deal with Order / Redo Prescription</span>
+              </button>
+            </div>
+          ) : null}
+
 
           <button type="button" className="rx-mobile-review-bar" onClick={() => document.getElementById('rx-order-review')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
             <span><small>Patient total</small><strong>{money(orderRevenue(activeOrder))}</strong></span>

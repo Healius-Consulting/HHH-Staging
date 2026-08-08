@@ -46,7 +46,8 @@ export default function AwaitingPayment() {
     if (!order.backendId) throw new Error('This order has not been saved to the HHH backend.');
     let pendingAcceptance = 0;
     for (const rx of order.prescriptions.filter(prescription => !prescription.placed)) {
-      if (!rx.fileId || !rx.serialNumber || !rx.issueDate) throw new Error(`Rx ${rx.id} does not have a complete prescription record.`);
+      if (!rx.fileId || !rx.issueDate) throw new Error(`Rx ${rx.id} does not have a complete prescription record.`);
+
       if (rx.items.some(item => !item.formulaId || !item.unitsNeededCount)) throw new Error(`Rx ${rx.id} has a product without a formula ID or prescribed-unit count.`);
       const result = rx.entryMode === 'manual'
         ? await submitCuraleafManualPrescription({
@@ -54,7 +55,8 @@ export default function AwaitingPayment() {
             orderId: order.backendId,
             subOrderId: String(rx.id),
             fileId: rx.fileId,
-            serialNumber: rx.serialNumber,
+            serialNumber: rx.serialNumber || '',
+
             issueDate: rx.issueDate,
             prescriber: {
               pin: rx.prescriberPin?.trim() ?? '',
@@ -75,7 +77,8 @@ export default function AwaitingPayment() {
             orderId: order.backendId,
             subOrderId: String(rx.id),
             fileId: rx.fileId,
-            serialNumber: rx.serialNumber,
+            serialNumber: rx.serialNumber || '',
+
           });
       if (result.status !== 'purchase_order_submitted') pendingAcceptance += 1;
       dispatch({ type: 'CONFIRM_CURALEAF_SUBMISSION', orderId: order.id, rxId: rx.id, customerReference: result.customerReference });

@@ -5,6 +5,7 @@ import {
   Clock,
   Package,
   Printer,
+  RefreshCw,
   Search,
   ShieldAlert,
   XCircle,
@@ -32,7 +33,8 @@ interface FlatSubOrder {
 }
 
 export default function Orders() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
+
   const [activeTab, setActiveTab] = useState<CustomerOrdersTab>('needs-action');
   const [query, setQuery] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -278,7 +280,23 @@ export default function Orders() {
                     Patient: <strong>{selected.patientName}</strong> · Placed {fmtDate(selected.date)}
                   </p>
                 </div>
-                <div className="detail-actions">
+                <div className="detail-actions" style={{ display: 'flex', gap: '8px' }}>
+                  {(selected.isExpired || selected.placementState === 'CANCELLED_REFUNDED' || selected.rejectionReason) && (
+                    <button
+                      type="button"
+                      className="button button-primary button-sm"
+                      onClick={() => {
+                        const targetOrder = state.orders.find(o => o.id === selected.orderId);
+                        if (targetOrder) {
+                          dispatch({ type: 'NEW_ORDER' });
+                          dispatch({ type: 'SET_SCREEN', screen: 'create' });
+                        }
+                      }}
+                    >
+                      <RefreshCw size={14} />
+                      <span>Deal with Order / Redo Prescription</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="button button-secondary button-sm"
@@ -288,6 +306,7 @@ export default function Orders() {
                     <span>Print label</span>
                   </button>
                 </div>
+
               </header>
 
               {/* Status Banner */}

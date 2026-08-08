@@ -4,7 +4,8 @@ import type { CatalogueItem, LineItem, Prescription } from '../context/AppContex
 import { money } from '../context/AppContext';
 import './ManualPrescriptionEditor.css';
 
-type MetadataField = 'serialNumber' | 'issueDate' | 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber';
+type MetadataField = 'issueDate' | 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber';
+
 export type ManualPrescriptionEditorView = 'details' | 'formulary' | 'all';
 type CatalogueTypeFilter = 'all' | CatalogueItem['type'];
 

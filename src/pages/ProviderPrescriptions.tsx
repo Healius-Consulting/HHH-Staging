@@ -135,10 +135,10 @@ export default function ProviderPrescriptions() {
             {filtered.map(prescription => (
               <article className="provider-prescription-row" role="row" key={prescription.id}>
                 <span className="provider-prescription-row__identity" role="cell">
-                  <small>Serial number</small>
-                  <strong>{prescription.serialNumber}</strong>
-                  <code>{prescription.id}</code>
+                  <small>Curaleaf Rx ID</small>
+                  <strong>{prescription.id}</strong>
                 </span>
+
                 <span role="cell">
                   <small>Prescriber</small>
                   <strong>{prescription.prescriberName}</strong>

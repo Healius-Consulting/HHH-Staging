@@ -202,9 +202,25 @@ export interface CuraleafPrescriptionItem {
   unitsNeededCount: number;
 }
 
+export interface ExpiryCheckState {
+  isPaid: boolean;
+  isDispatched: boolean;
+  isArrivedAtPharmacy: boolean;
+  recommendation: 'cancel_and_redo' | 'awaiting_delivery_redo' | 'ready_to_collect_redo';
+}
+
+export interface RedoOrderContext {
+  originalOrderId: string;
+  isPaidRedo: boolean;
+  prefilledLineItems: Array<{ packId: string; quantity: number }>;
+  originalTotalPence: number;
+  priceDifferencePence: number;
+  requireCuraleafAuth: true;
+}
+
 export interface CuraleafPrescription {
   id: string;
-  serialNumber: string;
+  serialNumber?: string;
   issueDate: string;
   expiryDate: string;
   prescriberId: string;
@@ -237,9 +253,10 @@ export interface PortalOrderInput {
     fileId: string;
     clinicScanId?: string;
     curaleafPrescriptionId?: string;
-    serialNumber: string;
+    serialNumber?: string;
     issueDate: string;
     expiryDate?: string;
+
     patient: {
       name: string;
       dob: string;
