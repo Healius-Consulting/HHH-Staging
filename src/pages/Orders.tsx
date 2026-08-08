@@ -35,7 +35,7 @@ interface FlatSubOrder {
 export default function Orders() {
   const { state, dispatch } = useApp();
 
-  const [activeTab, setActiveTab] = useState<CustomerOrdersTab>('needs-action');
+  const [activeTab, setActiveTab] = useState<CustomerOrdersTab>('active');
   const [query, setQuery] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [printingRx, setPrintingRx] = useState<{ rx: Prescription; patientName: string } | null>(null);
@@ -152,15 +152,6 @@ export default function Orders() {
 
   return (
     <div className="page-body orders-page">
-      <header className="page-header-block">
-        <div>
-          <h1>Customer Orders Workspace</h1>
-          <p>Monitor real-time post-payment placement, margin holds, stock retries, expired prescriptions, and cancellations.</p>
-        </div>
-      </header>
-
-
-      {/* Primary Customer Orders Tabs */}
       <nav className="orders-workspace-tabs" aria-label="Customer Orders Views">
         <button
           type="button"

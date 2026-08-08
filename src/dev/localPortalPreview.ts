@@ -26,7 +26,7 @@ export const localPreviewStaff: AuthenticatedStaff | null = import.meta.env.DEV 
         email: 'owner@local.pharmacy',
         name: 'Alex Morgan',
         role: 'pharmacy_staff',
-        organisationId: '11111111-1111-4111-8111-111111111111',
+        organisationId: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126',
         emailVerified: true,
         mfaEnrolled: false,
       }

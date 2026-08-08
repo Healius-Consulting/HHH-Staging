@@ -1,18 +1,19 @@
+import { Plus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import WorkspacePageHeader from './WorkspacePageHeader';
 
 const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   home: {
-    title: 'Good morning',
-    subtitle: 'Your operational position and the work that needs attention today.',
+    title: 'Pharmacy overview',
+    subtitle: 'Daily operational position, urgent follow-ups, and active pharmacy workload.',
   },
   referrals: {
-    title: 'Patient onboarding',
-    subtitle: 'Track patients attributed to your pharmacy while Holistic Health Hub completes its review and onboarding decision.',
+    title: 'Patients hub',
+    subtitle: 'Approved patients, intake eligibility submissions, and clinical history for this pharmacy.',
   },
   formulary: {
     title: 'Curaleaf catalogue',
-    subtitle: 'Review Curaleaf products, pack sizes and recommended patient prices for this pharmacy.',
+    subtitle: 'Browse products, pack sizes, and recommended patient prices supplied by Curaleaf.',
   },
   create: {
     title: 'Prescription workspace',
@@ -23,44 +24,58 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
     subtitle: 'Track active Worldpay payment requests and review cleared transaction logs.',
   },
   'provider-prescriptions': {
-    title: 'Provider prescriptions',
-    subtitle: 'Review the prescription records and assignment states returned for this pharmacy’s Curaleaf account.',
+    title: 'Customer orders',
+    subtitle: 'Monitor post-payment placement, margin holds, stock retries, expired prescriptions, and cancellations.',
   },
   orders: {
-    title: 'Supplier order fulfilment',
-    subtitle: 'Track B2B orders sent to Curaleaf, confirm pharmacy receipt, and retrieve invoices.',
+    title: 'Customer orders',
+    subtitle: 'Monitor post-payment placement, margin holds, stock retries, expired prescriptions, and cancellations.',
   },
   patients: {
-    title: 'Patient directory',
-    subtitle: 'Search the patient index and view order histories, clinical files, and logged activities.',
+    title: 'Patients hub',
+    subtitle: 'Approved patients, intake eligibility submissions, and clinical history for this pharmacy.',
   },
   finance: {
     title: 'Prescription financials',
-    subtitle: 'Compare paid patient revenue, Curaleaf wholesale costs, dispensing fees and pharmacy contribution.',
+    subtitle: 'Compare paid patient revenue, Curaleaf wholesale costs, dispensing fees, and pharmacy contribution.',
   },
   resources: {
-    title: 'Forms and resources',
-    subtitle: 'Copy the pharmacy-specific patient link, save its QR code, or hand a website pack to developers.',
+    title: 'Settings & assets',
+    subtitle: 'Pharmacy profile, payment routes, operational readiness, and intake QR assets.',
   },
   settings: {
-    title: 'Organisation',
-    subtitle: 'Review your Worldpay connection, dispensing-charge policy, enabled modules and go-live requirements.',
+    title: 'Settings & assets',
+    subtitle: 'Pharmacy profile, payment routes, operational readiness, and intake QR assets.',
   },
 };
 
 export default function Header() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const organisation = state.organisations.find((org) => org.id === state.currentOrganisationId) ?? state.organisations[0];
   const info = SCREEN_HEADERS[state.screen] || {
     title: 'HHH Portal',
     subtitle: 'Ordering & Payments Interface',
   };
 
-  return <WorkspacePageHeader
-    section="Workspace"
-    context={organisation.tradingName}
-    title={info.title}
-    subtitle={info.subtitle}
-    contextControl={<div className="header-context" aria-label={`Current pharmacy status: ${organisation.status}`}><span>Account</span><span className={`tenant-status tenant-status--${organisation.status}`}>{organisation.status}</span></div>}
-  />;
+  const homeActions = state.screen === 'home' ? (
+    <button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'create' })}>
+      <Plus size={15} /> Start new prescription
+    </button>
+  ) : null;
+
+  return (
+    <WorkspacePageHeader
+      section="Workspace"
+      context={organisation.tradingName}
+      title={info.title}
+      subtitle={info.subtitle}
+      actions={homeActions}
+      contextControl={
+        <div className="header-context" aria-label={`Current pharmacy status: ${organisation.status}`}>
+          <span>Account</span>
+          <span className={`tenant-status tenant-status--${organisation.status}`}>{organisation.status}</span>
+        </div>
+      }
+    />
+  );
 }

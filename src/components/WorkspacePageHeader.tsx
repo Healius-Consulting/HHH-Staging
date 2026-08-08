@@ -9,10 +9,11 @@ interface WorkspacePageHeaderProps {
   title: string;
   subtitle: string;
   contextControl?: ReactNode;
+  actions?: ReactNode;
   commandLabel?: string;
 }
 
-export default function WorkspacePageHeader({ section, context, title, subtitle, contextControl, commandLabel = 'Quick find' }: WorkspacePageHeaderProps) {
+export default function WorkspacePageHeader({ section, context, title, subtitle, contextControl, actions, commandLabel = 'Quick find' }: WorkspacePageHeaderProps) {
   return (
     <header className="app-header workspace-page-header">
       <div className="brand-text">
@@ -21,6 +22,7 @@ export default function WorkspacePageHeader({ section, context, title, subtitle,
         <p>{subtitle}</p>
       </div>
       <div className="app-header__actions">
+        {actions}
         <button className="header-command-launcher" onClick={openCommandPalette} aria-label="Open command menu"><Search size={14} /><span>{commandLabel}</span><kbd>⌘K</kbd></button>
         {contextControl}
         <AccessibilityPanel />

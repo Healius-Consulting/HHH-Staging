@@ -250,15 +250,6 @@ export default function Patients() {
 
   return (
     <div className="page-body" style={{ position: 'relative' }}>
-      <header className="page-header-block">
-        <div>
-          <h1>Patients Hub</h1>
-          <p>Directory of approved pharmacy patients, intake eligibility submissions, and clinical history.</p>
-        </div>
-      </header>
-
-      {/* ══ Metrics Grid / Tab Switchers ══ */}
-
       <div className="filter-grid" role="group" aria-label="Filter patient directory">
         <button type="button" aria-pressed={activeTab === 'all'} className={`card card-surface filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
           <div className="filter-card__head">

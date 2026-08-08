@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, ListTodo, History, FileText, Plus } from 'lucide-react';
+import { Activity, ArrowRight, ListTodo, History, FileText } from 'lucide-react';
 import { orderRevenue, useApp } from '../context/AppContext';
 import SummaryTiles from '../components/SummaryTiles';
 import { compactPatientName } from '../utils/patientName';
@@ -115,18 +115,13 @@ export default function Dashboard() {
 
   return (
     <div className="page-body operations-dashboard">
-      <header className="page-header-block">
-        <div>
-          <h1>Pharmacy Overview</h1>
-          <p>{totalUrgent > 0 ? `${totalUrgent} urgent item${totalUrgent === 1 ? '' : 's'} require attention today.` : 'Daily operational position and active pharmacy workload.'}</p>
-        </div>
-        <button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'create' })}>
-          <Plus size={15} /> Start new prescription
-        </button>
-      </header>
+      {totalUrgent > 0 && (
+        <p className="page-status-note" role="status">
+          <strong>{totalUrgent}</strong> urgent item{totalUrgent === 1 ? '' : 's'} require attention today.
+        </p>
+      )}
 
       <section className="operations-brief">
-
         <SummaryTiles label="Pharmacy workflow summary" items={[
           { label: 'Patient review', value: newReferrals, detail: 'awaiting decisions', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'referrals' }) },
           { label: 'Payments', value: awaitingPayment, detail: 'awaiting action', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'review' }) },

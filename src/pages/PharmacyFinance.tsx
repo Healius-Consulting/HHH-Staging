@@ -115,22 +115,14 @@ export default function PharmacyFinance() {
 
   return (
     <div className="page-body pharmacy-finance">
-      <header className="page-header-block">
-        <div>
-          <h1>Prescription Financials</h1>
-          <p>Track prescription revenue, wholesale margin performance, and dispensing fees retained by this pharmacy.</p>
-        </div>
-      </header>
-
       <section className="pharmacy-finance__intro">
-
         <div>
-          <p className="section-label">Pharmacy financials</p>
-          <h2>Understand the contribution from paid prescriptions</h2>
-          <p>Compare Curaleaf patient prices with quoted wholesale costs and the dispensing charges retained by this pharmacy.</p>
+          <p className="section-label">Reporting window</p>
+          <h2>{PERIOD_LABELS[period]}</h2>
+          <p>Paid prescription revenue against quoted wholesale cost and retained dispensing fees.</p>
         </div>
         <label className="pharmacy-finance__period">
-          <span>Reporting period</span>
+          <span>Period</span>
           <select value={period} onChange={event => setPeriod(event.target.value as Period)}>
             {(Object.entries(PERIOD_LABELS) as Array<[Period, string]>).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
