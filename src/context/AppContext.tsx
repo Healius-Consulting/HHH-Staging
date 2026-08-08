@@ -312,30 +312,31 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
   {
-    id: '70913a30-71c3-4a41-952e-d532927af58c', slug: 'healius-training-pharmacy', referralToken: 'healius-tr-9k2p',
-    name: 'Healius Training Pharmacy', tradingName: 'Healius Training Pharmacy', logoText: 'HT',
-    gphcNumber: 'TRAINING-PHARM1', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'shaylen@healius.co.uk', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
-    address: 'Training Branch 1, United Kingdom', websiteDomains: ['training-pharm1.co.uk'],
+    id: '70913a30-71c3-4a41-952e-d532927af58c', slug: 'primary-branch', referralToken: 'primary-br-9k2p',
+    name: 'Primary Branch', tradingName: 'Primary Branch', logoText: 'PB',
+    gphcNumber: 'TRAINING-PHARM1', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'spatel@healiusconsulting.com', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
+    address: 'Primary Training Branch, United Kingdom', websiteDomains: ['training-pharm1.co.uk'],
     status: 'live', staffCount: 2,
     platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
-    brand: { primary: '#0f766e', portalName: 'Healius Training Pharmacy' },
+    brand: { primary: '#0f766e', portalName: 'Primary Branch' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
   {
-    id: 'f486a221-2236-44a5-b072-f06de399ab0e', slug: 'testpharm-dispensary', referralToken: 'testpharm-tr-4b1',
-    name: 'TestPharm Dispensary', tradingName: 'TestPharm Dispensary', logoText: 'TP',
-    gphcNumber: 'TRAINING-PHARM2', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'testpharm@local.pharmacy', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
-    address: 'Training Branch 2, United Kingdom', websiteDomains: ['training-pharm2.co.uk'],
+    id: 'f486a221-2236-44a5-b072-f06de399ab0e', slug: 'alternate-branch', referralToken: 'alternate-br-4b1',
+    name: 'Alternate Branch', tradingName: 'Alternate Branch', logoText: 'AB',
+    gphcNumber: 'TRAINING-PHARM2', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'shaylenpatel.locum@hotmail.com', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
+    address: 'Alternate Training Branch, United Kingdom', websiteDomains: ['training-pharm2.co.uk'],
     status: 'live', staffCount: 2,
     platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
-    brand: { primary: '#315b7d', portalName: 'TestPharm Dispensary' },
+    brand: { primary: '#1e40af', portalName: 'Alternate Branch' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
 ];
+
 
 
 const SEED_CRM: CRMPatient[] = [
