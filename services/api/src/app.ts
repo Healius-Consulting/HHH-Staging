@@ -14,13 +14,14 @@ import { fetchCuraleafAccountSnapshot } from './curaleaf-mirror.js';
 import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
 import { cached, invalidateCache } from './cache.js';
-import { createRecord, getRecord, getTenantRecord, invalidateCollectionCache, listTenantRecords, updateTenantRecord } from './repository.js';
+import { createRecord, getRecord, getTenantRecord, invalidateCollectionCache, listTenantRecords, listTenantRecordsByField, updateTenantRecord } from './repository.js';
 import { readIntegrationSecret, writeIntegrationSecret } from './secrets.js';
 import type { FulfilmentStatus, IntegrationName, PaymentStatus } from './types.js';
 import { createHostedPaymentSession, reconcileWorldpayPayment, type WorldpayCredential, verifyWorldpaySignature } from './worldpay.js';
 import { activatePatientForOrder, completeReferral } from './patient-finance.js';
 import { adminReferralFinance, pharmacyPrescriptionFinance } from './finance-reporting.js';
 import { allocateDispensingFee, calculateExpiryBoundaryDate, calculatePrescriptionExpiry, recordPlacementLedgerEvent, rankSubstitutions, satisfiesMarginFloor } from './placement-engine.js';
+import { enrichOrderRecord, evaluateOrderCycle } from './order-cycle.js';
 import { refundAdapter } from './refund-adapter.js';
 import type { Company, CuraleafValidationRecord, PortalOrganisation, PrescriptionPlacement } from './types.js';
 
@@ -171,12 +172,26 @@ function curaleafTestEnvironmentOnly(_request: Request, response: Response, next
 
 async function platformCuraleafCatalogue() {
   return cached('curaleaf:catalog:platform', 5 * 60_000, async () => {
-    const [formulaPage, productPage] = await Promise.all([
-      curaleafPlatformList<Record<string, unknown>>('/v1/formulas/', 'formulas'),
-      curaleafPlatformList<Record<string, unknown>>('/v1/products/', 'products'),
-    ]);
+    // Sequential lists respect soft ~1 req/s Curaleaf spacing.
+    const formulaPage = await curaleafPlatformList<Record<string, unknown>>('/v1/formulas/', 'formulas');
+    const productPage = await curaleafPlatformList<Record<string, unknown>>('/v1/products/', 'products');
     return {
       environment: 'test' as const,
+      fetchedAt: timestamp(),
+      formulas: formulaPage.records,
+      products: productPage.records,
+      formulaTotal: formulaPage.totalRecordCount,
+      productTotal: productPage.totalRecordCount,
+    };
+  });
+}
+
+async function tenantCuraleafCatalogue(organisationId: string) {
+  return cached(`curaleaf:catalog:${organisationId}`, 5 * 60_000, async () => {
+    const formulaPage = await curaleafList<Record<string, unknown>>(organisationId, '/v1/formulas/', 'formulas');
+    const productPage = await curaleafList<Record<string, unknown>>(organisationId, '/v1/products/', 'products');
+    return {
+      environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' as const : 'production' as const,
       fetchedAt: timestamp(),
       formulas: formulaPage.records,
       products: productPage.records,
@@ -1229,7 +1244,11 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/scan', async (request, 
       }
       throw error;
     }
-    const productPage = await curaleafList<ClinicScanProduct>(organisationId, '/v1/products/', 'products');
+    const catalogue = await tenantCuraleafCatalogue(organisationId);
+    const productPage = {
+      records: catalogue.products as ClinicScanProduct[],
+      totalRecordCount: catalogue.productTotal,
+    };
     const matchedItems = matchClinicPrescriptionPacks(scan.prescription.items, productPage.records);
     const { pin: _unusedPin, ...prescriber } = scan.prescriber;
     const result: StoredClinicScanResult = { ...scan, prescriber, matchedItems };
@@ -1248,7 +1267,40 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/scan', async (request, 
   }
 });
 
-app.get('/v1/portal/orders', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('orders', organisationId); response.json(records); } catch (error) { next(error); } });
+app.get('/v1/portal/orders', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    const patientId = typeof request.query.patientId === 'string' && request.query.patientId.trim()
+      ? idSchema.parse(request.query.patientId)
+      : null;
+    const unresolvedOnly = request.query.unresolvedOnly === 'true' || request.query.unresolvedOnly === '1';
+    const records = patientId
+      ? await listTenantRecordsByField('orders', organisationId, 'patientId', patientId)
+      : await listTenantRecords('orders', organisationId);
+    const enriched = records
+      .map(record => enrichOrderRecord(record as Record<string, unknown>))
+      .filter(record => {
+        if (unresolvedOnly && !record.redoEligible) return false;
+        return true;
+      });
+    response.json(enriched);
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/portal/patients/:patientId/unresolved-orders', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    const patientId = idSchema.parse(request.params.patientId);
+    await getTenantRecord('patients', patientId, organisationId);
+    const records = await listTenantRecordsByField('orders', organisationId, 'patientId', patientId);
+    const unresolved = records
+      .map(record => enrichOrderRecord(record as Record<string, unknown>))
+      .filter(record => record.redoEligible)
+      .sort((left, right) => String(right.createdAt ?? '').localeCompare(String(left.createdAt ?? '')));
+    response.json(unresolved);
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/orders', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.body.organisationId);
@@ -1262,6 +1314,43 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       }
     }
     const patient = await getTenantRecord('patients', input.patientId, organisationId);
+    let authoritativeRedoContext: {
+      originalOrderId: string;
+      isPaidRedo: boolean;
+      originalTotalPence: number;
+      priceDifferencePence: number;
+      requireCuraleafAuth: true;
+      unresolvedReason: 'expired' | 'rejected';
+      recommendation: 'cancel_and_redo' | 'awaiting_delivery_redo' | 'ready_to_collect_redo';
+      sourceWasExpired: boolean;
+    } | null = null;
+    if (input.redoContext) {
+      const originalOrderId = String(input.redoContext.originalOrderId);
+      const originalOrder = await getTenantRecord('orders', originalOrderId, organisationId);
+      if (originalOrder.patientId !== input.patientId) {
+        throw new HttpError(409, 'Redo orders must keep the same patient as the unresolved source order.', 'REDO_PATIENT_MISMATCH');
+      }
+      if (originalOrder.redoneByOrderId) {
+        throw new HttpError(409, 'That order has already been redone.', 'REDO_ALREADY_COMPLETED');
+      }
+      const evaluation = evaluateOrderCycle(originalOrder as Record<string, unknown>);
+      if (!evaluation.unresolvedReason || !evaluation.redoEligible) {
+        throw new HttpError(409, 'Only archived 28-day or Curaleaf-rejected orders can be redone.', 'REDO_NOT_ELIGIBLE');
+      }
+      if (input.redoContext.isPaidRedo && !evaluation.isPaid) {
+        throw new HttpError(409, 'Payment carry-over is only allowed when the original order was paid.', 'REDO_PAYMENT_CARRYOVER_INVALID');
+      }
+      authoritativeRedoContext = {
+        originalOrderId,
+        isPaidRedo: evaluation.isPaid,
+        originalTotalPence: Number(originalOrder.totalPence ?? input.redoContext.originalTotalPence ?? 0),
+        priceDifferencePence: input.redoContext.priceDifferencePence ?? 0,
+        requireCuraleafAuth: true,
+        unresolvedReason: evaluation.unresolvedReason,
+        recommendation: evaluation.recommendation,
+        sourceWasExpired: Boolean(originalOrder.isExpired) || evaluation.unresolvedReason === 'expired',
+      };
+    }
     const prescriptions = await Promise.all(input.prescriptions.map(async prescription => {
       if (!prescription.clinicScanId) {
         requireMatchingPatient(prescription.patient, patient);
@@ -1298,14 +1387,18 @@ app.post('/v1/portal/orders', async (request, response, next) => {
     if (prescribedItems.length && !samePackQuantities(packQuantities(input.lineItems), packQuantities(prescribedItems))) {
       throw new HttpError(400, 'The order lines must exactly match the products and quantities assigned to its prescriptions.', 'ORDER_ITEM_MISMATCH');
     }
-    const [productPage, rawQuote] = await Promise.all([
-      curaleafList<{ id: string; formulaId: string; formulaName: string; patientPackPrice: string; state: string }>(organisationId, '/v1/products/', 'products'),
+    const [catalogue, rawQuote] = await Promise.all([
+      tenantCuraleafCatalogue(organisationId),
       curaleafRequest<unknown>(organisationId, '/v1/quotes/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: input.lineItems }),
       }),
     ]);
+    const productPage = {
+      records: catalogue.products as Array<{ id: string; formulaId: string; formulaName: string; patientPackPrice: string; state: string }>,
+      totalRecordCount: catalogue.productTotal,
+    };
     const parsedQuote = curaleafQuoteSchema.safeParse(rawQuote);
     if (!parsedQuote.success) {
       throw new HttpError(502, 'Curaleaf returned an invalid quote response.', 'INVALID_SUPPLIER_QUOTE');
@@ -1361,7 +1454,7 @@ app.post('/v1/portal/orders', async (request, response, next) => {
     }, 0);
     const productTotalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, 0);
     const totalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, input.dispensingFeePence);
-    const { paymentRoute: _ignoredRequestedRoute, ...authoritativeInput } = input;
+    const { paymentRoute: _ignoredRequestedRoute, redoContext: _ignoredClientRedo, ...authoritativeInput } = input;
     const record = await createRecord('orders', {
       ...authoritativeInput,
       prescriptions,
@@ -1379,10 +1472,21 @@ app.post('/v1/portal/orders', async (request, response, next) => {
         shippingPence,
       },
       fulfilmentMethod: 'patient_collection',
-      paymentStatus: input.redoContext?.isPaidRedo ? 'paid' : 'pending',
+      paymentStatus: authoritativeRedoContext?.isPaidRedo ? 'paid' : 'pending',
       fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus,
-      redoContext: input.redoContext,
+      status: 'open',
+      redoContext: authoritativeRedoContext,
+      redoOfOrderId: authoritativeRedoContext?.originalOrderId ?? null,
     });
+
+    if (authoritativeRedoContext) {
+      await updateTenantRecord('orders', authoritativeRedoContext.originalOrderId, organisationId, {
+        redoneByOrderId: record.id,
+        unresolvedClosedAt: timestamp(),
+        status: authoritativeRedoContext.unresolvedReason === 'expired' ? 'archived' : 'rejected',
+        isExpired: authoritativeRedoContext.sourceWasExpired,
+      });
+    }
 
     await audit(request, 'order.created', {
       organisationId,
@@ -1393,34 +1497,22 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       wholesaleProductPence,
       shippingPence,
       paymentRoute,
+      redoOfOrderId: authoritativeRedoContext?.originalOrderId ?? null,
+      isPaidRedo: authoritativeRedoContext?.isPaidRedo ?? false,
     });
-    response.status(201).json(record);
+    response.status(201).json(enrichOrderRecord(record as Record<string, unknown>));
   } catch (error) { next(error); }
 });
 
 app.get('/v1/portal/orders/:id/evaluate-28day-expiry', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.query.organisationId as string);
-    const orderId = request.params.id;
+    const orderId = idSchema.parse(request.params.id);
     const order = await getTenantRecord('orders', orderId, organisationId);
-
-    const isPaid = order.paymentStatus === 'paid' || order.payment?.status === 'paid';
-    const isDispatched = ['dispatched', 'in_transit'].includes(order.fulfilmentStatus) || order.curaleafPoState === 'DISPATCHED';
-    const isArrivedAtPharmacy = order.fulfilmentStatus === 'received_at_pharmacy';
-
-    let recommendation: 'cancel_and_redo' | 'awaiting_delivery_redo' | 'ready_to_collect_redo' = 'cancel_and_redo';
-    if (isPaid) {
-      if (isArrivedAtPharmacy) recommendation = 'ready_to_collect_redo';
-      else if (isDispatched) recommendation = 'awaiting_delivery_redo';
-      else recommendation = 'cancel_and_redo';
-    }
-
+    const evaluation = evaluateOrderCycle(order as Record<string, unknown>);
     response.json({
       orderId,
-      isPaid,
-      isDispatched,
-      isArrivedAtPharmacy,
-      recommendation,
+      ...evaluation,
       evaluatedAt: nowIso(),
     });
   } catch (error) { next(error); }
@@ -1429,34 +1521,69 @@ app.get('/v1/portal/orders/:id/evaluate-28day-expiry', async (request, response,
 app.post('/v1/portal/orders/:id/cancel-and-archive', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.body.organisationId);
-    const orderId = request.params.id;
-    const orderRef = firestore.collection('orders').doc(orderId);
-    const orderSnap = await orderRef.get();
+    const orderId = idSchema.parse(request.params.id);
+    const orderData = await getTenantRecord('orders', orderId, organisationId);
+    const evaluation = evaluateOrderCycle(orderData as Record<string, unknown>);
 
-    if (!orderSnap.exists) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
-    const orderData = orderSnap.data()!;
-
-    // Cancel active Curaleaf purchase order if present and not dispatched
-    if (orderData.curaleafPurchaseOrderId && !['DISPATCHED', 'SHIPPED'].includes(orderData.curaleafPoState)) {
-      try {
-        await curaleafRequest(organisationId, `/v1/purchase-orders/${orderData.curaleafPurchaseOrderId}`, {
-          method: 'DELETE',
-        });
-      } catch (curaleafErr) {
-        console.warn(`Curaleaf purchase order deletion warning for order ${orderId}:`, curaleafErr);
-      }
+    if (orderData.redoneByOrderId) {
+      throw new HttpError(409, 'That order has already been redone.', 'REDO_ALREADY_COMPLETED');
+    }
+    if (evaluation.isPaid && evaluation.recommendation !== 'cancel_and_redo') {
+      throw new HttpError(
+        409,
+        evaluation.recommendation === 'awaiting_delivery_redo'
+          ? 'This paid order is already in transit. Use the awaiting-delivery redo path instead of cancelling the purchase order.'
+          : 'This paid order has arrived at the pharmacy. Authenticate the new prescription and mark ready to collect instead of cancelling.',
+        'REDO_CANCEL_NOT_ALLOWED',
+      );
     }
 
-    await orderRef.update({
+    const purchaseOrderId = orderData.curaleaf?.purchaseOrderId ?? orderData.curaleafPurchaseOrderId ?? null;
+    let purchaseOrderCancelSupportCaseId: string | null = null;
+    // Curaleaf (Phil, 5 Aug 2026): PO cancel is CS-only — no DELETE API. Open a support case when a CREATED PO exists.
+    if (purchaseOrderId && String(orderData.curaleaf?.purchaseOrderState ?? orderData.curaleafPoState ?? '') === 'CREATED') {
+      const supportCaseId = createHash('sha256').update(`${organisationId}:${orderId}:purchase_order_cancellation:${purchaseOrderId}`).digest('hex');
+      const supportCase = firestore.collection('curaleafSupportCases').doc(supportCaseId);
+      if (!(await supportCase.get()).exists) {
+        await supportCase.create({
+          id: supportCaseId,
+          organisationId,
+          orderId,
+          reason: 'purchase_order_cancellation',
+          status: 'open',
+          note: '28-day cycle archive: request Curaleaf customer service to cancel the CREATED purchase order. No programmatic cancel API is available.',
+          prescriptionId: orderData.curaleaf?.prescriptionId ?? null,
+          purchaseOrderId,
+          openedBy: identity(request).uid,
+          openedByRole: identity(request).role,
+          openedAt: timestamp(),
+          createdAt: timestamp(),
+          updatedAt: timestamp(),
+        });
+        invalidateCollectionCache('curaleafSupportCases');
+      }
+      purchaseOrderCancelSupportCaseId = supportCaseId;
+    }
+
+    const updated = await updateTenantRecord('orders', orderId, organisationId, {
       isExpired: true,
       status: 'archived',
       archivedAt: nowIso(),
       archivedReason: '28-day prescription cycle expired',
+      fulfilmentStatus: evaluation.isPaid ? orderData.fulfilmentStatus : 'exception',
+      purchaseOrderCancelSupportCaseId,
       updatedAt: nowIso(),
     });
 
-    await audit(request, 'order.archived_28day_cycle', { organisationId, orderId });
-    response.json({ success: true, orderId, status: 'archived' });
+    await audit(request, 'order.archived_28day_cycle', {
+      organisationId,
+      orderId,
+      recommendation: evaluation.recommendation,
+      isPaid: evaluation.isPaid,
+      purchaseOrderCancelSupportCaseId,
+      curaleafPoDeleteSkipped: true,
+    });
+    response.json(enrichOrderRecord((updated ?? { ...orderData, id: orderId, isExpired: true, status: 'archived' }) as Record<string, unknown>));
   } catch (error) { next(error); }
 });
 
@@ -1884,20 +2011,7 @@ app.post('/v1/portal/integrations/curaleaf/training/quote', curaleafTestEnvironm
 app.get('/v1/portal/integrations/curaleaf/catalog', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.query.organisationId);
-    response.json(await cached(`curaleaf:catalog:${organisationId}`, 5 * 60_000, async () => {
-      const [formulaPage, productPage] = await Promise.all([
-        curaleafList<Record<string, unknown>>(organisationId, '/v1/formulas/', 'formulas'),
-        curaleafList<Record<string, unknown>>(organisationId, '/v1/products/', 'products'),
-      ]);
-      return {
-        environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production',
-        fetchedAt: timestamp(),
-        formulas: formulaPage.records,
-        products: productPage.records,
-        formulaTotal: formulaPage.totalRecordCount,
-        productTotal: productPage.totalRecordCount,
-      };
-    }));
+    response.json(await tenantCuraleafCatalogue(organisationId));
   } catch (error) { next(error); }
 });
 

@@ -54,3 +54,35 @@ export async function listTenantRecords(collection: string, pharmacyId: string, 
   });
 }
 
+/** Tenant list filtered by a single equality field (e.g. orders by patientId). */
+export async function listTenantRecordsByField(
+  collection: string,
+  pharmacyId: string,
+  field: string,
+  value: string,
+  limit = 200,
+) {
+  const cacheKey = `list:${collection}:${pharmacyId}:${field}:${value}:${limit}`;
+  return cached(cacheKey, LIST_TTL_MS, async () => {
+    const byOrg = await firestore
+      .collection(collection)
+      .where('organisationId', '==', pharmacyId)
+      .where(field, '==', value)
+      .limit(limit)
+      .get();
+    let docs = byOrg.docs;
+    if (docs.length === 0) {
+      const byPharmacy = await firestore
+        .collection(collection)
+        .where('pharmacyId', '==', pharmacyId)
+        .where(field, '==', value)
+        .limit(limit)
+        .get();
+      docs = byPharmacy.docs;
+    }
+    return docs
+      .map(document => document.data())
+      .sort((a, b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? '')));
+  });
+}
+

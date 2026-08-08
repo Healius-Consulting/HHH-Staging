@@ -278,6 +278,13 @@ export interface PortalOrderInput {
   }>;
   dispensingFeePence: number;
   currency: 'GBP';
+  redoContext?: {
+    originalOrderId: string | number;
+    isPaidRedo: boolean;
+    originalTotalPence?: number;
+    priceDifferencePence?: number;
+    requireCuraleafAuth?: true;
+  };
 }
 
 export interface PortalPatientRecord {
@@ -337,6 +344,26 @@ export interface PortalOrderRecord {
   paymentStatus: string;
   fulfilmentStatus: string;
   paymentId?: string;
+  status?: 'open' | 'archived' | 'rejected' | string;
+  isExpired?: boolean;
+  archivedAt?: string;
+  archivedReason?: string;
+  cycleStartedAt?: string;
+  cycleExpiresAt?: string;
+  unresolvedReason?: 'expired' | 'rejected' | null;
+  redoEligible?: boolean;
+  redoneByOrderId?: string | null;
+  redoOfOrderId?: string | null;
+  redoContext?: {
+    originalOrderId: string | number;
+    isPaidRedo: boolean;
+    originalTotalPence?: number;
+    priceDifferencePence?: number;
+    requireCuraleafAuth?: boolean;
+    unresolvedReason?: 'expired' | 'rejected';
+    recommendation?: ExpiryCheckState['recommendation'];
+  };
+  expiryCheck?: ExpiryCheckState;
   pricingQuote?: CuraleafPricingSnapshot;
   quoteReview?: {
     status: 'required' | 'approved' | 'recreate_required';

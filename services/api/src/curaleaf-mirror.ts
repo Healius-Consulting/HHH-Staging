@@ -76,12 +76,12 @@ export async function persistCuraleafAccountSnapshot(
 export async function fetchCuraleafAccountSnapshot(
   organisationId: string,
 ): Promise<CuraleafAccountSnapshot> {
-  const [prescriberPage, prescriptionPage, purchaseOrderPage, shipmentPage] = await Promise.all([
-    curaleafList<Record<string, unknown>>(organisationId, '/v1/prescribers/', 'prescribers'),
-    curaleafList<Record<string, unknown>>(organisationId, '/v1/prescriptions/', 'prescriptions'),
-    curaleafList<Record<string, unknown>>(organisationId, '/v1/purchase-orders/', 'purchaseOrders'),
-    curaleafList<Record<string, unknown>>(organisationId, '/v1/shipments/', 'shipments'),
-  ]);
+  const [prescriberPage, prescriptionPage, purchaseOrderPage, shipmentPage] = [
+    await curaleafList<Record<string, unknown>>(organisationId, '/v1/prescribers/', 'prescribers'),
+    await curaleafList<Record<string, unknown>>(organisationId, '/v1/prescriptions/', 'prescriptions'),
+    await curaleafList<Record<string, unknown>>(organisationId, '/v1/purchase-orders/', 'purchaseOrders'),
+    await curaleafList<Record<string, unknown>>(organisationId, '/v1/shipments/', 'shipments'),
+  ];
   const snapshot: CuraleafAccountSnapshot = {
     environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production',
     fetchedAt: nowIso(),

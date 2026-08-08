@@ -5,8 +5,13 @@ interface CacheEntry {
 
 const MAX_ENTRIES = 500;
 const entries = new Map<string, CacheEntry>();
-const inFlight = new Map<string, { generation: number; request: Promise<unknown> }>();
-let cacheGeneration = 0;
+const inFlight = new Map<string, Promise<unknown>>();
+
+function touch(key: string, entry: CacheEntry) {
+  // Re-insert so Map iteration order approximates LRU-by-access.
+  entries.delete(key);
+  entries.set(key, entry);
+}
 
 function pruneExpired() {
   const now = Date.now();
@@ -22,31 +27,38 @@ function pruneExpired() {
 
 export async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   const existing = entries.get(key);
-  if (existing && existing.expiresAt > Date.now()) return existing.value as T;
+  if (existing && existing.expiresAt > Date.now()) {
+    touch(key, existing);
+    return existing.value as T;
+  }
   if (existing) entries.delete(key);
 
-  const generation = cacheGeneration;
   const pending = inFlight.get(key);
-  if (pending?.generation === generation) return pending.request as Promise<T>;
+  if (pending) return pending as Promise<T>;
 
   const request = load()
     .then(value => {
-      if (cacheGeneration === generation) {
-        pruneExpired();
-        entries.set(key, { value, expiresAt: Date.now() + ttlMs });
-      }
+      pruneExpired();
+      entries.set(key, { value, expiresAt: Date.now() + ttlMs });
       return value;
     })
     .finally(() => {
-      if (inFlight.get(key)?.request === request) inFlight.delete(key);
+      if (inFlight.get(key) === request) inFlight.delete(key);
     });
-  inFlight.set(key, { generation, request });
+  inFlight.set(key, request);
   return request;
 }
 
+/** Drop matching keys only — do not invalidate unrelated in-flight cache writes. */
 export function invalidateCache(...prefixes: string[]) {
-  cacheGeneration += 1;
-  for (const key of entries.keys()) {
+  if (!prefixes.length) {
+    entries.clear();
+    return;
+  }
+  for (const key of [...entries.keys()]) {
     if (prefixes.some(prefix => key.startsWith(prefix))) entries.delete(key);
+  }
+  for (const key of [...inFlight.keys()]) {
+    if (prefixes.some(prefix => key.startsWith(prefix))) inFlight.delete(key);
   }
 }

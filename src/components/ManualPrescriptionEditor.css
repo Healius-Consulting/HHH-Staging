@@ -1,12 +1,5 @@
-.rx-entry-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.rx-entry-mode > button { display: flex; align-items: center; gap: 9px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-surface); color: var(--text-secondary); text-align: left; }
-.rx-entry-mode > button[aria-pressed="true"] { border-color: var(--tenant-primary); background: var(--tenant-primary-soft); color: var(--tenant-primary); box-shadow: inset 0 0 0 1px var(--tenant-primary); }
-.rx-entry-mode strong, .rx-entry-mode small { display: block; }
 .rx-entry-mode strong { color: var(--text-primary); font-size: 11px; }
 .rx-entry-mode small { margin-top: 2px; font-size: 9px; }
-.rx-payment-route-toggle > div.is-selected { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--tenant-primary); border-radius: 9px; background: var(--tenant-primary-soft); color: var(--tenant-primary); }
-.rx-payment-route-toggle > div.is-selected > span { min-width: 0; flex: 1; }
-.rx-payment-route-toggle > div.is-selected strong, .rx-payment-route-toggle > div.is-selected small { display: block; }
 .rx-payment-route-toggle > div.is-selected strong { color: var(--text-primary); font-size: 11px; }
 .rx-payment-route-toggle > div.is-selected small { margin-top: 2px; color: var(--text-secondary); font-size: 9px; }
 .manual-rx-editor { display: grid; gap: 18px; }
@@ -26,6 +19,7 @@
 .manual-rx-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .manual-rx-field-group > .manual-rx-fields { padding: 13px 14px 14px; border-left: 1px solid var(--border); }
 .manual-rx-fields label { display: grid; gap: 6px; min-width: 0; }
+.manual-rx-date-label { display: grid; gap: 6px; min-width: 0; }
 .manual-rx-fields label > span { color: var(--text-secondary); font-size: 11px; font-weight: 700; }
 .manual-rx-date-field { display: grid; grid-template-columns: minmax(34px, .65fr) auto minmax(34px, .65fr) auto minmax(58px, 1fr); min-height: 38px; align-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); }
 .manual-rx-date-field:focus-within { border-color: var(--tenant-primary); box-shadow: 0 0 0 3px var(--tenant-primary-soft); }

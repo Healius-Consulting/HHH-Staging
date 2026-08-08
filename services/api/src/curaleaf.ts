@@ -4,7 +4,8 @@ import { HttpError } from './http.js';
 import { readIntegrationSecret, readPlatformSecret } from './secrets.js';
 
 const REQUEST_TIMEOUT_MS = 12_000;
-const TENANT_REQUEST_SPACING_MS = 150;
+/** Soft limit from Curaleaf (Phil, 5 Aug 2026): ~1 request/second per pharmacy key. */
+export const TENANT_REQUEST_SPACING_MS = 1000;
 
 
 

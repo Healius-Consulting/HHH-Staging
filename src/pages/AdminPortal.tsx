@@ -850,7 +850,7 @@ export default function AdminPortal() {
         <a className="skip-link" href="#admin-main-content">Skip to main content</a>
         <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
         <div className="app-main">
-          <WorkspacePageHeader section="Pharmacy workspace" context="HHH administration" title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} contextControl={!setupStatus?.completed ? <div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div> : undefined} />
+          <WorkspacePageHeader section="HHH operations" context="Pharmacy detail" title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} contextControl={!setupStatus?.completed ? <div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div> : undefined} />
           <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
           <button className="btn btn-sm admin-detail-back" onClick={() => setSelectedOrganisationId(null)}><ArrowLeft size={14} /> {view === 'patients' ? 'Back to patient register' : 'Back to pharmacy directory'}</button>
 
@@ -939,7 +939,9 @@ export default function AdminPortal() {
 
   const renderOverview = () => (
     <>
-      <div className="admin-workspace-toolbar"><span><p className="section-label">Portfolio position</p><strong>Multi-pharmacy operations</strong><small>Provision workspaces and control each go-live gate.</small></span><button className="btn btn-primary" onClick={() => setShowOnboarding(true)}><Plus size={15} /> Onboard pharmacy</button></div>
+      <div className="admin-page-actions">
+        <button className="btn btn-primary" onClick={() => setShowOnboarding(true)}><Plus size={15} /> Onboard pharmacy</button>
+      </div>
       <SummaryTiles label="Portfolio summary" items={[
         { label: 'Portfolio', value: state.organisations.length, detail: 'pharmacies' },
         { label: 'Operating', value: liveCount, detail: 'live pharmacies' },
@@ -955,26 +957,21 @@ export default function AdminPortal() {
       <section className="card admin-directory">
         <div className="admin-directory-head">
           <div>
+            <p className="section-label">Directory</p>
             <h2>Pharmacy directory</h2>
             <p>Account records, legal companies, workspace configuration and patient attribution.</p>
           </div>
-          <div className="directory-view-toggle">
-            <button
-              type="button"
-              className={`btn btn-sm ${directoryMode === 'flat' ? 'btn-primary' : ''}`}
-              onClick={() => setDirectoryMode('flat')}
-            >
-              Flat Directory
+          <div className="directory-view-toggle" role="group" aria-label="Directory layout">
+            <button type="button" className={`filter-card${directoryMode === 'flat' ? ' active' : ''}`} onClick={() => setDirectoryMode('flat')}>
+              <div className="filter-card__head"><span>Flat</span></div>
+              <span className="filter-card__value">{filteredOrganisations.length}</span>
             </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${directoryMode === 'by-company' ? 'btn-primary' : ''}`}
-              onClick={() => setDirectoryMode('by-company')}
-            >
-              By Company Group
+            <button type="button" className={`filter-card${directoryMode === 'by-company' ? ' active' : ''}`} onClick={() => setDirectoryMode('by-company')}>
+              <div className="filter-card__head"><span>By company</span></div>
+              <span className="filter-card__value">{filteredOrganisations.length}</span>
             </button>
           </div>
-          <label className="admin-search">
+          <label className="search-box admin-search">
             <Search size={15} />
             <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or GPhC number" />
           </label>
@@ -1028,23 +1025,21 @@ export default function AdminPortal() {
                 const accruedCommission = earningPatientsCount * 50;
 
                 return (
-                  <div className="company-group-card card" key={org.id} style={{ marginBottom: '1.25rem', padding: '1.25rem' }}>
-                    <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color, #e5e7eb)', paddingBottom: '0.75rem' }}>
+                  <div className="company-group-card card" key={org.id}>
+                    <header className="company-group-card__header">
                       <div>
-                        <span className="pill pill-info" style={{ marginBottom: '0.25rem', display: 'inline-block' }}>Legal Company</span>
-                        <h3 style={{ margin: 0 }}>{org.tradingName || org.name}</h3>
-                        <small style={{ color: 'var(--text-muted, #6b7280)' }}>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
+                        <span className="pill pill-info">Legal company</span>
+                        <h3>{org.tradingName || org.name}</h3>
+                        <small>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <span className="pill pill-green">GDPR Confirmed</span>
-                        <div style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
-                          <strong>{earningPatientsCount}</strong> Earning Patients · <strong>£{accruedCommission}</strong> Accrued Commission
+                      <div className="company-group-card__meta">
+                        <span className="pill pill-green">GDPR confirmed</span>
+                        <div>
+                          <strong>{earningPatientsCount}</strong> earning patients · <strong>£{accruedCommission}</strong> accrued
                         </div>
                       </div>
                     </header>
-
-                    {/* Branch card under company */}
-                    <article className="admin-org-row" style={{ background: 'var(--surface-tint, #f9fafb)', borderRadius: '6px' }}>
+                    <article className="admin-org-row admin-org-row--nested">
                       <div className="admin-org-brand">
                         <div className="tenant-mark" style={brandSwatchStyle(org.brand.primary)}>{org.logoText}</div>
                         <div>
@@ -1054,7 +1049,7 @@ export default function AdminPortal() {
                       </div>
                       <div className="admin-org-metric">
                         <strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong>
-                        <span>Attributed Patients</span>
+                        <span>Attributed patients</span>
                       </div>
                       <div className="readiness-cell">
                         <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} gates</span></div>
@@ -1110,7 +1105,9 @@ export default function AdminPortal() {
     };
     return (
       <>
-        <div className="admin-workspace-toolbar"><span><p className="section-label">Programme gate</p><strong>Referral workflow</strong><small>Record the call/check, complete the referral, then send the patient email as a separate action.</small></span><span className="pill pill-amber"><PhoneCall size={13} /> {pending.length} awaiting decision</span></div>
+        <div className="admin-page-actions">
+          <span className="pill pill-amber"><PhoneCall size={13} /> {pending.length} awaiting decision</span>
+        </div>
         <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Approval boundary</strong><p>HHH approval authorises programme onboarding only. It does not diagnose, prescribe, replace a doctor’s prescription, or replace the pharmacy’s legal and professional checks before dispensing.</p></div></section>
         <section className="card admin-patient-table admin-referral-register">
           <div className="admin-directory-head"><div><h2>Awaiting HHH review</h2><p>The patient call and records outcome must be recorded before referral completion.</p></div></div>
@@ -1126,10 +1123,13 @@ export default function AdminPortal() {
 
   const renderPatients = () => (
     <>
-      <div className="admin-workspace-toolbar"><span><p className="section-label">Cross-pharmacy register</p><strong>Patient index</strong></span><div className="flex gap-sm flex-wrap"><span className="pill pill-info"><Users size={13} /> {displayedPatients.length}{isLocalPortalPreview ? ` of ${allPatients.length}` : ''} records</span><button className="btn btn-sm" type="button" onClick={() => void exportPatients()} disabled={patientExportBusy || patientRegisterLoading || (!isLocalPortalPreview && !serverPatientRegister)}><Download size={14} /> {patientExportBusy ? 'Preparing CSV…' : patientRegisterLoading ? 'Loading scope…' : 'Export filtered CSV'}</button></div></div>
+      <div className="admin-page-actions">
+        <span className="pill pill-info"><Users size={13} /> {displayedPatients.length}{isLocalPortalPreview ? ` of ${allPatients.length}` : ''} records</span>
+        <button className="btn btn-sm" type="button" onClick={() => void exportPatients()} disabled={patientExportBusy || patientRegisterLoading || (!isLocalPortalPreview && !serverPatientRegister)}><Download size={14} /> {patientExportBusy ? 'Preparing CSV…' : patientRegisterLoading ? 'Loading scope…' : 'Export filtered CSV'}</button>
+      </div>
       <section className="card admin-patient-table admin-master-patients">
-        <div className="admin-directory-head"><div><h2>Patient register</h2></div><label className="admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB or pharmacy" /></label></div>
-        <div className="admin-patient-filters" aria-label="Patient register filters">
+        <div className="admin-directory-head"><div><p className="section-label">Register</p><h2>Patient register</h2></div><label className="search-box admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB or pharmacy" /></label></div>
+        <div className="admin-patient-filters filter-toolbar" aria-label="Patient register filters">
           <label>Pharmacy<select className="input" value={patientOrganisationId} onChange={event => setPatientOrganisationId(event.target.value)}><option value="all">All pharmacies</option>{state.organisations.map(organisation => <option key={organisation.id} value={organisation.id}>{organisation.tradingName}</option>)}</select></label>
           <label>Eligibility status<select className="input" value={patientStatus} onChange={event => setPatientStatus(event.target.value)}><option value="all">All statuses</option>{patientStatuses.map(status => <option key={status} value={status}>{onboardingStatusLabel(status)}</option>)}</select></label>
           <label>From date<input className="input" type="date" value={patientFrom} max={patientTo || undefined} onChange={event => setPatientFrom(event.target.value)} /></label>
@@ -1164,9 +1164,31 @@ export default function AdminPortal() {
 
     return (
       <>
-        <div className="admin-workspace-toolbar"><span><p className="section-label">HHH referral finance</p><strong>Referral fee ledger</strong><small>Accrued HHH fees only. Pharmacy prescription revenue and wholesale performance remain inside each pharmacy workspace.</small></span><div className="flex gap-sm flex-wrap"><span className="pill pill-info"><PoundSterling size={13} /> £50 + £40 model</span><button type="button" className="btn btn-sm" onClick={() => setAdminFinanceRefresh(value => value + 1)} disabled={adminFinanceLoading}><RefreshCw size={13} className={adminFinanceLoading ? 'spin' : ''} /> Refresh</button></div></div>
+        <div className="admin-page-actions">
+          <span className="pill pill-info"><PoundSterling size={13} /> £50 + £40 model</span>
+          <button type="button" className="btn btn-sm" onClick={() => setAdminFinanceRefresh(value => value + 1)} disabled={adminFinanceLoading}><RefreshCw size={13} className={adminFinanceLoading ? 'spin' : ''} /> Refresh</button>
+        </div>
 
-        <section className="card admin-finance-filters" aria-label="Referral finance filters">
+        <div className="filter-grid admin-finance-period-grid" role="group" aria-label="Finance period">
+          {([
+            { id: 'all' as const, label: 'All time', value: String(filteredReferralFeeEvents.length) },
+            { id: 'month' as const, label: 'Month', value: financeMonth || '—' },
+            { id: 'year' as const, label: 'Year', value: financeYear || '—' },
+          ]).map(period => (
+            <button
+              key={period.id}
+              type="button"
+              className={`filter-card${financePeriod === period.id ? ' active' : ''}`}
+              aria-pressed={financePeriod === period.id}
+              onClick={() => setFinancePeriod(period.id)}
+            >
+              <div className="filter-card__head"><span>{period.label}</span></div>
+              <span className="filter-card__value">{period.value}</span>
+            </button>
+          ))}
+        </div>
+
+        <section className="card admin-finance-filters filter-toolbar" aria-label="Referral finance filters">
           <div className="admin-finance-filter">
             <label htmlFor="finance-pharmacy">Pharmacy</label>
             <select id="finance-pharmacy" className="input" value={financeOrganisationId} onChange={event => setFinanceOrganisationId(event.target.value)}>
@@ -1179,14 +1201,6 @@ export default function AdminPortal() {
             <select id="finance-patient" className="input" value={financePatientKey} onChange={event => setFinancePatientKey(event.target.value)}>
               <option value="all">All patients</option>
               {financePatients.map(patient => <option value={patient.key} key={patient.key}>{patient.name} · {patient.email}</option>)}
-            </select>
-          </div>
-          <div className="admin-finance-filter">
-            <label htmlFor="finance-period">Period</label>
-            <select id="finance-period" className="input" value={financePeriod} onChange={event => setFinancePeriod(event.target.value as typeof financePeriod)}>
-              <option value="all">All time</option>
-              <option value="month">Specific month</option>
-              <option value="year">Specific year</option>
             </select>
           </div>
           {financePeriod === 'month' && <div className="admin-finance-filter">
@@ -1224,13 +1238,39 @@ export default function AdminPortal() {
 
   const renderCompliance = () => (
     <>
-      <div className="admin-workspace-toolbar"><span><p className="section-label">Operational setup</p><strong>Go-live position</strong><small>Six required steps per pharmacy.</small></span><span className="pill pill-info"><ClipboardCheck size={13} /> Six-step checklist</span></div>
       <SummaryTiles label="Readiness summary" items={[
         { label: 'Pharmacies', value: state.organisations.length, detail: 'pharmacy accounts' },
         { label: 'Fully ready', value: Object.values(setupByOrganisation).filter(status => status.completed).length, detail: 'all steps complete' },
         { label: 'Completed', value: Object.values(setupByOrganisation).reduce((total, status) => total + status.completedCount, 0), detail: 'steps recorded' },
         { label: 'Waiting', value: remainingSetupSteps, detail: 'actions remaining' },
       ]} />
+      <section className="card admin-external-gates" aria-label="External Curaleaf gates">
+        <div className="admin-directory-head">
+          <div>
+            <p className="section-label">External gates</p>
+            <h2>Curaleaf production blockers</h2>
+            <p>Phil answered Q1–Q13 on 5 August 2026. These remaining items still block full Rocky production order flow.</p>
+          </div>
+        </div>
+        <div className="filter-grid admin-gate-grid">
+          {[
+            { label: 'Sandbox stocked products', detail: 'Quote / PO / shipment UAT', status: 'pending' as const },
+            { label: 'Second sandbox pharmacy key', detail: 'Multi-tenant isolation UAT', status: 'pending' as const },
+            { label: 'Ellis catalogue confirmation', detail: 'Customer-specific pricing N/A?', status: 'pending' as const },
+            { label: 'Direct-to-live written OK', detail: 'Onboarding runbook gate', status: 'pending' as const },
+            { label: 'Curaleaf DPA / scan retention', detail: 'Legal production gate', status: 'pending' as const },
+            { label: 'Partner master API key', detail: 'Not offered yet — per-pharmacy keys', status: 'blocked' as const },
+          ].map(gate => (
+            <div key={gate.label} className={`filter-card admin-gate-card${gate.status === 'blocked' ? ' is-blocked' : ''}`} aria-pressed={false}>
+              <div className="filter-card__head">
+                <span>{gate.label}</span>
+                <span className={`pill ${gate.status === 'blocked' ? 'pill-neutral' : 'pill-amber'}`}>{gate.status === 'blocked' ? 'Unavailable' : 'Pending'}</span>
+              </div>
+              <span className="filter-card__value text-xs">{gate.detail}</span>
+            </div>
+          ))}
+        </div>
+      </section>
       <section className="card admin-patient-table compliance-register">
         <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Open a pharmacy to see its evidence. Pharmacy staff update their own steps; Curaleaf activation remains HHH-admin only.</p></div></div>
         {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
@@ -1269,8 +1309,32 @@ export default function AdminPortal() {
 
   const renderIntegrations = () => (
     <>
-      <div className="admin-workspace-toolbar"><span><p className="section-label">Shared infrastructure</p><strong>Connection controls</strong><small>Supplier, payment, intake and notification services.</small></span><span className="pill pill-info"><ShieldCheck size={13} /> Platform-level access</span></div>
-      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Pricing and payment boundary</strong><p>Curaleaf supplies each pharmacy’s patient medicine prices. The pharmacy controls only its dispensing charge and approved Worldpay merchant relationship; patient funds settle directly to that pharmacy.</p></div></section>
+      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Pricing and payment boundary</strong><p>Curaleaf supplies each pharmacy’s patient medicine prices. The pharmacy controls only its dispensing charge and approved Worldpay merchant relationship; patient funds settle directly to that pharmacy. There is no partner master API key — activate each pharmacy with its own Curaleaf key.</p></div></section>
+      <section className="card admin-external-gates" aria-label="Curaleaf open gates">
+        <div className="admin-directory-head">
+          <div>
+            <p className="section-label">External dependencies</p>
+            <h2>Curaleaf open gates</h2>
+            <p>Do not mark these connected until Curaleaf / legal deliver them. Confirmed facts (16MB uploads, 1 req/s, quotes for wholesale, CS-only PO cancel) are already in the Rocky reference.</p>
+          </div>
+        </div>
+        <div className="filter-grid admin-gate-grid">
+          {[
+            { label: 'Sandbox stocked products', status: 'Pending' },
+            { label: 'Second sandbox pharmacy key', status: 'Pending' },
+            { label: 'Curaleaf DPA / scan retention', status: 'Pending' },
+            { label: 'Partner master API key', status: 'Unavailable' },
+          ].map(gate => (
+            <div key={gate.label} className="filter-card admin-gate-card">
+              <div className="filter-card__head">
+                <span>{gate.label}</span>
+                <span className={`pill ${gate.status === 'Unavailable' ? 'pill-neutral' : 'pill-amber'}`}>{gate.status}</span>
+              </div>
+              <span className="filter-card__value text-xs">Not platform-complete</span>
+            </div>
+          ))}
+        </div>
+      </section>
       <form className="card secure-integration-form" onSubmit={submitCuraleafActivation}>
         <div className="admin-directory-head"><div><p className="section-label">HHH administrator only</p><h2>Activate a pharmacy’s Curaleaf account</h2><p>After Curaleaf returns its onboarding email and customer ID, connect them here. Until this succeeds, the pharmacy stays in a session-only training workspace.</p></div><LockKeyhole size={22} /></div>
         <div className="form-grid-two">

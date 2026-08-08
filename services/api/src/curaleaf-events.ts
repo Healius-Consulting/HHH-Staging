@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { CuraleafRequestError, curaleafRequest } from './curaleaf.js';
-import { reconcilePendingCuraleafOrders } from './curaleaf-reconciliation.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
 
@@ -70,9 +69,9 @@ async function pollEventKind(organisationId: string, kind: EventKind) {
 
 export async function pollCuraleafEvents(organisationId: string) {
   const results = [];
+  // Keep poll lightweight — full order reconciliation runs on the 5-minute schedule.
   for (const kind of Object.keys(eventKinds) as EventKind[]) results.push(await pollEventKind(organisationId, kind));
-  const reconciliation = await reconcilePendingCuraleafOrders(organisationId);
-  return { organisationId, results, reconciliation, completedAt: nowIso() };
+  return { organisationId, results, completedAt: nowIso() };
 }
 
 export function eventPollBackoffSeconds(error: unknown, priorFailures: number) {

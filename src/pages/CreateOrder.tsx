@@ -11,7 +11,10 @@ import {
   orderRevenue,
   orderCost,
   marginPct,
+  getUnresolvedReason,
   type LineItem,
+  type PatientOrder,
+  type UnresolvedOrderReason,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { createPortalOrder, createWorldpaySession, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, uploadPrescriptionFile } from '../shared/api';
@@ -43,6 +46,7 @@ export default function CreateOrder() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [editingClinicFormularyRxId, setEditingClinicFormularyRxId] = useState<number | null>(null);
+  const [selectedUnresolvedOrderId, setSelectedUnresolvedOrderId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!activeOrder?.prescriptions.length) return setSelectedRxId(null);
@@ -60,12 +64,45 @@ export default function CreateOrder() {
     setQuoteSummary(null);
     setQuotedUnavailableProductIds([]);
     setEditingClinicFormularyRxId(null);
+    setSelectedUnresolvedOrderId(activeOrder?.redoContext?.originalOrderId ?? null);
   }, [activeOrder?.id]);
 
   const matchingPatients = useMemo(() => {
     const query = patientQuery.trim().toLowerCase();
     return tenantPatients.filter(candidate => !query || [candidate.name, candidate.email, candidate.mobile, candidate.dob ?? '', formatPatientDob(candidate.dob)].some(value => value.toLowerCase().includes(query))).slice(0, 7);
   }, [patientQuery, tenantPatients]);
+
+  const unresolvedOrdersForPatient = useMemo(() => {
+    if (!patient) return [] as Array<{ order: PatientOrder; reason: UnresolvedOrderReason; itemCount: number }>;
+    const now = new Date();
+    return state.orders
+      .filter(order => order.organisationId === state.currentOrganisationId && order.patientId === patient.id)
+      .map(order => {
+        const reason = getUnresolvedReason(order, now);
+        if (!reason) return null;
+        return {
+          order,
+          reason,
+          itemCount: order.prescriptions.flatMap(rx => rx.items).length,
+        };
+      })
+      .filter((entry): entry is { order: PatientOrder; reason: UnresolvedOrderReason; itemCount: number } => Boolean(entry))
+      .sort((a, b) => new Date(b.order.date).getTime() - new Date(a.order.date).getTime());
+  }, [patient, state.currentOrganisationId, state.orders]);
+
+  useEffect(() => {
+    if (!unresolvedOrdersForPatient.length) {
+      setSelectedUnresolvedOrderId(null);
+      return;
+    }
+    if (activeOrder?.redoContext?.originalOrderId && unresolvedOrdersForPatient.some(entry => entry.order.id === activeOrder.redoContext!.originalOrderId)) {
+      setSelectedUnresolvedOrderId(activeOrder.redoContext.originalOrderId);
+      return;
+    }
+    if (!unresolvedOrdersForPatient.some(entry => entry.order.id === selectedUnresolvedOrderId)) {
+      setSelectedUnresolvedOrderId(unresolvedOrdersForPatient[0].order.id);
+    }
+  }, [activeOrder?.redoContext?.originalOrderId, selectedUnresolvedOrderId, unresolvedOrdersForPatient]);
 
   const selectedRx = activeOrder?.prescriptions.find(rx => rx.id === selectedRxId) ?? null;
   const selectedRxIndex = activeOrder && selectedRx ? activeOrder.prescriptions.findIndex(rx => rx.id === selectedRx.id) : -1;
@@ -259,6 +296,13 @@ export default function CreateOrder() {
           })),
           dispensingFeePence: Math.round(activeOrder.dispensingFee * 100),
           currency: 'GBP',
+          ...(activeOrder.redoContext ? {
+            redoContext: {
+              originalOrderId: activeOrder.redoContext.originalBackendId ?? activeOrder.redoContext.originalOrderId,
+              isPaidRedo: activeOrder.redoContext.isPaidRedo,
+              requireCuraleafAuth: true as const,
+            },
+          } : {}),
         });
         if (!activeOrder.backendId) {
           dispatch({ type: 'SET_ORDER_BACKEND_ID', orderId: activeOrder.id, backendId: persisted.id });
@@ -418,48 +462,19 @@ export default function CreateOrder() {
     setPatientSearchOpen(false);
   };
 
-  const unresolvedOrderForPatient = useMemo(() => {
-    if (!patient) return null;
-    const now = new Date();
-    return state.orders.find(order => {
-      if (order.organisationId !== state.currentOrganisationId || order.patientId !== patient.id) return false;
-      const entryDate = new Date(order.date);
-      const expiryDate = new Date(entryDate);
-      expiryDate.setDate(expiryDate.getDate() + 28);
-      const isExpired = now > expiryDate;
-      const hasRejection = order.quoteReview !== undefined;
-      return isExpired || hasRejection;
-    }) ?? null;
-
-  }, [patient, state.currentOrganisationId, state.orders]);
-
-  const handleRedoPrescription = (unresolvedOrder: typeof unresolvedOrderForPatient) => {
-    if (!unresolvedOrder || !activeOrder) return;
-    const itemsToPrefill = unresolvedOrder.prescriptions.flatMap(rx => rx.items);
-    if (itemsToPrefill.length && activeOrder.prescriptions.length) {
-      const targetRx = activeOrder.prescriptions[0];
-      itemsToPrefill.forEach(item => {
-        dispatch({
-          type: 'ADD_ITEM_TO_RX',
-          orderId: activeOrder.id,
-          rxId: targetRx.id,
-          item: {
-            productId: item.productId,
-            formulaId: item.formulaId,
-            name: item.name,
-            qty: item.qty,
-            unitsNeededCount: item.unitsNeededCount,
-            cost: item.cost,
-            retail: item.retail,
-          },
-        });
-      });
-      dispatch({
-        type: 'ADD_TOAST',
-        message: `Pre-filled ${itemsToPrefill.length} prescribed items from Order #${unresolvedOrder.id}. Please attach the new prescription PDF for mandatory Curaleaf API authentication.`,
-        toastType: 'info',
-      });
-    }
+  const handleRedoPrescription = (sourceOrderId: number) => {
+    if (!activeOrder) return;
+    const source = unresolvedOrdersForPatient.find(entry => entry.order.id === sourceOrderId);
+    if (!source) return;
+    dispatch({ type: 'APPLY_REDO_FROM_ORDER', orderId: activeOrder.id, sourceOrderId });
+    setSelectedUnresolvedOrderId(sourceOrderId);
+    dispatch({
+      type: 'ADD_TOAST',
+      message: source.order.payment.status === 'paid'
+        ? `Order #${sourceOrderId} loaded into this draft (${source.itemCount} item${source.itemCount === 1 ? '' : 's'}). Payment can be carried over after you attach and authenticate the new prescription PDF.`
+        : `Order #${sourceOrderId} loaded into this draft (${source.itemCount} item${source.itemCount === 1 ? '' : 's'}). Attach and authenticate the new prescription PDF before checkout.`,
+      toastType: 'info',
+    });
   };
 
   const beginPatientChange = () => {
@@ -563,8 +578,11 @@ export default function CreateOrder() {
 
   return (
     <div className="page-body rx-workbench">
-      <section className="rx-draft-bar" aria-label="Prescription draft sessions">
-        <div className="rx-draft-bar__title"><span className="section-label">Draft sessions</span><strong>{draftOrders.length} open</strong></div>
+      <section className="rx-draft-bar card" aria-label="Prescription draft sessions">
+        <div className="rx-draft-bar__title">
+          <p className="section-label">Draft sessions</p>
+          <strong>{draftOrders.length} open</strong>
+        </div>
         <div className="rx-draft-tabs" role="tablist" aria-label="Open prescription drafts">
           {draftOrders.map(order => {
             const draftPatient = order.patientId ? tenantPatients.find(candidate => candidate.id === order.patientId) : null;
@@ -572,65 +590,145 @@ export default function CreateOrder() {
             return (
               <button type="button" role="tab" aria-selected={active} key={order.id} className={`rx-draft-tab${active ? ' active' : ''}`} onClick={() => dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id })}>
                 <span className="rx-draft-tab__avatar">{draftPatient ? initials(draftPatient.name) : '—'}</span>
-                <span><strong>{draftPatient?.name ?? `Unlinked draft #${order.id}`}</strong><small>{order.prescriptions.length} record{order.prescriptions.length === 1 ? '' : 's'}</small></span>
+                <span>
+                  <strong>{draftPatient?.name ?? `Unlinked draft #${order.id}`}</strong>
+                  <small>{order.prescriptions.length} record{order.prescriptions.length === 1 ? '' : 's'}</small>
+                </span>
               </button>
             );
           })}
         </div>
-        <button type="button" className="btn btn-sm btn-primary rx-new-draft" onClick={() => dispatch({ type: 'NEW_ORDER' })}><Plus size={14} /> New prescription</button>
+        <button type="button" className="btn btn-primary rx-new-draft" onClick={() => dispatch({ type: 'NEW_ORDER' })}>
+          <Plus size={14} /> New prescription
+        </button>
       </section>
 
       {!activeOrder ? (
-        <div className="empty-state"><div className="empty-icon"><FileText size={32} /></div><h3>No active prescription</h3><p className="empty-desc">Start a prescription, link an approved patient and add the supplied prescription records.</p></div>
+        <div className="empty-state">
+          <FileText size={32} />
+          <h3>No active prescription</h3>
+          <p className="empty-desc">Start a prescription, link an approved patient and add the supplied prescription records.</p>
+        </div>
       ) : (
         <>
-          <section className={`rx-patient-band${changingPatient || !patient ? ' is-changing-patient' : ''}`}>
+          <section className={`rx-patient-band card${changingPatient || !patient ? ' is-changing-patient' : ''}`}>
             <div className="rx-patient-band__identity">
-              <span className="rx-step-number">01</span>
               {patient ? (
                 changingPatient ? (
                   renderPatientSearch('change')
                 ) : (
-                  <><span className="avatar">{initials(patient.name)}</span><span className="rx-patient-identity-copy"><small>Approved patient</small><strong>{patient.name}</strong><em>DOB {formatPatientDob(patient.dob)} · {patient.email} · {patient.mobile}</em></span><span className="pill pill-green"><CheckCircle size={11} /> Linked</span><div className="rx-patient-actions"><button type="button" className="btn btn-sm" onClick={beginPatientChange}><Pencil size={12} /> Change patient</button><button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDelete(true)}><Trash2 size={14} /></button></div></>
+                  <>
+                    <span className="avatar">{initials(patient.name)}</span>
+                    <span className="rx-patient-identity-copy">
+                      <p className="section-label">Approved patient</p>
+                      <strong>{patient.name}</strong>
+                      <em>DOB {formatPatientDob(patient.dob)} · {patient.email} · {patient.mobile}</em>
+                    </span>
+                    <span className="pill pill-green"><CheckCircle size={11} /> Linked</span>
+                    <div className="rx-patient-actions">
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={beginPatientChange}><Pencil size={12} /> Change</button>
+                      <button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDelete(true)}><Trash2 size={14} /></button>
+                    </div>
+                  </>
                 )
               ) : (
                 renderPatientSearch('link')
               )}
             </div>
-            <div className="rx-readiness-summary" aria-label="Prescription readiness">
-              {readiness.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}
+            <div className="rx-readiness-strip" aria-label="Prescription readiness">
+              <span className="rx-readiness-strip__count">
+                <strong>{readiness.filter(item => item.complete).length}/{readiness.length}</strong>
+                <small>checks ready</small>
+              </span>
+              <div className="rx-readiness-strip__dots">
+                {readiness.map(item => (
+                  <span key={item.label} className={item.complete ? 'complete' : ''} title={item.label}>
+                    {item.complete ? <CheckCircle size={14} /> : <span className="rx-readiness-dot" />}
+                  </span>
+                ))}
+              </div>
             </div>
             {confirmingDraftDelete && (
               <div className="rx-draft-delete-confirm" role="alert">
                 <span><Trash2 size={16} /><span><strong>Delete this draft?</strong><small>The linked patient and every unfinished prescription record in this draft will be removed.</small></span></span>
-                <div><button type="button" className="btn btn-sm" onClick={() => setConfirmingDraftDelete(false)}>Keep draft</button><button type="button" className="btn btn-sm btn-danger" onClick={deleteDraft}>Delete draft</button></div>
+                <div>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDelete(false)}>Keep draft</button>
+                  <button type="button" className="btn btn-sm btn-danger" onClick={deleteDraft}>Delete draft</button>
+                </div>
               </div>
             )}
           </section>
 
-          {/* Unresolved Expired / Rejected Orders Banner */}
-          {patient && unresolvedOrderForPatient ? (
-            <div className="alert-box alert-warning" style={{ margin: '12px 0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                <AlertTriangle size={20} />
+          {patient && unresolvedOrdersForPatient.length > 0 ? (
+            <section className="rx-unresolved-panel card" aria-label="Unresolved archived and rejected orders">
+              <header className="rx-unresolved-panel__header">
                 <div>
-                  <strong>Unresolved Order #{unresolvedOrderForPatient.id} ({unresolvedOrderForPatient.quoteReview ? 'Curaleaf Exception / Rejected' : '28-Day Prescription Expired'})</strong>
-                  <p style={{ margin: 0, fontSize: '0.85rem' }}>
-                    {unresolvedOrderForPatient.prescriptions.flatMap(r => r.items).length} prescribed item(s) from previous cycle. Attach new prescription PDF for mandatory Curaleaf authentication.
-                  </p>
+                  <p className="section-label">Unresolved for this patient</p>
+                  <strong>{unresolvedOrdersForPatient.length} archived / rejected order{unresolvedOrdersForPatient.length === 1 ? '' : 's'}</strong>
+                  <span>Select one to load its medicines into this draft, then attach the new prescription for Curaleaf authentication.</span>
                 </div>
+                {activeOrder.redoContext ? (
+                  <span className={`pill ${activeOrder.redoContext.isPaidRedo ? 'pill-green' : 'pill-amber'}`}>
+                    {activeOrder.redoContext.isPaidRedo ? 'Paid redo loaded' : 'Redo loaded'}
+                  </span>
+                ) : (
+                  <span className="pill pill-amber">Action needed</span>
+                )}
+              </header>
+              <div className="rx-unresolved-list" role="listbox" aria-label="Unresolved orders">
+                {unresolvedOrdersForPatient.map(entry => {
+                  const selected = selectedUnresolvedOrderId === entry.order.id;
+                  const applied = activeOrder.redoContext?.originalOrderId === entry.order.id;
+                  const itemNames = entry.order.prescriptions.flatMap(rx => rx.items.map(item => item.name));
+                  return (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      key={entry.order.id}
+                      className={`rx-unresolved-item${selected ? ' is-selected' : ''}${applied ? ' is-applied' : ''}`}
+                      onClick={() => setSelectedUnresolvedOrderId(entry.order.id)}
+                    >
+                      <span className="rx-unresolved-item__meta">
+                        <strong>Order #{entry.order.id}</strong>
+                        <small>
+                          {entry.reason === 'rejected' ? 'Curaleaf rejected' : '28-day archived'}
+                          {' · '}
+                          {new Date(entry.order.date).toLocaleDateString('en-GB')}
+                          {' · '}
+                          {entry.order.payment.status === 'paid' ? 'Paid' : entry.order.payment.status}
+                        </small>
+                      </span>
+                      <span className="rx-unresolved-item__items">
+                        {entry.itemCount} item{entry.itemCount === 1 ? '' : 's'}
+                        {itemNames.length ? ` · ${itemNames.slice(0, 2).join(', ')}${itemNames.length > 2 ? '…' : ''}` : ''}
+                      </span>
+                      {applied ? <em>In this draft</em> : <span className={`pill ${entry.reason === 'rejected' ? 'pill-red' : 'pill-neutral'}`}>{entry.reason === 'rejected' ? 'Rejected' : 'Archived'}</span>}
+                    </button>
+                  );
+                })}
               </div>
-              <button
-                type="button"
-                className="button button-secondary button-sm"
-                onClick={() => handleRedoPrescription(unresolvedOrderForPatient)}
-              >
-                <RefreshCw size={14} />
-                <span>Deal with Order / Redo Prescription</span>
-              </button>
-            </div>
+              <footer className="rx-unresolved-panel__actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={!selectedUnresolvedOrderId}
+                  onClick={() => selectedUnresolvedOrderId && handleRedoPrescription(selectedUnresolvedOrderId)}
+                >
+                  <RefreshCw size={14} />
+                  {activeOrder.redoContext?.originalOrderId === selectedUnresolvedOrderId
+                    ? 'Reload into this draft'
+                    : 'Fix in this draft'}
+                </button>
+                <span>
+                  Clears the old PDF and pre-fills medicines. New Curaleaf prescription authentication is required
+                  {selectedUnresolvedOrderId && unresolvedOrdersForPatient.find(entry => entry.order.id === selectedUnresolvedOrderId)?.order.payment.status === 'paid'
+                    ? '; customer payment can be carried over after auth.'
+                    : '.'}
+                </span>
+              </footer>
+            </section>
           ) : null}
-
 
           <button type="button" className="rx-mobile-review-bar" onClick={() => document.getElementById('rx-order-review')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
             <span><small>Patient total</small><strong>{money(orderRevenue(activeOrder))}</strong></span>
@@ -639,27 +737,58 @@ export default function CreateOrder() {
 
           <div className="rx-workbench-layout">
             <main className="rx-workbench-main">
-              <section className="rx-surface rx-record-editor">
+              <section className="rx-surface card rx-record-editor">
                 <header className="rx-surface__header">
-                  <div><span className="rx-step-number">02</span><span><small>Prescription records</small><strong>Attach and verify the selected Rx</strong></span></div>
-                  <button type="button" className="btn btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}><Plus size={13} /> Add record</button>
+                  <div className="section-heading" style={{ margin: 0 }}>
+                    <div>
+                      <p className="section-label">Step 1 · Prescription records</p>
+                      <h3><FileText size={17} /> Attach and verify the selected Rx</h3>
+                    </div>
+                  </div>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}><Plus size={13} /> Add record</button>
                 </header>
                 <div className="rx-record-tabs" role="tablist" aria-label="Prescription records">
                   {activeOrder.prescriptions.map((rx, index) => {
                     const active = rx.id === selectedRxId;
-                    return <button key={rx.id} type="button" role="tab" aria-selected={active} className={active ? 'active' : ''} onClick={() => setSelectedRxId(rx.id)}><FileText size={14} /><span><strong>Rx {index + 1}</strong><small>{rx.items.length} item{rx.items.length === 1 ? '' : 's'}</small></span><span className={`rx-record-state${rx.copyFileName && rx.prescriber.trim() ? ' complete' : ''}`} aria-hidden="true" /></button>;
+                    return (
+                      <button key={rx.id} type="button" role="tab" aria-selected={active} className={active ? 'active' : ''} onClick={() => setSelectedRxId(rx.id)}>
+                        <FileText size={14} />
+                        <span><strong>Rx {index + 1}</strong><small>{rx.items.length} item{rx.items.length === 1 ? '' : 's'}</small></span>
+                        <span className={`rx-record-state${rx.copyFileName && rx.prescriber.trim() ? ' complete' : ''}`} aria-hidden="true" />
+                      </button>
+                    );
                   })}
                 </div>
 
                 {selectedRx && (
                   <div className="rx-record-body">
                     <div className="rx-record-evidence">
-                      <div className="rx-record-evidence__heading"><span><small>Editing</small><strong>Prescription {selectedRxIndex + 1}</strong></span>{activeOrder.prescriptions.length > 1 && <button type="button" className="icon-button danger" aria-label={`Delete prescription ${selectedRxIndex + 1}`} title="Delete prescription record" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Removed Rx ${selectedRxIndex + 1}.`, toastType: 'info' }); }}><Trash2 size={14} /></button>}</div>
-                      <div className="rx-entry-mode" role="group" aria-label="Prescription entry route">
-                        <button type="button" aria-pressed={selectedRx.entryMode === 'clinic'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' }); }}><FileScan size={15} /><span><strong>Curaleaf Clinic QR</strong><small>Preferred automatic route</small></span></button>
-                        <button type="button" aria-pressed={selectedRx.entryMode === 'manual'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'manual' }); }}><Pencil size={15} /><span><strong>Manual prescription</strong><small>Copy from the signed document</small></span></button>
+                      <div className="rx-record-evidence__heading">
+                        <div>
+                          <p className="section-label">Editing</p>
+                          <strong>Prescription {selectedRxIndex + 1}</strong>
+                        </div>
+                        {activeOrder.prescriptions.length > 1 && (
+                          <button type="button" className="icon-button danger" aria-label={`Delete prescription ${selectedRxIndex + 1}`} title="Delete prescription record" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Removed Rx ${selectedRxIndex + 1}.`, toastType: 'info' }); }}>
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
-                      <div className="rx-clinic-note"><FileScan size={18} aria-hidden="true" /><span><strong>{selectedRx.entryMode === 'clinic' ? 'Scan the Curaleaf Clinic barcode' : 'Attach the complete signed prescription'}</strong><span>{selectedRx.entryMode === 'clinic' ? 'Attach the complete prescription with a clear barcode. Curaleaf supplies the serial, dates, prescriber, patient identity, formula and prescribed quantity.' : 'Use this only when the Clinic QR cannot be read. Copy every detail exactly as printed before taking payment.'}</span></span></div>
+                      <div className="rx-entry-mode" role="group" aria-label="Prescription entry route">
+                        <button type="button" aria-pressed={selectedRx.entryMode === 'clinic'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' }); }}>
+                          <FileScan size={15} /><span><strong>Curaleaf Clinic QR</strong><small>Preferred automatic route</small></span>
+                        </button>
+                        <button type="button" aria-pressed={selectedRx.entryMode === 'manual'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'manual' }); }}>
+                          <Pencil size={15} /><span><strong>Manual prescription</strong><small>Copy from the signed document</small></span>
+                        </button>
+                      </div>
+                      <div className="rx-clinic-note">
+                        <FileScan size={18} aria-hidden="true" />
+                        <span>
+                          <strong>{selectedRx.entryMode === 'clinic' ? 'Scan the Curaleaf Clinic barcode' : 'Attach the complete signed prescription'}</strong>
+                          <span>{selectedRx.entryMode === 'clinic' ? 'Attach the complete prescription with a clear barcode. Curaleaf supplies serial, dates, prescriber, patient identity, formula and quantity.' : 'Use this only when the Clinic QR cannot be read. Copy every detail exactly as printed before taking payment.'}</span>
+                        </span>
+                      </div>
                       {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
                       </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
@@ -701,16 +830,28 @@ export default function CreateOrder() {
                 )}
               </section>
 
-              <section className="rx-surface rx-formulary-stage">
+              <section className="rx-surface card rx-formulary-stage">
                 <header className="rx-surface__header">
-                  <div><span className="rx-step-number">03</span><span><small>Formulary and packs</small><strong>{selectedRx?.entryMode === 'manual' ? 'Select the prescribed Curaleaf medicines' : editingClinicFormularyRxId === selectedRx?.id ? 'Correct the Curaleaf formula and pack match' : 'Review the Curaleaf formula and pack match'}</strong></span></div>
+                  <div className="section-heading" style={{ margin: 0 }}>
+                    <div>
+                      <p className="section-label">Step 2 · Formulary and packs</p>
+                      <h3>
+                        <ShieldCheck size={17} />
+                        {selectedRx?.entryMode === 'manual'
+                          ? 'Select the prescribed Curaleaf medicines'
+                          : editingClinicFormularyRxId === selectedRx?.id
+                            ? 'Correct the Curaleaf formula and pack match'
+                            : 'Review the Curaleaf formula and pack match'}
+                      </h3>
+                    </div>
+                  </div>
                   <div className="rx-formulary-actions">
                     {selectedRx?.items.length ? <span className="pill pill-green"><CheckCircle size={11} /> {selectedRx.entryMode === 'clinic' && editingClinicFormularyRxId !== selectedRx.id ? 'Matched automatically' : `${selectedRx.items.length} selected`}</span> : null}
                     {selectedRx?.entryMode === 'clinic' && selectedRx.clinicScanId ? (
                       editingClinicFormularyRxId === selectedRx.id ? (
                         <button type="button" className="btn btn-sm btn-primary" onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'ADD_TOAST', message: 'Formulary corrections saved to this prescription draft.', toastType: 'success' }); }}><Save size={13} /> Save formulary</button>
                       ) : (
-                        <button type="button" className="btn btn-sm" onClick={() => setEditingClinicFormularyRxId(selectedRx.id)}><Pencil size={13} /> Edit formulary</button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditingClinicFormularyRxId(selectedRx.id)}><Pencil size={13} /> Edit formulary</button>
                       )
                     ) : null}
                   </div>
@@ -752,15 +893,23 @@ export default function CreateOrder() {
             </main>
 
             <aside className="rx-checkout-rail">
-              <section className="rx-checkout-panel" id="rx-order-review">
-                <header><small>Order {activeOrder.id}</small><strong>Review and request payment</strong></header>
-                <dl className="rx-order-totals"><div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div><div><dt>Wholesale total</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div><div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div><div><dt>Product margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${orderMargin}%`}</dd></div></dl>
+              <section className="rx-checkout-panel card" id="rx-order-review">
+                <header>
+                  <p className="section-label">Order {activeOrder.id}</p>
+                  <strong>Review and request payment</strong>
+                </header>
+                <dl className="rx-order-totals">
+                  <div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div>
+                  <div><dt>Wholesale total</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div>
+                  <div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div>
+                  <div><dt>Product margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${orderMargin}%`}</dd></div>
+                </dl>
                 <div className={`rx-checkout-readiness${quoteError ? ' has-error' : ''}`}>
                   <span className="section-label">{state.workspaceMode === 'training' ? 'Curaleaf test quote' : 'Live Curaleaf quote'}</span>
                   <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{quoteAvailable ? 'Wholesale and stock verified' : quoteCurrent ? 'Pricing returned · stock unavailable' : state.workspaceMode === 'training' ? 'Optional availability and wholesale check' : 'Required for current quantities'}</span>
                   {quoteSummary && quoteCurrent ? <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />} Shipping {money(quoteSummary.shippingPrice)} · tax {quoteSummary.taxRate}%</span> : null}
                   {quoteError ? <ProviderStatusNotice title={quoteError.title} detail={quoteError.detail} /> : null}
-                  <button type="button" className="btn btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Requesting quote…' : quoteCurrent ? 'Refresh Curaleaf quote' : 'Get Curaleaf quote'}</button>
+                  <button type="button" className="btn btn-secondary btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Requesting quote…' : quoteCurrent ? 'Refresh Curaleaf quote' : 'Get Curaleaf quote'}</button>
                 </div>
                 <div className="rx-dispensing-charge">
                   <span><strong>Dispensing charge</strong><small>Optional pharmacy charge · patient collection only</small></span>
@@ -768,13 +917,16 @@ export default function CreateOrder() {
                   <label className="rx-dispensing-custom"><span>Custom</span><span className="money-input"><span>£</span><input type="number" min="0" max="100" step="0.01" value={activeOrder.dispensingFee} onFocus={event => event.currentTarget.select()} onChange={event => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: Math.max(0, Math.min(100, Number(event.target.value))) })} aria-label="Custom dispensing charge" /></span></label>
                 </div>
                 <div className="rx-patient-total"><span><small>Patient total</small><em>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)} products + {money(activeOrder.dispensingFee)} dispensing</em></span><strong>{money(orderRevenue(activeOrder))}</strong></div>
-                <div className="rx-checkout-readiness"><span className="section-label">Ready to continue</span>{readiness.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}</div>
+                <div className="rx-checkout-readiness">
+                  <span className="section-label">Ready to continue</span>
+                  {readiness.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}
+                </div>
                 <div className="rx-payment-actions">
                   <span className="section-label">Payment route</span>
                   <div className="rx-payment-route-toggle" aria-label="Pharmacy payment route">
                     <div className="is-selected">{selectedPaymentRoute === 'worldpay' ? <CreditCard size={17} /> : <Banknote size={17} />}<span><strong>{selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy payment'}</strong><small>{selectedPaymentRoute === 'worldpay' ? 'Verified hosted checkout' : 'EPOS, cash or transfer'}</small></span><CheckCircle size={14} /></div>
                   </div>
-                  <p className="rx-payment-route-note">This route is set in Pharmacy Settings and is locked when the order is saved. Changing Settings only affects future orders.</p>
+                  <p className="rx-payment-route-note">This route is set in Pharmacy Settings and locked when the order is saved.</p>
                   <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : selectedPaymentRoute === 'worldpay' ? 'Create Worldpay request' : 'Continue with pharmacy payment'}</button>
                 </div>
                 {!readyForPayment && <p className="rx-checkout-blocker"><AlertTriangle size={13} /> Complete the outstanding checks before requesting payment.</p>}

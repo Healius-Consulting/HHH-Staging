@@ -10,7 +10,7 @@ import {
   ShieldAlert,
   XCircle,
 } from 'lucide-react';
-import { lineRevenue, money, useApp, type Prescription } from '../context/AppContext';
+import { getUnresolvedReason, lineRevenue, money, useApp, type Prescription } from '../context/AppContext';
 import { useModalFocus } from '../accessibility/useModalFocus';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
@@ -56,11 +56,8 @@ export default function Orders() {
         const patientDob = patient?.dob ?? '';
 
         order.prescriptions.forEach((rx, index) => {
-          // Determine 28 day expiry from entry date
-          const entryDate = new Date(order.date);
-          const expiryDate = new Date(entryDate);
-          expiryDate.setDate(expiryDate.getDate() + 28);
-          const isExpired = now > expiryDate;
+          const unresolvedReason = getUnresolvedReason(order, now);
+          const isExpired = unresolvedReason === 'expired' || Boolean(order.isExpired);
 
           let placementState: FlatSubOrder['placementState'] = 'PLACED';
           let rejectionReason: string | undefined;
@@ -73,9 +70,11 @@ export default function Orders() {
             placementState = 'HELD_STOCK';
             rejectionReason = 'Out of stock at Curaleaf supplier';
           }
-          if (order.quoteReview?.type === 'patient_price_changed') {
+          if (order.quoteReview?.type === 'patient_price_changed' || unresolvedReason === 'rejected') {
             placementState = 'HELD_PRICE';
-            rejectionReason = 'Wholesale cost shift below 15% margin floor';
+            rejectionReason = order.quoteReview?.type === 'patient_price_changed'
+              ? 'Wholesale cost shift below 15% margin floor'
+              : 'Curaleaf rejected / recreate required';
           }
           if (order.payment.status === 'none') {
             placementState = 'PENDING_PLACEMENT';
@@ -252,11 +251,12 @@ export default function Orders() {
                       type="button"
                       className="button button-primary button-sm"
                       onClick={() => {
-                        const targetOrder = state.orders.find(o => o.id === selected.orderId);
-                        if (targetOrder) {
-                          dispatch({ type: 'NEW_ORDER' });
-                          dispatch({ type: 'SET_SCREEN', screen: 'create' });
-                        }
+                        dispatch({ type: 'START_REDO_ORDER', sourceOrderId: selected.orderId });
+                        dispatch({
+                          type: 'ADD_TOAST',
+                          message: `Started a redo draft from order #${selected.orderId}. Attach the new prescription PDF for Curaleaf authentication.`,
+                          toastType: 'info',
+                        });
                       }}
                     >
                       <RefreshCw size={14} />

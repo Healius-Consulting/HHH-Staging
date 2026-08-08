@@ -49,9 +49,19 @@ Pharmacy-token eligibility intake → Shaylen/HHH telephone review and programme
 - **SMS / email provider** — the "ready for collection" notification.
 - **File storage** for prescription scans — special-category health data (UK GDPR Art. 9); encryption + retention rules apply.
 
-## Open items (pending Curaleaf confirmation)
+## Open items (Curaleaf — remaining external gates)
 
-Several Rocky API details are not yet locked — see TRD §9. Most notably: whether `POST /purchase-order` accepts multiple `prescription_refs` (consolidated vs one PO per prescription), the auth header scheme, the `GET /products` response schema + exact stock-status values, scan max file size, shipment status set, and how delivery/goods-in is reported. An email requesting these has been sent to Curaleaf (Mike Baker / Phil Jones).
+Phil answered Q1–Q13 on **5 August 2026** (see `Curaleaf-OpenItems-Email-and-Agenda.docx` and `Rocky-API-Reference.md` “Confirmed operational constraints”). Confirmed: `customerId` internal; ~1 req/s + 10s poll; 16MB uploads; prescriber required; wholesale via quotes; PO cancel / declined scripts via CS; no partner master key yet.
+
+**Still chasing Curaleaf / Ellis / legal:**
+
+1. Stocked products in the development environment (quote / PO / shipment UAT)
+2. Existing sandbox key + one additional dev-pharmacy key (multi-tenant isolation)
+3. Ellis confirmation that HHH does not need customer-specific catalogues
+4. Written approval for direct-to-live onboarding after initial acceptance
+5. DPA / data-sharing terms and prescription-scan retention rules
+
+Track chase owners in `project-manager-playbook.md` §9 and compliance I-02 / I-03. Notion remains the external decision log.
 
 ## Notes for scoping
 

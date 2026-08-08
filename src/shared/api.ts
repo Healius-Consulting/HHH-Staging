@@ -26,6 +26,7 @@ import type {
   PortalPatientRecord,
   PortalOrderInput,
   PortalOrderRecord,
+  ExpiryCheckState,
   PrescriptionUploadRequest,
   PrescriptionUploadTarget,
   CuraleafClinicPrescriptionInput,
@@ -196,8 +197,36 @@ export function getPortalPatients(organisationId: string) {
   return apiRequest<PortalPatientRecord[]>(`/v1/portal/patients?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
-export function getPortalOrders(organisationId: string) {
-  return apiRequest<PortalOrderRecord[]>(`/v1/portal/orders?organisationId=${encodeURIComponent(organisationId)}`);
+export function getPortalOrders(organisationId: string, options?: { patientId?: string; unresolvedOnly?: boolean }) {
+  const params = new URLSearchParams({ organisationId });
+  if (options?.patientId) params.set('patientId', options.patientId);
+  if (options?.unresolvedOnly) params.set('unresolvedOnly', 'true');
+  return apiRequest<PortalOrderRecord[]>(`/v1/portal/orders?${params.toString()}`);
+}
+
+export function getUnresolvedPortalOrders(organisationId: string, patientId: string) {
+  return apiRequest<PortalOrderRecord[]>(
+    `/v1/portal/patients/${encodeURIComponent(patientId)}/unresolved-orders?organisationId=${encodeURIComponent(organisationId)}`,
+  );
+}
+
+export function evaluatePortalOrderExpiry(orderId: string, organisationId: string) {
+  return apiRequest<ExpiryCheckState & {
+    orderId: string;
+    cycleStartedAt: string;
+    cycleExpiresAt: string;
+    isCycleExpired: boolean;
+    unresolvedReason: 'expired' | 'rejected' | null;
+    redoEligible: boolean;
+    evaluatedAt: string;
+  }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/evaluate-28day-expiry?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+export function cancelAndArchivePortalOrder(orderId: string, organisationId: string) {
+  return apiRequest<PortalOrderRecord>(`/v1/portal/orders/${encodeURIComponent(orderId)}/cancel-and-archive`, {
+    method: 'POST',
+    body: JSON.stringify({ organisationId }),
+  });
 }
 
 export function createPortalOrder(input: PortalOrderInput) {

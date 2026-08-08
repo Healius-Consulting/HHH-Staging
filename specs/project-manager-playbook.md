@@ -390,13 +390,15 @@ I confirm UAT sections applicable to our go-live phase have been tested and pass
 
 Phil answered Q1–Q13 on 5 August 2026. Keep only the externally owned gates below open and block full production Rocky order flow until they are resolved.
 
-| # | What to confirm | Why it matters |
-|---|-----------------|----------------|
-| 1 | Ellis confirmation on whether HHH receives customer-specific catalogue/pricing | Catalogue operating model |
-| 2 | Stocked products in the development environment | Quote, PO and shipment UAT |
-| 3 | Existing sandbox key plus a second dev-pharmacy key | Two-tenant isolation UAT |
-| 4 | Written approval for direct-to-live onboarding after initial integration acceptance | Pharmacy onboarding runbook |
-| 5 | DPA/data-sharing terms and prescription-scan retention rules | Legal production gate |
+| # | What to confirm | Why it matters | Status |
+|---|-----------------|----------------|--------|
+| 1 | Ellis confirmation on whether HHH receives customer-specific catalogue/pricing | Catalogue operating model | Open (Phil: likely N/A for HHH) |
+| 2 | Stocked products in the development environment | Quote, PO and shipment UAT | Open (Q4 — Curaleaf to follow up) |
+| 3 | Existing sandbox key plus a second dev-pharmacy key | Two-tenant isolation UAT | Open (Q5 — Curaleaf to follow up) |
+| 4 | Written approval for direct-to-live onboarding after initial integration acceptance | Pharmacy onboarding runbook | Open (Q6 — needs Ellis + written OK) |
+| 5 | DPA/data-sharing terms and prescription-scan retention rules | Legal production gate | Open (Q13 — Curaleaf legal) |
+
+**Closed via Phil (5 Aug 2026) — do not re-chase:** `customerId` meaning; 16MB upload limit; ~1 req/s + 10s polling; mandatory `prescriberId`; wholesale via quotes; CS-only PO cancel / declined scripts; no partner master key yet.
 
 ---
 

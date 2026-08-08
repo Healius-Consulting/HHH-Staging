@@ -96,6 +96,15 @@ export type PaymentStatus = 'none' | 'sent' | 'paid';
 export type PaymentRoute = 'worldpay' | 'pharmacy' | null;
 export type ManualTender = 'epos-card' | 'cash' | 'bank-transfer' | 'other';
 
+export type UnresolvedOrderReason = 'expired' | 'rejected';
+
+export interface OrderRedoContext {
+  originalOrderId: number;
+  originalBackendId?: string;
+  isPaidRedo: boolean;
+  reason: UnresolvedOrderReason;
+}
+
 export interface PatientOrder {
   id: number;
   backendId?: string;
@@ -117,6 +126,32 @@ export interface PatientOrder {
   };
   prescriptions: Prescription[];
   quoteReview?: PortalOrderRecord['quoteReview'];
+  redoContext?: OrderRedoContext;
+  lifecycleStatus?: string;
+  isExpired?: boolean;
+  unresolvedReason?: UnresolvedOrderReason | null;
+  redoEligible?: boolean;
+  redoneByOrderId?: string | null;
+  cycleExpiresAt?: string;
+  expiryCheck?: PortalOrderRecord['expiryCheck'];
+}
+
+/** Archived (28-day expired) or Curaleaf-rejected orders that still need a redo. */
+export function getUnresolvedReason(order: PatientOrder, now = new Date()): UnresolvedOrderReason | null {
+  if (order.payment.status === 'none') return null;
+  if (order.redoneByOrderId) return null;
+  if (order.unresolvedReason === 'expired' || order.unresolvedReason === 'rejected') return order.unresolvedReason;
+  if (order.redoEligible === false) return null;
+  if (order.quoteReview?.status === 'recreate_required' || order.quoteReview) return 'rejected';
+  if (order.lifecycleStatus === 'archived' || order.isExpired) return 'expired';
+  const entryDate = new Date(order.date);
+  const expiryDate = order.cycleExpiresAt ? new Date(order.cycleExpiresAt) : (() => {
+    const value = new Date(entryDate);
+    value.setDate(value.getDate() + 28);
+    return value;
+  })();
+  if (now > expiryDate) return 'expired';
+  return null;
 }
 
 export type SubmissionStatus = 'New' | 'Under HHH review' | 'Approved' | 'Declined';
@@ -477,6 +512,9 @@ export type Action =
   | { type: 'DECLINE_ONBOARDING'; subId: EligibilitySubmission['id']; note?: string }
   // Orders
   | { type: 'NEW_ORDER'; patientId?: string }
+  | { type: 'START_REDO_ORDER'; sourceOrderId: number }
+  | { type: 'APPLY_REDO_FROM_ORDER'; orderId: number; sourceOrderId: number }
+  | { type: 'CLEAR_ORDER_REDO_CONTEXT'; orderId: number }
   | { type: 'SET_ACTIVE_ORDER'; orderId: number }
   | { type: 'SET_ORDER_PATIENT'; orderId: number; patientId: string }
   | { type: 'SET_ORDER_DISPENSING_FEE'; orderId: number; amount: number }
@@ -638,6 +676,19 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
     },
     prescriptions,
     quoteReview: record.quoteReview,
+    lifecycleStatus: record.status,
+    isExpired: Boolean(record.isExpired || record.unresolvedReason === 'expired'),
+    unresolvedReason: record.unresolvedReason ?? null,
+    redoEligible: record.redoEligible,
+    redoneByOrderId: record.redoneByOrderId ?? null,
+    cycleExpiresAt: record.cycleExpiresAt,
+    expiryCheck: record.expiryCheck,
+    redoContext: record.redoContext ? {
+      originalOrderId: 0,
+      originalBackendId: String(record.redoOfOrderId ?? record.redoContext.originalOrderId),
+      isPaidRedo: Boolean(record.redoContext.isPaidRedo),
+      reason: record.redoContext.unresolvedReason ?? 'expired',
+    } : undefined,
   };
 }
 
@@ -701,7 +752,9 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
 
   const rx4: Prescription = {
     id: 4, entryMode: 'clinic', prescriber: 'Dr. S. Patel', copyFileName: 'prescription_jdoe_overdue.pdf',
-    items: [],
+    items: [
+      { productId: 'seed-pack-khan-oil', formulaId: 'seed-formula-khan-oil', name: 'Curaleaf 20:10 Oil 30ml', qty: 1, unitsNeededCount: 1, cost: 42, retail: 79 },
+    ],
     placed: true, poRef: 'PO-9003', status: 'approved', invoiceRef: 'INV-4073', trackingNumber: null, carrier: null,
   };
   const o3: PatientOrder = {
@@ -715,11 +768,22 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
       paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null,
     },
     prescriptions: [rx4],
+    quoteReview: {
+      status: 'recreate_required',
+      type: 'patient_price_changed',
+      fingerprint: 'seed-price-shift',
+      latestQuote: { shippingPrice: '0', taxRate: '0', items: [] },
+      differences: [{ category: 'patient_price', field: 'patientPackPrice', previous: '79', latest: '92' }],
+      checkedAt: new Date().toISOString(),
+    },
   };
 
   const rx5: Prescription = {
     id: 5, entryMode: 'clinic', prescriber: 'Dr. R. Okafor', copyFileName: 'prescription_sbennett.pdf',
-    items: [],
+    items: [
+      { productId: 'seed-pack-flower', formulaId: 'seed-formula-flower', name: 'Curaleaf Access TT1 Flower 10g', qty: 2, unitsNeededCount: 2, cost: 28, retail: 55 },
+      { productId: 'seed-pack-oil', formulaId: 'seed-formula-oil', name: 'Curaleaf 10:10 Oil 30ml', qty: 1, unitsNeededCount: 1, cost: 36, retail: 69 },
+    ],
     placed: true, poRef: 'PO-9004', status: 'collected', invoiceRef: 'INV-4074', trackingNumber: null, carrier: null,
   };
   const o4: PatientOrder = {
@@ -735,7 +799,29 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
     prescriptions: [rx5],
   };
 
-  return { orders: [o1, o2, o3, o4], nextRx: 6 };
+  const rx6: Prescription = {
+    id: 6, entryMode: 'clinic', prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_cycle.pdf',
+    items: [
+      { productId: 'seed-pack-doe-flower', formulaId: 'seed-formula-doe-flower', name: 'Curaleaf Access T20 Flower 10g', qty: 1, unitsNeededCount: 1, cost: 30, retail: 58 },
+      { productId: 'seed-pack-doe-oil', formulaId: 'seed-formula-doe-oil', name: 'Curaleaf 20:10 Oil 30ml', qty: 1, unitsNeededCount: 1, cost: 42, retail: 79 },
+    ],
+    placed: true, poRef: 'PO-9005', status: 'collected', invoiceRef: 'INV-4075', trackingNumber: null, carrier: null,
+  };
+  const o5: PatientOrder = {
+    id: 5, organisationId: ORGANISATIONS[0].id, patientId: 'P-1001', date: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000), dispensingFee: 0,
+    payment: {
+      status: 'paid',
+      route: 'worldpay',
+      amount: 137,
+      ref: 'WP-8891',
+      sentAt: new Date(Date.now() - 34 * 24 * 60 * 60 * 1000),
+      paidAt: new Date(Date.now() - 34 * 24 * 60 * 60 * 1000),
+      manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null,
+    },
+    prescriptions: [rx6],
+  };
+
+  return { orders: [o1, o2, o3, o4, o5], nextRx: 7 };
 }
 
 const seed = buildSeedOrders();
@@ -807,7 +893,7 @@ const initialState: AppState = {
   orders: usePrototypeState ? seed.orders : [],
   activeOrderId: usePrototypeState ? 1 : null,
   toasts: [],
-  nextIds: { patient: 2000, rx: seed.nextRx, order: 5, submission: 5, invoice: 4072 },
+  nextIds: { patient: 2000, rx: seed.nextRx, order: 6, submission: 5, invoice: 4072 },
   portalMode: initialPortalMode,
   workspaceMode: 'training',
   organisations: usePrototypeState ? ORGANISATIONS : [],
@@ -828,6 +914,43 @@ const initialState: AppState = {
 
 function findOrder(state: AppState, orderId: number) {
   return state.orders.find(o => o.id === orderId);
+}
+
+function applyRedoOntoDraft(draft: PatientOrder, source: PatientOrder, reason: UnresolvedOrderReason): PatientOrder {
+  const items = source.prescriptions.flatMap(rx => rx.items).map(item => ({ ...item }));
+  const targetRxId = draft.prescriptions[0]?.id;
+  return {
+    ...draft,
+    patientId: source.patientId ?? draft.patientId,
+    redoContext: {
+      originalOrderId: source.id,
+      originalBackendId: source.backendId,
+      isPaidRedo: source.payment.status === 'paid',
+      reason,
+    },
+    prescriptions: draft.prescriptions.map(rx => {
+      if (rx.id !== targetRxId) return rx;
+      return {
+        ...rx,
+        items,
+        copyFileName: null,
+        fileId: undefined,
+        clinicScanId: undefined,
+        curaleafPrescriptionId: undefined,
+        serialNumber: undefined,
+        issueDate: undefined,
+        expiryDate: undefined,
+        curaleafPatientName: undefined,
+        curaleafPatientDob: undefined,
+        placed: false,
+        poRef: null,
+        status: 'draft',
+        invoiceRef: null,
+        trackingNumber: null,
+        carrier: null,
+      };
+    }),
+  };
 }
 
 function mapOrder(state: AppState, orderId: number, fn: (o: PatientOrder) => PatientOrder): AppState {
@@ -948,7 +1071,7 @@ function reducer(state: AppState, action: Action): AppState {
           submissions: training.submissions,
           orders: training.orders,
           activeOrderId: 1,
-          nextIds: { patient: 2000, rx: training.nextRx, order: 5, submission: 5, invoice: 4072 },
+          nextIds: { patient: 2000, rx: training.nextRx, order: 6, submission: 5, invoice: 4072 },
         };
       }
       if (state.workspaceMode === action.mode) return state;
@@ -1104,6 +1227,39 @@ function reducer(state: AppState, action: Action): AppState {
         nextIds: { ...state.nextIds, order: id + 1, rx: rxId + 1 },
       };
     }
+    case 'START_REDO_ORDER': {
+      const source = state.orders.find(order => order.id === action.sourceOrderId && order.organisationId === state.currentOrganisationId);
+      if (!source?.patientId || source.payment.status === 'none') return state;
+      const reason = getUnresolvedReason(source) ?? 'rejected';
+      if (!state.crm.some(patient => patient.id === source.patientId && patient.organisationId === state.currentOrganisationId && patient.status !== 'Suspended')) return state;
+      const id = state.nextIds.order;
+      const rxId = state.nextIds.rx;
+      const draft = blankOrder(id, source.patientId, state.currentOrganisationId);
+      draft.prescriptions = [blankRx(rxId)];
+      const redone = applyRedoOntoDraft(draft, source, reason);
+      return {
+        ...state,
+        orders: [...state.orders, redone],
+        activeOrderId: id,
+        nextIds: { ...state.nextIds, order: id + 1, rx: rxId + 1 },
+        screen: 'create',
+      };
+    }
+    case 'APPLY_REDO_FROM_ORDER': {
+      const source = state.orders.find(order => order.id === action.sourceOrderId && order.organisationId === state.currentOrganisationId);
+      const draft = state.orders.find(order => order.id === action.orderId && order.organisationId === state.currentOrganisationId);
+      if (!source || !draft || draft.payment.status !== 'none') return state;
+      const reason = getUnresolvedReason(source);
+      if (!reason) return state;
+      if (source.patientId && draft.patientId && source.patientId !== draft.patientId) return state;
+      return mapOrder(state, action.orderId, order => applyRedoOntoDraft(order, source, reason));
+    }
+    case 'CLEAR_ORDER_REDO_CONTEXT':
+      return mapOrder(state, action.orderId, order => {
+        if (!order.redoContext) return order;
+        const { redoContext: _removed, ...rest } = order;
+        return rest;
+      });
     case 'SET_ACTIVE_ORDER':
       return { ...state, activeOrderId: action.orderId };
     case 'SET_ORDER_PATIENT': {
@@ -1112,6 +1268,9 @@ function reducer(state: AppState, action: Action): AppState {
       return patient ? mapOrder(state, action.orderId, o => ({
         ...o,
         patientId: patient.id,
+        redoContext: o.redoContext && o.redoContext.originalOrderId
+          ? (state.orders.find(source => source.id === o.redoContext!.originalOrderId)?.patientId === patient.id ? o.redoContext : undefined)
+          : undefined,
         prescriptions: o.prescriptions.map(prescription => prescription.entryMode === 'manual' ? {
           ...prescription,
           curaleafPatientName: patient.name,
