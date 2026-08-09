@@ -47,7 +47,7 @@ export default function Navigation() {
       ariaLabel="Pharmacy workspace"
       activeKey={state.screen}
       groups={groups}
-      mobilePrimaryKeys={['home', 'referrals', 'create', 'review']}
+      mobilePrimaryKeys={['home', 'create', 'orders', 'patients']}
       onNavigate={screen => dispatch({ type: 'SET_SCREEN', screen })}
       brand={{ title: 'Holistic Health Hub', subtitle: 'Pharmacy operations', partner: organisation.tradingName, logo: <HhhBrandMark /> }}
       user={{ initials: staffInitials, name: staffName, role: isAdminViewingClient ? 'HHH administrator' : `Pharmacy staff · ${organisation.status}` }}

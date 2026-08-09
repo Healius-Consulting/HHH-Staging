@@ -845,6 +845,19 @@ export default function AdminPortal() {
     return { ready, total, percent: total ? Math.round(ready / total * 100) : 0 };
   };
 
+  useEffect(() => {
+    if (!showCuraleafDrawer || !curaleafOrganisationId) return;
+    let cancelled = false;
+    void getCuraleafConnectionStatus(curaleafOrganisationId)
+      .then(status => {
+        if (!cancelled) setCuraleafResult(status);
+      })
+      .catch(() => {
+        if (!cancelled) setCuraleafResult(null);
+      });
+    return () => { cancelled = true; };
+  }, [curaleafOrganisationId, showCuraleafDrawer]);
+
   if (selectedOrganisation) {
     const submissions = submissionsByOrganisation.get(selectedOrganisation.id) ?? [];
     const patients = crmByOrganisation.get(selectedOrganisation.id) ?? [];
@@ -1268,19 +1281,6 @@ export default function AdminPortal() {
       </>
     );
   };
-
-  useEffect(() => {
-    if (!showCuraleafDrawer || !curaleafOrganisationId) return;
-    let cancelled = false;
-    void getCuraleafConnectionStatus(curaleafOrganisationId)
-      .then(status => {
-        if (!cancelled) setCuraleafResult(status);
-      })
-      .catch(() => {
-        if (!cancelled) setCuraleafResult(null);
-      });
-    return () => { cancelled = true; };
-  }, [curaleafOrganisationId, showCuraleafDrawer]);
 
   const openCuraleafDrawer = (organisationId: string) => {
     setCuraleafOrganisationId(organisationId);

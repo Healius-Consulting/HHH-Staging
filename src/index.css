@@ -1235,7 +1235,17 @@ td.font-semibold{
 
 .admin-detail-assets .resource-url{ margin: 16px 0; }
 
-.eligibility-shell{ padding: 28px 16px 70px; color: #172033; background: #edf4f1; }
+.eligibility-shell{
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 28px 16px 70px;
+  color: #172033;
+  background: #edf4f1;
+}
 
 .eligibility-brand, .eligibility-card{ max-width: 720px; margin-left: auto; margin-right: auto; }
 
@@ -5074,7 +5084,12 @@ html.modal-open .page-container{ overflow: hidden; }
 }
 
 .curaleaf-catalog-preview{
-  min-height: 100vh;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   color: #17332d;
   background:
     radial-gradient(circle at 85% -10%, rgba(152, 196, 179, .22), transparent 32rem),
@@ -7208,5 +7223,78 @@ td{
   }
 .company-group-card__header{
     flex-direction: column;
+}
+}
+
+/* Shared mobile chrome: keep page identity readable and expose the real routes. */
+@media (max-width: 760px) {
+  .staff-login-page{
+    grid-template-rows: max-content max-content;
+    align-content: start;
+  }
+
+  .workspace-page-header{
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .workspace-page-header .brand-text{
+    width: 100%;
+  }
+
+  .workspace-page-header .app-header__eyebrow{
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-page-header .brand-text h1{
+    overflow: visible;
+    font-size: clamp(20px, 6vw, 24px);
+    line-height: 1.18;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .workspace-page-header .app-header__actions{
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .workspace-page-header .app-header__actions > .btn{
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .workspace-page-header .header-command-launcher{
+    flex: 0 0 42px;
+    width: 42px;
+    min-height: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .workspace-page-header .header-command-launcher span,
+  .workspace-page-header .header-command-launcher kbd{
+    display: none;
+  }
+
+  .mobile-bottom-nav{
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .pricing-position > div{
+    column-gap: 16px;
+  }
+}
+
+@media (max-width: 380px) {
+  .workspace-page-header .app-header__actions > .btn{
+    padding-inline: 11px !important;
+    font-size: 11px;
   }
 }

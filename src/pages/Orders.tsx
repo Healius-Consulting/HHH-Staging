@@ -97,7 +97,7 @@ export default function Orders() {
       });
 
     return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [state.crm, state.currentOrganisationId, state.orders]);
+  }, [state.catalogue, state.crm, state.currentOrganisationId, state.orders]);
 
   // Filter into the 4 tabs: Needs Action, Active, Archived, Rejected
   const tabFilteredOrders = useMemo(() => {

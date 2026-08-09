@@ -65,7 +65,7 @@ export default function CreateOrder() {
     setQuotedUnavailableProductIds([]);
     setEditingClinicFormularyRxId(null);
     setSelectedUnresolvedOrderId(activeOrder?.redoContext?.originalOrderId ?? null);
-  }, [activeOrder?.id]);
+  }, [activeOrder?.id, activeOrder?.redoContext?.originalOrderId]);
 
   const matchingPatients = useMemo(() => {
     const query = patientQuery.trim().toLowerCase();
