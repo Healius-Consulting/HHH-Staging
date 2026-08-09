@@ -8678,3 +8678,242 @@ html[data-theme] .app-shell{
 html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   background: var(--bg-app) !important;
 }
+
+/* Patient eligibility form — calm, guided and independent of staff themes. */
+.eligibility-shell{
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  padding: 0 24px 80px;
+  overflow-y: auto;
+  color: #18231f;
+  background: #f2f6f4;
+}
+
+.eligibility-brand{
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, 1160px);
+  max-width: none;
+  min-height: 84px;
+  margin: 0 auto 32px;
+  padding: 18px 0;
+  border-bottom: 1px solid #d9e2de;
+}
+
+.eligibility-brand__identity{ display: flex; align-items: center; gap: 12px; }
+.eligibility-brand .gateway-logo{ width: 44px; height: 44px; border-radius: 11px; }
+.eligibility-brand strong{ color: #17231e; font-size: 14px; font-weight: 700; }
+.eligibility-brand span{ color: #617069; font-size: 11px; }
+.eligibility-brand__secure{
+  display: inline-flex !important;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  color: #315e50 !important;
+  background: #e7efeb;
+  border: 1px solid #d3e1da;
+  border-radius: 999px;
+  font-weight: 650;
+}
+
+.eligibility-layout{
+  display: grid;
+  grid-template-columns: minmax(300px, 390px) minmax(0, 720px);
+  align-items: start;
+  gap: clamp(28px, 5vw, 64px);
+  width: min(100%, 1160px);
+  margin: 0 auto;
+}
+
+.eligibility-intro{
+  position: sticky;
+  top: 28px;
+  padding: 34px;
+  overflow: hidden;
+  color: #edf8f3;
+  background: var(--tenant-sidebar, #12372d);
+  border: 1px solid color-mix(in srgb, var(--tenant-primary) 28%, #203d35);
+  border-radius: 22px;
+  box-shadow: 0 24px 54px rgba(25, 56, 46, .14);
+}
+
+.eligibility-intro::after{
+  content: '';
+  position: absolute;
+  right: -82px;
+  bottom: -100px;
+  width: 230px;
+  height: 230px;
+  border: 54px solid color-mix(in srgb, var(--tenant-primary) 30%, transparent);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.eligibility-intro .section-label{ position: relative; z-index: 1; color: color-mix(in srgb, var(--tenant-primary) 45%, #fff); font-size: 10px; letter-spacing: .12em; }
+.eligibility-intro h1{ position: relative; z-index: 1; max-width: 330px; margin: 15px 0 16px; color: #fff; font-size: clamp(33px, 3.4vw, 47px); font-weight: 680; letter-spacing: -.045em; line-height: 1.02; }
+.eligibility-intro__lead{ position: relative; z-index: 1; color: #c7d7d1; font-size: 14px; line-height: 1.65; }
+
+.eligibility-trust{
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+  padding: 20px 0 0;
+  border-top: 1px solid rgba(255,255,255,.13);
+  color: #e1eee9;
+  font-size: 12px;
+  font-weight: 600;
+}
+.eligibility-trust span{ display: flex; align-items: center; gap: 9px; }
+.eligibility-trust svg{ color: color-mix(in srgb, var(--tenant-primary) 52%, #fff); }
+
+.eligibility-next-steps{ position: relative; z-index: 1; margin-top: 31px; }
+.eligibility-next-steps > p{ color: #849c93; font-size: 9px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
+.eligibility-next-steps ol{ display: grid; gap: 15px; margin-top: 15px; }
+.eligibility-next-steps li{ display: grid; grid-template-columns: 28px 1fr; gap: 11px; align-items: start; }
+.eligibility-next-steps li > span{ display: grid; width: 27px; height: 27px; place-items: center; color: #fff; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; font-size: 10px; font-weight: 700; }
+.eligibility-next-steps strong, .eligibility-next-steps small{ display: block; }
+.eligibility-next-steps strong{ color: #edf6f2; font-size: 12px; }
+.eligibility-next-steps small{ margin-top: 3px; color: #91a69e; font-size: 10px; line-height: 1.45; }
+.eligibility-intro__note{ position: relative; z-index: 1; display: flex; gap: 8px; align-items: flex-start; margin-top: 28px; padding-top: 18px; color: #9eb2aa; border-top: 1px solid rgba(255,255,255,.1); font-size: 10px; line-height: 1.5; }
+.eligibility-intro__note svg{ flex: 0 0 auto; }
+
+.eligibility-card.eligibility-form{
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  overflow: visible;
+  color: #1c2924;
+  background: #fff !important;
+  border: 1px solid #dce4e0 !important;
+  border-radius: 22px !important;
+  box-shadow: 0 22px 60px rgba(27, 55, 46, .09) !important;
+}
+
+.eligibility-form-header{ padding: 29px 32px 26px; border-bottom: 1px solid #e5ebe8; }
+.eligibility-form-header > span{ display: flex; align-items: center; gap: 7px; color: var(--tenant-primary-strong, #176d55); font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+.eligibility-form-header h2{ margin-top: 10px; color: #17231e; font-size: 25px; font-weight: 680; letter-spacing: -.025em; }
+.eligibility-form-header p{ margin-top: 5px; color: #66756e; font-size: 12px; }
+
+.eligibility-form-section{ display: grid; gap: 22px; padding: 30px 32px 32px; border-bottom: 1px solid #e5ebe8; }
+.eligibility-form-section--consent{ border-bottom: 0; }
+.eligibility-section-heading{ display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; }
+.eligibility-section-heading > span{ display: grid; width: 32px; height: 32px; place-items: center; color: var(--tenant-primary-strong, #176d55); background: var(--tenant-primary-soft, #e8f3ef); border: 1px solid color-mix(in srgb, var(--tenant-primary) 24%, #dce7e2); border-radius: 9px; font-size: 10px; font-weight: 750; }
+.eligibility-section-heading h3{ color: #1a2822; font-size: 16px; font-weight: 680; }
+.eligibility-section-heading p{ margin-top: 3px; color: #718079; font-size: 11px; line-height: 1.45; }
+
+.eligibility-form-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 18px 16px; }
+.eligibility-form label, .eligibility-form legend{ color: #35453e; font-size: 12px; font-style: normal; font-weight: 650; }
+.eligibility-form em{ color: #b23b3b; font-style: normal; }
+.eligibility-form label > .input{ margin-top: 7px; }
+.eligibility-form .input{
+  min-height: 47px;
+  padding: 0 13px;
+  color: #1d2824 !important;
+  background: #fbfcfb !important;
+  border: 1px solid #cfd9d4 !important;
+  border-radius: 9px !important;
+  box-shadow: 0 1px 2px rgba(24, 48, 39, .025) !important;
+}
+.eligibility-form .input:hover{ border-color: #aebdb6 !important; }
+.eligibility-form .input:focus{ border-color: var(--tenant-primary) !important; box-shadow: 0 0 0 3px var(--tenant-focus-ring) !important; }
+.eligibility-form .input:disabled{ color: #8b9892 !important; background: #f1f4f2 !important; cursor: not-allowed; }
+.eligibility-form fieldset{ display: grid; gap: 9px; min-width: 0; border: 0; }
+
+.eligibility-condition-field{ position: relative; gap: 8px !important; }
+.eligibility-condition-menu{ position: relative; background: #fbfcfb; border: 1px solid #cfd9d4; border-radius: 10px; }
+.eligibility-condition-menu[open]{ z-index: 30; border-color: var(--tenant-primary); box-shadow: 0 0 0 3px var(--tenant-focus-ring); }
+.eligibility-condition-menu summary{ display: flex; min-height: 57px; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 13px; color: #24312c; cursor: pointer; list-style: none; }
+.eligibility-condition-menu summary::-webkit-details-marker{ display: none; }
+.eligibility-condition-menu summary > span{ min-width: 0; }
+.eligibility-condition-menu summary strong, .eligibility-condition-menu summary small{ display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eligibility-condition-menu summary strong{ font-size: 12px; font-weight: 650; }
+.eligibility-condition-menu summary small{ max-width: 580px; margin-top: 4px; color: #718079; font-size: 10px; font-weight: 500; }
+.eligibility-condition-menu summary > svg{ flex: 0 0 auto; color: #687770; transition: transform 160ms ease; }
+.eligibility-condition-menu[open] summary > svg{ transform: rotate(180deg); }
+.eligibility-condition-options{
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -1px;
+  right: -1px;
+  display: grid;
+  max-height: 320px;
+  padding: 7px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #ccd8d2;
+  border-radius: 12px;
+  box-shadow: 0 18px 42px rgba(20, 48, 38, .18);
+}
+.eligibility-condition-options__head{ position: sticky; top: -7px; z-index: 2; display: flex; justify-content: space-between; gap: 14px; padding: 10px 10px 9px; color: #687770; background: #fff; border-bottom: 1px solid #edf1ef; font-size: 10px; }
+.eligibility-condition-options__head strong{ color: #35453e; font-size: 10px; }
+.eligibility-condition-options label{ display: flex; min-height: 39px; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; color: #34423c; font-size: 11px; font-weight: 550; cursor: pointer; }
+.eligibility-condition-options label:hover{ background: #f1f6f3; }
+.eligibility-condition-options label:has(input:checked){ color: #164f3e; background: var(--tenant-primary-soft); border-color: color-mix(in srgb, var(--tenant-primary) 28%, #d9e6e0); }
+.eligibility-condition-options label.disabled{ color: #9aa59f; background: transparent; cursor: not-allowed; }
+.eligibility-condition-options input{ width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--tenant-primary); }
+.eligibility-condition-field.has-error .eligibility-condition-menu{ border-color: #c74646; box-shadow: 0 0 0 3px rgba(199,70,70,.1); }
+.eligibility-field-error{ color: #b23131; font-size: 11px; font-weight: 650; }
+
+.eligibility-choice{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.eligibility-choice label{ display: flex; min-height: 58px; align-items: flex-start; gap: 10px; padding: 12px 13px; color: #34443d; background: #fbfcfb; border: 1px solid #d6dfda; border-radius: 10px; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.eligibility-choice label:hover{ border-color: #aebdb6; }
+.eligibility-choice label:has(input:checked){ color: #174f3f; background: var(--tenant-primary-soft); border-color: var(--tenant-primary); box-shadow: inset 0 0 0 1px var(--tenant-primary); }
+.eligibility-choice input{ width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--tenant-primary); }
+.eligibility-choice span, .eligibility-choice strong, .eligibility-choice small{ display: block; }
+.eligibility-choice strong{ font-size: 12px; }
+.eligibility-choice small{ margin-top: 3px; color: #77857f; font-size: 9px; font-weight: 500; }
+
+.eligibility-consents{ display: grid; gap: 9px; padding: 0; background: transparent; }
+.eligibility-consents label{ display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px; color: #42524b; background: #f7faf8; border: 1px solid #dce5e0; border-radius: 10px; font-size: 11px; font-weight: 520; line-height: 1.55; cursor: pointer; }
+.eligibility-consents label:has(input:checked){ background: var(--tenant-primary-soft); border-color: color-mix(in srgb, var(--tenant-primary) 35%, #d5e2dc); }
+.eligibility-consents input{ width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; accent-color: var(--tenant-primary); }
+.eligibility-consents .eligibility-consent--optional{ background: #fff; border-style: dashed; }
+.eligibility-consents small{ display: inline-block; margin-left: 5px; padding: 1px 5px; color: #687770; background: #e9eeeb; border-radius: 4px; font-size: 8px; font-weight: 650; text-transform: uppercase; }
+
+.eligibility-form-footer{ display: grid; gap: 9px; padding: 0 32px 26px; }
+.eligibility-submit{ min-height: 50px; justify-content: center; padding: 13px 18px; border-radius: 10px !important; font-size: 13px; font-weight: 700; }
+.eligibility-form-footer p{ display: flex; align-items: center; justify-content: center; gap: 6px; color: #718079; font-size: 10px; text-align: center; }
+.eligibility-legal{ margin: 0 32px 28px; color: #87938e !important; font-size: 9px; line-height: 1.55; text-align: center; }
+
+@media (max-width: 900px){
+  .eligibility-shell{ padding-inline: 18px; }
+  .eligibility-brand{ margin-bottom: 24px; }
+  .eligibility-layout{ grid-template-columns: 1fr; gap: 20px; width: min(100%, 720px); }
+  .eligibility-intro{ position: relative; top: 0; padding: 30px; }
+  .eligibility-intro h1{ max-width: 560px; }
+  .eligibility-next-steps ol{ grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .eligibility-next-steps li{ grid-template-columns: 27px 1fr; }
+}
+
+@media (max-width: 560px){
+  .eligibility-shell{ padding: 0 12px 52px; }
+  .eligibility-brand{ min-height: 72px; margin-bottom: 14px; }
+  .eligibility-brand .gateway-logo{ width: 39px; height: 39px; }
+  .eligibility-brand__secure{ width: 36px; height: 36px; justify-content: center; padding: 0; }
+  .eligibility-brand__secure svg{ width: 15px; height: 15px; }
+  .eligibility-brand__secure{ font-size: 0 !important; }
+  .eligibility-intro{ padding: 25px 22px; border-radius: 17px; }
+  .eligibility-intro h1{ margin-top: 12px; font-size: 34px; }
+  .eligibility-intro__lead{ font-size: 13px; }
+  .eligibility-next-steps{ margin-top: 25px; }
+  .eligibility-next-steps ol{ grid-template-columns: 1fr; gap: 12px; }
+  .eligibility-intro__note{ margin-top: 22px; }
+  .eligibility-card.eligibility-form{ border-radius: 17px !important; }
+  .eligibility-form-header{ padding: 24px 20px 22px; }
+  .eligibility-form-header h2{ font-size: 22px; }
+  .eligibility-form-section{ padding: 25px 20px 27px; }
+  .eligibility-form-grid, .eligibility-choice{ grid-template-columns: 1fr; }
+  .eligibility-form-grid{ gap: 15px; }
+  .eligibility-form-footer{ padding: 0 20px 22px; }
+  .eligibility-legal{ margin: 0 20px 24px; }
+  .eligibility-condition-options{ max-height: min(330px, 55vh); }
+}
