@@ -8663,3 +8663,18 @@ html[data-theme='dark'] .alert-success{
     color: var(--text-tertiary);
   }
 }
+
+/*
+ * Keep every signed-in route on one uninterrupted canvas. Several legacy route
+ * rules set gradients with `background`; changing only `background-color` later
+ * left those images in the cascade and produced visible bands in dark mode.
+ */
+html[data-theme] body,
+html[data-theme] #root,
+html[data-theme] .app-shell{
+  background: var(--bg-root) !important;
+}
+
+html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
+  background: var(--bg-app) !important;
+}
