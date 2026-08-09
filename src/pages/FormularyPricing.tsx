@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { CircleDollarSign, Package, Search, ShieldCheck, Tags } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import { money, TYPE_LABELS, useApp } from '../context/AppContext';
@@ -6,7 +6,7 @@ import { money, TYPE_LABELS, useApp } from '../context/AppContext';
 const TYPE_FILTERS = ['All', 'oil', 'flos', 'capsule', 'lozenge', 'vape', 'other'] as const;
 
 export default function FormularyPricing() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('All');
 
@@ -21,6 +21,13 @@ export default function FormularyPricing() {
   const updatedAt = state.catalogueUpdatedAt
     ? new Date(state.catalogueUpdatedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
     : null;
+
+  useEffect(() => {
+    if (state.navigationTarget?.kind !== 'catalogue') return;
+    setTypeFilter('All');
+    setQuery(state.navigationTarget.query);
+    dispatch({ type: 'CLEAR_NAVIGATION_TARGET' });
+  }, [dispatch, state.navigationTarget]);
 
   return (
     <div className="page-body formulary-pricing-workspace">

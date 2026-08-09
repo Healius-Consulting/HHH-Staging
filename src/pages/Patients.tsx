@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Activity, AlertTriangle, Building2, CalendarDays, FileText, Hash, Link2, Mail, MapPin, Phone, Search, ChevronRight, Plus, X, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
 import { useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
@@ -208,6 +208,18 @@ export default function Patients() {
   }, [patients, search, activeTab, sortKey]);
 
   const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
+
+  useEffect(() => {
+    const target = state.navigationTarget;
+    if (target?.kind !== 'patient') return;
+    const patient = patients.find(item => item.id === target.id);
+    if (patient) {
+      setActiveTab('all');
+      setSearch('');
+      setSelectedPatientId(patient.id);
+    }
+    dispatch({ type: 'CLEAR_NAVIGATION_TARGET' });
+  }, [dispatch, patients, state.navigationTarget]);
 
   const handleCreateOrder = (patient: UnifiedPatient) => {
     const finalPatientId = patient.crmPatient?.status === 'HHH approved' ? patient.crmPatient.id : null;

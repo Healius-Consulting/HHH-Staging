@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { sendPasswordResetEmail } from 'firebase/auth';
 import {
   AlertCircle,
-  ArrowLeft,
   Building2,
   ClipboardCheck,
   Copy,
@@ -828,15 +827,36 @@ export default function AdminPortal() {
   const liveCount = state.organisations.filter(org => org.status === 'live').length;
   const remainingSetupSteps = Object.values(setupByOrganisation).reduce((total, status) => total + status.requiredCount - status.completedCount, 0);
   const pendingAdminDecisions = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review').length;
-  const adminCommands: CommandDefinition[] = [
-    { label: 'Open pharmacies', detail: 'Manage pharmacy organisations', icon: <LayoutDashboard size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); } },
-    { label: 'Review onboarding', detail: 'Record patient calls and decisions', icon: <UserCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('referrals'); } },
-    { label: 'Search patients', detail: 'Open the cross-pharmacy patient register', icon: <Users size={16} />, run: () => { setSelectedOrganisationId(null); setView('patients'); } },
-    { label: 'Open referral finance', detail: 'Review £50 referrals and £40 annual fees', icon: <PoundSterling size={16} />, run: () => { setSelectedOrganisationId(null); setView('finance'); } },
-    { label: 'Open platform', detail: 'Pharmacy setup progress and Curaleaf activation', icon: <ClipboardCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('setup'); } },
-    { label: 'Activate Curaleaf', detail: 'Connect a pharmacy Curaleaf API account', icon: <LockKeyhole size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('curaleaf'); } },
-    { label: 'Onboard pharmacy', detail: 'Create a new pharmacy workspace', icon: <Plus size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); setShowOnboarding(true); } },
-  ];
+  const adminCommands = useMemo<CommandDefinition[]>(() => [
+    { label: 'Pharmacies', detail: 'Manage pharmacy organisations', group: 'Navigate', icon: <LayoutDashboard size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); } },
+    { label: 'Patient onboarding', detail: 'Record patient calls and decisions', group: 'Navigate', icon: <UserCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('referrals'); } },
+    { label: 'Patient register', detail: 'Cross-pharmacy patient ownership', group: 'Navigate', icon: <Users size={16} />, run: () => { setSelectedOrganisationId(null); setView('patients'); } },
+    { label: 'Referral finance', detail: '£50 referrals and £40 annual fees', group: 'Navigate', icon: <PoundSterling size={16} />, run: () => { setSelectedOrganisationId(null); setView('finance'); } },
+    { label: 'Platform readiness', detail: 'Setup progress and Curaleaf activation', group: 'Navigate', icon: <ClipboardCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('setup'); } },
+    { label: 'Activate Curaleaf', detail: 'Connect a pharmacy Curaleaf API account', group: 'Actions', icon: <LockKeyhole size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('curaleaf'); } },
+    { label: 'Onboard pharmacy', detail: 'Create a new pharmacy workspace', group: 'Actions', icon: <Plus size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); setShowOnboarding(true); } },
+    ...state.organisations.map((organisation): CommandDefinition => ({
+      label: organisation.tradingName,
+      detail: `${organisation.name} · GPhC ${organisation.gphcNumber}`,
+      keywords: `${organisation.websiteDomains.join(' ')} ${organisation.mainContactEmail}`,
+      group: 'Pharmacies',
+      searchOnly: true,
+      icon: <Building2 size={16} />,
+      run: () => { setQuery(''); setSelectedOrganisationId(organisation.id); },
+    })),
+    ...allPatients.map((patient): CommandDefinition => {
+      const organisation = state.organisations.find(item => item.id === patient.organisationId);
+      return {
+        label: patient.name,
+        detail: `${organisation?.tradingName ?? 'Unknown pharmacy'} · ${patient.email}`,
+        keywords: `${patient.mobile} ${patient.dob} ${patient.stage}`,
+        group: 'Patients',
+        searchOnly: true,
+        icon: <Users size={16} />,
+        run: () => { setSelectedOrganisationId(null); setView('patients'); setQuery(patient.email); },
+      };
+    }),
+  ], [allPatients, state.organisations]);
 
   const tenantReadiness = (organisationId: string) => {
     const status = setupByOrganisation[organisationId];
@@ -871,10 +891,8 @@ export default function AdminPortal() {
         <a className="skip-link" href="#admin-main-content">Skip to main content</a>
         <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
         <div className="app-main">
-          <WorkspacePageHeader section="HHH operations" context="Pharmacy detail" title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} contextControl={!setupStatus?.completed ? <div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div> : undefined} />
+          <WorkspacePageHeader section="Administration" context={selectedOrganisation.tradingName} title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} commandLabel="Find anything" onSectionClick={() => { setSelectedOrganisationId(null); setView('overview'); }} backAction={{ label: 'Return to previous admin page', onClick: () => setSelectedOrganisationId(null) }} contextControl={!setupStatus?.completed ? <div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div> : undefined} />
           <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
-          <button className="btn btn-sm admin-detail-back" onClick={() => setSelectedOrganisationId(null)}><ArrowLeft size={14} /> {view === 'patients' ? 'Back to patient register' : 'Back to pharmacy directory'}</button>
-
           <section className="admin-client-heading">
             <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Pharmacy account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
             <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
@@ -1517,7 +1535,7 @@ export default function AdminPortal() {
       <a className="skip-link" href="#admin-main-content">Skip to main content</a>
       <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setView(next); setQuery(''); }} />
       <div className="app-main">
-        <WorkspacePageHeader section="HHH operations" context="Administration" title={pageMeta[view].title} subtitle={pageMeta[view].subtitle} contextControl={<div className="header-context"><span>Access</span><span className="tenant-status tenant-status--live">Admin</span></div>} />
+        <WorkspacePageHeader section="HHH operations" context={pageMeta[view].title} title={pageMeta[view].title} subtitle={pageMeta[view].subtitle} commandLabel="Find anything" onSectionClick={() => { setView('overview'); setQuery(''); }} backAction={view !== 'overview' ? { label: 'Return to pharmacies', onClick: () => { setView('overview'); setQuery(''); } } : undefined} contextControl={<div className="header-context"><span>Access</span><span className="tenant-status tenant-status--live">Admin</span></div>} />
         <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
           {view === 'overview' && renderOverview()}
           {view === 'referrals' && renderReferrals()}

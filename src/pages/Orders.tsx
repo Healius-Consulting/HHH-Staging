@@ -156,6 +156,25 @@ export default function Orders() {
   const archivedCount = allSubOrders.filter(i => i.isExpired).length;
   const rejectedCount = allSubOrders.filter(i => i.placementState === 'CANCELLED_REFUNDED' || i.rejectionReason !== undefined).length;
 
+  useEffect(() => {
+    const navigationTarget = state.navigationTarget;
+    if (navigationTarget?.kind !== 'order') return;
+    const targetOrder = allSubOrders.find(item => item.key === navigationTarget.key);
+    if (targetOrder) {
+      const targetTab: CustomerOrdersTab = targetOrder.isExpired
+        ? 'archived'
+        : targetOrder.placementState === 'CANCELLED_REFUNDED' || targetOrder.rejectionReason
+          ? 'rejected'
+          : targetOrder.placementState === 'HELD_PRICE' || targetOrder.placementState === 'HELD_STOCK' || targetOrder.placementState === 'CANCELLATION_PENDING_REFUND' || targetOrder.rx.status === 'received'
+            ? 'needs-action'
+            : 'active';
+      setQuery('');
+      setActiveTab(targetTab);
+      setSelectedKey(targetOrder.key);
+    }
+    dispatch({ type: 'CLEAR_NAVIGATION_TARGET' });
+  }, [allSubOrders, dispatch, state.navigationTarget]);
+
   return (
     <div className="page-body orders-page">
       <div className="filter-grid" role="group" aria-label="Customer order views">

@@ -65,11 +65,14 @@ export default function Header() {
 
   return (
     <WorkspacePageHeader
-      section="Workspace"
-      context={organisation.tradingName}
+      section={organisation.tradingName}
+      context={info.title}
       title={info.title}
       subtitle={info.subtitle}
       actions={homeActions}
+      commandLabel="Find anything"
+      onSectionClick={() => dispatch({ type: 'SET_SCREEN', screen: 'home' })}
+      backAction={state.screenHistory.length ? { label: 'Return to previous workspace', onClick: () => dispatch({ type: 'GO_BACK' }) } : undefined}
       contextControl={
         <div className="header-context" aria-label={`Current pharmacy status: ${organisation.status}`}>
           <span>Account</span>

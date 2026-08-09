@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Building2, Clock, FileCheck2, FilePlus, Home, Package, QrCode, Search, Settings, Tags, UserSearch, Users, X } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Building2, CircleUserRound, Clock, FileCheck2, FilePlus, Home, Package, QrCode, ReceiptText, Search, Settings, Tags, UserSearch, Users, X } from 'lucide-react';
 import { useApp, type Screen } from '../context/AppContext';
 import { OPEN_COMMAND_PALETTE_EVENT } from './commandPaletteEvents';
 
@@ -8,6 +8,9 @@ export interface CommandDefinition {
   detail: string;
   icon: ReactNode;
   run: () => void;
+  group?: string;
+  keywords?: string;
+  searchOnly?: boolean;
 }
 
 interface CommandPaletteProps {
@@ -17,8 +20,8 @@ interface CommandPaletteProps {
   emptyLabel?: string;
 }
 
-export default function CommandPalette({ commands: suppliedCommands, contextLabel = 'Pharmacy operations', placeholder = 'Go to a patient, workflow or action…', emptyLabel = 'No matching command' }: CommandPaletteProps = {}) {
-  const { dispatch } = useApp();
+export default function CommandPalette({ commands: suppliedCommands, contextLabel = 'Pharmacy operations', placeholder = 'Search patients, orders, products or actions…', emptyLabel = 'No matching result' }: CommandPaletteProps = {}) {
+  const { state, dispatch } = useApp();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -31,21 +34,88 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
     setOpen(false);
   };
 
-  const defaultCommands: CommandDefinition[] = [
-    { label: 'Open overview', detail: 'Today’s position and priority queue', icon: <Home size={16} />, run: () => navigate('home') },
-    { label: 'Start a prescription', detail: 'Create a new draft session', icon: <FilePlus size={16} />, run: () => { dispatch({ type: 'NEW_ORDER' }); navigate('create'); } },
-    { label: 'Find a patient', detail: 'Search the pharmacy patient directory', icon: <UserSearch size={16} />, run: () => navigate('patients') },
-    { label: 'Review patient onboarding', detail: 'See HHH decisions and attributed enquiries', icon: <Users size={16} />, run: () => navigate('referrals') },
-    { label: 'Open payments', detail: 'Review active and cleared payment requests', icon: <Clock size={16} />, run: () => navigate('review') },
-    { label: 'Review provider prescriptions', detail: 'Open Curaleaf prescription records for this pharmacy', icon: <FileCheck2 size={16} />, run: () => navigate('provider-prescriptions') },
-    { label: 'Track supplier orders', detail: 'Open Curaleaf fulfilment activity', icon: <Package size={16} />, run: () => navigate('orders') },
-    { label: 'Open Curaleaf catalogue', detail: 'Review products, pack sizes and patient prices', icon: <Tags size={16} />, run: () => navigate('formulary') },
-    { label: 'Copy forms and resources', detail: 'Eligibility link, QR and content pack', icon: <QrCode size={16} />, run: () => navigate('resources') },
-    { label: 'Organisation settings', detail: 'Setup, services and pharmacy identity', icon: <Settings size={16} />, run: () => navigate('settings') },
-  ];
-  const commands = suppliedCommands ?? defaultCommands;
+  const navigateTo = (screen: Screen, target: NonNullable<typeof state.navigationTarget>) => {
+    dispatch({ type: 'SET_NAVIGATION_TARGET', target });
+    navigate(screen);
+  };
 
-  const results = commands.filter(command => `${command.label} ${command.detail}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const defaultCommands: CommandDefinition[] = [
+    { label: 'Open overview', detail: 'Today’s position and priority queue', group: 'Navigate', icon: <Home size={16} />, run: () => navigate('home') },
+    { label: 'Patients hub', detail: 'Patient records, onboarding and order history', group: 'Navigate', keywords: 'find patient directory', icon: <UserSearch size={16} />, run: () => navigate('patients') },
+    { label: 'Customer orders', detail: 'Supplier progress, holds and collections', group: 'Navigate', keywords: 'track provider prescription fulfilment', icon: <Package size={16} />, run: () => navigate('orders') },
+    { label: 'Payments and billing', detail: 'Active and cleared payment requests', group: 'Navigate', icon: <Clock size={16} />, run: () => navigate('review') },
+    { label: 'Curaleaf catalogue', detail: 'Products, pack sizes and patient prices', group: 'Navigate', icon: <Tags size={16} />, run: () => navigate('formulary') },
+    { label: 'Organisation settings', detail: 'Setup, services, assets and pharmacy identity', group: 'Navigate', icon: <Settings size={16} />, run: () => navigate('settings') },
+    { label: 'Start a prescription', detail: 'Create a new draft session', group: 'Actions', icon: <FilePlus size={16} />, run: () => { dispatch({ type: 'NEW_ORDER' }); navigate('create'); } },
+    { label: 'Review patient onboarding', detail: 'See HHH decisions and attributed enquiries', group: 'Actions', icon: <Users size={16} />, run: () => navigate('referrals') },
+    { label: 'Review provider prescriptions', detail: 'Open Curaleaf prescription records', group: 'Actions', icon: <FileCheck2 size={16} />, run: () => navigate('provider-prescriptions') },
+    { label: 'Copy forms and resources', detail: 'Eligibility link, QR and content pack', group: 'Actions', icon: <QrCode size={16} />, run: () => navigate('resources') },
+  ];
+
+  const needle = query.trim().toLowerCase();
+  const entityCommands: CommandDefinition[] = (() => {
+    if (!open || suppliedCommands || needle.length < 2) return [];
+    const organisationId = state.currentOrganisationId;
+    const people = new Map<string, { id: string; name: string; email: string; mobile: string; dob: string }>();
+    state.crm.filter(patient => patient.organisationId === organisationId).forEach(patient => {
+      people.set(patient.email.toLowerCase(), { id: patient.id, name: patient.name, email: patient.email, mobile: patient.mobile, dob: patient.dob ?? '' });
+    });
+    state.submissions.filter(patient => patient.organisationId === organisationId).forEach(patient => {
+      const key = patient.email.toLowerCase();
+      if (!people.has(key)) people.set(key, { id: `sub-${patient.id}`, name: patient.name, email: patient.email, mobile: patient.mobile, dob: patient.dob });
+    });
+    const patientCommands = [...people.values()]
+      .filter(patient => `${patient.name} ${patient.email} ${patient.mobile} ${patient.dob}`.toLowerCase().includes(needle))
+      .map((patient): CommandDefinition => ({
+        label: patient.name,
+        detail: `${patient.email} · ${patient.mobile}`,
+        keywords: `${patient.dob} patient`,
+        group: 'Patients',
+        searchOnly: true,
+        icon: <CircleUserRound size={16} />,
+        run: () => navigateTo('patients', { kind: 'patient', id: patient.id }),
+      }));
+    const orderCommands = state.orders
+      .filter(order => order.organisationId === organisationId && order.prescriptions.length)
+      .filter(order => {
+        const patient = state.crm.find(item => item.id === order.patientId && item.organisationId === organisationId);
+        return `order ${order.id} ${patient?.name ?? ''} ${patient?.email ?? ''} ${patient?.mobile ?? ''} ${order.prescriptions.map(rx => rx.poRef ?? '').join(' ')}`.toLowerCase().includes(needle);
+      })
+      .map((order): CommandDefinition => {
+        const patient = state.crm.find(item => item.id === order.patientId && item.organisationId === organisationId);
+        return {
+          label: `Order #${order.id}`,
+          detail: `${patient?.name ?? 'Unassigned patient'} · ${order.prescriptions.length} prescription${order.prescriptions.length === 1 ? '' : 's'}`,
+          keywords: `${patient?.email ?? ''} ${patient?.mobile ?? ''} ${order.prescriptions.map(rx => rx.poRef ?? '').join(' ')}`,
+          group: 'Orders',
+          searchOnly: true,
+          icon: <ReceiptText size={16} />,
+          run: () => navigateTo('orders', { kind: 'order', key: `${order.id}-${order.prescriptions[0].id}` }),
+        };
+      });
+    const catalogueCommands = state.catalogue
+      .filter(product => `${product.name} ${product.type} ${product.unit ?? ''}`.toLowerCase().includes(needle))
+      .map((product): CommandDefinition => ({
+        label: product.name,
+        detail: `${product.packSize ?? '—'} ${product.unit ?? 'units'} · Curaleaf catalogue`,
+        keywords: `${product.type} product medicine`,
+        group: 'Catalogue',
+        searchOnly: true,
+        icon: <Tags size={16} />,
+        run: () => navigateTo('formulary', { kind: 'catalogue', query: product.name }),
+      }));
+    return [...patientCommands, ...orderCommands, ...catalogueCommands];
+  })();
+
+  const commands = suppliedCommands ?? [...defaultCommands, ...entityCommands];
+  const results = commands
+    .filter(command => (!command.searchOnly || needle.length >= 2) && `${command.label} ${command.detail} ${command.keywords ?? ''}`.toLowerCase().includes(needle))
+    .slice(0, 18);
+
+  const execute = (command: CommandDefinition) => {
+    setOpen(false);
+    command.run();
+  };
 
   useEffect(() => {
     const show = () => {
@@ -116,27 +186,29 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
             onKeyDown={event => {
               if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex(index => Math.min(index + 1, results.length - 1)); }
               if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex(index => Math.max(index - 1, 0)); }
-              if (event.key === 'Enter' && results[activeIndex]) results[activeIndex].run();
+              if (event.key === 'Enter' && results[activeIndex]) execute(results[activeIndex]);
             }}
             placeholder={placeholder}
             aria-label={`Search ${contextLabel.toLowerCase()} commands`}
           />
           <button onClick={() => setOpen(false)} aria-label="Close command palette"><X size={15} /></button>
         </div>
-        <div id="command-palette-help" className="command-palette__meta"><span>{contextLabel}</span><kbd>↑↓</kbd><small>navigate</small><kbd>↵</kbd><small>open</small></div>
+        <div id="command-palette-help" className="command-palette__meta"><span>{contextLabel}<em>Live workspace search</em></span><kbd>↑↓</kbd><small>navigate</small><kbd>↵</kbd><small>open</small></div>
         <div className="command-palette__results" aria-live="polite">
           {results.map((command, index) => (
-            <button
-              key={command.label}
-              className={activeIndex === index ? 'active' : ''}
-              onMouseEnter={() => setActiveIndex(index)}
-              onClick={command.run}
-              aria-current={activeIndex === index ? 'true' : undefined}
-            >
-              <span>{command.icon}</span>
-              <span><strong>{command.label}</strong><small>{command.detail}</small></span>
-              <kbd>{index + 1}</kbd>
-            </button>
+            <Fragment key={`${command.group ?? 'Commands'}-${command.label}-${index}`}>
+              {(index === 0 || results[index - 1]?.group !== command.group) && <div className="command-palette__group-label">{command.group ?? 'Commands'}</div>}
+              <button
+                className={activeIndex === index ? 'active' : ''}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => execute(command)}
+                aria-current={activeIndex === index ? 'true' : undefined}
+              >
+                <span>{command.icon}</span>
+                <span><strong>{command.label}</strong><small>{command.detail}</small></span>
+                <kbd>↵</kbd>
+              </button>
+            </Fragment>
           ))}
           {results.length === 0 && <div className="command-palette__empty"><Building2 size={18} /><span>{emptyLabel}</span></div>}
         </div>

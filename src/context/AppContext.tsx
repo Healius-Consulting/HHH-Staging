@@ -273,6 +273,12 @@ export interface PlatformIntegration {
 
 export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'provider-prescriptions' | 'orders' | 'patients' | 'finance' | 'resources' | 'settings';
 
+export type NavigationTarget =
+  | { kind: 'patient'; id: string }
+  | { kind: 'order'; key: string }
+  | { kind: 'catalogue'; query: string }
+  | null;
+
 export type PortalMode = 'gateway' | 'admin' | 'clinician';
 export type WorkspaceMode = 'training' | 'live';
 
@@ -291,6 +297,8 @@ export interface Toast {
 
 export interface AppState {
   screen: Screen;
+  screenHistory: Screen[];
+  navigationTarget: NavigationTarget;
   catalogue: CatalogueItem[];
   catalogueSource: 'curaleaf' | 'training' | 'unavailable';
   catalogueLoading: boolean;
@@ -497,6 +505,9 @@ export type Action =
   | { type: 'UPDATE_COMPLIANCE'; itemId: string; status: ComplianceStatus; evidence?: string }
   | { type: 'UPDATE_PLATFORM_INTEGRATION'; integrationId: PlatformIntegration['id']; status: PlatformIntegration['status']; description?: string }
   | { type: 'SET_SCREEN'; screen: Screen }
+  | { type: 'GO_BACK' }
+  | { type: 'SET_NAVIGATION_TARGET'; target: NavigationTarget }
+  | { type: 'CLEAR_NAVIGATION_TARGET' }
   | { type: 'SET_CATALOGUE_LOADING' }
   | { type: 'SET_CATALOGUE'; catalogue: CatalogueItem[]; updatedAt: string }
   | { type: 'SET_CATALOGUE_ERROR'; message: string }
@@ -883,6 +894,8 @@ const initialOrganisation = ORGANISATIONS.find(org => org.referralToken === init
 
 const initialState: AppState = {
   screen: 'home',
+  screenHistory: [],
+  navigationTarget: null,
   catalogue: [],
   catalogueSource: 'unavailable',
   catalogueLoading: isApiConfigured,
@@ -974,7 +987,17 @@ function buildTenantTrainingData(organisationId: string) {
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_SCREEN':
-      return { ...state, screen: action.screen };
+      if (action.screen === state.screen) return state;
+      return { ...state, screen: action.screen, screenHistory: [...state.screenHistory.slice(-7), state.screen] };
+    case 'GO_BACK': {
+      const previous = state.screenHistory.at(-1);
+      if (!previous) return state;
+      return { ...state, screen: previous, screenHistory: state.screenHistory.slice(0, -1), navigationTarget: null };
+    }
+    case 'SET_NAVIGATION_TARGET':
+      return { ...state, navigationTarget: action.target };
+    case 'CLEAR_NAVIGATION_TARGET':
+      return { ...state, navigationTarget: null };
     case 'SET_CATALOGUE_LOADING':
       return { ...state, catalogueLoading: true, catalogueError: null };
     case 'SET_CATALOGUE':
@@ -1051,7 +1074,7 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
     case 'SET_PORTAL_MODE':
-      return { ...state, portalMode: action.mode };
+      return { ...state, portalMode: action.mode, screenHistory: [], navigationTarget: null };
     case 'SET_WORKSPACE_MODE': {
       if (action.mode === 'training') {
         const organisationId = action.organisationId ?? state.currentOrganisationId;
@@ -1065,6 +1088,8 @@ function reducer(state: AppState, action: Action): AppState {
           ...state,
           workspaceMode: 'training',
           screen: 'home',
+          screenHistory: [],
+          navigationTarget: null,
           catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
           catalogueSource: state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
           crm: [...patients.values()],
@@ -1079,6 +1104,8 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         workspaceMode: 'live',
         screen: 'home',
+        screenHistory: [],
+        navigationTarget: null,
         catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
         crm: [],
         submissions: [],
@@ -1101,6 +1128,8 @@ function reducer(state: AppState, action: Action): AppState {
         portalMode: 'gateway',
         workspaceMode: 'training',
         screen: 'home',
+        screenHistory: [],
+        navigationTarget: null,
         catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
         catalogueSource: state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
         crm: usePrototypeState ? [...SEED_CRM] : [],
@@ -1243,6 +1272,7 @@ function reducer(state: AppState, action: Action): AppState {
         activeOrderId: id,
         nextIds: { ...state.nextIds, order: id + 1, rx: rxId + 1 },
         screen: 'create',
+        screenHistory: state.screen === 'create' ? state.screenHistory : [...state.screenHistory.slice(-7), state.screen],
       };
     }
     case 'APPLY_REDO_FROM_ORDER': {
