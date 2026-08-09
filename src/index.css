@@ -8624,6 +8624,12 @@ html[data-theme='dark'] :is(.admin-referral-item__label, .admin-referral-item sm
 html[data-theme='dark'] .admin-patient-filters label{ color: var(--text-secondary); }
 html[data-theme='dark'] .payment-route-settings button small{ color: var(--text-tertiary); }
 
+/* Keep the pharmacy overview action group visually continuous between tiles. */
+.operations-dashboard .summary-tiles{
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
 html[data-theme='dark'] .alert-warning{
   color: var(--amber-700) !important;
   border-color: color-mix(in srgb, var(--amber-500) 42%, var(--border)) !important;
