@@ -249,7 +249,7 @@ export default function Orders() {
                   {(selected.isExpired || selected.placementState === 'CANCELLED_REFUNDED' || selected.rejectionReason) && (
                     <button
                       type="button"
-                      className="button button-primary button-sm"
+                      className="btn btn-primary btn-sm"
                       onClick={() => {
                         dispatch({ type: 'START_REDO_ORDER', sourceOrderId: selected.orderId });
                         dispatch({
@@ -265,7 +265,7 @@ export default function Orders() {
                   )}
                   <button
                     type="button"
-                    className="button button-secondary button-sm"
+                    className="btn btn-secondary btn-sm"
                     onClick={() => setPrintingRx({ rx: selected.rx, patientName: selected.patientName })}
                   >
                     <Printer size={14} />
@@ -332,11 +332,11 @@ export default function Orders() {
                           </td>
                           <td>
                             {selected.placementState === 'HELD_PRICE' ? (
-                              <button type="button" className="button button-secondary button-xs">
+                              <button type="button" className="btn btn-secondary btn-xs">
                                 Absorb & place
                               </button>
                             ) : isOutOfStock ? (
-                              <button type="button" className="button button-secondary button-xs">
+                              <button type="button" className="btn btn-secondary btn-xs">
                                 Approve substitution
                               </button>
                             ) : (

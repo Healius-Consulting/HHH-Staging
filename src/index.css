@@ -663,27 +663,58 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   padding-right: 36px;
 }
 
-.btn{
+.btn, .button{
+  appearance: none;
+  -webkit-appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 16px;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
   font-size: var(--font-sm);
   font-weight: 600;
+  line-height: 1.2;
   color: var(--text-primary);
   cursor: pointer;
   font-family: var(--font-family);
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.btn:disabled{
-  opacity: 0.4;
+.btn svg, .button svg{
+  flex: 0 0 auto;
+}
+
+.btn:hover:not(:disabled), .button:hover:not(:disabled){
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.btn:disabled, .button:disabled{
+  opacity: 0.48;
   cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
-.btn-sm{
-  padding: 4px 10px;
+.btn-sm, .button-sm{
+  min-height: 34px;
+  padding: 6px 10px;
   font-size: var(--font-xs);
+  gap: 6px;
+}
+
+.btn-xs, .button-xs{
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 11px;
+  gap: 5px;
 }
 
 @keyframes laserScan {
@@ -1328,6 +1359,15 @@ td.font-semibold{
 .spin{ animation: eligibilitySpin 1s linear infinite; }
 
 @keyframes eligibilitySpin { to { transform: rotate(360deg); } }
+
+@media (max-width: 520px) {
+  .eligibility-shell{ padding: 20px 12px 52px; }
+  .eligibility-card{ padding: 22px 20px; border-radius: 16px; }
+  .eligibility-card h1{ font-size: 24px; }
+  .eligibility-form-grid, .eligibility-choice{ grid-template-columns: 1fr; }
+  .eligibility-form-grid{ gap: 14px; }
+  .eligibility-trust{ flex-direction: column; gap: 10px; }
+}
 
 .resource-banner{ align-items: flex-start; margin-bottom: 20px; }
 
@@ -5415,7 +5455,7 @@ body, .app-shell, .app-main, .page-container{
   box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 2px 4px -1px rgba(15, 23, 42, 0.04) !important;
 }
 
-input, select, textarea, .rx-entry-mode, .rx-record-tabs, .payment-route-settings{
+:where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea), .rx-entry-mode, .rx-record-tabs, .payment-route-settings{
   background: #ffffff !important;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
   border-radius: 8px !important;
@@ -5423,58 +5463,74 @@ input, select, textarea, .rx-entry-mode, .rx-record-tabs, .payment-route-setting
   color: var(--text-primary) !important;
 }
 
-input:focus, select:focus, textarea:focus{
+:where(input:not([type='checkbox']):not([type='radio']):not([type='file']):focus, select:focus, textarea:focus){
   outline: none !important;
   border-color: var(--tenant-primary) !important;
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important;
 }
 
-.btn-primary, .button-primary{
-  background: var(--tenant-primary) !important;
-  color: #ffffff !important;
-  border: 1px solid transparent !important;
-  border-radius: 8px !important;
-  font-weight: 600 !important;
-  padding: 9px 16px !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
-  transition: background-color 0.15s ease, transform 0.15s ease !important;
+.staff-login-input input,
+.command-palette__search input,
+.admin-search input,
+.catalog-preview-search input,
+.money-input input,
+.brand-colour-field input{
+  min-height: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
-.btn-primary:hover, .button-primary:hover{
-  background: var(--tenant-primary-hover) !important;
-  transform: translateY(-1px) !important;
+.staff-login-input input:focus,
+.command-palette__search input:focus,
+.admin-search input:focus,
+.catalog-preview-search input:focus,
+.money-input input:focus,
+.brand-colour-field input:focus{
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.btn-primary, .button-primary{
+  background: var(--tenant-primary);
+  color: #ffffff;
+  border-color: transparent;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.btn-primary:hover:not(:disabled), .button-primary:hover:not(:disabled){
+  background: var(--tenant-primary-hover);
+  border-color: transparent;
+  transform: translateY(-1px);
 }
 
 .btn-danger, .button-danger{
-  background: var(--red-500, #ef4444) !important;
-  color: #ffffff !important;
-  border: 1px solid transparent !important;
-  border-radius: 8px !important;
-  font-weight: 600 !important;
-  padding: 9px 16px !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
-  transition: background-color 0.15s ease, transform 0.15s ease !important;
+  background: var(--red-500, #ef4444);
+  color: #ffffff;
+  border-color: transparent;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
-.btn-danger:hover, .button-danger:hover{
-  background: var(--red-600, #dc2626) !important;
-  transform: translateY(-1px) !important;
+.btn-danger:hover:not(:disabled), .button-danger:hover:not(:disabled){
+  background: var(--red-600, #dc2626);
+  border-color: transparent;
+  transform: translateY(-1px);
 }
 
 .btn-secondary, .button-secondary{
-  background: #ffffff !important;
-  color: #334155 !important;
-  border: 1px solid #cbd5e1 !important;
-  border-radius: 8px !important;
-  font-weight: 500 !important;
-  padding: 9px 16px !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
-  transition: background-color 0.15s ease, border-color 0.15s ease !important;
+  background: #ffffff;
+  color: #334155;
+  border-color: #cbd5e1;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.btn-secondary:hover, .button-secondary:hover{
-  background: #f8fafc !important;
-  border-color: #94a3b8 !important;
+.btn-secondary:hover:not(:disabled), .button-secondary:hover:not(:disabled){
+  background: #f8fafc;
+  border-color: #94a3b8;
 }
 
 .provider-prescription-table, .patient-directory-table, table{
