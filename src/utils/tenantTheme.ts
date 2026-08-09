@@ -91,7 +91,9 @@ function contrastRatio(first: string, second: string) {
 }
 
 function readableText(background: string) {
-  return contrastRatio(background, '#ffffff') >= contrastRatio(background, '#172033') ? '#ffffff' : '#172033';
+  const lightText = '#ffffff';
+  const darkText = '#07120f';
+  return contrastRatio(background, lightText) >= contrastRatio(background, darkText) ? lightText : darkText;
 }
 
 export function deriveTenantTheme(primaryInput: string): TenantTheme {

@@ -1846,109 +1846,66 @@ td.font-semibold{
 .connection-summary > div:last-child{ border-bottom: 0 !important; }
 }
 
-html[data-theme='clinical-light']{
+html[data-theme='light']{
   --bg-root: #edf0f3;
   --bg-app: #f4f6f8;
   --bg-surface: #ffffff;
   --bg-elevated: #f6f8fa;
+  --card-bg: var(--bg-surface);
   --border: #d5dde5;
   --border-strong: #aebbc8;
   --border-hover: #aebbc8;
+  --border-clean: #dbe3ea;
+  --border-subtle: #edf1f4;
   --text-primary: #172033;
   --text-secondary: #475569;
   --text-tertiary: #667589;
   --text-faint: #7a8797;
 }
 
-html[data-theme='clinical-dark']{
-  --bg-root: #0b111b;
-  --bg-app: #101826;
-  --bg-surface: #172232;
-  --bg-elevated: #202d3d;
+html[data-theme='dark']{
+  --bg-root: #090f17;
+  --bg-app: #0d1520;
+  --bg-surface: #141f2c;
+  --bg-elevated: #1b2938;
   --bg-overlay: rgba(2, 6, 12, 0.72);
   --card-bg: var(--bg-surface);
-  --border: #3a485b;
-  --border-strong: #617188;
-  --border-hover: #617188;
-  --text-primary: #f4f7fb;
-  --text-secondary: #c7d1de;
-  --text-tertiary: #a5b3c4;
-  --text-faint: #8998aa;
+  --border: #324255;
+  --border-strong: #607187;
+  --border-hover: #71849b;
+  --border-clean: #324255;
+  --border-subtle: #233244;
+  --text-primary: #f7f9fc;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #a8b5c5;
+  --text-faint: #8d9caf;
+  --green-50: rgba(16, 185, 129, 0.16);
+  --green-100: #86efac;
+  --green-500: #34d399;
+  --green-600: #34d399;
+  --green-700: #86efac;
+  --amber-50: rgba(245, 158, 11, 0.17);
+  --amber-500: #fbbf24;
+  --amber-700: #fcd34d;
+  --red-50: rgba(244, 63, 94, 0.17);
+  --red-500: #fb7185;
+  --red-700: #fda4af;
+  --info-50: rgba(56, 189, 248, 0.15);
+  --info-500: #7dd3fc;
+  --info-700: #bae6fd;
+  --color-success: var(--green-700);
+  --color-warning: var(--amber-700);
+  --color-warning-text: var(--amber-700);
+  --color-danger: var(--red-700);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 24px 54px rgba(0, 0, 0, 0.45);
 }
 
-html[data-theme='warm-low-glare']{
-  --bg-root: #e7dfd1;
-  --bg-app: #eee8dc;
-  --bg-surface: #f8f3e9;
-  --bg-elevated: #f0e9dc;
-  --card-bg: var(--bg-surface);
-  --border: #cfc4b2;
-  --border-strong: #a99a83;
-  --border-hover: #a99a83;
-  --text-primary: #29251f;
-  --text-secondary: #554c40;
-  --text-tertiary: #736757;
-  --text-faint: #807363;
-  --shadow-sm: 0 1px 2px rgba(64, 51, 34, 0.08);
-  --shadow-md: 0 9px 24px rgba(64, 51, 34, 0.11);
-}
-
-html[data-theme='high-contrast']{
-  --bg-root: #000000;
-  --bg-app: #000000;
-  --bg-surface: #090909;
-  --bg-elevated: #151515;
-  --bg-overlay: rgba(0, 0, 0, 0.9);
-  --card-bg: var(--bg-surface);
-  --border: #ffffff;
-  --border-strong: #ffffff;
-  --border-hover: #ffde59;
-  --border-focus: #ffde59;
-  --text-primary: #ffffff;
-  --text-secondary: #ffffff;
-  --text-tertiary: #e6e6e6;
-  --text-faint: #d1d1d1;
-  --text-inverse: #000000;
-  --green-50: #001d0c;
-  --green-100: #79ffad;
-  --green-500: #42f58a;
-  --green-600: #42f58a;
-  --green-700: #79ffad;
-  --amber-50: #261b00;
-  --amber-500: #ffde59;
-  --amber-700: #ffde59;
-  --red-50: #2b0000;
-  --red-500: #ff8585;
-  --red-700: #ff8585;
-  --info-50: #001f29;
-  --info-500: #63e6ff;
-  --info-700: #63e6ff;
-  --shadow-sm: none;
-  --shadow-md: none;
-  --shadow-lg: 0 0 0 2px #ffffff;
-}
-
-html[data-theme='high-contrast'] .app-shell{
-  --tenant-primary: #63e6ff !important;
-  --tenant-primary-hover: #a5f3ff !important;
-  --tenant-primary-strong: #63e6ff !important;
-  --tenant-primary-soft: #002733 !important;
-  --tenant-primary-muted: #a5f3ff !important;
-  --tenant-on-primary: #000000 !important;
-  --tenant-sidebar: #000000 !important;
-  --tenant-sidebar-hover: #202020 !important;
-  --tenant-sidebar-border: #ffffff !important;
-  --tenant-focus-ring: rgba(255, 222, 89, 0.45) !important;
-  --tenant-surface-tint: #000000 !important;
-}
-
-html[data-theme='clinical-dark'] .app-shell{
+html[data-theme='dark'] .app-shell{
   --tenant-primary-soft: color-mix(in srgb, var(--tenant-primary) 18%, var(--bg-surface)) !important;
-  --tenant-primary-strong: color-mix(in srgb, var(--tenant-primary) 58%, #ffffff) !important;
-  --tenant-primary-muted: color-mix(in srgb, var(--tenant-primary) 42%, #ffffff) !important;
+  --tenant-primary-strong: color-mix(in srgb, var(--tenant-primary) 48%, #ffffff) !important;
+  --tenant-primary-muted: color-mix(in srgb, var(--tenant-primary) 34%, #ffffff) !important;
   --tenant-focus-ring: color-mix(in srgb, var(--tenant-primary) 42%, transparent) !important;
   --tenant-surface-tint: color-mix(in srgb, var(--tenant-primary) 5%, var(--bg-app)) !important;
 }
@@ -1959,52 +1916,40 @@ html[data-text-scale='large']{ font-size: 112.5%; }
 
 html[data-text-scale='larger']{ font-size: 125%; }
 
-html[data-theme='clinical-dark'] body, html[data-theme='high-contrast'] body, html[data-theme='warm-low-glare'] body{
+html[data-theme='dark'] body{
   background: var(--bg-root);
   color: var(--text-primary);
 }
 
-html[data-theme='clinical-dark'] .app-header, html[data-theme='high-contrast'] .app-header, html[data-theme='warm-low-glare'] .app-header{
+html[data-theme='dark'] .app-header{
   background: var(--bg-surface);
   border-color: var(--border);
 }
 
-html[data-theme='clinical-dark'] .page-container, html[data-theme='high-contrast'] .page-container, html[data-theme='warm-low-glare'] .page-container{
+html[data-theme='dark'] .page-container{
   background: linear-gradient(145deg, color-mix(in srgb, var(--tenant-primary) 6%, var(--bg-app)), var(--bg-app) 38%);
 }
 
-html[data-theme='clinical-dark'] :is(.admin-shell, .staff-login-page), html[data-theme='high-contrast'] :is(.admin-shell, .staff-login-page), html[data-theme='warm-low-glare'] :is(.admin-shell, .staff-login-page){
+html[data-theme='dark'] :is(.admin-shell, .staff-login-page){
   background: var(--bg-root);
 }
 
-html[data-theme='clinical-dark'] :is(.staff-login-panel, .admin-org-row, .drawer, .money-input), html[data-theme='high-contrast'] :is(.staff-login-panel, .admin-org-row, .drawer, .money-input), html[data-theme='warm-low-glare'] :is(.staff-login-panel, .admin-org-row, .drawer, .money-input){
+html[data-theme='dark'] :is(.staff-login-panel, .admin-org-row, .drawer, .money-input){
   background: var(--bg-surface);
   color: var(--text-primary);
 }
 
-html[data-theme='clinical-dark'] :is(.drawer-header, .module-row), html[data-theme='high-contrast'] :is(.drawer-header, .module-row), html[data-theme='warm-low-glare'] :is(.drawer-header, .module-row){
+html[data-theme='dark'] :is(.drawer-header, .module-row){
   background: var(--bg-elevated);
 }
 
-html[data-theme='clinical-dark'] :is(.table-link), html[data-theme='high-contrast'] :is(.table-link), html[data-theme='warm-low-glare'] :is(.table-link){
+html[data-theme='dark'] :is(.table-link){
   color: var(--text-primary);
 }
 
-html[data-theme='clinical-dark'] .admin-patient-table tbody tr:hover, html[data-theme='high-contrast'] .admin-patient-table tbody tr:hover, html[data-theme='warm-low-glare'] .admin-patient-table tbody tr:hover{
+html[data-theme='dark'] .admin-patient-table tbody tr:hover{
   background: var(--bg-elevated);
 }
-
-html[data-theme='high-contrast'] :is(.card, .table-wrap, .input, .btn, .banner, .operational-state){
-  border-width: 2px;
-}
-
-html[data-theme='high-contrast'] .sidebar .sidebar-item.active{
-  color: #000000;
-  background: #63e6ff;
-  box-shadow: inset 4px 0 0 #ffde59;
-}
-
-html[data-theme='high-contrast'] .sidebar .sidebar-item.active svg{ color: #000000; }
 
 html[data-underline-links='true'] a{
   text-decoration: underline;
@@ -2184,13 +2129,9 @@ html[data-enhanced-focus='true'] :is(button, a, input, select, textarea, [tabind
 
 .theme-option__check{ color: var(--color-primary); }
 
-.theme-option--clinical-light .theme-option__icon{ color: #1f5a67; background: #ffffff; }
+.theme-option--light .theme-option__icon{ color: #1f5a67; background: #ffffff; }
 
-.theme-option--clinical-dark .theme-option__icon{ color: #d9e6f2; background: #142131; }
-
-.theme-option--high-contrast .theme-option__icon{ color: #ffde59; background: #000000; }
-
-.theme-option--warm-low-glare .theme-option__icon{ color: #5d4c35; background: #eadfc9; }
+.theme-option--dark .theme-option__icon{ color: #d9e6f2; background: #142131; }
 
 .accessibility-fieldset--compact{ display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 
@@ -2769,7 +2710,7 @@ html[data-reduced-motion='true'] *, html[data-reduced-motion='true'] *::before, 
 .setup-step-actions > :last-child{ justify-self: stretch; }
 }
 
-:root{
+html[data-theme='light']{
   --bg-root: #dfe4e2;
   --bg-app: #f2f4f1;
   --bg-surface: #fbfcfa;
@@ -3205,21 +3146,6 @@ body{ background: var(--bg-app); }
 }
 
 #pharmacy-main-content:focus, #admin-main-content:focus{ outline-offset: -4px; }
-
-html[data-theme='high-contrast'] :is(.sidebar, .sidebar-footer){
-  color: #fff;
-  background: #000;
-  border-color: #fff;
-}
-
-html[data-theme='high-contrast'] .filter-card.active{
-  color: #fff;
-  outline: 3px solid #ffde59;
-  outline-offset: -3px;
-  box-shadow: inset 0 -5px 0 #63e6ff;
-}
-
-html[data-theme='high-contrast'] :is(.operations-brief, .priority-queue, .command-palette, .accessibility-panel){ border-width: 2px; }
 
 @media (hover: hover) {
 .sidebar-item:hover svg{ transform: translateX(2px); }
@@ -3857,9 +3783,7 @@ html[data-theme='high-contrast'] :is(.operations-brief, .priority-queue, .comman
 .training-mode-banner strong{ justify-self: start; }
 }
 
-html[data-theme='clinical-dark'] :is(.rx-draft-tab__avatar, .rx-record-evidence, .payment-ledger-row__icon), html[data-theme='high-contrast'] :is(.rx-draft-tab__avatar, .rx-record-evidence, .payment-ledger-row__icon), html[data-theme='warm-low-glare'] :is(.rx-draft-tab__avatar, .rx-record-evidence, .payment-ledger-row__icon){ background-color: var(--bg-elevated); }
-
-html[data-theme='high-contrast'] :is(.rx-surface, .rx-checkout-panel, .payment-ledger, .payment-detail, .rx-patient-band, .rx-draft-bar){ border-width: 2px; }
+html[data-theme='dark'] :is(.rx-draft-tab__avatar, .rx-record-evidence, .payment-ledger-row__icon){ background-color: var(--bg-elevated); }
 
 @media (prefers-reduced-motion: reduce) {
 .payment-ledger-row, .payment-detail{ animation: none; }
@@ -4006,8 +3930,6 @@ html[data-reduced-motion='true'] :is(.payment-ledger-row, .payment-detail){ anim
 .setup-worldpay-link{ align-items: stretch; flex-direction: column; }
 .setup-worldpay-link .btn{ align-self: flex-start; }
 }
-
-html[data-theme='high-contrast'] :is(.pricing-brief, .pricing-ledger){ border-width: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
 .pricing-row{ animation: none; }
@@ -4172,7 +4094,7 @@ html[data-reduced-motion='true'] .mobile-more-sheet { animation: none; }
   background: var(--bg-app);
 }
 
-.unified-admin-shell .sidebar{ --tenant-primary: #149b83; --tenant-primary-strong: #74d8c5; }
+.unified-admin-shell .sidebar{ --tenant-primary: #149b83; --tenant-primary-strong: #74d8c5; --tenant-on-primary: #07120f; }
 
 .unified-admin-shell .admin-content{
   width: auto;
@@ -4630,8 +4552,6 @@ tbody tr:hover{ background: var(--bg-elevated); }
 .rx-price-node--px{ padding: 10px 0 0; border-top: 1px solid var(--border); border-left: 0; }
 .rx-prescribed-item__contribution{ grid-column: 1; grid-row: auto; }
 }
-
-html[data-theme='high-contrast'] :is(.summary-tiles, .provider-prescription-ledger, .rx-item-stack, .resource-banner){ border-width: 2px; }
 
 html[data-reduced-motion='true'] :is(.summary-tile, .rx-prescribed-item){ transition: none; }
 
@@ -5429,7 +5349,7 @@ html.modal-open .page-container{ overflow: hidden; }
 .rx-price-flow--readonly{ grid-template-columns: 1fr; }
 }
 
-:root{
+html[data-theme='light']{
   --bg-root: #f8fafc;
   --bg-app: #f8fafc;
   --bg-surface: #ffffff;
@@ -8345,5 +8265,395 @@ button.filter-card.active .filter-card__value--text{
 
   .command-palette__meta > span em{
     display: none;
+  }
+}
+
+/* Two-theme integrity layer. Keep legacy route styles on the shared colour tokens. */
+html[data-theme='light']{
+  --text-tertiary: #52615b;
+  --text-faint: #5f6d67;
+}
+
+html[data-theme='light'] :is(
+  .summary-tile__detail,
+  .summary-tile__arrow,
+  .alert-item__category,
+  .section-heading > span,
+  .session-ledger__head,
+  .session-ledger__date span,
+  .session-ledger__patient span,
+  .session-ledger__status small,
+  .rx-draft-tab small,
+  .rx-readiness-strip__count small,
+  .rx-record-tabs > button small,
+  .order-card-header .date,
+  .text-muted,
+  .pharmacy-finance__pending,
+  .pharmacy-finance__footnote,
+  .app-header__eyebrow,
+  .header-context,
+  .settings-meta-grid span,
+  .connection-summary span
+){ color: var(--text-tertiary) !important; }
+
+html[data-theme='light'] :is(.empty-state, .empty-state p, .empty-state .empty-desc){ color: var(--text-tertiary) !important; }
+html[data-theme='light'] .condition-pill small{ color: var(--text-secondary) !important; }
+
+html[data-theme='light'] :is(.header-command-launcher kbd, .command-palette kbd){ color: var(--text-secondary); }
+html[data-theme='light'] .sidebar-menu-label{ color: #8fa69e; }
+html[data-theme='light'] .text-amber{ color: #92400e !important; }
+html[data-theme='light'] .text-red{ color: #b91c1c !important; }
+html[data-theme='light'] .text-info{ color: #1d4ed8 !important; }
+html[data-theme='light'] .pill-green{ color: #065f46 !important; }
+html[data-theme='light'] .pill-amber{ color: #92400e !important; }
+html[data-theme='light'] .pill-red{ color: #9f1239 !important; }
+html[data-theme='light'] .pill-info{ color: #1e40af !important; }
+html[data-theme='light'] .pharmacy-finance__table-wrap td > span{ color: var(--text-tertiary) !important; }
+
+html[data-theme='dark']{
+  --bg-root: #090f17;
+  --bg-app: #0d1520;
+  --bg-surface: #141f2c;
+  --bg-elevated: #1b2938;
+  --card-bg: var(--bg-surface);
+  --border: #324255;
+  --border-strong: #607187;
+  --border-hover: #71849b;
+  --border-clean: #324255;
+  --border-subtle: #233244;
+  --text-primary: #f7f9fc;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #a8b5c5;
+  --text-faint: #8d9caf;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .28);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, .32);
+  --shadow-lg: 0 24px 54px rgba(0, 0, 0, .48);
+}
+
+html[data-theme='dark'] :is(
+  .app-header,
+  .accessibility-panel,
+  .command-palette,
+  .drawer,
+  .drawer-header,
+  .staff-login-panel,
+  .staff-login-card,
+  .admin-org-row,
+  .admin-directory,
+  .admin-detail-card,
+  .card,
+  .rx-surface,
+  .rx-checkout-panel,
+  .rx-patient-band,
+  .summary-tile,
+  .banner,
+  .alert-box,
+  .settings-identity,
+  .content-pack-card,
+  .resource-link-card,
+  .resource-qr-card,
+  .operations-brief,
+  .order-card-item,
+  .order-detail-pane,
+  .detail-header,
+  .filter-card,
+  .pricing-brief,
+  .pricing-ledger,
+  .search-box,
+  .priority-action,
+  .session-ledger__open,
+  .money-input,
+  .module-row,
+  .settings-meta-grid > div,
+  .connection-summary > div
+){
+  color: var(--text-primary);
+  border-color: var(--border) !important;
+  background: var(--bg-surface) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme='dark'] :is(
+  .drawer-header,
+  .detail-header,
+  .module-row,
+  .settings-meta-grid > div,
+  .connection-summary > div,
+  .admin-search,
+  .header-context,
+  .command-palette__search,
+  .command-palette__results > button > span:first-child,
+  .pricing-type-filter,
+  .text-scale-options,
+  .theme-option,
+  .icon-button
+){
+  color: var(--text-primary);
+  border-color: var(--border) !important;
+  background: var(--bg-elevated) !important;
+}
+
+html[data-theme='dark'] :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea),
+html[data-theme='dark'] :is(.input, .rx-entry-mode, .rx-record-tabs, .payment-route-settings){
+  color: var(--text-primary) !important;
+  border-color: var(--border-strong) !important;
+  background: var(--bg-surface) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme='dark'] :is(input, textarea)::placeholder{ color: var(--text-faint) !important; }
+
+html[data-theme='dark'] :is(.btn-secondary, .button-secondary, .btn:not(.btn-primary):not(.btn-danger), .button:not(.button-primary):not(.button-danger)){
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-theme='dark'] :is(.btn-secondary, .button-secondary, .btn:not(.btn-primary):not(.btn-danger), .button:not(.button-primary):not(.button-danger)):hover:not(:disabled){
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+  background: color-mix(in srgb, var(--bg-elevated) 82%, white);
+}
+
+html[data-theme='dark'] :is(.btn-primary, .button-primary){ color: var(--tenant-on-primary); }
+
+html[data-theme='dark'] :is(table, .provider-prescription-table, .patient-directory-table){
+  color: var(--text-primary);
+  border-color: var(--border) !important;
+  background: var(--bg-surface) !important;
+}
+
+html[data-theme='dark'] :is(tr, .provider-prescription-row){ border-color: var(--border-subtle) !important; }
+
+html[data-theme='dark'] :is(tr:hover, .provider-prescription-row:hover, .order-card-item:hover, .session-ledger__row:hover){
+  background: var(--bg-elevated) !important;
+}
+
+html[data-theme='dark'] th{
+  color: var(--text-secondary) !important;
+  border-color: var(--border) !important;
+  background: var(--bg-elevated) !important;
+}
+
+html[data-theme='dark'] td{ color: var(--text-primary) !important; }
+
+html[data-theme='dark'] :is(
+  .section-heading h3,
+  .summary-tile,
+  .summary-tile:hover,
+  .summary-tile__value,
+  .alert-item__title,
+  .session-ledger__date strong,
+  .session-ledger__patient button,
+  .order-card-header strong,
+  .order-card-meta,
+  .detail-header h2,
+  .filter-card__value,
+  .settings-identity h2,
+  .empty-state h3
+){ color: var(--text-primary) !important; }
+
+html[data-theme='dark'] :is(
+  .section-label,
+  .section-heading > span,
+  .summary-tile__label,
+  .summary-tile__detail,
+  .summary-tile__arrow,
+  .alert-item__category,
+  .alert-item__desc,
+  .session-ledger__date span,
+  .session-ledger__patient span,
+  .session-ledger__status small,
+  .order-card-header .date,
+  .order-card-patient span,
+  .filter-card__head,
+  .settings-identity > div > p:last-child,
+  .empty-state,
+  .empty-state p,
+  .empty-state .empty-desc,
+  .workspace-back-button,
+  .command-palette__group-label,
+  .command-palette__meta > span em
+){ color: var(--text-tertiary) !important; }
+
+html[data-theme='dark'] :is(.header-command-launcher, .header-icon-button):hover{
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+  background: var(--bg-elevated);
+}
+
+html[data-theme='dark'] .command-palette__results > button.active{
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--tenant-primary) 14%, var(--bg-elevated));
+}
+
+html[data-theme='dark'] .command-palette__group-label{
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  border-color: var(--border-subtle) !important;
+}
+
+html[data-theme='dark'] :is(.filter-grid, .directory-view-toggle):has(> button.filter-card){
+  border-color: var(--border);
+  background: var(--bg-root);
+}
+
+html[data-theme='dark'] :is(.filter-grid, .directory-view-toggle) > button.filter-card{
+  color: var(--text-secondary);
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-theme='dark'] :is(.filter-grid, .directory-view-toggle) > button.filter-card:hover{
+  border-color: var(--border-hover) !important;
+  background: var(--bg-elevated) !important;
+}
+
+html[data-theme='dark'] :is(.filter-grid, .directory-view-toggle) > button.filter-card.active{
+  color: var(--text-primary);
+  border-color: var(--border-strong) !important;
+  background: var(--bg-surface) !important;
+  box-shadow: inset 0 3px 0 var(--tenant-primary), var(--shadow-sm) !important;
+}
+
+html[data-theme='dark'] :is(button.summary-tile--action, .summary-tile--action){
+  color: var(--text-primary) !important;
+  border-color: var(--border-strong) !important;
+  border-top-color: var(--tenant-primary) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tenant-primary) 10%, var(--bg-surface)), var(--bg-surface) 62%) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme='dark'] :is(.priority-action--quiet, .workspace-back-button){
+  color: var(--text-secondary) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-theme='dark'] :is(.settings-page .payment-route-settings > button, .settings-page .payment-route-settings > button::after){
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+}
+
+html[data-theme='dark'] :is(.pill-green, .tenant-status--live){ color: var(--green-100); background: var(--green-50); }
+html[data-theme='dark'] .pill-amber{ color: var(--amber-700); background: var(--amber-50); }
+html[data-theme='dark'] .pill-red{ color: var(--red-700); background: var(--red-50); }
+html[data-theme='dark'] .pill-info{ color: var(--info-700); background: var(--info-50); }
+html[data-theme='dark'] .pill-neutral{ color: var(--text-secondary); background: var(--bg-elevated); }
+
+html[data-theme='dark'] :is(.text-primary, .text-info){ color: var(--tenant-primary-muted) !important; }
+html[data-theme='dark'] .text-red{ color: var(--red-700) !important; }
+
+html[data-theme='dark'] :is(.session-ledger__head, .page-status-note){
+  color: var(--text-secondary);
+  border-color: var(--border) !important;
+  background: var(--bg-elevated);
+}
+
+html[data-theme='dark'] .session-ledger__head > span{ color: var(--text-secondary); }
+html[data-theme='dark'] .sidebar-menu-label{ color: #8fa69e; }
+
+html[data-theme='dark'] .local-preview-switcher button.active{
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+html[data-theme='dark'] :is(.text-muted, .rx-patient-identity-copy em, .rx-unresolved-panel__header span, .rx-unresolved-panel__actions > span, .rx-unresolved-item__meta small, .rx-unresolved-item__items, .rx-entry-mode small, .rx-order-totals dt){ color: var(--text-tertiary) !important; }
+html[data-theme='dark'] .text-amber{ color: var(--amber-700) !important; }
+html[data-theme='dark'] .text-green{ color: var(--green-100) !important; }
+
+html[data-theme='dark'] :is(.rx-draft-bar, .rx-draft-tab, .rx-readiness-strip, .rx-unresolved-item, .rx-surface__header, .rx-record-tabs > button, .rx-entry-mode > button, .rx-dispensing-presets > button){
+  color: var(--text-primary);
+  border-color: var(--border) !important;
+  background: var(--bg-surface) !important;
+}
+
+html[data-theme='dark'] :is(.rx-draft-bar__title strong, .rx-patient-identity-copy strong, .rx-readiness-strip__count strong, .rx-unresolved-panel__header strong, .rx-unresolved-item__meta strong, .rx-record-evidence__heading strong, .rx-checkout-panel > header strong, .rx-order-totals dd){ color: var(--text-primary) !important; }
+
+html[data-theme='dark'] :is(.rx-draft-tab:hover, .rx-record-tabs, .rx-checkout-panel > header, .rx-document-control){
+  color: var(--text-primary);
+  border-color: var(--border) !important;
+  background: var(--bg-elevated) !important;
+}
+
+html[data-theme='dark'] :is(.rx-draft-tab.active, .rx-unresolved-item.is-applied, .rx-record-tabs > button.active, .rx-entry-mode > button[aria-pressed='true'], .rx-document-control.uploaded, .rx-dispensing-presets > button[aria-pressed='true'], .rx-payment-route-toggle .is-selected){
+  color: var(--tenant-primary-muted);
+  border-color: var(--tenant-primary) !important;
+  background: color-mix(in srgb, var(--tenant-primary) 14%, var(--bg-surface)) !important;
+}
+
+html[data-theme='dark'] .rx-draft-tab__avatar{
+  color: var(--text-secondary) !important;
+  background: var(--bg-elevated) !important;
+}
+
+html[data-theme='dark'] .rx-readiness-strip__dots > span{ color: var(--border-strong); }
+html[data-theme='dark'] .rx-readiness-strip__dots > span.complete{ color: var(--tenant-primary-muted); }
+
+html[data-theme='dark'] .rx-unresolved-panel{
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--amber-500) 38%, var(--border)) !important;
+  background: color-mix(in srgb, var(--amber-500) 8%, var(--bg-surface)) !important;
+}
+
+html[data-theme='dark'] :is(.rx-surface__header, .rx-checkout-panel > header, .rx-order-totals, .rx-order-totals > div){ border-color: var(--border-subtle) !important; }
+
+html[data-theme='dark'] .rx-document-control{ border-color: var(--border-strong) !important; }
+
+html[data-theme='dark'] .rx-dispensing-presets > button[aria-pressed='true']{ color: var(--tenant-primary-muted); }
+
+html[data-theme='dark'] .settings-note{
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--tenant-secondary) 12%, var(--bg-elevated));
+}
+
+html[data-theme='dark'] button:not(.btn-primary):not(.button-primary):not(.btn-danger):not(.button-danger){ color: inherit; }
+
+html[data-theme='dark'] :is(.pharmacy-finance__table-wrap strong, .pharmacy-finance__footnote strong){ color: var(--text-primary) !important; }
+html[data-theme='dark'] :is(.sort-control, .pharmacy-finance__footnote){ color: var(--text-tertiary); }
+
+html[data-theme='dark'] :is(.admin-referral-item, .unified-admin-shell .admin-patient-filters, .unified-admin-shell .admin-finance-filters, .unified-admin-shell .admin-search.search-box, .unified-admin-shell .search-box.admin-search){
+  color: var(--text-primary);
+  border-color: var(--border);
+  background: var(--bg-surface);
+}
+
+html[data-theme='dark'] .admin-referral-item--history{ background: var(--bg-elevated); }
+html[data-theme='dark'] .admin-referral-item__pharmacy{ border-color: var(--border-subtle); }
+html[data-theme='dark'] :is(.admin-referral-item__label, .admin-referral-item small){ color: var(--text-tertiary); }
+html[data-theme='dark'] .admin-patient-filters label{ color: var(--text-secondary); }
+html[data-theme='dark'] .payment-route-settings button small{ color: var(--text-tertiary); }
+
+html[data-theme='dark'] .alert-warning{
+  color: var(--amber-700) !important;
+  border-color: color-mix(in srgb, var(--amber-500) 42%, var(--border)) !important;
+  background: var(--amber-50) !important;
+}
+
+html[data-theme='dark'] .alert-danger{
+  color: var(--red-700) !important;
+  border-color: color-mix(in srgb, var(--red-500) 42%, var(--border)) !important;
+  background: var(--red-50) !important;
+}
+
+html[data-theme='dark'] .alert-success{
+  color: var(--green-100) !important;
+  border-color: color-mix(in srgb, var(--green-500) 42%, var(--border)) !important;
+  background: var(--green-50) !important;
+}
+
+@media (max-width: 760px){
+  html[data-theme='dark'] :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) tr{
+    color: var(--text-primary);
+    border-color: var(--border) !important;
+    background: var(--bg-surface) !important;
+  }
+
+  html[data-theme='dark'] :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) td{
+    color: var(--text-primary) !important;
+  }
+
+  html[data-theme='dark'] :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) td::before{
+    color: var(--text-tertiary);
   }
 }

@@ -123,8 +123,12 @@ function conditionSet(record: Record<string, unknown>) {
   return { conditions, primaryCondition };
 }
 
+const preferenceThemeSchema = z
+  .enum(['light', 'dark', 'clinical-light', 'clinical-dark', 'high-contrast', 'warm-low-glare'])
+  .transform(theme => theme === 'dark' || theme === 'clinical-dark' || theme === 'high-contrast' ? 'dark' : 'light');
+
 const preferencesSchema = z.object({
-  theme: z.enum(['clinical-light', 'clinical-dark', 'high-contrast', 'warm-low-glare']),
+  theme: preferenceThemeSchema,
   textScale: z.enum(['default', 'large', 'larger']).default('default'),
   reduceMotion: z.boolean().default(false),
   enhancedFocus: z.boolean().default(false),
@@ -474,7 +478,7 @@ app.get('/v1/portal/session', async (request, response, next) => {
 });
 
 app.get('/v1/portal/preferences', async (request, response, next) => {
-  try { response.json((await firestore.collection('staffUsers').doc(identity(request).uid).get()).data()?.preferences ?? preferencesSchema.parse({ theme: 'clinical-light' })); }
+  try { response.json(preferencesSchema.parse((await firestore.collection('staffUsers').doc(identity(request).uid).get()).data()?.preferences ?? { theme: 'light' })); }
   catch (error) { next(error); }
 });
 
@@ -2625,7 +2629,7 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
           organisationId: input.organisationId,
           contactRole,
           status: 'invited',
-          preferences: preferencesSchema.parse({ theme: 'clinical-light' }),
+          preferences: preferencesSchema.parse({ theme: 'light' }),
           createdAt,
           updatedAt: createdAt,
         }, { merge: true });
@@ -2633,7 +2637,7 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
     } else {
       await firestore.collection('staffUsers').doc(user.uid).set({
         id: user.uid, schemaVersion: 1, email: input.email, displayName: input.displayName, role: input.role,
-        organisationId: input.organisationId, contactRole, status: 'invited', preferences: preferencesSchema.parse({ theme: 'clinical-light' }), createdAt, updatedAt: createdAt,
+        organisationId: input.organisationId, contactRole, status: 'invited', preferences: preferencesSchema.parse({ theme: 'light' }), createdAt, updatedAt: createdAt,
       });
     }
 

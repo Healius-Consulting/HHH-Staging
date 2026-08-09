@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Check,
-  Contrast,
-  Eye,
   Link as LinkIcon,
   Moon,
   RotateCcw,
@@ -23,10 +21,8 @@ const THEME_OPTIONS: Array<{
   description: string;
   icon: typeof SunMedium;
 }> = [
-  { value: 'clinical-light', label: 'Clinical Light', description: 'Clear, neutral workspace', icon: SunMedium },
-  { value: 'clinical-dark', label: 'Clinical Dark', description: 'Dark surfaces with clear status colours', icon: Moon },
-  { value: 'high-contrast', label: 'High Contrast', description: 'Maximum separation and stronger outlines', icon: Contrast },
-  { value: 'warm-low-glare', label: 'Warm Low-Glare', description: 'Warm neutrals with reduced blue-white glare', icon: Eye },
+  { value: 'light', label: 'Light', description: 'Bright, clear workspace', icon: SunMedium },
+  { value: 'dark', label: 'Dark', description: 'Low-glare workspace with high readability', icon: Moon },
 ];
 
 const TEXT_SCALE_OPTIONS: Array<{ value: TextScale; label: string }> = [

@@ -638,7 +638,7 @@ export interface UpdatePharmacySetupTaskInput {
 }
 
 export interface StaffAccessibilityPreferences {
-  theme: 'clinical-light' | 'clinical-dark' | 'high-contrast' | 'warm-low-glare';
+  theme: 'light' | 'dark';
   textScale: 'default' | 'large' | 'larger';
   reduceMotion: boolean;
   enhancedFocus: boolean;
@@ -851,4 +851,3 @@ export interface PharmacyStaffInvitation extends PharmacyStaffAccount {
   invitationQueued: boolean;
   actionLink: string;
 }
-
