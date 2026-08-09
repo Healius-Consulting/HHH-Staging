@@ -7481,3 +7481,472 @@ td{
     font-size: 11px;
   }
 }
+
+/* Unified HHH admin layout system */
+.unified-admin-shell .admin-page-actions{
+  min-height: 38px;
+  margin: 0;
+}
+
+.unified-admin-shell .admin-directory,
+.unified-admin-shell .admin-patient-table,
+.unified-admin-shell .admin-external-gates,
+.unified-admin-shell .admin-staff-card,
+.unified-admin-shell .admin-client-compliance{
+  margin-top: 0;
+}
+
+.unified-admin-shell .admin-directory-head{
+  margin-bottom: 16px;
+}
+
+.unified-admin-shell .admin-directory-head h2{
+  margin: 2px 0 4px;
+}
+
+.unified-admin-shell .admin-directory-head p{
+  max-width: 760px;
+  line-height: 1.5;
+}
+
+.unified-admin-shell .admin-segment-tabs{
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.unified-admin-shell .admin-segment-tabs .filter-card{
+  min-height: 62px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+}
+
+.unified-admin-shell .admin-segment-tabs .filter-card__head{
+  margin: 0;
+  font-size: 11px;
+}
+
+.unified-admin-shell .admin-segment-tabs .filter-card__value{
+  margin: 0;
+  color: #1e293b;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.unified-admin-shell .admin-segment-tabs .filter-card.active{
+  box-shadow: inset 3px 0 0 var(--tenant-primary), 0 1px 2px rgba(15, 23, 42, .05);
+}
+
+.unified-admin-shell .admin-detail-tabs{
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.unified-admin-shell .admin-detail-tabs .filter-card__value{
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.unified-admin-shell .admin-finance-period-grid{
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.unified-admin-shell .admin-platform-tabs{
+  width: min(100%, 720px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.unified-admin-shell .admin-detail-back{
+  width: fit-content;
+  min-height: 30px;
+  margin: 0;
+  padding: 4px 2px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: #475569;
+}
+
+.unified-admin-shell .admin-detail-back:hover:not(:disabled){
+  border-color: transparent;
+  background: transparent;
+  color: var(--tenant-primary);
+}
+
+.unified-admin-shell .admin-client-heading{
+  margin: 0;
+  padding: 4px 0 18px;
+}
+
+.unified-admin-shell .admin-detail-summary{
+  margin: 0;
+}
+
+.unified-admin-shell .admin-staff-card,
+.unified-admin-shell .admin-detail-grid{
+  margin-top: 0;
+}
+
+.admin-view-overview .admin-directory-head{
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto minmax(320px, 1.1fr);
+  align-items: end;
+  gap: 18px;
+}
+
+.admin-view-overview .directory-view-toggle{
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+}
+
+.admin-view-overview .directory-view-toggle .filter-card{
+  min-height: 64px;
+  padding: 10px 13px;
+}
+
+.admin-view-overview .directory-view-toggle .filter-card__head{
+  margin-bottom: 2px;
+}
+
+.admin-view-overview .directory-view-toggle .filter-card__value{
+  font-size: 18px;
+}
+
+.admin-view-overview .admin-search{
+  width: 100%;
+}
+
+.admin-view-patients .admin-patient-filters{
+  display: grid !important;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(170px, 1fr) minmax(145px, .8fr) minmax(145px, .8fr) auto;
+  align-items: end;
+}
+
+.admin-view-finance .admin-finance-filters{
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-content: stretch;
+  margin: 0;
+}
+
+.admin-view-finance .admin-finance-filter,
+.admin-view-finance .admin-finance-filter .input{
+  width: 100%;
+}
+
+.admin-view-finance .admin-finance-position,
+.admin-view-finance .admin-finance-ledger{
+  margin-top: 0;
+}
+
+.admin-view-finance .admin-finance-position .empty-state{
+  min-height: 88px;
+  padding: 24px;
+}
+
+.admin-view-platform .admin-external-gates{
+  padding: 20px;
+}
+
+.admin-view-platform .admin-gate-grid{
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.admin-view-platform .admin-gate-card{
+  min-height: 106px;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.admin-view-platform .admin-gate-card .filter-card__head{
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+}
+
+.admin-view-platform .admin-gate-card .filter-card__head > span:first-child{
+  max-width: 180px;
+}
+
+.admin-view-platform .admin-gate-card .filter-card__value{
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+@media (max-width: 1100px) {
+  .admin-view-overview .admin-directory-head{
+    grid-template-columns: 1fr auto;
+  }
+  .admin-view-overview .admin-search{
+    grid-column: 1 / -1;
+  }
+  .admin-view-patients .admin-patient-filters{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .admin-view-patients .admin-patient-filters .btn{
+    justify-self: start;
+  }
+  .admin-view-platform .admin-gate-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .unified-admin-shell .admin-content{
+    gap: 12px;
+    padding: 14px 16px calc(92px + env(safe-area-inset-bottom));
+  }
+
+  .unified-admin-shell .summary-tiles,
+  .unified-admin-shell .summary-tiles--three{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .unified-admin-shell .summary-tile{
+    min-height: 80px;
+    padding: 12px 13px;
+  }
+
+  .unified-admin-shell .summary-tile__value{
+    font-size: 20px;
+  }
+
+  .unified-admin-shell .summary-tile__detail{
+    font-size: 10px;
+  }
+
+  .unified-admin-shell .summary-tiles > .summary-tile:last-child:nth-child(odd){
+    grid-column: 1 / -1;
+  }
+
+  .unified-admin-shell .admin-page-actions{
+    min-height: 0;
+  }
+
+  .unified-admin-shell .admin-segment-tabs .filter-card{
+    min-height: 56px;
+    padding: 9px 10px;
+  }
+
+  .unified-admin-shell .admin-segment-tabs .filter-card__head{
+    font-size: 9px;
+  }
+
+  .unified-admin-shell .admin-segment-tabs .filter-card__value{
+    font-size: 12px;
+  }
+
+  .unified-admin-shell .admin-detail-tabs,
+  .unified-admin-shell .admin-finance-period-grid{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .unified-admin-shell .admin-platform-tabs{
+    width: 100%;
+  }
+
+  .unified-admin-shell .admin-detail-back{
+    width: fit-content;
+  }
+
+  .unified-admin-shell .admin-client-heading{
+    flex-direction: row;
+    align-items: center;
+    padding-bottom: 14px;
+  }
+
+  .unified-admin-shell .admin-client-heading .tenant-mark{
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
+    font-size: 14px;
+  }
+
+  .unified-admin-shell .admin-client-heading h1{
+    font-size: 22px;
+  }
+
+  .unified-admin-shell .admin-client-status{
+    margin-left: auto;
+    gap: 8px;
+  }
+
+  .admin-view-overview .admin-attention-strip{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .admin-view-overview .admin-attention-strip .btn{
+    width: 100%;
+  }
+
+  .admin-view-overview .admin-directory-head{
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .admin-view-overview .directory-view-toggle,
+  .admin-view-overview .admin-search{
+    grid-column: auto;
+  }
+
+  .admin-view-overview .directory-view-toggle .filter-card{
+    min-height: 58px;
+  }
+
+  .admin-view-patients .admin-patient-filters{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+  }
+
+  .admin-view-patients .admin-patient-filters label:nth-child(-n + 2),
+  .admin-view-patients .admin-patient-filters .btn{
+    grid-column: 1 / -1;
+  }
+
+  .admin-view-patients .admin-patient-filters .btn{
+    width: 100%;
+  }
+
+  .admin-view-finance .admin-finance-filters{
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .admin-view-platform .admin-gate-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-view-platform .admin-gate-card{
+    min-height: 124px;
+    padding: 12px;
+  }
+
+  .admin-view-platform .admin-gate-card .filter-card__head{
+    flex-direction: column;
+  }
+
+  .admin-view-platform .admin-gate-card .pill{
+    width: fit-content;
+  }
+
+  .admin-view-detail .admin-staff-invite-form{
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .admin-view-detail .admin-staff-invite-form .btn{
+    grid-column: auto;
+    width: 100%;
+  }
+
+  .admin-view-detail .admin-detail-grid{
+    gap: 12px;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) .table-wrap{
+    overflow: visible;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) :is(table, tbody, tr, td){
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) table{
+    border: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) thead{
+    display: none;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) tbody{
+    display: grid;
+    gap: 10px;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) tr{
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 10px;
+    background: #ffffff !important;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) td{
+    display: grid !important;
+    gap: 3px;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: visible !important;
+    color: #334155;
+    font-size: 12px !important;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) td::before{
+    color: #64748b;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .055em;
+    text-transform: uppercase;
+  }
+
+  :is(.admin-master-patients, .admin-finance-position, .admin-finance-ledger, .compliance-register, .admin-client-compliance, .admin-attributed-patients, .admin-curaleaf-status) td:first-child{
+    grid-column: 1 / -1;
+    padding-bottom: 10px !important;
+    border-bottom: 1px solid #edf1f4 !important;
+  }
+
+  .admin-master-patients td:nth-child(1)::before{ content: 'Patient'; }
+  .admin-master-patients td:nth-child(2)::before{ content: 'Attributed pharmacy'; }
+  .admin-master-patients td:nth-child(3)::before{ content: 'Current stage'; }
+  .admin-master-patients td:nth-child(4)::before{ content: 'Last recorded'; }
+
+  .admin-finance-position td:nth-child(1)::before{ content: 'Pharmacy'; }
+  .admin-finance-position td:nth-child(2)::before{ content: 'Patients'; }
+  .admin-finance-position td:nth-child(3)::before{ content: 'New referrals'; }
+  .admin-finance-position td:nth-child(4)::before{ content: 'Annual fees'; }
+  .admin-finance-position td:nth-child(5)::before{ content: 'Total accrued'; }
+
+  .admin-finance-ledger td:nth-child(1)::before{ content: 'Accrued'; }
+  .admin-finance-ledger td:nth-child(2)::before{ content: 'Patient'; }
+  .admin-finance-ledger td:nth-child(3)::before{ content: 'Pharmacy'; }
+  .admin-finance-ledger td:nth-child(4)::before{ content: 'Fee event'; }
+  .admin-finance-ledger td:nth-child(5)::before{ content: 'Amount'; }
+
+  .compliance-register td:nth-child(1)::before{ content: 'Pharmacy'; }
+  .compliance-register td:nth-child(2)::before{ content: 'Setup progress'; }
+  .compliance-register td:nth-child(3)::before{ content: 'Next action'; }
+  .compliance-register td:nth-child(4)::before{ content: 'Status'; }
+  .compliance-register td:nth-child(5)::before{ content: 'Action'; }
+
+  .admin-client-compliance td:nth-child(1)::before{ content: 'Setup step'; }
+  .admin-client-compliance td:nth-child(2)::before{ content: 'Owner'; }
+  .admin-client-compliance td:nth-child(3)::before{ content: 'Evidence'; }
+  .admin-client-compliance td:nth-child(4)::before{ content: 'Status'; }
+
+  .admin-attributed-patients td:nth-child(1)::before{ content: 'Patient'; }
+  .admin-attributed-patients td:nth-child(2)::before{ content: 'Submitted'; }
+  .admin-attributed-patients td:nth-child(3)::before{ content: 'Conditions'; }
+  .admin-attributed-patients td:nth-child(4)::before{ content: 'Source'; }
+  .admin-attributed-patients td:nth-child(5)::before{ content: 'Status'; }
+
+  .admin-curaleaf-status td:nth-child(1)::before{ content: 'Pharmacy'; }
+  .admin-curaleaf-status td:nth-child(2)::before{ content: 'Curaleaf'; }
+  .admin-curaleaf-status td:nth-child(3)::before{ content: 'Action'; }
+}

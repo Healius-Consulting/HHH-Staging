@@ -867,7 +867,7 @@ export default function AdminPortal() {
     const tenantTheme = deriveTenantTheme(selectedOrganisation.brand.primary);
 
     return (
-      <div className="app-shell admin-shell unified-admin-shell">
+      <div className="app-shell admin-shell unified-admin-shell admin-view-detail">
         <a className="skip-link" href="#admin-main-content">Skip to main content</a>
         <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
         <div className="app-main">
@@ -880,13 +880,13 @@ export default function AdminPortal() {
             <div className="admin-client-status"><span className={`pill ${selectedOrganisation.status === 'live' ? 'pill-green' : selectedOrganisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{selectedOrganisation.status}</span><button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
           </section>
 
-          <SummaryTiles className="summary-tiles--compact" label="Pharmacy account summary" items={[
+          <SummaryTiles className="summary-tiles--compact admin-detail-summary" label="Pharmacy account summary" items={[
             { label: 'Patients', value: new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size, detail: 'attributed records' },
             { label: 'Access', value: selectedOrganisation.staffCount, detail: 'staff accounts' },
             { label: 'Platform fee', value: selectedOrganisation.platformFeeMonthly == null ? '—' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`, detail: 'per month' },
           ]} />
 
-          <div className="filter-grid admin-detail-tabs" role="tablist" aria-label="Pharmacy detail sections">
+          <div className="filter-grid admin-detail-tabs admin-segment-tabs" role="tablist" aria-label="Pharmacy detail sections">
             <button type="button" role="tab" aria-selected={pharmacyDetailTab === 'access'} className={`filter-card${pharmacyDetailTab === 'access' ? ' active' : ''}`} onClick={() => setPharmacyDetailTab('access')}>
               <div className="filter-card__head"><span>Access</span></div>
               <span className="filter-card__value filter-card__value--text">Staff accounts</span>
@@ -965,7 +965,7 @@ export default function AdminPortal() {
                 <div className="compliance-table table-wrap"><table><thead><tr><th>Setup step</th><th>Owner</th><th>Evidence</th><th>Status</th></tr></thead><tbody>{SETUP_TASKS.map(definition => { const task = setupStatus?.tasks.find(item => item.id === definition.id); return <tr key={definition.id}><td><strong>{definition.title}</strong><small>{definition.description}</small></td><td><span className={`setup-owner-tag${definition.owner === 'hhh_admin' ? ' setup-owner-tag--admin' : ''}`}>{definition.owner === 'hhh_admin' ? 'HHH admin' : 'Pharmacy'}</span></td><td>{task?.evidence || 'Not supplied yet'}</td><td><span className={`pill ${task?.completed ? 'pill-green' : 'pill-amber'}`}>{task?.completed ? 'Complete' : 'Waiting'}</span></td></tr>; })}</tbody></table></div>
               </section>}
 
-              <section className="card admin-patient-table">
+              <section className="card admin-patient-table admin-attributed-patients">
                 <div className="admin-directory-head"><div><h2>Patients attributed to this pharmacy</h2><p>Attribution is derived from the pharmacy token and retained on the patient record.</p></div></div>
                 {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Conditions</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><CompactPatientCell name={sub.name} email={sub.email} dob={sub.dob} /></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td><ConditionList conditions={sub.conditions} primaryCondition={sub.primaryCondition} /></td><td>{sub.source}</td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(sub.status)}`}>{onboardingStatusLabel(sub.status)}</span></td></tr>)}</tbody></table></div>}
               </section>
@@ -988,7 +988,7 @@ export default function AdminPortal() {
       <div className="admin-page-actions">
         <button className="btn btn-primary" onClick={() => setShowOnboarding(true)}><Plus size={15} /> Onboard pharmacy</button>
       </div>
-      <SummaryTiles label="Portfolio summary" items={[
+      <SummaryTiles className="admin-overview-summary" label="Portfolio summary" items={[
         { label: 'Portfolio', value: state.organisations.length, detail: 'pharmacies' },
         { label: 'Operating', value: liveCount, detail: 'live pharmacies' },
         { label: 'Patient reach', value: allPatients.length, detail: 'attributed records' },
@@ -1232,7 +1232,7 @@ export default function AdminPortal() {
           <button type="button" className="btn btn-sm" onClick={() => setAdminFinanceRefresh(value => value + 1)} disabled={adminFinanceLoading}><RefreshCw size={13} className={adminFinanceLoading ? 'spin' : ''} /> Refresh</button>
         </div>
 
-        <div className="filter-grid admin-finance-period-grid" role="group" aria-label="Finance period">
+        <div className="filter-grid admin-finance-period-grid admin-segment-tabs" role="group" aria-label="Finance period">
           {([
             { id: 'all' as const, label: 'All time', value: String(filteredReferralFeeEvents.length) },
             { id: 'month' as const, label: 'Month', value: financeMonth || '—' },
@@ -1279,7 +1279,7 @@ export default function AdminPortal() {
         {adminFinanceError && <div className="banner banner-amber" role="alert"><AlertCircle size={16} /><span><strong>Referral finance is temporarily unavailable</strong><small>{adminFinanceError}</small></span><button className="btn btn-sm" type="button" onClick={() => setAdminFinanceRefresh(value => value + 1)}>Try again</button></div>}
         {adminFinanceLoading && !adminFinanceReport && !isLocalPortalPreview && <div className="empty-state admin-finance-loading">Loading the referral fee ledger…</div>}
 
-        <SummaryTiles label="Referral finance summary" items={[
+        <SummaryTiles className="admin-finance-summary" label="Referral finance summary" items={[
           { label: 'Total accrued', value: referralFeeFormatter.format(totalAccrued), detail: `${filteredReferralFeeEvents.length} fee event${filteredReferralFeeEvents.length === 1 ? '' : 's'}` },
           { label: 'New referrals', value: referralFeeFormatter.format(newReferralEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${newReferralEvents.length} × £50` },
           { label: 'Annual fees', value: referralFeeFormatter.format(annualEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${annualEvents.length} × £40` },
@@ -1396,7 +1396,7 @@ export default function AdminPortal() {
 
   const renderPlatform = () => (
     <>
-      <div className="filter-grid directory-view-toggle" role="tablist" aria-label="Platform sections">
+      <div className="filter-grid directory-view-toggle admin-platform-tabs admin-segment-tabs" role="tablist" aria-label="Platform sections">
         <button type="button" role="tab" aria-selected={platformTab === 'setup'} className={`filter-card${platformTab === 'setup' ? ' active' : ''}`} onClick={() => setPlatformTab('setup')}>
           <div className="filter-card__head"><span>Setup</span></div>
           <span className="filter-card__value">{remainingSetupSteps}</span>
@@ -1409,7 +1409,7 @@ export default function AdminPortal() {
 
       {platformTab === 'setup' && (
         <>
-          <SummaryTiles label="Readiness summary" items={[
+          <SummaryTiles className="admin-platform-summary" label="Readiness summary" items={[
             { label: 'Pharmacies', value: state.organisations.length, detail: 'pharmacy accounts' },
             { label: 'Fully ready', value: Object.values(setupByOrganisation).filter(status => status.completed).length, detail: 'all steps complete' },
             { label: 'Completed', value: Object.values(setupByOrganisation).reduce((total, status) => total + status.completedCount, 0), detail: 'steps recorded' },
@@ -1460,7 +1460,7 @@ export default function AdminPortal() {
             </div>
           </section>
 
-          <section className="card admin-patient-table" aria-label="Curaleaf connection status">
+          <section className="card admin-patient-table admin-curaleaf-status" aria-label="Curaleaf connection status">
             <div className="admin-directory-head">
               <div>
                 <p className="section-label">Per pharmacy</p>
@@ -1513,7 +1513,7 @@ export default function AdminPortal() {
   };
 
   return (
-    <div className="app-shell admin-shell unified-admin-shell">
+    <div className={`app-shell admin-shell unified-admin-shell admin-view-${view}`}>
       <a className="skip-link" href="#admin-main-content">Skip to main content</a>
       <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setView(next); setQuery(''); }} />
       <div className="app-main">
