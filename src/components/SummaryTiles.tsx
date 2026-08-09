@@ -23,7 +23,11 @@ export default function SummaryTiles({ items, label, className = '' }: SummaryTi
             <span className="summary-tile__label">{item.label}</span>
             <strong className="summary-tile__value">{item.value}</strong>
             <small className="summary-tile__detail">{item.detail}</small>
-            {item.onClick && <ArrowRight className="summary-tile__arrow" size={14} aria-hidden="true" />}
+            {item.onClick && (
+              <span className="summary-tile__action" aria-hidden="true">
+                Open <ArrowRight size={13} />
+              </span>
+            )}
           </>
         );
 

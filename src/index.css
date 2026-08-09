@@ -7950,3 +7950,303 @@ td{
   .admin-curaleaf-status td:nth-child(2)::before{ content: 'Curaleaf'; }
   .admin-curaleaf-status td:nth-child(3)::before{ content: 'Action'; }
 }
+
+/* Final interaction overrides live after route-specific layout rules. */
+.page-body > .operations-brief{
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+button.summary-tile--action{
+  border-color: #c8d3dd !important;
+  border-top: 3px solid var(--tenant-primary) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tenant-primary) 4%, #ffffff), #ffffff 58%) !important;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, .1), inset 0 1px 0 rgba(255, 255, 255, .75) !important;
+}
+
+button.summary-tile--action:hover{
+  border-color: var(--tenant-primary) !important;
+  box-shadow: 0 7px 16px rgba(15, 23, 42, .13) !important;
+}
+
+.btn, .button{
+  border-color: #b8c4cf;
+  font-weight: 650;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .09), inset 0 -1px 0 rgba(15, 23, 42, .06);
+}
+
+.btn:hover:not(:disabled), .button:hover:not(:disabled){
+  border-color: #8fa0ae;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, .11), inset 0 -1px 0 rgba(15, 23, 42, .05);
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled), .button:active:not(:disabled){
+  box-shadow: inset 0 2px 4px rgba(15, 23, 42, .12);
+  transform: translateY(0);
+}
+
+.btn-primary, .button-primary{
+  border-color: color-mix(in srgb, var(--tenant-primary) 82%, #0f172a);
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--tenant-primary) 24%, transparent), inset 0 1px 0 rgba(255, 255, 255, .18);
+}
+
+.sidebar-exit, .unified-admin-shell .admin-detail-back{
+  box-shadow: none;
+}
+
+.header-command-launcher, .header-icon-button{
+  border-color: #c5d0da;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .08), inset 0 -1px 0 rgba(15, 23, 42, .04);
+}
+
+.header-context{
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+.section-label{
+  width: fit-content;
+  color: #64748b;
+  font-size: 10px !important;
+  font-weight: 750;
+  letter-spacing: .085em;
+  line-height: 1.3;
+}
+
+.pill, .tenant-status, .setup-owner-tag, .module-state{
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 999px;
+  box-shadow: none;
+  cursor: default;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .015em;
+  line-height: 1.15;
+}
+
+.tenant-status{ padding: 3px 7px; }
+
+/* Filter cards are controls, not content cards. */
+:is(.filter-grid, .directory-view-toggle):has(> button.filter-card){
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid #d5dee7;
+  border-radius: 12px;
+  background: #e9eef3;
+}
+
+:is(.filter-grid, .directory-view-toggle) > button.filter-card{
+  min-height: 64px;
+  padding: 10px 13px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+:is(.filter-grid, .directory-view-toggle) > button.filter-card:hover{
+  border-color: #ced8e1;
+  background: rgba(255, 255, 255, .72);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .07);
+  transform: translateY(-1px);
+}
+
+:is(.filter-grid, .directory-view-toggle) > button.filter-card:active{
+  box-shadow: inset 0 2px 4px rgba(15, 23, 42, .12);
+  transform: translateY(0);
+}
+
+button.filter-card .filter-card__head{
+  color: #526171;
+  font-weight: 700;
+}
+
+button.filter-card.active .filter-card__head,
+button.filter-card.active .filter-card__value,
+button.filter-card.active .filter-card__value--text{
+  color: var(--tenant-primary-strong) !important;
+}
+
+.operations-brief{
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.summary-tile{
+  border-color: #e1e7ed;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .035);
+}
+
+.summary-tile:hover{
+  border-color: #e1e7ed !important;
+  color: #1e293b;
+}
+
+.summary-tile--action{
+  overflow: hidden;
+  border-color: #c8d3dd !important;
+  border-top: 3px solid var(--tenant-primary) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tenant-primary) 4%, #ffffff), #ffffff 58%) !important;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, .1), inset 0 1px 0 rgba(255, 255, 255, .75) !important;
+  cursor: pointer;
+}
+
+.summary-tile--action:hover{
+  border-color: var(--tenant-primary) !important;
+  box-shadow: 0 7px 16px rgba(15, 23, 42, .13) !important;
+  transform: translateY(-2px);
+}
+
+.summary-tile--action:active{
+  box-shadow: inset 0 2px 5px rgba(15, 23, 42, .12);
+  transform: translateY(0);
+}
+
+.summary-tile__action{
+  grid-column: 2;
+  grid-row: 2 / 4;
+  align-self: center;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--tenant-primary-muted);
+  border-radius: 999px;
+  background: var(--tenant-primary-soft);
+  color: var(--tenant-primary-strong);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.summary-tile__action svg{
+  flex: 0 0 auto;
+  transition: transform .15s ease;
+}
+
+.summary-tile--action:hover .summary-tile__action svg{
+  transform: translateX(2px);
+}
+
+:is(.filter-grid, .directory-view-toggle) > button.filter-card.active{
+  border-color: #b8c6d2;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .12), inset 0 3px 0 var(--tenant-primary);
+}
+
+.unified-admin-shell :is(.admin-segment-tabs, .admin-detail-tabs, .admin-platform-tabs, .admin-finance-period-grid) .filter-card.active{
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .12), inset 0 3px 0 var(--tenant-primary);
+}
+
+.admin-gate-card, .admin-gate-card:hover{
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  box-shadow: none;
+  cursor: default;
+  transform: none;
+}
+
+.priority-action, .session-ledger__open{
+  border-color: #b8c4cf;
+  background: #ffffff;
+  color: var(--tenant-primary-strong);
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .09), inset 0 -1px 0 rgba(15, 23, 42, .05);
+}
+
+.priority-action:hover, .session-ledger__open:hover{
+  border-color: var(--tenant-primary);
+  background: var(--tenant-primary-soft);
+  box-shadow: 0 4px 9px rgba(15, 23, 42, .1);
+  transform: translateY(-1px);
+}
+
+.priority-action--quiet{
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: #475569;
+  text-decoration: underline;
+  text-decoration-color: #aebbc6;
+  text-underline-offset: 3px;
+}
+
+.table-link, .session-ledger__patient button{
+  color: var(--tenant-primary-strong);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--tenant-primary-muted);
+  text-underline-offset: 3px;
+}
+
+.settings-page .payment-route-settings > button{
+  position: relative;
+  border-color: #cbd5df;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .07);
+}
+
+.settings-page .payment-route-settings > button::after{
+  content: '';
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #94a3b8;
+  border-radius: 50%;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.settings-page .payment-route-settings > button > svg{
+  display: none;
+}
+
+.settings-page .payment-route-settings > button:hover:not(:disabled){
+  border-color: #94a3b8;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, .09);
+  transform: translateY(-1px);
+}
+
+.settings-page .payment-route-settings > button[aria-checked='true']{
+  border-color: var(--tenant-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tenant-primary) 12%, transparent), 0 2px 5px rgba(15, 23, 42, .08);
+}
+
+.settings-page .payment-route-settings > button[aria-checked='true']::after{
+  border: 5px solid var(--tenant-primary);
+}
+
+.settings-meta-grid > div, .connection-summary > div{
+  border-color: #e5eaf0;
+  background: #f7f9fb;
+  box-shadow: none;
+}
+
+@media (max-width: 760px){
+  :is(.filter-grid, .directory-view-toggle):has(> button.filter-card){
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :is(.filter-grid, .directory-view-toggle) > button.filter-card{
+    min-height: 58px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce){
+  .btn, .button, .summary-tile--action, .summary-tile__action svg,
+  :is(.filter-grid, .directory-view-toggle) > button.filter-card,
+  .priority-action, .session-ledger__open{
+    transition: none !important;
+    transform: none !important;
+  }
+}
