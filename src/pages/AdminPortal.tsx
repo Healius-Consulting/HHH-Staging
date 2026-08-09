@@ -1120,7 +1120,7 @@ export default function AdminPortal() {
   const renderReferrals = () => {
     const pending = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review');
     const reviewed = state.submissions.filter(submission => submission.status === 'Approved' || submission.status === 'Declined');
-    const row = (submission: typeof state.submissions[number]) => {
+    const referralCard = (submission: typeof state.submissions[number], section: 'queue' | 'history') => {
       const organisation = state.organisations.find(org => org.id === submission.organisationId);
       const recordsComplete = submission.recordsCheck?.status === 'completed' || submission.calls.length > 0;
       const referralComplete = submission.referral?.status === 'completed' || submission.status === 'Approved';
@@ -1131,37 +1131,54 @@ export default function AdminPortal() {
         setReferralDialog({ id: submission.id, organisationId: submission.organisationId, patientName: submission.name, action });
       };
       return (
-        <tr key={submission.id}>
-          <td><CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} /></td>
-          <td><strong>{organisation?.tradingName ?? submission.pharmacyName}</strong><small>Token-attributed pharmacy</small></td>
-          <td><ConditionList conditions={submission.conditions} primaryCondition={submission.primaryCondition} /><small>{submission.tried2 ? 'Two treatments reported' : 'Treatment history requires review'} · {submission.psychExclusion ? 'Exclusion flagged' : 'No psychosis exclusion reported'}</small></td>
-          <td><strong>{recordsComplete ? 'Completed' : 'Pending'}</strong><small>{submission.recordsCheck?.completedAt ? new Date(submission.recordsCheck.completedAt).toLocaleDateString('en-GB') : 'Patient call and records check required'}</small></td>
-          <td><div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(submission.status)}`}>{onboardingStatusLabel(submission.status)}</span>{submission.reviewedBy && <small>{submission.reviewedBy} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</div></td>
-          <td>
-            <div className="admin-referral-actions">
-              {!recordsComplete && <button className="btn btn-sm" onClick={() => openAction('records')}><PhoneCall size={13} /> Log call / records check</button>}
-              {!referralComplete && submission.status !== 'Declined' && <button className="btn btn-sm btn-primary" disabled={!recordsComplete} onClick={() => openAction('complete')}><UserCheck size={13} /> Complete referral</button>}
-              {!referralComplete && submission.status !== 'Declined' && <button className="btn btn-sm" disabled={!recordsComplete} onClick={() => openAction('decline')}><UserX size={13} /> Decline</button>}
-              {referralComplete && emailStatus === 'not_sent' && <button className="btn btn-sm btn-primary" onClick={() => openAction('email')}><ExternalLink size={13} /> Send email</button>}
-              {referralComplete && emailStatus !== 'not_sent' && <span className={`pill ${emailStatus === 'failed' ? 'pill-red' : 'pill-green'}`}>Email {emailStatus.replace('_', ' ')}</span>}
+        <article className={`admin-referral-item admin-referral-item--${section}`} key={submission.id}>
+          <div className="admin-referral-item__identity">
+            <CompactPatientCell name={submission.name} email={submission.email} mobile={submission.mobile} dob={submission.dob} />
+            <div className="admin-referral-item__pharmacy">
+              <span className="admin-referral-item__label">Attributed pharmacy</span>
+              <strong>{organisation?.tradingName ?? submission.pharmacyName}</strong>
+              <small>Token-attributed record</small>
             </div>
-          </td>
-        </tr>
+          </div>
+
+          <div className="admin-referral-item__screening">
+            <span className="admin-referral-item__label">Screening summary</span>
+            <ConditionList conditions={submission.conditions} primaryCondition={submission.primaryCondition} />
+            <small>{submission.tried2 ? 'Two treatments reported' : 'Treatment history requires review'} · {submission.psychExclusion ? 'Exclusion flagged' : 'No psychosis exclusion reported'}</small>
+          </div>
+
+          <div className="admin-referral-item__workflow">
+            <div>
+              <span className="admin-referral-item__label">Call / check</span>
+              <strong>{recordsComplete ? 'Completed' : 'Pending'}</strong>
+              <small>{submission.recordsCheck?.completedAt ? new Date(submission.recordsCheck.completedAt).toLocaleDateString('en-GB') : recordsComplete ? 'Recorded in the audit trail' : 'Patient call and records check required'}</small>
+            </div>
+            <div>
+              <span className="admin-referral-item__label">Referral</span>
+              <div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(submission.status)}`}>{onboardingStatusLabel(submission.status)}</span>{submission.reviewedBy && <small>{submission.reviewedBy} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</div>
+            </div>
+          </div>
+
+          <div className="admin-referral-actions" aria-label={`Actions for ${submission.name}`}>
+            {!recordsComplete && <button className="btn btn-sm" onClick={() => openAction('records')}><PhoneCall size={13} /> Log call / records check</button>}
+            {!referralComplete && submission.status !== 'Declined' && <button className="btn btn-sm btn-primary" disabled={!recordsComplete} onClick={() => openAction('complete')}><UserCheck size={13} /> Complete referral</button>}
+            {!referralComplete && submission.status !== 'Declined' && <button className="btn btn-sm" disabled={!recordsComplete} onClick={() => openAction('decline')}><UserX size={13} /> Decline</button>}
+            {referralComplete && emailStatus === 'not_sent' && <button className="btn btn-sm btn-primary" onClick={() => openAction('email')}><ExternalLink size={13} /> Send email</button>}
+            {referralComplete && emailStatus !== 'not_sent' && <span className={`pill ${emailStatus === 'failed' ? 'pill-red' : 'pill-green'}`}>Email {emailStatus.replace('_', ' ')}</span>}
+          </div>
+        </article>
       );
     };
     return (
       <>
-        <div className="admin-page-actions">
-          <span className="pill pill-amber"><PhoneCall size={13} /> {pending.length} awaiting decision</span>
-        </div>
         <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>Approval boundary</strong><p>HHH approval authorises programme onboarding only. It does not diagnose, prescribe, replace a doctor’s prescription, or replace the pharmacy’s legal and professional checks before dispensing.</p></div></section>
-        <section className="card admin-patient-table admin-referral-register">
-          <div className="admin-directory-head"><div><h2>Awaiting HHH review</h2><p>The patient call and records outcome must be recorded before referral completion.</p></div></div>
-          {pending.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>Call / check</th><th>Referral</th><th>Actions</th></tr></thead><tbody>{pending.map(row)}</tbody></table></div> : <div className="empty-state">No onboarding decisions are waiting.</div>}
+        <section className="card admin-referral-section">
+          <div className="admin-directory-head"><div><p className="section-label">Action queue</p><h2>Awaiting HHH review</h2><p>The patient call and records outcome must be recorded before referral completion.</p></div><span className="pill pill-amber">{pending.length} waiting</span></div>
+          {pending.length ? <div className="admin-referral-list">{pending.map(submission => referralCard(submission, 'queue'))}</div> : <div className="empty-state">No onboarding decisions are waiting.</div>}
         </section>
-        <section className="card admin-patient-table admin-referral-register">
-          <div className="admin-directory-head"><div><h2>Decision history</h2><p>Approved patients become available only inside their attributed pharmacy workspace.</p></div></div>
-          {reviewed.length ? <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Screening summary</th><th>Call / check</th><th>Referral</th><th>Email</th></tr></thead><tbody>{reviewed.map(row)}</tbody></table></div> : <div className="empty-state">No decisions have been recorded.</div>}
+        <section className="card admin-referral-section admin-referral-section--history">
+          <div className="admin-directory-head"><div><p className="section-label">Audit trail</p><h2>Decision history</h2><p>Approved patients become available only inside their attributed pharmacy workspace.</p></div><span className="pill pill-neutral">{reviewed.length} recorded</span></div>
+          {reviewed.length ? <div className="admin-referral-list">{reviewed.map(submission => referralCard(submission, 'history'))}</div> : <div className="empty-state">No decisions have been recorded.</div>}
         </section>
       </>
     );

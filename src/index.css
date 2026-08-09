@@ -7146,6 +7146,133 @@ td{
   gap: 16px;
 }
 
+.unified-admin-shell .admin-content > *{
+  flex: 0 0 auto;
+}
+
+.admin-referral-section{
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.admin-referral-section .admin-directory-head{
+  margin: 0;
+}
+
+.admin-referral-list{
+  display: grid;
+  gap: 10px;
+}
+
+.admin-referral-item{
+  display: grid;
+  grid-template-columns: minmax(225px, 1.05fr) minmax(210px, 1fr) minmax(175px, .78fr) minmax(220px, .9fr);
+  gap: 18px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.admin-referral-item--queue{
+  border-left: 3px solid color-mix(in srgb, var(--tenant-primary) 70%, #ffffff);
+}
+
+.admin-referral-item--history{
+  background: #fbfcfd;
+}
+
+.admin-referral-item__identity,
+.admin-referral-item__screening,
+.admin-referral-item__workflow,
+.admin-referral-item__workflow > div{
+  min-width: 0;
+}
+
+.admin-referral-item__identity,
+.admin-referral-item__screening,
+.admin-referral-item__workflow{
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.admin-referral-item__pharmacy{
+  display: grid;
+  gap: 2px;
+  padding-top: 10px;
+  border-top: 1px solid #edf1f4;
+}
+
+.admin-referral-item__label{
+  display: block;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .055em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.admin-referral-item :is(strong, small){
+  overflow-wrap: anywhere;
+}
+
+.admin-referral-item small{
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.admin-referral-item__workflow{
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.admin-referral-item__workflow > div{
+  display: grid;
+  gap: 4px;
+}
+
+.admin-referral-item .admin-referral-actions{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  min-width: 0;
+}
+
+.admin-referral-item .admin-referral-actions .btn{
+  width: 100%;
+  min-height: 34px;
+  justify-content: flex-start;
+  padding: 6px 10px;
+  white-space: normal;
+  text-align: left;
+}
+
+@media (max-width: 1180px) {
+  .admin-referral-item{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .admin-referral-item .admin-referral-actions{
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .admin-referral-section{ padding: 14px; }
+  .admin-referral-section .admin-directory-head{ align-items: flex-start; }
+  .admin-referral-item{ grid-template-columns: 1fr; gap: 14px; padding: 14px; }
+  .admin-referral-item__workflow{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-referral-item .admin-referral-actions{ grid-column: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-referral-item .admin-referral-actions > :only-child,
+  .admin-referral-item .admin-referral-actions > :first-child:nth-last-child(3){ grid-column: 1 / -1; }
+}
+
 .unified-admin-shell .admin-directory, .unified-admin-shell .admin-patient-table, .unified-admin-shell .secure-integration-form, .unified-admin-shell .integration-card, .unified-admin-shell .admin-external-gates, .unified-admin-shell .company-group-card{
   background: #ffffff;
   border: 1px solid #e2e8f0;
