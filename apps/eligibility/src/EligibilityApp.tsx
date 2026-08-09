@@ -29,6 +29,7 @@ export default function EligibilityApp() {
   const [selectedConditions, setSelectedConditions] = useState<string[]>([]);
   const [primaryCondition, setPrimaryCondition] = useState('');
   const [conditionError, setConditionError] = useState('');
+  const [treatmentHistory, setTreatmentHistory] = useState<'' | 'yes' | 'no'>('');
   const conditionMenuRef = useRef<HTMLDetailsElement>(null);
   const themeStyle = tenantThemeVariables(pharmacy?.primaryColour ?? '#0f766e') as CSSProperties;
 
@@ -62,6 +63,7 @@ export default function EligibilityApp() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!pharmacy) return;
+    if (treatmentHistory === 'no') return;
     if (selectedConditions.length < 1 || selectedConditions.length > 3) {
       setConditionError('Select between one and three conditions.');
       return;
@@ -154,7 +156,7 @@ export default function EligibilityApp() {
             {conditionError && <span className="eligibility-field-error" id="condition-error" role="alert">{conditionError}</span>}
           </fieldset>
           <label>Primary condition <em>*</em><select className="input select" value={primaryCondition} disabled={selectedConditions.length === 0} required onChange={event => { setPrimaryCondition(event.target.value); setConditionError(''); }}><option value="">Select the main condition</option>{selectedConditions.map(conditionId => <option key={conditionId} value={conditionId}>{conditionLabel(conditionId)}</option>)}</select></label>
-          <fieldset><legend>Have you tried at least two licensed treatments or therapies? <em>*</em></legend><div className="eligibility-choice"><label><input type="radio" name="tried2" value="yes" required /><span><strong>Yes</strong><small>I have tried two or more</small></span></label><label><input type="radio" name="tried2" value="no" /><span><strong>No</strong><small>Not yet or I am unsure</small></span></label></div></fieldset>
+          <fieldset><legend>Have you tried at least two licensed treatments or therapies? <em>*</em></legend><div className="eligibility-choice"><label><input type="radio" name="tried2" value="yes" required checked={treatmentHistory === 'yes'} onChange={() => setTreatmentHistory('yes')} /><span><strong>Yes</strong><small>I have tried two or more</small></span></label><label><input type="radio" name="tried2" value="no" checked={treatmentHistory === 'no'} onChange={() => setTreatmentHistory('no')} /><span><strong>No</strong><small>Not yet or I am unsure</small></span></label></div>{treatmentHistory === 'no' && <div className="eligibility-screening-stop" role="alert"><AlertTriangle size={18} /><div><strong>You are not eligible to submit this check yet</strong><p>At least two licensed treatments or therapies must have been tried before a referral can be considered. If you are unsure what counts, please contact the pharmacy.</p></div></div>}</fieldset>
           <fieldset><legend>Have you or an immediate family member been diagnosed with psychosis or schizophrenia? <em>*</em></legend><div className="eligibility-choice"><label><input type="radio" name="psychExclusion" value="yes" required /><span><strong>Yes</strong><small>This applies to me or family</small></span></label><label><input type="radio" name="psychExclusion" value="no" /><span><strong>No</strong><small>This does not apply</small></span></label></div></fieldset>
         </section>
         <section className="eligibility-form-section eligibility-form-section--consent" aria-labelledby="eligibility-consent">
@@ -163,7 +165,7 @@ export default function EligibilityApp() {
           <div className="eligibility-consents"><label><input type="checkbox" name="consentReferral" required /><span>I understand the consultation and medicine may involve costs, and I want the pharmacy to consider me for referral. <em>*</em></span></label><label><input type="checkbox" name="consentShare" required /><span>I explicitly consent to my health information being collected and shared with this pharmacy and relevant specialist healthcare services for this enquiry. <em>*</em></span></label><label className="eligibility-consent--optional"><input type="checkbox" name="marketing" /><span>I would like to receive optional service news and offers. I can withdraw this consent at any time. <small>Optional</small></span></label></div>
         </section>
         {error && <div className="banner banner-red"><AlertTriangle size={16} /> {error}</div>}
-        <footer className="eligibility-form-footer"><button className="btn btn-primary eligibility-submit" type="submit" disabled={submitting}>{submitting ? 'Submitting securely…' : 'Submit eligibility check'}</button><p><LockKeyhole size={13} /> Your answers are sent securely to {pharmacy.tradingName}.</p></footer>
+        <footer className="eligibility-form-footer"><button className="btn btn-primary eligibility-submit" type="submit" disabled={submitting || treatmentHistory === 'no'}>{submitting ? 'Submitting securely…' : treatmentHistory === 'no' ? 'Not eligible to submit' : 'Submit eligibility check'}</button><p>{treatmentHistory === 'no' ? <><AlertTriangle size={13} /> Submission is unavailable based on your treatment history.</> : <><LockKeyhole size={13} /> Your answers are sent securely to {pharmacy.tradingName}.</>}</p></footer>
         <p className="eligibility-legal">{isLocalPreview ? 'Local preview only — this form does not transmit or store the information entered.' : 'HHH is a platform of Healius Consulting. The approved live privacy notice must identify the verified legal entity and explain the pharmacy and platform operator’s data-protection roles before patient information is accepted.'}</p>
       </form>
     </div>
