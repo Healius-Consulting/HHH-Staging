@@ -272,7 +272,7 @@ export interface PortalOrderInput {
     fileId: string;
     clinicScanId?: string;
     curaleafPrescriptionId?: string;
-    serialNumber?: string;
+    serialNumber: string;
     issueDate: string;
     expiryDate?: string;
 
@@ -303,6 +303,7 @@ export interface PortalOrderInput {
     originalTotalPence?: number;
     priceDifferencePence?: number;
     requireCuraleafAuth?: true;
+    priceResolution?: 'absorb' | 'refund_and_recharge';
   };
 }
 
@@ -358,11 +359,17 @@ export interface PortalOrderRecord {
   prescriptions?: PortalOrderInput['prescriptions'];
   dispensingFeePence: number;
   totalPence: number;
+  quotedTotalPence?: number;
+  pharmacyContributionPence?: number;
   currency: 'GBP';
   paymentRoute: 'manual' | 'worldpay';
   paymentStatus: string;
   fulfilmentStatus: string;
   paymentId?: string;
+  worldpayPaymentId?: string;
+  paymentTransactionReference?: string;
+  refund?: OrderRefundState;
+  curaleafApprovedAt?: string;
   status?: 'open' | 'archived' | 'rejected' | string;
   isExpired?: boolean;
   archivedAt?: string;
@@ -381,6 +388,9 @@ export interface PortalOrderRecord {
     requireCuraleafAuth?: boolean;
     unresolvedReason?: 'expired' | 'rejected';
     recommendation?: ExpiryCheckState['recommendation'];
+    rootOrderId?: string | number;
+    replacementSequence?: number;
+    priceResolution?: 'absorb' | 'refund_and_recharge';
   };
   expiryCheck?: ExpiryCheckState;
   pricingQuote?: CuraleafPricingSnapshot;
@@ -409,6 +419,22 @@ export interface PortalOrderRecord {
   };
   createdAt: string;
   updatedAt: string;
+}
+
+export interface OrderRefundState {
+  id: string;
+  status: 'pending_confirmation' | 'completed';
+  amountPence: number;
+  method: 'worldpay_portal' | 'pharmacy_manual';
+  paymentReference: string;
+  transactionReference?: string | null;
+  reason: 'patient_cancelled' | 'replacement_price_changed';
+  resolution: 'cancel' | 'replace_new_payment';
+  requestedAt: string;
+  requestedBy?: string;
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
+  externalReference?: string | null;
 }
 
 export interface PrescriptionUploadRequest {
@@ -544,7 +570,6 @@ export interface WorldpayConnectionInput {
   username: string;
   password: string;
   entityId: string;
-  webhookSecret: string;
 }
 
 export interface WorldpayConnectionStatus {
@@ -553,6 +578,12 @@ export interface WorldpayConnectionStatus {
   status?: 'verification_required' | 'connected' | 'attention';
   maskedIdentifier?: string;
   updatedAt?: string;
+  validation?: {
+    passed: true;
+    checkedAt: string;
+    environment: 'try' | 'live';
+    entityId: string;
+  } | null;
 }
 
 export interface CreateOrganisationInput {

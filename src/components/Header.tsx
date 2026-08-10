@@ -7,29 +7,17 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
     title: 'Pharmacy overview',
     subtitle: 'Daily operational position, urgent follow-ups, and active pharmacy workload.',
   },
-  referrals: {
-    title: 'Patients hub',
-    subtitle: 'Approved patients, intake eligibility submissions, and clinical history for this pharmacy.',
-  },
   formulary: {
     title: 'Curaleaf catalogue',
     subtitle: 'Browse products, pack sizes, and recommended patient prices supplied by Curaleaf.',
   },
   create: {
-    title: 'Prescription workspace',
-    subtitle: 'Select an HHH-approved patient, verify the doctor’s prescription, and prepare the Curaleaf order.',
-  },
-  review: {
-    title: 'Payments and billing',
-    subtitle: 'Track active Worldpay payment requests and review cleared transaction logs.',
-  },
-  'provider-prescriptions': {
-    title: 'Customer orders',
-    subtitle: 'Monitor post-payment placement, margin holds, stock retries, expired prescriptions, and cancellations.',
+    title: 'Create prescription order',
+    subtitle: 'Link an approved patient, authenticate the prescription, verify Curaleaf packs and pricing, then request payment.',
   },
   orders: {
     title: 'Customer orders',
-    subtitle: 'Monitor post-payment placement, margin holds, stock retries, expired prescriptions, and cancellations.',
+    subtitle: 'One customer journey from payment through Curaleaf approval, delivery, collection, rejection, or archive.',
   },
   patients: {
     title: 'Patients hub',
@@ -38,10 +26,6 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   finance: {
     title: 'Prescription financials',
     subtitle: 'Compare paid patient revenue, Curaleaf wholesale costs, dispensing fees, and pharmacy contribution.',
-  },
-  resources: {
-    title: 'Settings & assets',
-    subtitle: 'Pharmacy profile, payment routes, operational readiness, and intake QR assets.',
   },
   settings: {
     title: 'Settings & assets',

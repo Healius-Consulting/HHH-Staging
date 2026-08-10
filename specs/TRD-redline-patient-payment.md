@@ -10,7 +10,7 @@ End-to-end flow: pharmacy-token enquiry → HHH telephone review → HHH approve
 
 Two payment routes are supported:
 
-1. **Worldpay online:** HHH creates a hosted checkout session against the attributed pharmacy's connected Worldpay merchant account. Only a verified server-side Worldpay webhook may mark the payment paid. Patient funds settle directly to that pharmacy.
+1. **Worldpay online:** HHH creates a hosted checkout session against the attributed pharmacy's connected Worldpay merchant account. A webhook triggers server-side Payment Queries reconciliation; only a matching reference, amount, currency, merchant entity and settlement state may mark the payment paid. Patient funds settle directly to that pharmacy.
 2. **Pharmacy-managed:** The pharmacy takes payment through its own EPOS/till/banking process (including EPOS card, cash, bank transfer or other) and a staff member manually confirms receipt. The record captures tender type, amount, confirmation time, staff actor, optional invoice/receipt reference and optional notes.
 
 HHH does not take a percentage of prescription sales. The pharmacy's platform subscription fee is agreed and invoiced separately from patient payments.
@@ -27,7 +27,7 @@ HHH does not take a percentage of prescription sales. The pharmacy's platform su
 - **F-NN — Payment route selection.** Staff must choose either Worldpay hosted checkout or pharmacy-managed payment before an order leaves draft. The chosen route must be visible throughout payment review and audit history.
 - **F-NN — Pharmacy-managed payment.** For the pharmacy-managed route, authorised staff must manually confirm that the full amount has been received and record the tender type (`EPOS card`, `cash`, `bank transfer`, or `other`). Invoice/receipt reference and reconciliation notes are optional.
 - **F-NN — Payment status tracking.** Each sub-order must hold a payment status of Unpaid, Link sent, or Paid, with the amount and a payment reference. Status must be visible in the sub-order, the order summary, the review screen, and the Orders tab.
-- **F-NN — Payment confirmation.** Worldpay payments become Paid only following a verified webhook/callback. Pharmacy-managed payments become Paid only following an explicit staff confirmation. Both routes record amount, route and timestamp; manual confirmation also records the staff actor and tender.
+- **F-NN — Payment confirmation.** Worldpay payments become Paid only after server-side Payment Queries verification, triggered by a webhook or reconciliation sweep. Pharmacy-managed payments become Paid only following an explicit staff confirmation. Both routes record amount, route and timestamp; manual confirmation also records the staff actor and tender.
 - **F-NN — Order-placement gating.** The pharmacy must not be able to request payment or place the stock order with Curaleaf unless the patient is HHH-approved and every sub-order has a named prescriber, attached valid prescription copy, at least one priced item and confirmed patient payment. The place-order action must be disabled and outstanding requirements flagged.
 - **F-NN — Resend / expiry.** The pharmacist should be able to resend a payment link, and links should expire after a configurable period.
 - **F-NN — Refund/cancellation handling (SHOULD).** If a sub-order is cancelled after payment but before the Curaleaf order is placed, the platform should support flagging the payment for refund.
@@ -40,7 +40,7 @@ HHH does not take a percentage of prescription sales. The pharmacy's platform su
 
 ## Open items to confirm
 
-- Worldpay hosted-checkout API credentials, webhook signing/verification details and final event/status mapping.
+- Worldpay hosted-checkout API credentials, webhook network-access configuration and final event/status mapping. No application-level webhook secret is assumed unless Worldpay explicitly supplies and documents one for the account.
 - Worldpay's supported method for securely connecting and attributing a separate merchant account to each pharmacy.
 - Platform subscription billing frequency, VAT treatment, invoice terms and non-payment handling in the partner agreement.
 - Whether the CRM exposes an API/shared DB for patient lookup, or data is co-located on the HHH platform.

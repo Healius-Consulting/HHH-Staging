@@ -53,6 +53,16 @@ test('already redone orders are not unresolved', () => {
   assert.equal(evaluation.redoEligible, false);
 });
 
+test('collected orders do not become unresolved when the prescription window later expires', () => {
+  const evaluation = evaluateOrderCycle({
+    createdAt: '2026-01-01T00:00:00.000Z',
+    paymentStatus: 'paid',
+    fulfilmentStatus: 'collected',
+  }, new Date('2026-03-01T00:00:00.000Z'));
+  assert.equal(evaluation.unresolvedReason, null);
+  assert.equal(evaluation.redoEligible, false);
+});
+
 test('enrichOrderRecord exposes stable platform fields', () => {
   const enriched = enrichOrderRecord({
     id: 'ord-1',

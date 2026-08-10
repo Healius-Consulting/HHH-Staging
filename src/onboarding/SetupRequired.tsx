@@ -7,7 +7,7 @@ export function SetupRequired({ onOpenSetup }: { onOpenSetup: () => void }) {
         <span className="resource-icon"><LockKeyhole size={22} /></span>
         <p className="section-label">Limited access</p>
         <h2>Complete pharmacy setup to use this workspace</h2>
-        <p>Patient processing, payments and Curaleaf actions remain locked until the mandatory pharmacy checks are complete. You can still use the Dashboard and Resources areas.</p>
+        <p>Patient processing, payments and Curaleaf actions remain locked until the mandatory pharmacy checks are complete. You can still use Overview, Catalogue, and Settings & Assets.</p>
         <button type="button" className="btn btn-primary" onClick={onOpenSetup}><Settings size={16} /> Continue setup</button>
       </section>
     </div>

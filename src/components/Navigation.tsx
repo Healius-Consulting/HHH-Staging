@@ -15,10 +15,9 @@ export default function Navigation() {
   const staffName = state.staffSession?.name || 'Staff User';
   const staffInitials = staffName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase();
   const counts: Partial<Record<Screen, number>> = {
-    referrals: state.submissions.filter(s => s.organisationId === organisation.id && (s.status === 'New' || s.status === 'Under HHH review')).length,
+    patients: state.submissions.filter(s => s.organisationId === organisation.id && (s.status === 'New' || s.status === 'Under HHH review')).length,
     create: tenantOrders.filter(o => o.payment.status === 'none' && o.prescriptions.some(r => r.items.length > 0)).length,
-    review: tenantOrders.filter(o => o.payment.status === 'sent').length,
-    orders: tenantOrders.filter(o => o.payment.status === 'paid' && o.prescriptions.some(r => !['ready', 'collected'].includes(r.status))).length,
+    orders: tenantOrders.filter(o => o.payment.status !== 'none' && o.prescriptions.some(r => r.status !== 'collected')).length,
   };
 
   const groups: WorkspaceNavGroup<Screen>[] = [
@@ -28,7 +27,7 @@ export default function Navigation() {
         { key: 'home', label: 'Overview', icon: <Home size={17} /> },
         { key: 'create', label: 'Prescriptions', shortLabel: 'Rx', icon: <FilePlus size={17} />, count: counts.create },
         { key: 'orders', label: 'Customer Orders', shortLabel: 'Orders', icon: <Package size={17} />, count: counts.orders },
-        { key: 'patients', label: 'Patients Hub', shortLabel: 'Patients', icon: <Users size={17} />, count: counts.referrals },
+        { key: 'patients', label: 'Patients Hub', shortLabel: 'Patients', icon: <Users size={17} />, count: counts.patients },
       ],
     },
     {

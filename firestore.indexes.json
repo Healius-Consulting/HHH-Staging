@@ -15,6 +15,14 @@
         { "fieldPath": "organisationId", "order": "ASCENDING" },
         { "fieldPath": "transactionReference", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "route", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

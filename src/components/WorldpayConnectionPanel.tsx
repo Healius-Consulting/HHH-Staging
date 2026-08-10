@@ -4,7 +4,7 @@ import { connectWorldpayPharmacy, getWorldpayConnectionStatus } from '../shared/
 import type { WorldpayConnectionStatus } from '../shared/contracts';
 import './WorldpayConnectionPanel.css';
 
-const EMPTY_FORM = { username: '', password: '', entityId: '', webhookSecret: '' };
+const EMPTY_FORM = { username: '', password: '', entityId: '' };
 
 export default function WorldpayConnectionPanel({
   organisationId,
@@ -39,7 +39,7 @@ export default function WorldpayConnectionPanel({
   useEffect(() => { void refresh(); }, [refresh]);
 
   const connect = async () => {
-    if (!form.username.trim() || !form.password || !form.entityId.trim() || !form.webhookSecret) return;
+    if (!form.username.trim() || !form.password || !form.entityId.trim()) return;
     setBusy(true);
     setError(null);
     try {
@@ -48,7 +48,6 @@ export default function WorldpayConnectionPanel({
         username: form.username.trim(),
         password: form.password,
         entityId: form.entityId.trim(),
-        webhookSecret: form.webhookSecret,
       });
       setStatus(result);
       setForm(EMPTY_FORM);
@@ -66,7 +65,7 @@ export default function WorldpayConnectionPanel({
         <span className="worldpay-connect-panel__icon"><KeyRound size={17} /></span>
         <span>
           <strong>{status?.connected ? 'Worldpay merchant connected' : status?.configured ? 'Worldpay verification required' : 'Connect this pharmacy’s merchant account'}</strong>
-          <small>Credentials travel directly to HHH’s secure backend and are stored in Google Secret Manager. They are never shown again.</small>
+          <small>TRY or live API credentials are verified with Worldpay Payment Queries, then stored in Google Secret Manager. They are never shown again.</small>
         </span>
         {status?.connected ? <span className="pill pill-green"><CheckCircle2 size={11} /> Connected</span> : null}
       </header>
@@ -78,9 +77,8 @@ export default function WorldpayConnectionPanel({
           <label><span>API username</span><input className="input" autoComplete="off" value={form.username} onChange={event => setForm(current => ({ ...current, username: event.target.value }))} /></label>
           <label><span>API password</span><input className="input" type={showSecrets ? 'text' : 'password'} autoComplete="new-password" value={form.password} onChange={event => setForm(current => ({ ...current, password: event.target.value }))} /></label>
           <label><span>Merchant entity ID</span><input className="input" autoComplete="off" placeholder="PO…" value={form.entityId} onChange={event => setForm(current => ({ ...current, entityId: event.target.value }))} /></label>
-          <label><span>Webhook secret</span><input className="input" type={showSecrets ? 'text' : 'password'} autoComplete="new-password" value={form.webhookSecret} onChange={event => setForm(current => ({ ...current, webhookSecret: event.target.value }))} /></label>
           <button type="button" className="btn btn-sm worldpay-connect-panel__reveal" onClick={() => setShowSecrets(value => !value)}>{showSecrets ? <EyeOff size={13} /> : <Eye size={13} />}{showSecrets ? 'Hide secrets' : 'Show while entering'}</button>
-          <button type="button" className="btn btn-primary" disabled={busy || !form.username.trim() || !form.password || !form.entityId.trim() || !form.webhookSecret} onClick={() => void connect()}>{busy ? <RefreshCw size={14} className="spin" /> : <ShieldCheck size={14} />}{busy ? 'Verifying…' : 'Save and verify connection'}</button>
+          <button type="button" className="btn btn-primary" disabled={busy || !form.username.trim() || !form.password || !form.entityId.trim()} onClick={() => void connect()}>{busy ? <RefreshCw size={14} className="spin" /> : <ShieldCheck size={14} />}{busy ? 'Verifying with Worldpay…' : 'Save and verify connection'}</button>
         </div>
       )}
 

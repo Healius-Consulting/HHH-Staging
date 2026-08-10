@@ -1,8 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Activity, AlertTriangle, Building2, CalendarDays, FileText, Hash, Link2, Mail, MapPin, Phone, Search, ChevronRight, Plus, X, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
-import { useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
+import { Activity, AlertTriangle, Building2, CalendarDays, FileText, Hash, Mail, MapPin, Phone, Search, ChevronRight, Plus, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
+import { getUnresolvedReason, orderReference, useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
-import { useModalFocus } from '../accessibility/useModalFocus';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
@@ -36,11 +35,36 @@ function stepsCompleted(status: string): number {
   }
 }
 
+function orderExceptionReason(order: PatientOrder): 'rejected' | 'expired' | null {
+  if (order.prescriptions.length > 0 && order.prescriptions.every(prescription => prescription.status === 'collected')) return null;
+  if (order.unresolvedReason === 'rejected' || order.quoteReview) return 'rejected';
+  if (order.unresolvedReason === 'expired' || order.lifecycleStatus === 'archived' || order.isExpired) return 'expired';
+  return getUnresolvedReason(order);
+}
+
+function operationalOrder(order: PatientOrder) {
+  return !orderExceptionReason(order);
+}
+
+function orderNeedsResolution(order: PatientOrder) {
+  return Boolean(orderExceptionReason(order)) && !order.redoneByOrderId && order.refund?.status !== 'completed';
+}
+
 /* ── Status derivation ── */
 function deriveStatus(p: UnifiedPatient): { label: string; compactLabel: string; pill: string } {
   if (p.orders.length > 0) {
+    const unresolved = p.orders.find(order => orderExceptionReason(order) && !order.redoneByOrderId);
+    if (unresolved?.refund?.status === 'pending_confirmation') return { label: 'Refund confirmation needed', compactLabel: 'Refund pending', pill: 'pill-amber' };
+    if (unresolved?.refund?.status === 'completed') return { label: 'Refunded', compactLabel: 'Refunded', pill: 'pill-neutral' };
+    if (unresolved) {
+      const replacementDraft = p.orders.some(order => order.payment.status === 'none' && order.redoContext?.originalOrderId === unresolved.id);
+      return replacementDraft
+        ? { label: 'Replacement in progress', compactLabel: 'Replacing', pill: 'pill-info' }
+        : { label: 'Paid order needs resolution', compactLabel: 'Action needed', pill: 'pill-red' };
+    }
+    const operational = p.orders.filter(operationalOrder);
     if (
-      p.orders.some(
+      operational.some(
         o =>
           o.payment.status === 'paid' &&
           o.prescriptions.some(rx => rx.status === 'ready'),
@@ -49,7 +73,7 @@ function deriveStatus(p: UnifiedPatient): { label: string; compactLabel: string;
       return { label: 'Ready for collection', compactLabel: 'Ready', pill: 'pill-green' };
 
     if (
-      p.orders.some(
+      operational.some(
         o =>
           o.payment.status === 'paid' &&
           o.prescriptions.some(rx => rx.status !== 'ready' && rx.status !== 'collected'),
@@ -58,7 +82,7 @@ function deriveStatus(p: UnifiedPatient): { label: string; compactLabel: string;
       return { label: 'In fulfilment', compactLabel: 'Fulfilment', pill: 'pill-info' };
 
     if (
-      p.orders.some(
+      operational.some(
         o =>
           o.payment.status === 'paid' &&
           o.prescriptions.every(rx => rx.status === 'collected')
@@ -66,11 +90,11 @@ function deriveStatus(p: UnifiedPatient): { label: string; compactLabel: string;
     )
       return { label: 'Collected', compactLabel: 'Collected', pill: 'pill-neutral' };
 
-    if (p.orders.some(o => o.payment.status === 'sent'))
+    if (operational.some(o => o.payment.status === 'sent'))
       return { label: 'Awaiting payment', compactLabel: 'Awaiting payment', pill: 'pill-amber' };
 
     if (
-      p.orders.some(
+      operational.some(
         o =>
           o.payment.status === 'none' &&
           o.prescriptions.some(rx => rx.items.length > 0),
@@ -100,6 +124,17 @@ function deriveStatus(p: UnifiedPatient): { label: string; compactLabel: string;
   return { label: '—', compactLabel: '—', pill: 'pill-neutral' };
 }
 
+type PatientIndicatorTone = 'active' | 'journey' | 'ready' | 'attention' | 'complete';
+
+function patientIndicatorTone(status: ReturnType<typeof deriveStatus>): PatientIndicatorTone {
+  const label = status.label.toLowerCase();
+  if (label.includes('needs resolution') || label.includes('refund confirmation') || label.includes('declined')) return 'attention';
+  if (label.includes('ready for collection')) return 'ready';
+  if (label.includes('collected') || label === 'refunded') return 'complete';
+  if (label === 'active' || label.includes('approved')) return 'active';
+  return 'journey';
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 0) return '?';
@@ -120,7 +155,6 @@ export default function Patients() {
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
-  const patientDrawerRef = useModalFocus<HTMLDivElement>(Boolean(selectedPatientId), () => setSelectedPatientId(null));
 
   /* ── Build merged patient list ── */
   const patients = useMemo(() => {
@@ -191,7 +225,7 @@ export default function Patients() {
     } else if (activeTab === 'on-order') {
       list = list.filter(p =>
         p.crmPatient &&
-        p.orders.some(o => o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))
+        p.orders.some(o => orderExceptionReason(o) ? orderNeedsResolution(o) : o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))
       );
     }
 
@@ -207,7 +241,12 @@ export default function Patients() {
     return list;
   }, [patients, search, activeTab, sortKey]);
 
-  const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
+  const selectedPatient = processedPatients.find(patient => patient.id === selectedPatientId) ?? processedPatients[0] ?? null;
+
+  useEffect(() => {
+    if (selectedPatient && selectedPatient.id !== selectedPatientId) setSelectedPatientId(selectedPatient.id);
+    if (!selectedPatient && selectedPatientId) setSelectedPatientId(null);
+  }, [selectedPatient, selectedPatientId]);
 
   useEffect(() => {
     const target = state.navigationTarget;
@@ -258,7 +297,7 @@ export default function Patients() {
   // Metrics counts
   const totalCRM = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId).length;
   const activeEnquiries = state.submissions.filter(s => s.organisationId === state.currentOrganisationId && (s.status === 'New' || s.status === 'Under HHH review')).length;
-  const onOrderCount = patients.filter(p => p.crmPatient && p.orders.some(o => o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))).length;
+  const onOrderCount = patients.filter(p => p.crmPatient && p.orders.some(o => orderExceptionReason(o) ? orderNeedsResolution(o) : o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))).length;
 
   return (
     <div className="page-body patients-page">
@@ -304,6 +343,16 @@ export default function Patients() {
 
       {/* ══ Patients directory list ══ */}
       <div className="table-wrap">
+        <div className="patient-directory-key">
+          <div className="patient-directory-key__title"><span>Patient directory</span><strong>{processedPatients.length}</strong></div>
+          <div className="patient-status-key" aria-label="Patient status colour key">
+            <span><i className="patient-status-dot is-active" />Active</span>
+            <span><i className="patient-status-dot is-journey" />In journey</span>
+            <span><i className="patient-status-dot is-ready" />Ready</span>
+            <span><i className="patient-status-dot is-attention" />Attention</span>
+            <span><i className="patient-status-dot is-complete" />Complete</span>
+          </div>
+        </div>
         <table className="patient-directory-table">
           <thead>
             <tr>
@@ -325,6 +374,7 @@ export default function Patients() {
             ) : (
               processedPatients.map(p => {
                 const status = deriveStatus(p);
+                const indicatorTone = patientIndicatorTone(status);
                 const hasUncollectedWarning = p.orders.some(o =>
                   o.payment.status === 'paid' &&
                   o.prescriptions.some(rx => {
@@ -335,38 +385,42 @@ export default function Patients() {
                   })
                 );
                 return (
-                  <tr key={p.id}>
+                  <tr
+                    key={p.id}
+                    className={selectedPatient?.id === p.id ? 'is-selected' : ''}
+                    onClick={() => setSelectedPatientId(p.id)}
+                  >
                     <td className="font-semibold">
                       <div className="flex items-center gap-sm">
                         <div className="avatar" style={{ width: 28, height: 28, fontSize: 12 }}>{initials(p.name)}</div>
-                        <span className="compact-patient-name" title={p.name} aria-label={p.name}>{compactPatientName(p.name)}</span>
+                        <span className="patient-directory-identity" title={p.name} aria-label={p.name}>
+                          <strong>{compactPatientName(p.name)}</strong>
+                          <small>{p.email} · {formatPatientDob(p.dob)}</small>
+                        </span>
                       </div>
                     </td>
                     <td><span className="compact-mobile">{formatPatientDob(p.dob)}</span></td>
                     <td><span className="compact-email" title={p.email}>{p.email}</span></td>
                     <td><span className="compact-mobile">{p.mobile}</span></td>
                     <td>
-                      <div className="flex items-center gap-xs">
-                        <span className={`pill crm-status-pill ${status.pill}`} aria-label={status.label} title={status.label}>
-                          <span className="crm-status-pill__full">{status.label}</span>
-                          <span className="crm-status-pill__compact" aria-hidden="true">{status.compactLabel}</span>
-                        </span>
+                      <div className="patient-status-indicators">
+                        <span className={`patient-status-dot is-${indicatorTone}`} aria-label={status.label} title={status.label} />
                         {hasUncollectedWarning && (
-                          <span className="pill crm-status-warning pill-red" aria-label="Collection overdue by at least 10 days">
-                            <AlertTriangle size={11} aria-hidden="true" /> 10d+
-                          </span>
+                          <span className="patient-status-dot is-attention is-ringed" aria-label="Collection overdue by at least 10 days" title="Collection overdue by at least 10 days" />
                         )}
                       </div>
                     </td>
                     <td className="text-right">
                       <button
-                        className="btn btn-sm"
+                        type="button"
+                        className="patient-directory-open"
+                        aria-label={`Open ${p.name}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedPatientId(p.id);
                         }}
                       >
-                        Details <ChevronRight size={12} />
+                        <ChevronRight size={15} />
                       </button>
                     </td>
                   </tr>
@@ -377,11 +431,9 @@ export default function Patients() {
         </table>
       </div>
 
-      {/* ══ Right Slide-over Detail Drawer ══ */}
+      {/* ══ Integrated patient record ══ */}
       {selectedPatient && (
-        <>
-          <div className="drawer-backdrop" aria-hidden="true" onClick={() => setSelectedPatientId(null)} />
-          <div ref={patientDrawerRef} className="drawer patient-record-drawer" role="dialog" aria-modal="true" aria-labelledby="patient-drawer-title" tabIndex={-1}>
+          <section className="patient-record-drawer" aria-labelledby="patient-drawer-title">
             <div className="drawer-header patient-record-drawer__header">
               <div className="patient-record-drawer__identity">
                 <div className="avatar patient-record-drawer__avatar">{initials(selectedPatient.name)}</div>
@@ -407,14 +459,6 @@ export default function Patients() {
                   onClick={() => handleCreateOrder(selectedPatient)}
                 >
                   <Plus size={12} /> New order
-                </button>
-                <button
-                  type="button"
-                  className="icon-button patient-record-drawer__close"
-                  aria-label="Close patient details"
-                  onClick={() => setSelectedPatientId(null)}
-                >
-                  <X size={16} />
                 </button>
               </div>
             </div>
@@ -455,7 +499,7 @@ export default function Patients() {
                   <header><Building2 size={15} aria-hidden="true" /><h4 id="patient-account-title">Account</h4></header>
                   <dl>
                     <div><dt><Building2 size={13} /> Pharmacy</dt><dd>{PHARMACY.name}</dd></div>
-                    <div><dt><Link2 size={13} /> Eligibility link</dt><dd className="patient-record-ellipsis" title={PHARMACY.formUrl}>{PHARMACY.formUrl}</dd></div>
+                    <div><dt><FileText size={13} /> Eligibility record</dt><dd>{selectedPatient.submission ? onboardingStatusLabel(selectedPatient.submission.status) : 'Not attached'}</dd></div>
                     <div><dt><Hash size={13} /> System ID</dt><dd><code>{selectedPatient.id}</code></dd></div>
                   </dl>
                 </section>
@@ -543,19 +587,29 @@ export default function Patients() {
                   [...selectedPatient.orders]
                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                     .map(order => {
-                      const paymentLabel = order.payment.status === 'paid' ? 'Paid' : order.payment.status === 'sent' ? 'Awaiting payment' : 'Draft';
+                      const exceptionReason = orderExceptionReason(order);
+                      const paymentLabel = order.refund?.status === 'completed' ? 'Refunded' : order.refund?.status === 'pending_confirmation' ? 'Refund pending' : exceptionReason && order.payment.status === 'paid' ? 'Paid · needs resolution' : order.payment.status === 'paid' ? 'Paid' : order.payment.status === 'sent' ? 'Awaiting payment' : 'Draft';
                       const paymentRoute = order.payment.route === 'worldpay' ? 'Worldpay' : order.payment.route === 'pharmacy' ? 'Pharmacy payment' : 'Not selected';
+                      const paymentPill = order.refund?.status === 'completed' ? 'pill-neutral' : order.refund?.status === 'pending_confirmation' ? 'pill-amber' : exceptionReason ? 'pill-red' : order.payment.status === 'paid' ? 'pill-green' : order.payment.status === 'sent' ? 'pill-amber' : 'pill-neutral';
                       return (
                         <article className="patient-order-card" key={order.id}>
                           <header>
-                            <span><small>Order {order.id}</small><strong>{fmtDate(order.date)}</strong></span>
-                            <span className={`pill ${order.payment.status === 'paid' ? 'pill-green' : order.payment.status === 'sent' ? 'pill-amber' : 'pill-neutral'}`}>{paymentLabel}</span>
+                            <span><small>{order.redoContext ? 'Replacement' : 'Order'} {orderReference(order)}</small><strong>{fmtDate(order.date)}</strong></span>
+                            <span className={`pill ${paymentPill}`}>{paymentLabel}</span>
                           </header>
                           <div className="patient-order-summary">
-                            <div><span>Order total</span><strong>{money(orderRevenue(order))}</strong></div>
+                            <div><span>Patient charged</span><strong>{money(order.payment.amount || orderRevenue(order))}</strong></div>
                             <div><span>Payment route</span><strong>{paymentRoute}</strong></div>
                             <div><span>Prescriptions</span><strong>{order.prescriptions.length}</strong></div>
                           </div>
+
+                          {exceptionReason ? (
+                            <div className={`patient-order-resolution${order.refund?.status === 'completed' ? ' is-complete' : ''}`}>
+                              <AlertTriangle size={16} />
+                              <span><strong>{order.refund?.status === 'completed' ? 'Patient refund recorded' : order.redoneByOrderId ? 'Replacement order created' : exceptionReason === 'rejected' ? 'Paid Curaleaf rejection' : 'Paid prescription expired'}</strong><small>{order.refund ? `${order.refund.method === 'worldpay_portal' ? 'Worldpay portal' : 'Pharmacy'} · ${money(order.refund.amountPence / 100)} · ${order.refund.paymentReference}` : order.redoneByOrderId ? `Continued as replacement order ${order.redoneByOrderId}.` : 'This is not awaiting payment. Choose replacement or refund in Customer Orders.'}</small></span>
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setSelectedPatientId(null); dispatch({ type: 'SET_NAVIGATION_TARGET', target: { kind: 'order', key: String(order.id) } }); dispatch({ type: 'SET_SCREEN', screen: 'orders' }); }}>Open order</button>
+                            </div>
+                          ) : null}
 
                           <div className="patient-order-rx-list">
                             {order.prescriptions.map((rx, idx) => (
@@ -567,8 +621,8 @@ export default function Patients() {
                                   )) : <div className="patient-record-empty">No prescribed products recorded.</div>}
                                 </div>
                                 <footer>
-                                  <span><small>Fulfilment</small><strong>{rx.placed ? RX_STATUS_LABELS[rx.status] : 'Not submitted'}</strong></span>
-                                  {rx.placed && renderTrackBar(rx.status)}
+                                  <span><small>{exceptionReason ? 'Resolution' : 'Fulfilment'}</small><strong>{exceptionReason ? exceptionReason === 'rejected' ? 'Curaleaf rejected' : 'Prescription expired' : rx.placed ? RX_STATUS_LABELS[rx.status] : 'Not submitted'}</strong></span>
+                                  {!exceptionReason && rx.placed && renderTrackBar(rx.status)}
                                 </footer>
                               </article>
                             ))}
@@ -579,8 +633,7 @@ export default function Patients() {
                 )}
               </section>
             </div>
-          </div>
-        </>
+          </section>
       )}
     </div>
   );

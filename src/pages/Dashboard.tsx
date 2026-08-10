@@ -123,8 +123,8 @@ export default function Dashboard() {
 
       <section className="operations-brief">
         <SummaryTiles label="Pharmacy workflow summary" items={[
-          { label: 'Patient review', value: newReferrals, detail: 'awaiting decisions', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'referrals' }) },
-          { label: 'Payments', value: awaitingPayment, detail: 'awaiting action', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'review' }) },
+          { label: 'Patient review', value: newReferrals, detail: 'awaiting decisions', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'patients' }) },
+          { label: 'Payments', value: awaitingPayment, detail: 'awaiting action', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
           { label: 'Supplier', value: inFulfilment, detail: 'in fulfilment', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
           { label: 'Collection', value: readyForCollection, detail: 'ready', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
         ]} />
@@ -147,7 +147,7 @@ export default function Dashboard() {
                         <strong className="text-primary">{alert.condition}</strong>. Review is pending.
                       </span>
                     </div>
-                    <button className="priority-action" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'referrals' })}>
+                    <button className="priority-action" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'patients' })}>
                       Review patient <ArrowRight size={14} />
                     </button>
                   </div>
@@ -245,8 +245,13 @@ export default function Dashboard() {
                 {recentOrders.map(order => {
                   const sessionDate = new Date(order.date);
                   const openSession = () => {
-                    dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id });
-                    dispatch({ type: 'SET_SCREEN', screen: 'create' });
+                    if (order.payment.status === 'none') {
+                      dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id });
+                      dispatch({ type: 'SET_SCREEN', screen: 'create' });
+                      return;
+                    }
+                    dispatch({ type: 'SET_NAVIGATION_TARGET', target: { kind: 'order', key: `${order.id}-${order.prescriptions[0]?.id ?? 0}` } });
+                    dispatch({ type: 'SET_SCREEN', screen: 'orders' });
                   };
                   return (
                     <div className="session-ledger__row" role="listitem" key={order.id}>

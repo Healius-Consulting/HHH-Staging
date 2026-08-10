@@ -162,7 +162,7 @@ Single API service that:
 - **REQ-PLATFORM / REQ-DEV:** Enforces **tenant isolation** on every query (`pharmacy_id` from auth context)
 - **REQ-PLATFORM / REQ-DEV:** Proxies Curaleaf Rocky API using per-tenant credentials from Secrets Manager
 - **REQ-PLATFORM / REQ-DEV:** Issues short-lived signed URLs for prescription scan download
-- **REQ-UK / REQ-DEV:** Creates Worldpay payment sessions; verifies webhooks — **hosted checkout only**
+- **REQ-UK / REQ-DEV:** Creates Worldpay HPP sessions; acknowledges webhooks and verifies payment identity/state with Payment Queries — **hosted checkout only**
 - **REQ-PLATFORM / REQ-DEV:** Enforces the HHH onboarding decision before a patient can enter a pharmacy ordering workflow; records named approver, time and reason
 - **REQ-GPHC / REQ-DEV:** Blocks payment and Curaleaf submission until the HHH-approved patient has a named prescriber, attached prescription and pharmacy verification
 - **REQ-ICO / REQ-DEV:** Writes audit logs for every read/write of patient data (supports Art. 15 access requests)
@@ -180,7 +180,7 @@ Separate worker process (same codebase, different entrypoint):
 |-----|-------------------|---------|
 | Curaleaf event poller | Every 60 sec per connected pharmacy | Poll `product-`, `prescription-`, `purchase-order-` and `shipment-events`; fetch changed entities by ID |
 | Curaleaf repair mirror | Hourly | Full account snapshot to repair missed or malformed event state |
-| Payment reconciliation | On webhook + hourly sweep | Match Worldpay refs to sub-orders |
+| Payment reconciliation | On webhook + one-minute pending sweep | Match Worldpay reference, amount, currency, merchant entity and settlement state to the order |
 | Notification dispatcher | Event-driven | Payment link, paid confirmation, ready for collection |
 | Draft order expiry | Daily | Clear stale draft orders (>24h per TRD F-26) |
 | Credential health check | Daily | Test Rocky auth per tenant; alert on failure |
@@ -420,7 +420,7 @@ sequenceDiagram
 | Rocky `POST /prescription` | API → Rocky | Per-tenant | Sequential per TRD F-25 |
 | Rocky `POST /purchase-order` | API → Rocky | Per-tenant | Gated on payment + scan |
 | Rocky `GET /*-events` | Worker → Rocky | Per-tenant | 60-second cursored polling; 1.1-second request spacing and 429 backoff |
-| Worldpay | API ↔ Worldpay | One connected merchant relationship per pharmacy | Hosted checkout only; tenant attribution, verified webhooks and direct settlement to the pharmacy |
+| Worldpay | API ↔ Worldpay | One connected merchant relationship per pharmacy | WPeCommerce HPP only; tenant attribution and settlement are verified through Payment Queries; no unconfirmed webhook secret |
 | Postmark / Twilio | Worker → provider | API keys | Templates per tenant branding |
 
 ---

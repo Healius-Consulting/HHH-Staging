@@ -5,7 +5,6 @@ import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
 import CreateOrder from './pages/CreateOrder';
-import AwaitingPayment from './pages/AwaitingPayment';
 import Orders from './pages/Orders';
 import FormularyPricing from './pages/FormularyPricing';
 import Patients from './pages/Patients';
@@ -185,22 +184,18 @@ function StaffWorkspace() {
   if (!organisation) return <AuthLoading />;
 
   const setupComplete = isLocalPortalPreview || Boolean(setup.status?.completed);
-  const unrestrictedScreens = new Set(['home', 'formulary', 'resources', 'settings']);
+  const unrestrictedScreens = new Set(['home', 'formulary', 'settings']);
   const isRestricted = !isLocalPortalPreview && curaleafActivated && !setupComplete && !unrestrictedScreens.has(state.screen);
 
   const renderScreen = () => {
     if (isRestricted) return <SetupRequired onOpenSetup={() => dispatch({ type: 'SET_SCREEN', screen: 'settings' })} />;
     switch (state.screen) {
       case 'home': return <Dashboard />;
-      case 'referrals': return <Patients />;
       case 'formulary': return <FormularyPricing />;
       case 'create': return <CreateOrder />;
-      case 'review': return <AwaitingPayment />;
-      case 'provider-prescriptions': return <Orders />;
       case 'orders': return <Orders />;
       case 'patients': return <Patients />;
       case 'finance': return <PharmacyFinance />;
-      case 'resources': return setupComplete ? <PharmacySettings /> : <PharmacySetupWizard organisation={organisation} setup={setup} />;
       case 'settings': return setupComplete ? <PharmacySettings /> : <PharmacySetupWizard organisation={organisation} setup={setup} />;
       default: return <Dashboard />;
     }

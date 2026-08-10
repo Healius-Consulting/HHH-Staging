@@ -205,6 +205,32 @@ export function getPortalOrders(organisationId: string, options?: { patientId?: 
   return apiRequest<PortalOrderRecord[]>(`/v1/portal/orders?${params.toString()}`);
 }
 
+export function recordPortalGoodsReceipt(shipmentId: string, input: {
+  organisationId: string;
+  items: Array<{
+    productId: string;
+    expectedQuantity: number;
+    receivedQuantity: number;
+    issue?: 'short' | 'damaged' | 'incorrect' | 'none';
+    notes?: string;
+  }>;
+}) {
+  return apiRequest<Record<string, unknown>>(`/v1/portal/shipments/${encodeURIComponent(shipmentId)}/goods-receipts`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updatePortalShipmentStatus(shipmentId: string, input: {
+  organisationId: string;
+  status: 'ready_for_collection' | 'collected' | 'exception';
+}) {
+  return apiRequest<Record<string, unknown> & { notification?: { status: 'queued'; outboxId: string; recipient: string } }>(
+    `/v1/portal/shipments/${encodeURIComponent(shipmentId)}/status`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+}
+
 export function getUnresolvedPortalOrders(organisationId: string, patientId: string) {
   return apiRequest<PortalOrderRecord[]>(
     `/v1/portal/patients/${encodeURIComponent(patientId)}/unresolved-orders?organisationId=${encodeURIComponent(organisationId)}`,
@@ -227,6 +253,20 @@ export function cancelAndArchivePortalOrder(orderId: string, organisationId: str
   return apiRequest<PortalOrderRecord>(`/v1/portal/orders/${encodeURIComponent(orderId)}/cancel-and-archive`, {
     method: 'POST',
     body: JSON.stringify({ organisationId }),
+  });
+}
+
+export function createPortalOrderRefund(orderId: string, input: { organisationId: string; reason: 'patient_cancelled' | 'replacement_price_changed'; resolution: 'cancel' | 'replace_new_payment' }) {
+  return apiRequest<import('./contracts').OrderRefundState>(`/v1/portal/orders/${encodeURIComponent(orderId)}/refunds/manual`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function confirmPortalOrderRefund(orderId: string, refundId: string, input: { organisationId: string; externalReference: string }) {
+  return apiRequest<import('./contracts').OrderRefundState>(`/v1/portal/orders/${encodeURIComponent(orderId)}/refunds/${encodeURIComponent(refundId)}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify(input),
   });
 }
 
@@ -273,7 +313,7 @@ export function createWorldpaySession(orderId: string, input: {
   successUrl: string;
   cancelUrl: string;
 }) {
-  return apiRequest<{ paymentId: string; transactionReference: string; provider: Record<string, unknown> }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/payments/worldpay-session`, {
+  return apiRequest<{ paymentId: string; transactionReference: string; provider: Record<string, unknown>; linkExpiresAt: string; reused?: boolean }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/payments/worldpay-session`, {
     method: 'POST',
     body: JSON.stringify(input),
   });

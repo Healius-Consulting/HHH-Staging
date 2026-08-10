@@ -76,6 +76,7 @@ export function evaluateOrderCycle(order: OrderCycleFields, now = new Date()): O
   const isDispatched = ['dispatched_to_pharmacy', 'dispatched', 'in_transit'].includes(fulfilment)
     || ['DISPATCHED', 'SHIPPED'].includes(String(order.curaleafPoState ?? ''));
   const isArrivedAtPharmacy = ['received', 'partially_received', 'ready_for_collection', 'received_at_pharmacy'].includes(fulfilment);
+  const isCompleted = ['collected', 'completed'].includes(fulfilment);
 
   let recommendation: ExpiryRecommendation = 'cancel_and_redo';
   if (isPaid) {
@@ -89,7 +90,7 @@ export function evaluateOrderCycle(order: OrderCycleFields, now = new Date()): O
   const rejected = order.quoteReview?.status === 'recreate_required';
 
   let unresolvedReason: UnresolvedOrderReason | null = null;
-  if (!alreadyRedone) {
+  if (!alreadyRedone && !isCompleted) {
     if (rejected) unresolvedReason = 'rejected';
     else if (archived || window.isCycleExpired) unresolvedReason = 'expired';
   }

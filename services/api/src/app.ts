@@ -15,12 +15,14 @@ import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
 import { cached, invalidateCache } from './cache.js';
 import { createRecord, getRecord, getTenantRecord, invalidateCollectionCache, listTenantRecords, listTenantRecordsByField, updateTenantRecord } from './repository.js';
-import { readIntegrationSecret, writeIntegrationSecret } from './secrets.js';
+import { writeIntegrationSecret } from './secrets.js';
 import type { FulfilmentStatus, IntegrationName, PaymentStatus } from './types.js';
-import { createHostedPaymentSession, reconcileWorldpayPayment, type WorldpayCredential, verifyWorldpaySignature } from './worldpay.js';
+import { createHostedPaymentSession, parseWorldpayWebhookEvent, validateWorldpayCredentials, type WorldpayCredential } from './worldpay.js';
+import { reconcileWorldpayPaymentDocument } from './worldpay-reconciliation.js';
 import { activatePatientForOrder, completeReferral } from './patient-finance.js';
 import { adminReferralFinance, pharmacyPrescriptionFinance } from './finance-reporting.js';
 import { allocateDispensingFee, calculateExpiryBoundaryDate, calculatePrescriptionExpiry, recordPlacementLedgerEvent, rankSubstitutions, satisfiesMarginFloor } from './placement-engine.js';
+import { canMarkShipmentReady, shipmentReceiptStatus } from './shipment-workflow.js';
 import { enrichOrderRecord, evaluateOrderCycle } from './order-cycle.js';
 import { refundAdapter } from './refund-adapter.js';
 import type { Company, CuraleafValidationRecord, PortalOrganisation, PrescriptionPlacement } from './types.js';
@@ -418,41 +420,48 @@ app.post('/v1/public/eligibility-submissions', publicSubmissionLimit, requirePub
 app.post('/v1/public/worldpay/webhooks/:organisationId', webhookLimit, async (request, response, next) => {
   try {
     const organisationId = idSchema.parse(request.params.organisationId);
-    const credential = await readIntegrationSecret<WorldpayCredential>(organisationId, 'worldpay');
-    if (!verifyWorldpaySignature(request.rawBody ?? Buffer.alloc(0), request.get('worldpay-signature'), credential.webhookSecret)) throw new HttpError(401, 'Webhook signature is invalid.', 'INVALID_WEBHOOK_SIGNATURE');
-    const event = z.object({ eventId: z.string().min(1).max(200), transactionReference: z.string().min(1).max(200) }).passthrough().parse(request.body);
-    await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).set({
-      status: 'connected',
-      webhookVerifiedAt: timestamp(),
-      updatedAt: timestamp(),
-    }, { merge: true });
+    const event = parseWorldpayWebhookEvent(request.body);
     const eventKey = createHash('sha256').update(event.eventId).digest('hex');
     const eventRef = firestore.collection('worldpayWebhookEvents').doc(eventKey);
-    try { await eventRef.create({ id: eventKey, organisationId, eventId: event.eventId, transactionReference: event.transactionReference, receivedAt: timestamp(), status: 'received' }); }
-    catch (error) { if ((error as { code?: number | string }).code === 6 || (error as { code?: number | string }).code === 'already-exists') return response.status(202).json({ accepted: true, duplicate: true }); throw error; }
+    try {
+      await eventRef.create({
+        id: eventKey,
+        schemaVersion: 1,
+        organisationId,
+        ...event,
+        receivedAt: timestamp(),
+        status: 'received',
+      });
+    } catch (error) {
+      if ((error as { code?: number | string }).code === 6 || (error as { code?: number | string }).code === 'already-exists') {
+        return response.status(200).json({ accepted: true, duplicate: true });
+      }
+      throw error;
+    }
 
     const payments = await firestore.collection('payments').where('organisationId', '==', organisationId).where('transactionReference', '==', event.transactionReference).limit(1).get();
     const paymentDoc = payments.docs[0];
-    if (!paymentDoc) { await eventRef.update({ status: 'unmatched', updatedAt: timestamp() }); return response.status(202).json({ accepted: true, reconciliationRequired: true }); }
-    const reconciliation = await reconcileWorldpayPayment(organisationId, event.transactionReference);
-    if (!reconciliation.reconciled) {
-      await paymentDoc.ref.update({ status: 'reconciliation_required', updatedAt: timestamp() });
-      await eventRef.update({ status: 'reconciliation_required', updatedAt: timestamp() });
-      return response.status(202).json({ accepted: true, reconciliationRequired: true });
+    if (!paymentDoc) {
+      await eventRef.update({ status: 'unmatched', updatedAt: timestamp() });
+      return response.status(200).json({ accepted: true, unmatched: true });
     }
-    const provider = reconciliation.payment;
-    const providerStatus = String(provider.status ?? provider.outcome ?? '').toLowerCase();
-    const providerAmount = Number((provider.value as Record<string, unknown> | undefined)?.amount);
-    const expected = paymentDoc.data();
-    const verified = ['authorised', 'authorized', 'settled', 'success'].includes(providerStatus) && providerAmount === expected.amountPence;
-    const status: PaymentStatus = verified ? 'paid' : 'reconciliation_required';
-    await paymentDoc.ref.update({ status, providerResponse: provider, reconciledAt: timestamp(), updatedAt: timestamp() });
-    if (verified) {
-      await firestore.collection('orders').doc(expected.orderId as string).update({ paymentStatus: 'paid', updatedAt: timestamp() });
-      invalidateCollectionCache('orders', expected.orderId as string);
+    const outcome = await reconcileWorldpayPaymentDocument(paymentDoc, event.entityId);
+    if (outcome.state === 'verification_pending') {
+      // Payment Queries can lag webhook delivery. The scheduled sweep retries it.
+      await eventRef.update({ status: 'query_pending', detail: outcome.reason, updatedAt: timestamp() });
+      return response.status(200).json({ accepted: true, verificationPending: true });
     }
-    await eventRef.update({ status, updatedAt: timestamp() });
-    response.status(202).json({ accepted: true, reconciled: verified });
+    if (outcome.state === 'reconciliation_required') {
+      await eventRef.update({ status: 'reconciliation_required', detail: outcome.reason, updatedAt: timestamp() });
+      return response.status(200).json({ accepted: true, reconciliationRequired: true });
+    }
+    await eventRef.update({
+      status: outcome.paymentStatus,
+      providerPaymentId: outcome.paymentId,
+      providerStatus: outcome.providerStatus,
+      updatedAt: timestamp(),
+    });
+    response.status(200).json({ accepted: true, reconciled: true, paymentStatus: outcome.paymentStatus });
   } catch (error) { next(error); }
 });
 
@@ -946,7 +955,7 @@ const orderPrescriptionSchema = z.object({
   fileId: idSchema,
   clinicScanId: idSchema.optional(),
   curaleafPrescriptionId: idSchema.optional(),
-  serialNumber: z.string().max(200).optional().default(''),
+  serialNumber: z.string().trim().min(1).max(200),
   issueDate: z.iso.date(),
   expiryDate: z.iso.date().optional(),
 
@@ -982,8 +991,33 @@ const orderSchema = z.object({
     originalTotalPence: z.number().int().nonnegative().optional(),
     priceDifferencePence: z.number().int().default(0),
     requireCuraleafAuth: z.boolean().default(true),
+    priceResolution: z.enum(['absorb', 'refund_and_recharge']).optional(),
   }).optional(),
 });
+
+const WORLDPAY_MIN_LINK_EXPIRY_SECONDS = 300;
+const WORLDPAY_MAX_LINK_EXPIRY_SECONDS = 28 * 24 * 60 * 60;
+
+function worldpayLinkExpirySeconds(order: Record<string, unknown>, now = new Date()) {
+  const prescriptions = Array.isArray(order.prescriptions) ? order.prescriptions : [];
+  const expiryTimes = prescriptions.flatMap(prescription => {
+    if (!prescription || typeof prescription !== 'object') return [];
+    const record = prescription as Record<string, unknown>;
+    const issueDate = typeof record.issueDate === 'string' ? record.issueDate : null;
+    const supplierExpiry = typeof record.expiryDate === 'string' ? record.expiryDate : undefined;
+    if (!issueDate) return [];
+    const expiryDate = calculatePrescriptionExpiry(issueDate, supplierExpiry);
+    const expiresAt = Date.parse(`${expiryDate}T23:59:59.999Z`);
+    return Number.isFinite(expiresAt) ? [expiresAt] : [];
+  });
+  const remainingSeconds = expiryTimes.length
+    ? Math.floor((Math.min(...expiryTimes) - now.getTime()) / 1_000)
+    : WORLDPAY_MAX_LINK_EXPIRY_SECONDS;
+  if (remainingSeconds < WORLDPAY_MIN_LINK_EXPIRY_SECONDS) {
+    throw new HttpError(409, 'The prescription expires too soon to create a Worldpay link. Review or replace the prescription first.', 'PRESCRIPTION_EXPIRY_TOO_CLOSE');
+  }
+  return Math.min(WORLDPAY_MAX_LINK_EXPIRY_SECONDS, remainingSeconds);
+}
 
 
 function normalisedPatientName(value: string) {
@@ -1341,6 +1375,9 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       unresolvedReason: 'expired' | 'rejected';
       recommendation: 'cancel_and_redo' | 'awaiting_delivery_redo' | 'ready_to_collect_redo';
       sourceWasExpired: boolean;
+      rootOrderId: string;
+      replacementSequence: number;
+      priceResolution?: 'absorb' | 'refund_and_recharge';
     } | null = null;
     if (input.redoContext) {
       const originalOrderId = String(input.redoContext.originalOrderId);
@@ -1355,12 +1392,19 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       if (!evaluation.unresolvedReason || !evaluation.redoEligible) {
         throw new HttpError(409, 'Only archived 28-day or Curaleaf-rejected orders can be redone.', 'REDO_NOT_ELIGIBLE');
       }
-      if (input.redoContext.isPaidRedo && !evaluation.isPaid) {
+      if (input.redoContext.isPaidRedo && !evaluation.isPaid && input.redoContext.priceResolution !== 'refund_and_recharge') {
         throw new HttpError(409, 'Payment carry-over is only allowed when the original order was paid.', 'REDO_PAYMENT_CARRYOVER_INVALID');
+      }
+      if (input.redoContext.priceResolution === 'refund_and_recharge') {
+        const refund = originalOrder.refund && typeof originalOrder.refund === 'object' ? originalOrder.refund as Record<string, unknown> : {};
+        if (refund.status !== 'completed') throw new HttpError(409, 'Confirm the original Worldpay refund before issuing a replacement payment link.', 'REFUND_CONFIRMATION_REQUIRED');
       }
       authoritativeRedoContext = {
         originalOrderId,
-        isPaidRedo: evaluation.isPaid,
+        rootOrderId: String((originalOrder.redoContext as Record<string, unknown> | undefined)?.rootOrderId ?? originalOrder.redoOfOrderId ?? originalOrderId),
+        replacementSequence: Number((originalOrder.redoContext as Record<string, unknown> | undefined)?.replacementSequence ?? (originalOrder.redoOfOrderId ? 1 : 0)) + 1,
+        isPaidRedo: evaluation.isPaid && input.redoContext.priceResolution !== 'refund_and_recharge',
+        priceResolution: input.redoContext.priceResolution,
         originalTotalPence: Number(originalOrder.totalPence ?? input.redoContext.originalTotalPence ?? 0),
         priceDifferencePence: input.redoContext.priceDifferencePence ?? 0,
         requireCuraleafAuth: true,
@@ -1471,13 +1515,28 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       return total + curaleafMoneyPence(quoted.wholesalePackPrice, 'wholesale pack price') * item.quantity;
     }, 0);
     const productTotalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, 0);
-    const totalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, input.dispensingFeePence);
+    const quotedTotalPence = lineItems.reduce((total, item) => total + item.unitPricePence * item.quantity, input.dispensingFeePence);
+    let totalPence = quotedTotalPence;
+    let pharmacyContributionPence = 0;
+    if (authoritativeRedoContext) {
+      authoritativeRedoContext.priceDifferencePence = quotedTotalPence - authoritativeRedoContext.originalTotalPence;
+      if (authoritativeRedoContext.priceDifferencePence !== 0 && authoritativeRedoContext.isPaidRedo) {
+        if (authoritativeRedoContext.priceResolution === 'absorb' && authoritativeRedoContext.priceDifferencePence > 0) {
+          pharmacyContributionPence = authoritativeRedoContext.priceDifferencePence;
+          totalPence = authoritativeRedoContext.originalTotalPence;
+        } else {
+          throw new HttpError(409, 'Choose pharmacy absorption or complete the old-payment refund before recreating this order.', 'REDO_PAYMENT_AMOUNT_MISMATCH');
+        }
+      }
+    }
     const { paymentRoute: _ignoredRequestedRoute, redoContext: _ignoredClientRedo, ...authoritativeInput } = input;
     const record = await createRecord('orders', {
       ...authoritativeInput,
       prescriptions,
       lineItems,
       totalPence,
+      quotedTotalPence,
+      pharmacyContributionPence,
       organisationId,
       paymentRoute,
       paymentRouteSnapshotAt: timestamp(),
@@ -1608,6 +1667,78 @@ app.post('/v1/portal/orders/:id/cancel-and-archive', async (request, response, n
 /* ========================================================================== */
 /* Post-Payment Placement Engine & Refund Routes                              */
 /* ========================================================================== */
+
+app.post('/v1/portal/orders/:id/refunds/manual', async (request, response, next) => {
+  try {
+    const input = z.object({
+      organisationId: idSchema.optional(),
+      reason: z.enum(['patient_cancelled', 'replacement_price_changed']),
+      resolution: z.enum(['cancel', 'replace_new_payment']),
+    }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    if (!['paid', 'refund_required'].includes(String(order.paymentStatus))) throw new HttpError(409, 'Only a paid order can be refunded.', 'PAYMENT_REQUIRED');
+    if (order.refund && typeof order.refund === 'object') return response.status(200).json(order.refund);
+
+    const paymentId = typeof order.paymentId === 'string' ? order.paymentId : '';
+    const paymentSnapshot = paymentId ? await firestore.collection('payments').doc(paymentId).get() : null;
+    const payment = paymentSnapshot?.data();
+    if (payment && payment.organisationId !== organisationId) throw new HttpError(409, 'The payment does not belong to this pharmacy.', 'PAYMENT_TENANT_MISMATCH');
+    const paymentRoute = payment?.route === 'worldpay' || order.paymentRoute === 'worldpay' ? 'worldpay' : 'manual';
+    const providerPaymentId = typeof payment?.providerPaymentId === 'string' ? payment.providerPaymentId : typeof order.worldpayPaymentId === 'string' ? order.worldpayPaymentId : null;
+    const transactionReference = typeof payment?.transactionReference === 'string' ? payment.transactionReference : typeof order.paymentTransactionReference === 'string' ? order.paymentTransactionReference : null;
+    const paymentReference = providerPaymentId ?? transactionReference ?? paymentId;
+    if (!paymentReference) throw new HttpError(409, 'The original payment reference is unavailable.', 'PAYMENT_REFERENCE_REQUIRED');
+
+    const refund = await refundAdapter.createRefundRecord({
+      orderId,
+      lineId: 'order',
+      pharmacyId: organisationId,
+      amountPence: Number(order.totalPence ?? 0),
+      originalPaymentRef: paymentReference,
+      paymentRoute,
+      cause: input.reason,
+      idempotencyKey: `refund--${orderId}--order`,
+    });
+    const refundState = {
+      id: refund.id,
+      status: refund.status,
+      amountPence: refund.amountPence,
+      method: paymentRoute === 'worldpay' ? 'worldpay_portal' : 'pharmacy_manual',
+      paymentReference,
+      transactionReference,
+      reason: input.reason,
+      resolution: input.resolution,
+      requestedAt: refund.createdAt,
+      requestedBy: identity(request).uid,
+    };
+    await firestore.collection('orders').doc(orderId).update({ refund: refundState, paymentStatus: 'refund_required', updatedAt: timestamp() });
+    invalidateCollectionCache('orders', orderId);
+    await audit(request, 'order.refund_requested', { organisationId, orderId, refundId: refund.id, paymentReference, amountPence: refund.amountPence, resolution: input.resolution });
+    response.status(201).json(refundState);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/orders/:id/refunds/:refundId/confirm', async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), externalReference: z.string().trim().min(3).max(160) }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const refundId = idSchema.parse(request.params.refundId);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    const refundState = order.refund && typeof order.refund === 'object' ? order.refund as Record<string, unknown> : null;
+    if (!refundState || refundState.id !== refundId) throw new HttpError(404, 'Refund task not found for this order.', 'NOT_FOUND');
+    const refundSnapshot = await firestore.collection('refundRecords').doc(refundId).get();
+    if (!refundSnapshot.exists || refundSnapshot.data()?.pharmacyId !== organisationId || refundSnapshot.data()?.orderId !== orderId) throw new HttpError(404, 'Refund record not found.', 'NOT_FOUND');
+    const confirmed = await refundAdapter.confirmRefund(refundId, identity(request).uid, input.externalReference);
+    const nextRefund = { ...refundState, status: 'completed', externalReference: input.externalReference, confirmedAt: confirmed.confirmedAt, confirmedBy: confirmed.confirmedBy };
+    await firestore.collection('orders').doc(orderId).update({ refund: nextRefund, paymentStatus: 'refunded', updatedAt: timestamp() });
+    invalidateCollectionCache('orders', orderId);
+    await audit(request, 'order.refund_confirmed', { organisationId, orderId, refundId, externalReference: input.externalReference });
+    response.json(nextRefund);
+  } catch (error) { next(error); }
+});
 
 
 app.post('/v1/portal/orders/:id/placement/absorb', async (request, response, next) => {
@@ -1957,14 +2088,28 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
         username: z.string().trim().min(1).max(500),
         password: z.string().min(8).max(1_000),
         entityId: z.string().trim().min(1).max(200),
-        webhookSecret: z.string().min(24).max(1_000),
       }).parse(request.body);
+    const worldpayValidation = integration === 'worldpay'
+      ? await validateWorldpayCredentials(credential as WorldpayCredential)
+      : null;
     const safeIdentifier = maskedIdentifier(integration === 'curaleaf'
       ? (credential as { customerId: string }).customerId
       : (credential as { entityId: string }).entityId);
     const stored = await writeIntegrationSecret(organisationId, integration, credential);
     const id = `${organisationId}--${integration}`;
-    await firestore.collection('integrationConnections').doc(id).set({ id, schemaVersion: 1, organisationId, integration, secretName: stored.secretName, secretVersion: stored.version, status: integration === 'worldpay' ? 'verification_required' : 'configured', maskedIdentifier: safeIdentifier, updatedAt: timestamp(), updatedBy: identity(request).uid }, { merge: true });
+    await firestore.collection('integrationConnections').doc(id).set({
+      id,
+      schemaVersion: 1,
+      organisationId,
+      integration,
+      secretName: stored.secretName,
+      secretVersion: stored.version,
+      status: integration === 'worldpay' ? 'connected' : 'configured',
+      maskedIdentifier: safeIdentifier,
+      ...(worldpayValidation ? { lastValidation: worldpayValidation, verifiedAt: worldpayValidation.checkedAt } : {}),
+      updatedAt: timestamp(),
+      updatedBy: identity(request).uid,
+    }, { merge: true });
     if (integration === 'curaleaf') {
       const validation = await validateCuraleafCredentials(organisationId);
       const connectionStatus = validation.passed ? 'validated' : 'attention';
@@ -1994,8 +2139,15 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
       const status = await curaleafConnectionStatus(organisationId);
       return response.json({ ...status, activated: false, maskedIdentifier: safeIdentifier, validation });
     }
-    await audit(request, 'integration.credentials_rotated', { organisationId, integration });
-    response.json({ configured: true, connected: false, verificationRequired: true, status: 'verification_required' as const, maskedIdentifier: safeIdentifier });
+    await audit(request, 'integration.credentials_rotated', { organisationId, integration, validationPassed: true });
+    response.json({
+      configured: true,
+      connected: true,
+      status: 'connected' as const,
+      maskedIdentifier: safeIdentifier,
+      validation: worldpayValidation,
+      updatedAt: timestamp(),
+    });
   } catch (error) { next(error); }
 });
 
@@ -2318,9 +2470,103 @@ app.post('/v1/portal/orders/:id/payments/manual', async (request, response, next
 
 app.post('/v1/portal/orders/:id/payments/worldpay-session', externalProviderLimit, async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if ((order.paymentRoute ?? 'manual') !== 'worldpay') throw new HttpError(409, 'This order is locked to the pharmacy payment route.', 'PAYMENT_ROUTE_LOCKED'); const connection = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get(); if (connection.data()?.status !== 'connected') throw new HttpError(409, 'This pharmacy’s Worldpay connection must be verified before taking payment.', 'WORLDPAY_VERIFICATION_REQUIRED'); if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID'); const organisation = await getRecord('organisations', organisationId); const transactionReference = `HHH-${orderId}-${randomUUID().slice(0, 8)}`; const provider = await createHostedPaymentSession(organisationId, { transactionReference, amountPence: order.totalPence as number, currency: 'GBP', successUrl: input.successUrl, cancelUrl: input.cancelUrl, statementNarrative: String(organisation.tradingName ?? organisation.name ?? 'HHH Pharmacy') }); const payment = await createRecord('payments', { organisationId, orderId, route: 'worldpay', status: 'pending' satisfies PaymentStatus, amountPence: order.totalPence, currency: 'GBP', transactionReference, providerSession: provider }); await firestore.collection('orders').doc(orderId).update({ paymentId: payment.id, paymentStatus: 'pending', updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.worldpay_session_created', { organisationId, orderId, paymentId: payment.id }); response.status(201).json({ paymentId: payment.id, transactionReference, provider });
+    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url() }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    await requireSetupComplete(organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    if ((order.paymentRoute ?? 'manual') !== 'worldpay') throw new HttpError(409, 'This order is locked to the pharmacy payment route.', 'PAYMENT_ROUTE_LOCKED');
+    const connection = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
+    if (connection.data()?.status !== 'connected') throw new HttpError(409, 'This pharmacy’s Worldpay connection must be verified before taking payment.', 'WORLDPAY_VERIFICATION_REQUIRED');
+    if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID');
+    if (typeof order.paymentId === 'string') {
+      const existingSnapshot = await firestore.collection('payments').doc(order.paymentId).get();
+      const existing = existingSnapshot.data();
+      const linkExpiresAt = typeof existing?.linkExpiresAt === 'string' ? existing.linkExpiresAt : '';
+      if (existing?.organisationId === organisationId
+        && existing?.orderId === orderId
+        && existing?.route === 'worldpay'
+        && existing?.status === 'pending'
+        && typeof existing.providerUrl === 'string'
+        && Date.parse(linkExpiresAt) > Date.now()) {
+        await audit(request, 'payment.worldpay_link_reused', { organisationId, orderId, paymentId: existingSnapshot.id });
+        return response.status(200).json({
+          paymentId: existingSnapshot.id,
+          transactionReference: existing.transactionReference,
+          provider: existing.providerSession,
+          linkExpiresAt,
+          reused: true,
+        });
+      }
+    }
+    const organisation = await getRecord('organisations', organisationId);
+    const transactionReference = `HHH-${orderId}-${randomUUID().slice(0, 8)}`;
+    const expirySeconds = worldpayLinkExpirySeconds(order as Record<string, unknown>);
+    const provider = await createHostedPaymentSession(organisationId, {
+      transactionReference,
+      amountPence: order.totalPence as number,
+      currency: 'GBP',
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      statementNarrative: String(organisation.tradingName ?? organisation.name ?? 'HHH Pharmacy'),
+      expirySeconds,
+    });
+    const providerLinks = provider._links && typeof provider._links === 'object' ? provider._links as Record<string, unknown> : {};
+    const providerSelf = providerLinks.self && typeof providerLinks.self === 'object' ? providerLinks.self as Record<string, unknown> : {};
+    const providerUrl = typeof provider.url === 'string' ? provider.url : null;
+    const paymentQueryUrl = typeof providerSelf.href === 'string' ? providerSelf.href : null;
+    const linkExpiresAt = new Date(Date.now() + expirySeconds * 1_000).toISOString();
+    const payment = await createRecord('payments', {
+      organisationId,
+      orderId,
+      route: 'worldpay',
+      status: 'pending' satisfies PaymentStatus,
+      amountPence: order.totalPence,
+      currency: 'GBP',
+      transactionReference,
+      providerUrl,
+      paymentQueryUrl,
+      linkExpiresAt,
+      providerSession: provider,
+    });
+    await firestore.collection('orders').doc(orderId).update({ paymentId: payment.id, paymentStatus: 'pending', paymentTransactionReference: transactionReference, updatedAt: timestamp() });
+    invalidateCollectionCache('orders', orderId);
+    await audit(request, 'payment.worldpay_session_created', { organisationId, orderId, paymentId: payment.id, expirySeconds });
+    response.status(201).json({ paymentId: payment.id, transactionReference, provider, linkExpiresAt });
   } catch (error) { next(error); }
 });
+
+async function linkedOrderForShipment(shipment: Record<string, unknown>, organisationId: string) {
+  const customerReference = typeof shipment.customerReference === 'string' ? shipment.customerReference : '';
+  if (!customerReference) return null;
+  const operations = await firestore.collection('integrationOperations').where('customerReference', '==', customerReference).limit(20).get();
+  const operation = operations.docs.find(document => document.data().organisationId === organisationId && typeof document.data().orderId === 'string');
+  if (!operation) return null;
+  const orderId = idSchema.parse(operation.data().orderId);
+  const order = await getTenantRecord('orders', orderId, organisationId);
+  return { orderId, order };
+}
+
+async function updateOrderFromShipment(
+  linked: Awaited<ReturnType<typeof linkedOrderForShipment>>,
+  shipmentId: string,
+  fulfilmentStatus: FulfilmentStatus,
+) {
+  if (!linked) return;
+  const curaleaf = linked.order.curaleaf && typeof linked.order.curaleaf === 'object'
+    ? linked.order.curaleaf as Record<string, unknown>
+    : {};
+  const shipmentIds = [...new Set([
+    ...(Array.isArray(curaleaf.shipmentIds) ? curaleaf.shipmentIds.filter((value): value is string => typeof value === 'string') : []),
+    shipmentId,
+  ])];
+  await firestore.collection('orders').doc(linked.orderId).update({
+    curaleaf: { ...curaleaf, shipmentIds },
+    fulfilmentStatus,
+    updatedAt: timestamp(),
+  });
+  invalidateCollectionCache('orders', linked.orderId);
+}
 
 app.get('/v1/portal/shipments', async (request, response, next) => { try { const organisationId = tenantFor(request, request.query.organisationId); const records = await listTenantRecords('shipments', organisationId); response.json(records); } catch (error) { next(error); } });
 app.post('/v1/portal/shipments/sync', async (request, response, next) => {
@@ -2341,6 +2587,12 @@ app.post('/v1/portal/shipments/sync', async (request, response, next) => {
         ...(existing.exists ? {} : { status: 'dispatched_to_pharmacy' satisfies FulfilmentStatus, createdAt: timestamp() }),
         updatedAt: timestamp(),
       }, { merge: true });
+      const linked = await linkedOrderForShipment({ customerReference: supplier.purchaseOrderCustomerReference }, organisationId);
+      if (linked) {
+        const currentStatus = String(linked.order.fulfilmentStatus ?? '');
+        const protectedStatuses = ['partially_received', 'received', 'ready_for_collection', 'collected'];
+        await updateOrderFromShipment(linked, id, protectedStatuses.includes(currentStatus) ? currentStatus as FulfilmentStatus : 'dispatched_to_pharmacy');
+      }
       synced.push(id);
     }
     invalidateCollectionCache('shipments');
@@ -2351,12 +2603,72 @@ app.post('/v1/portal/shipments/sync', async (request, response, next) => {
 
 app.post('/v1/portal/shipments/:id/goods-receipts', async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), items: z.array(z.object({ productId: idSchema, expectedQuantity: z.number().int().nonnegative(), receivedQuantity: z.number().int().nonnegative(), batchNumber: z.string().max(100).nullable().optional(), expiryDate: z.iso.date().nullable().optional(), issue: z.enum(['short', 'damaged', 'incorrect', 'none']).default('none'), notes: z.string().max(500).optional() })).min(1), checksComplete: z.boolean().default(false) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); const shipmentId = idSchema.parse(request.params.id); await getTenantRecord('shipments', shipmentId, organisationId); const full = input.items.every(item => item.receivedQuantity >= item.expectedQuantity && item.issue === 'none'); const anyReceived = input.items.some(item => item.receivedQuantity > 0); const status: FulfilmentStatus = full ? (input.checksComplete ? 'ready_for_collection' : 'received') : anyReceived ? 'partially_received' : 'exception'; const receipt = await createRecord('goodsReceipts', { organisationId, shipmentId, items: input.items, checksComplete: input.checksComplete, status, receivedBy: identity(request).uid, receivedAt: timestamp() }); await firestore.collection('shipments').doc(shipmentId).update({ status, latestGoodsReceiptId: receipt.id, updatedAt: timestamp() }); invalidateCollectionCache('shipments', shipmentId); await audit(request, 'shipment.goods_received', { organisationId, shipmentId, receiptId: receipt.id, status }); response.status(201).json(receipt);
+    const input = z.object({ organisationId: idSchema.optional(), items: z.array(z.object({ productId: idSchema, expectedQuantity: z.number().int().nonnegative(), receivedQuantity: z.number().int().nonnegative(), batchNumber: z.string().max(100).nullable().optional(), expiryDate: z.iso.date().nullable().optional(), issue: z.enum(['short', 'damaged', 'incorrect', 'none']).default('none'), notes: z.string().max(500).optional() })).min(1) }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const shipmentId = idSchema.parse(request.params.id);
+    const shipment = await getTenantRecord('shipments', shipmentId, organisationId);
+    const status = shipmentReceiptStatus(input.items);
+    const receipt = await createRecord('goodsReceipts', { organisationId, shipmentId, items: input.items, status, receivedBy: identity(request).uid, receivedAt: timestamp() });
+    await firestore.collection('shipments').doc(shipmentId).update({ status, latestGoodsReceiptId: receipt.id, updatedAt: timestamp() });
+    const linked = await linkedOrderForShipment(shipment, organisationId);
+    await updateOrderFromShipment(linked, shipmentId, status);
+    invalidateCollectionCache('shipments', shipmentId);
+    await audit(request, 'shipment.goods_received', { organisationId, shipmentId, receiptId: receipt.id, status });
+    response.status(201).json(receipt);
   } catch (error) { next(error); }
 });
 
 app.patch('/v1/portal/shipments/:id/status', async (request, response, next) => {
-  try { const input = z.object({ organisationId: idSchema.optional(), status: z.enum(['ready_for_collection', 'collected', 'exception']) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); const current = await getTenantRecord('shipments', idSchema.parse(request.params.id), organisationId); if (input.status === 'ready_for_collection' && current.status !== 'received') throw new HttpError(409, 'A full goods-in receipt is required before collection readiness.', 'GOODS_IN_REQUIRED'); if (input.status === 'collected' && current.status !== 'ready_for_collection') throw new HttpError(409, 'Only ready medication can be marked collected.', 'INVALID_STATUS_TRANSITION'); const result = await updateTenantRecord('shipments', current.id as string, organisationId, { status: input.status }); await audit(request, 'shipment.status_updated', { organisationId, shipmentId: current.id, status: input.status }); response.json(result); } catch (error) { next(error); }
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), status: z.enum(['ready_for_collection', 'collected', 'exception']) }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const shipmentId = idSchema.parse(request.params.id);
+    const current = await getTenantRecord('shipments', shipmentId, organisationId);
+    if (input.status === 'ready_for_collection' && !canMarkShipmentReady(current.status)) throw new HttpError(409, 'A complete pharmacy goods-in receipt is required before collection readiness.', 'GOODS_IN_REQUIRED');
+    if (input.status === 'collected' && current.status !== 'ready_for_collection') throw new HttpError(409, 'Only ready medication can be marked collected.', 'INVALID_STATUS_TRANSITION');
+    const linked = await linkedOrderForShipment(current, organisationId);
+    if (!linked) throw new HttpError(409, 'This shipment is not linked to a customer order. Sync Curaleaf shipments before changing its collection status.', 'SHIPMENT_ORDER_LINK_REQUIRED');
+
+    let notification: { status: 'queued'; outboxId: string; recipient: string } | undefined;
+    if (input.status === 'ready_for_collection') {
+      const patientId = typeof linked.order.patientId === 'string' ? linked.order.patientId : '';
+      if (!patientId) throw new HttpError(409, 'The order has no linked patient for the collection email.', 'PATIENT_REQUIRED');
+      const patient = await getTenantRecord('patients', patientId, organisationId);
+      const recipient = z.email().parse(patient.email);
+      const organisation = await getRecord('organisations', organisationId);
+      const outboxId = `${shipmentId}--ready-for-collection`;
+      const outboxRef = firestore.collection('notificationOutbox').doc(outboxId);
+      try {
+        await outboxRef.create({
+          id: outboxId,
+          schemaVersion: 1,
+          organisationId,
+          kind: 'patient_ready_for_collection',
+          recipient,
+          templateData: {
+            firstName: String(patient.name ?? 'Patient').trim().split(/\s+/)[0],
+            pharmacyName: String(organisation.tradingName ?? organisation.name ?? 'your pharmacy'),
+            orderId: linked.orderId,
+          },
+          status: 'pending',
+          orderId: linked.orderId,
+          shipmentId,
+          createdAt: timestamp(),
+          updatedAt: timestamp(),
+          createdBy: identity(request).uid,
+        });
+      } catch (error) {
+        const code = (error as { code?: number | string } | null)?.code;
+        if (code !== 6 && code !== 'already-exists') throw error;
+      }
+      notification = { status: 'queued', outboxId, recipient };
+    }
+
+    const result = await updateTenantRecord('shipments', shipmentId, organisationId, { status: input.status });
+    await updateOrderFromShipment(linked, shipmentId, input.status);
+    await audit(request, 'shipment.status_updated', { organisationId, shipmentId, status: input.status, notificationOutboxId: notification?.outboxId ?? null });
+    response.json({ ...result, ...(notification ? { notification } : {}) });
+  } catch (error) { next(error); }
 });
 
 app.get('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (request, response, next) => {

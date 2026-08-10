@@ -334,6 +334,9 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
   const shipments = await findCuraleafShipments(operation.organisationId, purchaseOrder.id);
   const shipmentIds = await saveShipments(operation.organisationId, shipments);
   const nextFulfilmentStatus = fulfilmentStatus(purchaseOrder, shipments);
+  const curaleafApprovedAt = purchaseOrder.state === 'CANCELLED'
+    ? typeof order.curaleafApprovedAt === 'string' ? order.curaleafApprovedAt : undefined
+    : typeof order.curaleafApprovedAt === 'string' ? order.curaleafApprovedAt : nowIso();
   const priorResult = operation.result && typeof operation.result === 'object' ? operation.result as Record<string, unknown> : {};
   const result = {
     ...priorResult,
@@ -363,6 +366,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
   const ownsLegacyResult = currentCuraleaf.customerReference === operation.customerReference || !currentCuraleaf.customerReference;
   await orderRef.update({
     ...(ownsLegacyResult ? { curaleaf: result } : {}),
+    ...(curaleafApprovedAt ? { curaleafApprovedAt } : {}),
     fulfilmentStatus: nextFulfilmentStatus,
     integrationStatus: purchaseOrder.state === 'CANCELLED' ? 'attention' : 'submitted',
     updatedAt: nowIso(),

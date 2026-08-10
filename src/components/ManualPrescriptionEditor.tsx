@@ -4,7 +4,7 @@ import type { CatalogueItem, LineItem, Prescription } from '../context/AppContex
 import { money } from '../context/AppContext';
 import './ManualPrescriptionEditor.css';
 
-type MetadataField = 'issueDate' | 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber';
+type MetadataField = 'issueDate' | 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber' | 'serialNumber';
 
 export type ManualPrescriptionEditorView = 'details' | 'formulary' | 'all';
 type CatalogueTypeFilter = 'all' | CatalogueItem['type'];
@@ -149,8 +149,19 @@ export default function ManualPrescriptionEditor({
           </header>
 
           <section className="manual-rx-field-group">
-            <header><FileText size={15} /><span><small>Section 1</small><strong>Prescription dates</strong><em>Issue date and 28-day expiry</em></span></header>
+            <header><FileText size={15} /><span><small>Section 1</small><strong>Prescription identity and dates</strong><em>Serial number, issue date and 28-day expiry</em></span></header>
             <div className="manual-rx-fields">
+              <label className="manual-rx-fields__wide">
+                <span>Prescription serial number</span>
+                <input
+                  className="input"
+                  value={prescription.serialNumber ?? ''}
+                  maxLength={200}
+                  placeholder="Enter exactly as printed on the prescription"
+                  onChange={event => onMetadataChange('serialNumber', event.target.value)}
+                />
+                <small className="manual-rx-field-help">Required by the current Curaleaf submission process.</small>
+              </label>
               <ManualDateField label="Issue date" value={prescription.issueDate} onChange={issueDate => onMetadataChange('issueDate', issueDate)} />
               {prescription.issueDate ? (
                 <label>

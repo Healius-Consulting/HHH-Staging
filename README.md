@@ -65,7 +65,7 @@ Start with [`specs/README.md`](specs/README.md). Important documents include:
 - Curaleaf Rocky is called only by the backend. HHH’s single API key is a Firebase Functions deployment secret; each pharmacy’s customer ID and portal email are stored separately in Secret Manager and never exposed to either Vercel application.
 - Before a pharmacy has a verified Curaleaf customer ID, it receives a clearly labelled training workspace. The supplied dummy dataset returns after refresh, while all training edits stay in memory and are discarded on refresh/sign-out rather than written to Firebase.
 - Curaleaf dispatch is not courier tracking. The platform records supplier dispatch, then the pharmacy records partial/full goods-in and separately confirms dispensing checks before collection notification.
-- Worldpay must use hosted checkout, secure pharmacy merchant onboarding and verified server-side webhooks. The portal now models each pharmacy connection, but live onboarding/payment calls remain disabled until Worldpay approves the platform model and supplies credentials.
+- Worldpay uses the WPeCommerce Hosted Payment Pages API with one server-side merchant connection per pharmacy. Webhooks are acknowledged without an invented shared secret; HHH independently verifies the transaction reference, amount, currency, entity and settlement state through Payment Queries before marking an order paid. TRY UAT and Worldpay approval remain pre-live gates.
 - Prescription scans require private UK-hosted storage, short-lived access links, retention rules and audit logging.
 - The eligibility privacy notice and consent wording require solicitor/DPO approval before live use.
 

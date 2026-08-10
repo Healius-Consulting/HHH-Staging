@@ -7,6 +7,10 @@
     ".": {
       "types": "./conditions.d.ts",
       "default": "./conditions.js"
+    },
+    "./delivery": {
+      "types": "./delivery.d.ts",
+      "default": "./delivery.js"
     }
   }
 }

@@ -18,7 +18,8 @@ export interface RefundAdapter {
 
   confirmRefund(
     refundId: string,
-    confirmedBy: string
+    confirmedBy: string,
+    externalReference?: string,
   ): Promise<RefundRecord>;
 }
 
@@ -57,7 +58,7 @@ export class StaffConfirmationRefundAdapter implements RefundAdapter {
     return record;
   }
 
-  async confirmRefund(refundId: string, confirmedBy: string): Promise<RefundRecord> {
+  async confirmRefund(refundId: string, confirmedBy: string, externalReference?: string): Promise<RefundRecord> {
     const docRef = firestore.collection('refundRecords').doc(refundId);
     const snapshot = await docRef.get();
     if (!snapshot.exists) {
@@ -74,6 +75,7 @@ export class StaffConfirmationRefundAdapter implements RefundAdapter {
       status: 'completed',
       confirmedAt: nowIso(),
       confirmedBy,
+      externalReference: externalReference ?? current.externalReference ?? null,
     };
 
     await docRef.set(updated);

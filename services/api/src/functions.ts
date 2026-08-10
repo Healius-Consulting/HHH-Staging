@@ -8,6 +8,7 @@ import { eventPollBackoffSeconds, pollCuraleafEvents } from './curaleaf-events.j
 import { reconcilePendingCuraleafOrders } from './curaleaf-reconciliation.js';
 import { accrueAnnualPatientFees } from './patient-finance.js';
 import { cleanupAbandonedPrescriptionFiles } from './prescription-file-cleanup.js';
+import { reconcilePendingWorldpayPayments } from './worldpay-reconciliation.js';
 import { syncConnectedCuraleafAccounts } from './curaleaf-mirror.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
@@ -39,6 +40,19 @@ export const reconcileCuraleafOrdersLondon = onSchedule({
 }, async () => {
   const reconciliation = await reconcilePendingCuraleafOrders();
   console.log('Curaleaf reconciliation complete', { reconciliation });
+});
+
+export const reconcileWorldpayPaymentsLondon = onSchedule({
+  schedule: 'every 1 minutes',
+  timeZone: 'Europe/London',
+  region: 'europe-west2',
+  timeoutSeconds: 120,
+  memory: '256MiB',
+  maxInstances: 1,
+  retryCount: 0,
+}, async () => {
+  const reconciliation = await reconcilePendingWorldpayPayments();
+  console.log('Worldpay reconciliation complete', { reconciliation });
 });
 
 export const mirrorCuraleafAccountsLondon = onSchedule({

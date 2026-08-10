@@ -146,6 +146,7 @@ export interface RefundRecord {
   idempotencyKey: string;
   confirmedAt?: string | null;
   confirmedBy?: string | null;
+  externalReference?: string | null;
   createdAt: string;
 }
 
@@ -172,4 +173,3 @@ declare global {
     }
   }
 }
-

@@ -16,6 +16,8 @@ const schema = z.object({
   CURALEAF_API_KEY: z.string().min(16).max(500).optional(),
   CURALEAF_EVENT_POLLING_ENABLED: z.enum(['true', 'false']).default('false'),
   WORLDPAY_HPP_BASE_URL: z.url().optional(),
+  WORLDPAY_PAYMENT_QUERIES_BASE_URL: z.url().optional(),
+  /** @deprecated Use WORLDPAY_PAYMENT_QUERIES_BASE_URL. */
   WORLDPAY_VERIFY_BASE_URL: z.url().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });

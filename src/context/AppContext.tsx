@@ -1,7 +1,8 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
-import type { CuraleafCatalogue, PortalOrderRecord } from '../shared/contracts';
+import type { CuraleafCatalogue, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
+import { checkPatientIdentity } from '../utils/patientIdentity';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -85,6 +86,7 @@ export interface Prescription {
   invoiceRef: string | null;
   trackingNumber: string | null;
   carrier: string | null;
+  shipmentId?: string;
   receivedItems?: GoodsReceiptLine[];
   goodsInAt?: Date | string | null;
   goodsInBy?: string | null;
@@ -101,8 +103,29 @@ export type UnresolvedOrderReason = 'expired' | 'rejected';
 export interface OrderRedoContext {
   originalOrderId: number;
   originalBackendId?: string;
+  rootOrderId?: number;
+  rootBackendId?: string;
+  replacementSequence?: number;
+  priceResolution?: 'absorb' | 'refund_and_recharge';
   isPaidRedo: boolean;
   reason: UnresolvedOrderReason;
+}
+
+function replacementSuffix(sequence: number) {
+  let value = Math.max(1, Math.floor(sequence));
+  let suffix = '';
+  while (value > 0) {
+    value -= 1;
+    suffix = String.fromCharCode(65 + (value % 26)) + suffix;
+    value = Math.floor(value / 26);
+  }
+  return suffix;
+}
+
+export function orderReference(order: PatientOrder) {
+  if (!order.redoContext) return `#${order.id}`;
+  const root = order.redoContext.rootOrderId ?? order.redoContext.originalOrderId;
+  return `#${root}${replacementSuffix(order.redoContext.replacementSequence ?? 1)}`;
 }
 
 export interface PatientOrder {
@@ -125,6 +148,9 @@ export interface PatientOrder {
     manualRecordedBy: string | null;
   };
   prescriptions: Prescription[];
+  curaleafApprovedAt?: Date | string | null;
+  refund?: OrderRefundState;
+  pharmacyContribution?: number;
   quoteReview?: PortalOrderRecord['quoteReview'];
   redoContext?: OrderRedoContext;
   lifecycleStatus?: string;
@@ -139,6 +165,7 @@ export interface PatientOrder {
 /** Archived (28-day expired) or Curaleaf-rejected orders that still need a redo. */
 export function getUnresolvedReason(order: PatientOrder, now = new Date()): UnresolvedOrderReason | null {
   if (order.payment.status === 'none') return null;
+  if (order.prescriptions.length > 0 && order.prescriptions.every(prescription => prescription.status === 'collected')) return null;
   if (order.redoneByOrderId) return null;
   if (order.unresolvedReason === 'expired' || order.unresolvedReason === 'rejected') return order.unresolvedReason;
   if (order.redoEligible === false) return null;
@@ -271,7 +298,7 @@ export interface PlatformIntegration {
   status: 'connected' | 'pending' | 'attention';
 }
 
-export type Screen = 'home' | 'referrals' | 'formulary' | 'create' | 'review' | 'provider-prescriptions' | 'orders' | 'patients' | 'finance' | 'resources' | 'settings';
+export type Screen = 'home' | 'formulary' | 'create' | 'orders' | 'patients' | 'finance' | 'settings';
 
 export type NavigationTarget =
   | { kind: 'patient'; id: string }
@@ -331,16 +358,16 @@ export interface AppState {
 
 export const ORGANISATIONS: PharmacyTenant[] = [
   {
-    id: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126', slug: 'k-chem-pharmacy', referralToken: 'kchem-7x4p9k',
-    name: 'K-Chem Pharmacy', tradingName: 'K-Chem Ltd', logoText: 'KC',
-    gphcNumber: '1099224', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'shaylen@kchempharmacy.co.uk', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
-    address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['kchempharmacy.co.uk'],
+    id: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126', slug: 'primary-branch', referralToken: 'primary-branch-7x4p9k',
+    name: 'Primary Branch', tradingName: 'Primary Branch', logoText: 'PB',
+    gphcNumber: '1099224', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'pharmacy@primarybranch.co.uk', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
+    address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['primarybranch.co.uk'],
     status: 'live', staffCount: 4,
     platformFeeMonthly: null,
     defaultPaymentRoute: 'worldpay',
-    brand: { primary: '#0f766e', portalName: 'K-Chem Pharmacy' },
+    brand: { primary: '#0f766e', portalName: 'Primary Branch' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
-    worldpay: { enabled: true, status: 'connected', environment: 'sandbox', merchantId: 'WP-KCHEM', merchantName: 'K-Chem Pharmacy', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
+    worldpay: { enabled: true, status: 'connected', environment: 'sandbox', merchantId: 'WP-PRIMARY-BRANCH', merchantName: 'Primary Branch', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
   },
   {
     id: '6d0176bb-89a0-4e32-9bce-c934c9557c42', slug: 'eastwood-health-pharmacy', referralToken: 'eastwood-3m8q2v',
@@ -418,6 +445,44 @@ export const lineMargin = (item: LineItem) => {
   return rev > 0 ? Math.round((rev - lineCost(item)) / rev * 100) : 0;
 };
 
+function prescriptionDateIsCurrent(prescription: Prescription, now = new Date()) {
+  if (!prescription.issueDate) return false;
+  const issueDate = new Date(`${prescription.issueDate}T00:00:00`);
+  if (Number.isNaN(issueDate.getTime()) || issueDate.getTime() > now.getTime()) return false;
+  const expiryDate = prescription.expiryDate
+    ? new Date(`${prescription.expiryDate}T23:59:59.999`)
+    : new Date(issueDate.getTime() + 28 * 24 * 60 * 60 * 1000);
+  return !Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() >= now.getTime();
+}
+
+function prescriptionIsPaymentReady(prescription: Prescription, patient: CRMPatient) {
+  const sourceVerified = prescription.entryMode === 'manual'
+    ? Boolean(prescription.serialNumber?.trim())
+    : Boolean(prescription.clinicScanId && prescription.curaleafPrescriptionId);
+  const prescriberComplete = Boolean(
+    prescription.issueDate
+    && prescription.prescriber.trim()
+    && (prescription.entryMode === 'manual' ? prescription.prescriberPin?.trim() : prescription.prescriberId),
+  );
+  const medicinesComplete = prescription.items.length > 0 && prescription.items.every(item => (
+    Boolean(item.productId && item.formulaId)
+    && Number.isInteger(item.qty) && item.qty > 0
+    && Number.isInteger(item.unitsNeededCount) && item.unitsNeededCount! > 0
+    && Number.isFinite(item.retail) && item.retail > 0
+  ));
+  return Boolean(prescription.copyFileName)
+    && sourceVerified
+    && prescriberComplete
+    && prescriptionDateIsCurrent(prescription)
+    && medicinesComplete
+    && checkPatientIdentity({
+      selectedName: patient.name,
+      selectedDob: patient.dob,
+      prescriptionName: prescription.curaleafPatientName,
+      prescriptionDob: prescription.curaleafPatientDob,
+    }).status === 'match';
+}
+
 export const rxRevenue = (rx: Prescription) => rx.items.reduce((t, i) => t + lineRevenue(i), 0);
 export const rxCost = (rx: Prescription) => rx.items.reduce((t, i) => t + lineCost(i), 0);
 export const orderRevenue = (o: PatientOrder) => o.prescriptions.reduce((t, r) => t + rxRevenue(r), 0) + (o.dispensingFee || 0);
@@ -478,6 +543,7 @@ export const RX_STATUS_LABELS: Record<RxStatus, string> = {
 const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
 const token = params.get('token');
 const urlOrganisation = ORGANISATIONS.find(org => org.referralToken === token) ?? ORGANISATIONS[0];
+const PORTAL_ORDER_SYNC_INTERVAL_MS = 15_000;
 
 export const PHARMACY = {
   name: urlOrganisation.name,
@@ -568,6 +634,11 @@ export type Action =
   // Payment
   | { type: 'SEND_PAYMENT_LINK'; orderId: number }
   | { type: 'START_MANUAL_PAYMENT'; orderId: number }
+  | { type: 'CARRY_OVER_PAYMENT'; orderId: number; sourceOrderId: number }
+  | { type: 'SET_REDO_PRICE_RESOLUTION'; orderId: number; resolution: 'absorb' | 'refund_and_recharge' | undefined }
+  | { type: 'START_ORDER_REFUND'; orderId: number; reason: OrderRefundState['reason']; resolution: OrderRefundState['resolution'] }
+  | { type: 'CONFIRM_ORDER_REFUND'; orderId: number; externalReference: string }
+  | { type: 'SET_ORDER_REFUND'; orderId: number; refund: OrderRefundState }
   | { type: 'CONFIRM_PAYMENT'; orderId: number }
   | { type: 'RECORD_MANUAL_PAYMENT'; orderId: number; tender: ManualTender; reference?: string; notes?: string }
   // Submission to Curaleaf.
@@ -599,7 +670,7 @@ function blankOrder(id: number, patientId: string | null, organisationId: string
   };
 }
 
-function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder {
+function mapPortalOrder(record: PortalOrderRecord, index: number, records: PortalOrderRecord[]): PatientOrder {
   const orderId = index + 1;
   const rxStatus: RxStatus = ({
     supplier_pending: 'awaiting-approval',
@@ -651,6 +722,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
         invoiceRef: null,
         trackingNumber: null,
         carrier: record.curaleaf?.courier ?? null,
+        shipmentId: record.curaleaf?.shipmentIds?.[rxIndex] ?? record.curaleaf?.shipmentIds?.[0],
       }))
     : [{
         id: orderId * 100 + 1,
@@ -664,8 +736,23 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
         invoiceRef: null,
         trackingNumber: null,
         carrier: record.curaleaf?.courier ?? null,
+        shipmentId: record.curaleaf?.shipmentIds?.[0],
       }];
-  const paid = record.paymentStatus === 'paid';
+  const paid = ['paid', 'refund_required', 'refunded'].includes(record.paymentStatus);
+  const redoSourceBackendId = record.redoContext ? String(record.redoOfOrderId ?? record.redoContext.originalOrderId) : null;
+  let redoSource = redoSourceBackendId ? records.find(candidate => candidate.id === redoSourceBackendId) : undefined;
+  let redoSequence = 0;
+  const seenRedoIds = new Set<string>();
+  while (redoSource && !seenRedoIds.has(redoSource.id)) {
+    seenRedoIds.add(redoSource.id);
+    redoSequence += 1;
+    const nextSourceId = redoSource.redoContext ? String(redoSource.redoOfOrderId ?? redoSource.redoContext.originalOrderId) : null;
+    if (!nextSourceId) break;
+    redoSource = records.find(candidate => candidate.id === nextSourceId);
+  }
+  const rootBackendId = record.redoContext?.rootOrderId ? String(record.redoContext.rootOrderId) : redoSource?.id ?? redoSourceBackendId ?? undefined;
+  const rootIndex = rootBackendId ? records.findIndex(candidate => candidate.id === rootBackendId) : -1;
+  const sourceIndex = redoSourceBackendId ? records.findIndex(candidate => candidate.id === redoSourceBackendId) : -1;
   return {
     id: orderId,
     backendId: record.id,
@@ -677,7 +764,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
       status: paid ? 'paid' : 'sent',
       route: record.paymentRoute === 'manual' ? 'pharmacy' : 'worldpay',
       amount: record.totalPence / 100,
-      ref: record.paymentId ?? null,
+      ref: record.worldpayPaymentId ?? record.paymentTransactionReference ?? record.paymentId ?? null,
       sentAt: new Date(record.createdAt),
       paidAt: paid ? new Date(record.updatedAt) : null,
       manualTender: null,
@@ -686,6 +773,9 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
       manualRecordedBy: null,
     },
     prescriptions,
+    curaleafApprovedAt: record.curaleafApprovedAt ?? null,
+    refund: record.refund,
+    pharmacyContribution: record.pharmacyContributionPence ? record.pharmacyContributionPence / 100 : 0,
     quoteReview: record.quoteReview,
     lifecycleStatus: record.status,
     isExpired: Boolean(record.isExpired || record.unresolvedReason === 'expired'),
@@ -695,8 +785,12 @@ function mapPortalOrder(record: PortalOrderRecord, index: number): PatientOrder 
     cycleExpiresAt: record.cycleExpiresAt,
     expiryCheck: record.expiryCheck,
     redoContext: record.redoContext ? {
-      originalOrderId: 0,
+      originalOrderId: sourceIndex >= 0 ? sourceIndex + 1 : 0,
       originalBackendId: String(record.redoOfOrderId ?? record.redoContext.originalOrderId),
+      rootOrderId: rootIndex >= 0 ? rootIndex + 1 : sourceIndex >= 0 ? sourceIndex + 1 : orderId,
+      rootBackendId,
+      replacementSequence: record.redoContext.replacementSequence ?? Math.max(1, redoSequence),
+      priceResolution: record.redoContext.priceResolution,
       isPaidRedo: Boolean(record.redoContext.isPaidRedo),
       reason: record.redoContext.unresolvedReason ?? 'expired',
     } : undefined,
@@ -771,12 +865,12 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
   const o3: PatientOrder = {
     id: 3, organisationId: ORGANISATIONS[0].id, patientId: 'P-1003', date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), dispensingFee: 0,
     payment: {
-      status: 'sent',
+      status: 'paid',
       route: 'worldpay',
       amount: 79,
       ref: 'WP-8815',
       sentAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
-      paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null,
+      paidAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null,
     },
     prescriptions: [rx4],
     quoteReview: {
@@ -832,7 +926,25 @@ function buildSeedOrders(): { orders: PatientOrder[]; nextRx: number } {
     prescriptions: [rx6],
   };
 
-  return { orders: [o1, o2, o3, o4, o5], nextRx: 7 };
+  const rx7: Prescription = {
+    id: 7, entryMode: 'clinic', prescriber: 'Dr. A. Lee', copyFileName: 'prescription_jdoe_approved.pdf',
+    items: [
+      { productId: 'seed-pack-approved-oil', formulaId: 'seed-formula-approved-oil', name: 'Curaleaf 20:10 Oil 30ml', qty: 1, unitsNeededCount: 1, cost: 42, retail: 79 },
+    ],
+    placed: true, poRef: 'PO-9006', status: 'approved', invoiceRef: null, trackingNumber: null, carrier: 'Curaleaf',
+  };
+  const o6: PatientOrder = {
+    id: 6, organisationId: ORGANISATIONS[0].id, patientId: 'P-1001', date: new Date('2026-08-06T13:45:00Z'), dispensingFee: 0,
+    payment: {
+      status: 'paid', route: 'worldpay', amount: 79, ref: 'WP-9006',
+      sentAt: new Date('2026-08-06T13:20:00Z'), paidAt: new Date('2026-08-06T13:30:00Z'),
+      manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null,
+    },
+    prescriptions: [rx7],
+    curaleafApprovedAt: new Date('2026-08-06T14:00:00Z'),
+  };
+
+  return { orders: [o1, o2, o3, o4, o5, o6], nextRx: 8 };
 }
 
 const seed = buildSeedOrders();
@@ -906,7 +1018,7 @@ const initialState: AppState = {
   orders: usePrototypeState ? seed.orders : [],
   activeOrderId: usePrototypeState ? 1 : null,
   toasts: [],
-  nextIds: { patient: 2000, rx: seed.nextRx, order: 6, submission: 5, invoice: 4072 },
+  nextIds: { patient: 2000, rx: seed.nextRx, order: 7, submission: 5, invoice: 4072 },
   portalMode: initialPortalMode,
   workspaceMode: 'training',
   organisations: usePrototypeState ? ORGANISATIONS : [],
@@ -938,7 +1050,10 @@ function applyRedoOntoDraft(draft: PatientOrder, source: PatientOrder, reason: U
     redoContext: {
       originalOrderId: source.id,
       originalBackendId: source.backendId,
-      isPaidRedo: source.payment.status === 'paid',
+      rootOrderId: source.redoContext?.rootOrderId ?? source.redoContext?.originalOrderId ?? source.id,
+      rootBackendId: source.redoContext?.rootBackendId ?? source.redoContext?.originalBackendId ?? source.backendId,
+      replacementSequence: (source.redoContext?.replacementSequence ?? 0) + 1,
+      isPaidRedo: source.payment.status === 'paid' && source.refund?.status !== 'completed',
       reason,
     },
     prescriptions: draft.prescriptions.map(rx => {
@@ -1096,7 +1211,7 @@ function reducer(state: AppState, action: Action): AppState {
           submissions: training.submissions,
           orders: training.orders,
           activeOrderId: 1,
-          nextIds: { patient: 2000, rx: training.nextRx, order: 6, submission: 5, invoice: 4072 },
+        nextIds: { patient: 2000, rx: training.nextRx, order: 7, submission: 5, invoice: 4072 },
         };
       }
       if (state.workspaceMode === action.mode) return state;
@@ -1259,8 +1374,16 @@ function reducer(state: AppState, action: Action): AppState {
     case 'START_REDO_ORDER': {
       const source = state.orders.find(order => order.id === action.sourceOrderId && order.organisationId === state.currentOrganisationId);
       if (!source?.patientId || source.payment.status === 'none') return state;
-      const reason = getUnresolvedReason(source) ?? 'rejected';
+      const reason = getUnresolvedReason(source);
+      if (!reason) return state;
       if (!state.crm.some(patient => patient.id === source.patientId && patient.organisationId === state.currentOrganisationId && patient.status !== 'Suspended')) return state;
+      const existingDraft = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none' && order.redoContext?.originalOrderId === source.id);
+      if (existingDraft) return {
+        ...state,
+        activeOrderId: existingDraft.id,
+        screen: 'create',
+        screenHistory: state.screen === 'create' ? state.screenHistory : [...state.screenHistory.slice(-7), state.screen],
+      };
       const id = state.nextIds.order;
       const rxId = state.nextIds.rx;
       const draft = blankOrder(id, source.patientId, state.currentOrganisationId);
@@ -1282,6 +1405,8 @@ function reducer(state: AppState, action: Action): AppState {
       const reason = getUnresolvedReason(source);
       if (!reason) return state;
       if (source.patientId && draft.patientId && source.patientId !== draft.patientId) return state;
+      const existingDraft = state.orders.find(order => order.id !== draft.id && order.organisationId === state.currentOrganisationId && order.payment.status === 'none' && order.redoContext?.originalOrderId === source.id);
+      if (existingDraft) return { ...state, activeOrderId: existingDraft.id };
       return mapOrder(state, action.orderId, order => applyRedoOntoDraft(order, source, reason));
     }
     case 'CLEAR_ORDER_REDO_CONTEXT':
@@ -1294,7 +1419,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, activeOrderId: action.orderId };
     case 'SET_ORDER_PATIENT': {
       const order = state.orders.find(item => item.id === action.orderId);
-      const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && item.status !== 'Suspended');
+      const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && item.status === 'HHH approved');
       return patient ? mapOrder(state, action.orderId, o => ({
         ...o,
         patientId: patient.id,
@@ -1320,7 +1445,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_RX_ENTRY_MODE':
       return mapOrder(state, action.orderId, order => {
         const patient = order.patientId
-          ? state.crm.find(item => item.id === order.patientId && item.organisationId === order.organisationId && item.status !== 'Suspended')
+          ? state.crm.find(item => item.id === order.patientId && item.organisationId === order.organisationId && item.status === 'HHH approved')
           : null;
         return mapRx(order, action.rxId, prescription => ({
           ...blankRx(prescription.id),
@@ -1439,9 +1564,9 @@ function reducer(state: AppState, action: Action): AppState {
     // ---- Payment ----
     case 'SEND_PAYMENT_LINK': {
       const order = findOrder(state, action.orderId);
-      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status !== 'Suspended');
-      const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
-      if (!order || !patientApproved || !prescriptionReady) return state;
+      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && candidate.status === 'HHH approved');
+      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
+      if (!order || !patient || !prescriptionReady) return state;
       const amount = orderRevenue(order);
       const nextState = mapOrder(state, action.orderId, o => ({
         ...o,
@@ -1454,9 +1579,9 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'START_MANUAL_PAYMENT': {
       const order = findOrder(state, action.orderId);
-      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status !== 'Suspended');
-      const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
-      if (!order || !patientApproved || !prescriptionReady) return state;
+      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && candidate.status === 'HHH approved');
+      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
+      if (!order || !patient || !prescriptionReady) return state;
       const amount = orderRevenue(order);
       const nextState = mapOrder(state, action.orderId, o => ({
         ...o,
@@ -1466,6 +1591,68 @@ function reducer(state: AppState, action: Action): AppState {
       nextState.activeOrderId = nextDraft ? nextDraft.id : null;
       return nextState;
     }
+    case 'CARRY_OVER_PAYMENT': {
+      const order = findOrder(state, action.orderId);
+      const source = findOrder(state, action.sourceOrderId);
+      if (!order?.redoContext?.isPaidRedo || order.redoContext.originalOrderId !== source?.id || source.payment.status !== 'paid') return state;
+      const amount = orderRevenue(order);
+      const absorbedDifference = order.redoContext.priceResolution === 'absorb' ? Math.max(0, amount - source.payment.amount) : 0;
+      if (Math.abs(amount - source.payment.amount) >= 0.005 && absorbedDifference <= 0) return state;
+      const nextState = {
+        ...state,
+        orders: state.orders.map(candidate => {
+          if (candidate.id === order.id) return {
+            ...candidate,
+            payment: {
+              ...source.payment,
+              status: 'paid' as const,
+              amount: absorbedDifference > 0 ? source.payment.amount : amount,
+              paidAt: source.payment.paidAt ?? new Date(),
+            },
+            pharmacyContribution: absorbedDifference,
+          };
+          if (candidate.id === source.id) return {
+            ...candidate,
+            redoneByOrderId: String(order.id),
+            unresolvedReason: order.redoContext?.reason,
+            redoEligible: false,
+            ...(order.redoContext?.reason === 'expired' ? { lifecycleStatus: 'archived', isExpired: true } : {}),
+          };
+          return candidate;
+        }),
+      };
+      const nextDraft = nextState.orders.find(candidate => candidate.payment.status === 'none' && candidate.id !== action.orderId);
+      nextState.activeOrderId = nextDraft ? nextDraft.id : null;
+      return nextState;
+    }
+    case 'SET_REDO_PRICE_RESOLUTION':
+      return mapOrder(state, action.orderId, order => order.redoContext ? { ...order, redoContext: { ...order.redoContext, priceResolution: action.resolution } } : order);
+    case 'START_ORDER_REFUND':
+      return mapOrder(state, action.orderId, order => {
+        if (order.payment.status !== 'paid' || order.refund) return order;
+        const requestedAt = new Date().toISOString();
+        return {
+          ...order,
+          refund: {
+            id: `training-refund-${order.id}`,
+            status: 'pending_confirmation',
+            amountPence: Math.round(order.payment.amount * 100),
+            method: order.payment.route === 'worldpay' ? 'worldpay_portal' : 'pharmacy_manual',
+            paymentReference: order.payment.ref ?? `ORDER-${order.id}`,
+            reason: action.reason,
+            resolution: action.resolution,
+            requestedAt,
+            requestedBy: state.staffSession?.name ?? 'Pharmacy staff',
+          },
+        };
+      });
+    case 'CONFIRM_ORDER_REFUND':
+      return mapOrder(state, action.orderId, order => order.refund?.status === 'pending_confirmation' ? {
+        ...order,
+        refund: { ...order.refund, status: 'completed', externalReference: action.externalReference, confirmedAt: new Date().toISOString(), confirmedBy: state.staffSession?.name ?? 'Pharmacy staff' },
+      } : order);
+    case 'SET_ORDER_REFUND':
+      return mapOrder(state, action.orderId, order => ({ ...order, refund: action.refund }));
     case 'CONFIRM_PAYMENT':
       return mapOrder(state, action.orderId, o => ({
         ...o,
@@ -1488,9 +1675,9 @@ function reducer(state: AppState, action: Action): AppState {
     // ---- Curaleaf submission simulation ----
     case 'PLACE_ORDER': {
       const order = findOrder(state, action.orderId);
-      const patientApproved = state.crm.some(patient => patient.id === order?.patientId && patient.organisationId === order?.organisationId && patient.status !== 'Suspended');
-      const prescriptionReady = order?.prescriptions.every(rx => Boolean(rx.copyFileName && rx.prescriber.trim() && rx.items.length));
-      if (!order || order.payment.status !== 'paid' || !patientApproved || !prescriptionReady) return state;
+      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && candidate.status === 'HHH approved');
+      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
+      if (!order || order.payment.status !== 'paid' || !patient || !prescriptionReady) return state;
       return {
         ...mapOrder(state, action.orderId, o => ({
           ...o,
@@ -1555,7 +1742,7 @@ function reducer(state: AppState, action: Action): AppState {
       const patientObj = order?.patientId ? state.crm.find(p => p.id === order.patientId) : null;
       const patientNameStr = patientObj?.name ?? 'Patient';
 
-      const msg = `Dispensing checks completed for Rx #${action.rxId}. Collection notification queued for ${patientNameStr} at ${PHARMACY.collectionPlace}.`;
+      const msg = `Ready-to-collect confirmed for Rx #${action.rxId}. Customer email queued for ${patientNameStr} at ${PHARMACY.collectionPlace}.`;
       const newToast = { id: Date.now().toString() + Math.random(), message: msg, type: 'success' as const };
       nextState.toasts = [...nextState.toasts, newToast];
       return nextState;
@@ -1677,16 +1864,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || state.workspaceMode !== 'live') return;
     let cancelled = false;
+    let inFlight = false;
     const organisationId = state.currentOrganisationId;
-    getPortalOrders(organisationId).then(records => {
-      if (cancelled) return;
-      const orders = records
-        .slice()
-        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-        .map(mapPortalOrder);
-      dispatch({ type: 'SYNC_PORTAL_ORDERS', organisationId, orders });
-    }).catch(error => console.warn('Order history sync unavailable:', error));
-    return () => { cancelled = true; };
+    const syncOrders = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const records = await getPortalOrders(organisationId);
+        if (cancelled) return;
+        const orders = records
+          .slice()
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+          .map(mapPortalOrder);
+        dispatch({ type: 'SYNC_PORTAL_ORDERS', organisationId, orders });
+      } catch (error) {
+        if (!cancelled) console.warn('Order history sync unavailable:', error);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const syncVisibleOrders = () => {
+      if (document.visibilityState === 'visible') void syncOrders();
+    };
+    void syncOrders();
+    const interval = window.setInterval(() => void syncOrders(), PORTAL_ORDER_SYNC_INTERVAL_MS);
+    window.addEventListener('focus', syncVisibleOrders);
+    document.addEventListener('visibilitychange', syncVisibleOrders);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', syncVisibleOrders);
+      document.removeEventListener('visibilitychange', syncVisibleOrders);
+    };
   }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
 
   // Cross-domain intake sync. In production, the access token comes from staff authentication.

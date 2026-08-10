@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
 import {
@@ -12,23 +12,37 @@ import {
   orderCost,
   marginPct,
   getUnresolvedReason,
+  orderReference,
   type LineItem,
   type PatientOrder,
   type UnresolvedOrderReason,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { createPortalOrder, createWorldpaySession, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, uploadPrescriptionFile } from '../shared/api';
+import { confirmPortalOrderRefund, createPortalOrder, createPortalOrderRefund, createWorldpaySession, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 
+function prescriptionDateIsCurrent(issueDate?: string, suppliedExpiryDate?: string) {
+  if (!issueDate) return false;
+  const issued = new Date(`${issueDate}T00:00:00`);
+  if (Number.isNaN(issued.getTime()) || issued.getTime() > Date.now()) return false;
+  const expires = suppliedExpiryDate
+    ? new Date(`${suppliedExpiryDate}T23:59:59.999`)
+    : new Date(issued.getTime() + 28 * 24 * 60 * 60 * 1000);
+  return !Number.isNaN(expires.getTime()) && expires.getTime() >= Date.now();
+}
+
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
-  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && patient.status !== 'Suspended');
+  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && patient.status === 'HHH approved');
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
   const canUseWorldpay = organisation.worldpay.enabled && organisation.worldpay.status === 'connected';
   const selectedPaymentRoute = organisation.defaultPaymentRoute === 'worldpay' && canUseWorldpay ? 'worldpay' : 'pharmacy';
   const draftOrders = state.orders.filter(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none');
   const activeOrder = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === state.activeOrderId && order.payment.status === 'none');
+  const redoSourceOrder = activeOrder?.redoContext
+    ? state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === activeOrder.redoContext!.originalOrderId)
+    : null;
   const patient = activeOrder?.patientId ? tenantPatients.find(candidate => candidate.id === activeOrder.patientId) ?? null : null;
   const [selectedRxId, setSelectedRxId] = useState<number | null>(null);
   const [changingPatient, setChangingPatient] = useState(false);
@@ -41,12 +55,15 @@ export default function CreateOrder() {
   const [quotedSignature, setQuotedSignature] = useState<string | null>(null);
   const [quoteSummary, setQuoteSummary] = useState<{ shippingPrice: number; taxRate: number } | null>(null);
   const [quotedUnavailableProductIds, setQuotedUnavailableProductIds] = useState<string[]>([]);
+  const quoteRequestVersion = useRef(0);
   const [uploadingRxId, setUploadingRxId] = useState<number | null>(null);
   const [readingRxId, setReadingRxId] = useState<number | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [editingClinicFormularyRxId, setEditingClinicFormularyRxId] = useState<number | null>(null);
   const [selectedUnresolvedOrderId, setSelectedUnresolvedOrderId] = useState<number | null>(null);
+  const [redoRefundReference, setRedoRefundReference] = useState('');
+  const [redoRefundBusy, setRedoRefundBusy] = useState(false);
 
   useEffect(() => {
     if (!activeOrder?.prescriptions.length) return setSelectedRxId(null);
@@ -54,6 +71,7 @@ export default function CreateOrder() {
   }, [activeOrder, selectedRxId]);
 
   useEffect(() => {
+    quoteRequestVersion.current += 1;
     setChangingPatient(false);
     setPatientQuery('');
     setPatientSearchOpen(false);
@@ -63,8 +81,10 @@ export default function CreateOrder() {
     setQuotedSignature(null);
     setQuoteSummary(null);
     setQuotedUnavailableProductIds([]);
+    setQuoteBusy(false);
     setEditingClinicFormularyRxId(null);
     setSelectedUnresolvedOrderId(activeOrder?.redoContext?.originalOrderId ?? null);
+    setRedoRefundReference('');
   }, [activeOrder?.id, activeOrder?.redoContext?.originalOrderId]);
 
   const matchingPatients = useMemo(() => {
@@ -113,14 +133,15 @@ export default function CreateOrder() {
     prescriptionName: selectedRx.curaleafPatientName,
     prescriptionDob: selectedRx.curaleafPatientDob,
   }) : null;
+  const hasPrescriptionRecords = Boolean(activeOrder?.prescriptions.length);
   const readiness = activeOrder ? [
-    { label: 'Approved patient linked', complete: Boolean(activeOrder.patientId) },
-    { label: 'Prescription copies attached', complete: activeOrder.prescriptions.every(rx => Boolean(rx.copyFileName) && (!requiresLiveCuraleafEvidence || Boolean(rx.fileId))) },
-    { label: 'Prescription source verified', complete: activeOrder.prescriptions.every(rx => rx.entryMode === 'manual' || Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
-    { label: 'Prescription details complete', complete: activeOrder.prescriptions.every(rx => Boolean(rx.issueDate && rx.prescriber.trim() && (rx.entryMode === 'manual' ? rx.prescriberPin?.trim() : rx.prescriberId))) },
-
-    { label: 'Patient identity matches', complete: Boolean(patient) && activeOrder.prescriptions.every(rx => checkPatientIdentity({ selectedName: patient!.name, selectedDob: patient!.dob, prescriptionName: rx.curaleafPatientName, prescriptionDob: rx.curaleafPatientDob }).status === 'match') },
-    { label: 'Formulary medicines selected', complete: activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => item.formulaId && item.unitsNeededCount)) },
+    { label: 'HHH-approved patient linked', complete: patient?.status === 'HHH approved' },
+    { label: 'Prescription evidence attached', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => Boolean(rx.copyFileName) && (!requiresLiveCuraleafEvidence || Boolean(rx.fileId))) },
+    { label: 'Serial number / Clinic source verified', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => rx.entryMode === 'manual' ? Boolean(rx.serialNumber?.trim()) : Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
+    { label: 'Prescription inside its 28-day window', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => prescriptionDateIsCurrent(rx.issueDate, rx.expiryDate)) },
+    { label: 'Prescriber details complete', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => Boolean(rx.issueDate && rx.prescriber.trim() && (rx.entryMode === 'manual' ? rx.prescriberPin?.trim() : rx.prescriberId))) },
+    { label: 'Prescription identity matches patient', complete: Boolean(patient) && hasPrescriptionRecords && activeOrder.prescriptions.every(rx => checkPatientIdentity({ selectedName: patient!.name, selectedDob: patient!.dob, prescriptionName: rx.curaleafPatientName, prescriptionDob: rx.curaleafPatientDob }).status === 'match') },
+    { label: 'Priced medicines and quantities complete', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => Boolean(item.productId && item.formulaId) && Number.isInteger(item.qty) && item.qty > 0 && Number.isInteger(item.unitsNeededCount) && item.unitsNeededCount! > 0 && Number.isFinite(item.retail) && item.retail > 0)) },
   ] : [];
   const prescriptionReady = readiness.every(item => item.complete);
   const wholesaleKnown = Boolean(activeOrder?.prescriptions.every(rx => rx.items.every(item => item.cost !== null)));
@@ -131,6 +152,7 @@ export default function CreateOrder() {
   const currentQuoteSignature = JSON.stringify(currentQuoteItems.slice().sort((a, b) => a.packId.localeCompare(b.packId)));
 
   useEffect(() => {
+    quoteRequestVersion.current += 1;
     setQuoteError(null);
     setQuotedSignature(null);
     setQuoteSummary(null);
@@ -140,7 +162,31 @@ export default function CreateOrder() {
   const quoteCurrent = wholesaleKnown && quotedSignature === currentQuoteSignature;
   const currentUnavailableProductIds = quotedSignature === currentQuoteSignature ? quotedUnavailableProductIds : [];
   const quoteAvailable = quoteCurrent && currentUnavailableProductIds.length === 0;
-  const readyForPayment = prescriptionReady && (!requiresLiveCuraleafEvidence || quoteAvailable);
+  const quoteGateComplete = !requiresLiveCuraleafEvidence || quoteAvailable;
+  const replacementUsesNewPayment = activeOrder?.redoContext?.priceResolution === 'refund_and_recharge';
+  const paymentRouteReady = Boolean(activeOrder?.redoContext?.isPaidRedo && !replacementUsesNewPayment) || selectedPaymentRoute === 'pharmacy' || canUseWorldpay;
+  const paidRedoAmountDifference = activeOrder?.redoContext?.isPaidRedo && redoSourceOrder
+    ? Math.round((orderRevenue(activeOrder) - redoSourceOrder.payment.amount) * 100) / 100
+    : 0;
+  const paidRedoAmountMatches = !activeOrder?.redoContext?.isPaidRedo || Math.abs(paidRedoAmountDifference) < 0.005;
+  const redoPriceResolutionReady = paidRedoAmountMatches
+    || activeOrder?.redoContext?.priceResolution === 'absorb' && paidRedoAmountDifference > 0
+    || replacementUsesNewPayment && redoSourceOrder?.refund?.status === 'completed';
+  const readyForPayment = prescriptionReady && quoteGateComplete && paymentRouteReady && redoPriceResolutionReady;
+  const paymentGate = activeOrder ? [
+    ...readiness,
+    { label: requiresLiveCuraleafEvidence ? 'Live Curaleaf price and stock quote verified' : 'Curaleaf quote optional in training', complete: quoteGateComplete },
+    { label: activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Original verified payment route retained' : selectedPaymentRoute === 'worldpay' ? 'Worldpay merchant connection verified' : 'Pharmacy-managed payment route selected', complete: paymentRouteReady },
+    ...(activeOrder.redoContext?.isPaidRedo ? [{ label: 'Replacement price decision recorded', complete: redoPriceResolutionReady }] : []),
+  ] : [];
+  const outstandingPaymentGates = paymentGate.filter(item => !item.complete);
+  const workflowSteps = activeOrder ? [
+    { label: 'Patient', detail: patient ? 'Approved and linked' : 'Select approved patient', complete: Boolean(patient), active: !patient },
+    { label: 'Prescription', detail: prescriptionReady ? `${activeOrder.prescriptions.length} record${activeOrder.prescriptions.length === 1 ? '' : 's'} verified` : `${readiness.filter(item => item.complete).length}/${readiness.length} checks passed`, complete: prescriptionReady, active: Boolean(patient) && !prescriptionReady },
+    { label: 'Curaleaf quote', detail: requiresLiveCuraleafEvidence ? quoteAvailable ? 'Price and stock verified' : 'Required before payment' : quoteAvailable ? 'Training quote checked' : 'Optional in training', complete: quoteGateComplete, active: prescriptionReady && !quoteGateComplete },
+    { label: 'Payment', detail: readyForPayment ? replacementUsesNewPayment ? 'New payment ready' : activeOrder.redoContext?.isPaidRedo ? 'Carry-over ready' : `${selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy route'} ready` : activeOrder.redoContext?.isPaidRedo && !redoPriceResolutionReady ? 'Price decision needed' : `${outstandingPaymentGates.length} blocker${outstandingPaymentGates.length === 1 ? '' : 's'}`, complete: false, active: readyForPayment },
+  ] : [];
+  const activeOrderRef = activeOrder ? orderReference(activeOrder) : '';
 
   const initials = (name: string) => name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2);
   const gmcNumber = (value?: string) => {
@@ -301,6 +347,7 @@ export default function CreateOrder() {
               originalOrderId: activeOrder.redoContext.originalBackendId ?? activeOrder.redoContext.originalOrderId,
               isPaidRedo: activeOrder.redoContext.isPaidRedo,
               requireCuraleafAuth: true as const,
+              priceResolution: activeOrder.redoContext.priceResolution,
             },
           } : {}),
         });
@@ -312,7 +359,10 @@ export default function CreateOrder() {
             items: persisted.lineItems.map(item => ({ productId: item.productId, patientPrice: item.unitPricePence / 100 })),
           });
         }
-        if (selectedPaymentRoute === 'worldpay') {
+        if (activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment) {
+          dispatch({ type: 'CARRY_OVER_PAYMENT', orderId: activeOrder.id, sourceOrderId: activeOrder.redoContext.originalOrderId });
+          dispatch({ type: 'ADD_TOAST', message: 'The verified payment was carried over. No second patient payment was requested.', toastType: 'success' });
+        } else if (selectedPaymentRoute === 'worldpay') {
           if (!canUseWorldpay) throw new Error('This pharmacy’s Worldpay connection is not verified. Change the default route in Settings.');
           const origin = window.location.origin;
           const session = await createWorldpaySession(persisted.id, {
@@ -329,6 +379,9 @@ export default function CreateOrder() {
           dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
           dispatch({ type: 'ADD_TOAST', message: 'Order saved. Confirm the pharmacy payment before sending its prescriptions to Curaleaf.', toastType: 'success' });
         }
+      } else if (activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment) {
+        dispatch({ type: 'CARRY_OVER_PAYMENT', orderId: activeOrder.id, sourceOrderId: activeOrder.redoContext.originalOrderId });
+        dispatch({ type: 'ADD_TOAST', message: 'Training payment carry-over recorded. No second payment request was created.', toastType: 'info' });
       } else if (selectedPaymentRoute === 'worldpay') {
         if (!canUseWorldpay) return;
         dispatch({ type: 'SEND_PAYMENT_LINK', orderId: activeOrder.id });
@@ -337,7 +390,7 @@ export default function CreateOrder() {
         dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
         dispatch({ type: 'ADD_TOAST', message: 'Training pharmacy payment selected. No external record was created.', toastType: 'success' });
       }
-      dispatch({ type: 'SET_SCREEN', screen: 'review' });
+      dispatch({ type: 'SET_SCREEN', screen: 'orders' });
     } catch (error) {
       dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The order could not be created.', toastType: 'error' });
     } finally {
@@ -377,8 +430,9 @@ export default function CreateOrder() {
     }
   };
 
-  const refreshQuote = async () => {
+  const refreshQuote = async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!activeOrder || !currentQuoteItems.length || !isApiConfigured) return;
+    const requestVersion = ++quoteRequestVersion.current;
     setQuoteBusy(true);
     setQuoteError(null);
     try {
@@ -387,6 +441,7 @@ export default function CreateOrder() {
         : state.workspaceMode === 'live'
           ? await getCuraleafQuote(state.currentOrganisationId, currentQuoteItems)
           : await getCuraleafTrainingQuote(state.currentOrganisationId, currentQuoteItems);
+      if (requestVersion !== quoteRequestVersion.current) return;
       const quotedPackIds = new Set(quote.items.map(item => item.packId));
       const missingPackIds = [...new Set(currentQuoteItems.map(item => item.packId).filter(packId => !quotedPackIds.has(packId)))];
       const lineNames = (packIds: string[]) => [...new Set(
@@ -426,12 +481,13 @@ export default function CreateOrder() {
           title: 'Selected pack is currently unavailable',
           detail: `Curaleaf returned pricing for ${names.join(', ') || 'the selected pack'} but marked it out of stock. Payment remains blocked; keep the draft and refresh later.`,
         });
-        dispatch({ type: 'ADD_TOAST', message: 'Curaleaf returned pricing, but one or more selected packs are out of stock.', toastType: 'info' });
+        if (!silent) dispatch({ type: 'ADD_TOAST', message: 'Curaleaf returned pricing, but one or more selected packs are out of stock.', toastType: 'info' });
       } else {
         setQuoteError(null);
-        dispatch({ type: 'ADD_TOAST', message: `Curaleaf quote refreshed for ${quote.items.length} product line${quote.items.length === 1 ? '' : 's'}.`, toastType: 'success' });
+        if (!silent) dispatch({ type: 'ADD_TOAST', message: `Curaleaf quote refreshed for ${quote.items.length} product line${quote.items.length === 1 ? '' : 's'}.`, toastType: 'success' });
       }
     } catch (error) {
+      if (requestVersion !== quoteRequestVersion.current) return;
       setQuoteSummary(null);
       setQuotedSignature(null);
       setQuotedUnavailableProductIds([]);
@@ -440,9 +496,22 @@ export default function CreateOrder() {
         detail: error instanceof Error ? error.message : 'The Curaleaf quote could not be loaded. Wait and retry, or contact your HHH administrator if this continues.',
       });
     } finally {
-      setQuoteBusy(false);
+      if (requestVersion === quoteRequestVersion.current) setQuoteBusy(false);
     }
   };
+
+  const automaticQuoteRef = useRef(refreshQuote);
+  automaticQuoteRef.current = refreshQuote;
+  const automaticQuoteOrderId = activeOrder?.id ?? null;
+  const hasCurrentQuoteItems = currentQuoteItems.length > 0;
+
+  useEffect(() => {
+    if (!automaticQuoteOrderId || !hasCurrentQuoteItems || !isApiConfigured) return;
+    const timeoutId = window.setTimeout(() => {
+      void automaticQuoteRef.current({ silent: true });
+    }, 500);
+    return () => window.clearTimeout(timeoutId);
+  }, [automaticQuoteOrderId, currentQuoteSignature, hasCurrentQuoteItems, state.currentOrganisationId, state.workspaceMode]);
 
   const selectPatient = (patientId: string) => {
     if (!activeOrder || !patientId) return;
@@ -477,8 +546,48 @@ export default function CreateOrder() {
     });
   };
 
-  const beginPatientChange = () => {
+  const chooseAbsorbDifference = () => {
+    if (!activeOrder || paidRedoAmountDifference <= 0) return;
+    dispatch({ type: 'SET_REDO_PRICE_RESOLUTION', orderId: activeOrder.id, resolution: 'absorb' });
+    dispatch({ type: 'ADD_TOAST', message: `The pharmacy will absorb ${money(paidRedoAmountDifference)}. The patient’s verified payment stays unchanged.`, toastType: 'info' });
+  };
 
+  const beginRefundAndRecharge = async () => {
+    if (!activeOrder?.redoContext || !redoSourceOrder || redoRefundBusy) return;
+    dispatch({ type: 'SET_REDO_PRICE_RESOLUTION', orderId: activeOrder.id, resolution: 'refund_and_recharge' });
+    if (redoSourceOrder.refund) return;
+    setRedoRefundBusy(true);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live' && redoSourceOrder.backendId) {
+        const refund = await createPortalOrderRefund(redoSourceOrder.backendId, { organisationId: state.currentOrganisationId, reason: 'replacement_price_changed', resolution: 'replace_new_payment' });
+        dispatch({ type: 'SET_ORDER_REFUND', orderId: redoSourceOrder.id, refund });
+      } else {
+        dispatch({ type: 'START_ORDER_REFUND', orderId: redoSourceOrder.id, reason: 'replacement_price_changed', resolution: 'replace_new_payment' });
+      }
+      dispatch({ type: 'ADD_TOAST', message: `Replacement held. Refund ${money(redoSourceOrder.payment.amount)} using payment ID ${redoSourceOrder.payment.ref ?? 'shown below'}.`, toastType: 'warning' });
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The refund task could not be created.', toastType: 'error' });
+    } finally { setRedoRefundBusy(false); }
+  };
+
+  const confirmRedoRefund = async () => {
+    if (!redoSourceOrder?.refund || redoRefundReference.trim().length < 3 || redoRefundBusy) return;
+    setRedoRefundBusy(true);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live' && redoSourceOrder.backendId) {
+        const refund = await confirmPortalOrderRefund(redoSourceOrder.backendId, redoSourceOrder.refund.id, { organisationId: state.currentOrganisationId, externalReference: redoRefundReference.trim() });
+        dispatch({ type: 'SET_ORDER_REFUND', orderId: redoSourceOrder.id, refund });
+      } else {
+        dispatch({ type: 'CONFIRM_ORDER_REFUND', orderId: redoSourceOrder.id, externalReference: redoRefundReference.trim() });
+      }
+      dispatch({ type: 'ADD_TOAST', message: 'Old payment refund confirmed. The replacement can now create a fresh payment link.', toastType: 'success' });
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The refund could not be confirmed.', toastType: 'error' });
+    } finally { setRedoRefundBusy(false); }
+  };
+
+  const beginPatientChange = () => {
+    if (activeOrder?.redoContext) return;
     setPatientQuery('');
     setPatientActiveIndex(0);
     setPatientSearchOpen(true);
@@ -592,7 +701,7 @@ export default function CreateOrder() {
                 <span className="rx-draft-tab__avatar">{draftPatient ? initials(draftPatient.name) : '—'}</span>
                 <span>
                   <strong>{draftPatient?.name ?? `Unlinked draft #${order.id}`}</strong>
-                  <small>{order.prescriptions.length} record{order.prescriptions.length === 1 ? '' : 's'}</small>
+                  <small>{order.prescriptions.length} record{order.prescriptions.length === 1 ? '' : 's'}{order.redoContext ? ` · ${orderReference(order)}` : ''}</small>
                 </span>
               </button>
             );
@@ -611,8 +720,8 @@ export default function CreateOrder() {
         </div>
       ) : (
         <>
-          <section className={`rx-patient-band card${changingPatient || !patient ? ' is-changing-patient' : ''}`}>
-            <div className="rx-patient-band__identity">
+          <section className={`rx-patient-band rx-builder-context card${changingPatient || !patient ? ' is-changing-patient' : ''}`}>
+            <div className="rx-patient-band__identity rx-builder-patient">
               {patient ? (
                 changingPatient ? (
                   renderPatientSearch('change')
@@ -620,13 +729,18 @@ export default function CreateOrder() {
                   <>
                     <span className="avatar">{initials(patient.name)}</span>
                     <span className="rx-patient-identity-copy">
-                      <p className="section-label">Approved patient</p>
+                      <p className="section-label rx-patient-approved-label"><CheckCircle size={12} /> Approved patient</p>
                       <strong>{patient.name}</strong>
-                      <em>DOB {formatPatientDob(patient.dob)} · {patient.email} · {patient.mobile}</em>
+                      <span className="rx-patient-meta" aria-label="Patient identity details">
+                        <span>DOB {formatPatientDob(patient.dob)}</span>
+                        <span>{patient.email}</span>
+                        <span>{patient.mobile}</span>
+                      </span>
                     </span>
-                    <span className="pill pill-green"><CheckCircle size={11} /> Linked</span>
                     <div className="rx-patient-actions">
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={beginPatientChange}><Pencil size={12} /> Change</button>
+                      {activeOrder.redoContext
+                        ? <span className="rx-redo-patient-lock"><ShieldCheck size={12} /> Locked to redo</span>
+                        : <button type="button" className="btn btn-secondary btn-sm" onClick={beginPatientChange}><Pencil size={12} /> Change</button>}
                       <button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDelete(true)}><Trash2 size={14} /></button>
                     </div>
                   </>
@@ -635,19 +749,14 @@ export default function CreateOrder() {
                 renderPatientSearch('link')
               )}
             </div>
-            <div className="rx-readiness-strip" aria-label="Prescription readiness">
-              <span className="rx-readiness-strip__count">
-                <strong>{readiness.filter(item => item.complete).length}/{readiness.length}</strong>
-                <small>checks ready</small>
-              </span>
-              <div className="rx-readiness-strip__dots">
-                {readiness.map(item => (
-                  <span key={item.label} className={item.complete ? 'complete' : ''} title={item.label}>
-                    {item.complete ? <CheckCircle size={14} /> : <span className="rx-readiness-dot" />}
-                  </span>
-                ))}
-              </div>
-            </div>
+            <ol className="rx-builder-flow" aria-label="Create order workflow">
+              {workflowSteps.map((step, index) => (
+                <li key={step.label} className={step.complete ? 'complete' : step.active ? 'active' : ''}>
+                  <span className="rx-builder-flow__number">{step.complete ? <CheckCircle size={15} /> : index + 1}</span>
+                  <span><strong>{step.label}</strong><small>{step.detail}</small></span>
+                </li>
+              ))}
+            </ol>
             {confirmingDraftDelete && (
               <div className="rx-draft-delete-confirm" role="alert">
                 <span><Trash2 size={16} /><span><strong>Delete this draft?</strong><small>The linked patient and every unfinished prescription record in this draft will be removed.</small></span></span>
@@ -659,26 +768,38 @@ export default function CreateOrder() {
             )}
           </section>
 
-          {patient && unresolvedOrdersForPatient.length > 0 ? (
-            <section className="rx-unresolved-panel card" aria-label="Unresolved archived and rejected orders">
-              <header className="rx-unresolved-panel__header">
-                <div>
+          {patient && activeOrder.redoContext ? (
+            <section className="rx-replacement-context card" aria-label={`Replacement order ${activeOrderRef}`}>
+              <span className="rx-replacement-context__mark">{activeOrderRef.replace(/^#\d+/, '')}</span>
+              <span className="rx-replacement-context__identity">
+                <p className="section-label">Replacement prescription</p>
+                <strong>Order {activeOrderRef}</strong>
+                <small>
+                  Replaces order {redoSourceOrder ? orderReference(redoSourceOrder) : `#${activeOrder.redoContext.originalOrderId}`}
+                  {' · '}{activeOrder.redoContext.reason === 'rejected' ? 'Curaleaf rejected' : 'Prescription expired'}
+                </small>
+              </span>
+              <span className="rx-replacement-context__carry">
+                <strong>{activeOrder.prescriptions.flatMap(rx => rx.items).length} medicine{activeOrder.prescriptions.flatMap(rx => rx.items).length === 1 ? '' : 's'} carried forward</strong>
+                <small>The old document was cleared automatically.</small>
+              </span>
+              <span className="rx-replacement-context__next"><ShieldCheck size={15} /><span><strong>New prescription required</strong><small>Authenticate the replacement below.</small></span></span>
+            </section>
+          ) : patient && unresolvedOrdersForPatient.length > 0 ? (
+            <details key={`${activeOrder.id}-${activeOrder.redoContext?.originalOrderId ?? 'none'}`} className="rx-unresolved-panel rx-unresolved-drawer card" aria-label="Unresolved archived and rejected orders" open={Boolean(activeOrder.redoContext)}>
+              <summary className="rx-unresolved-panel__header">
+                <span>
                   <p className="section-label">Unresolved for this patient</p>
                   <strong>{unresolvedOrdersForPatient.length} archived / rejected order{unresolvedOrdersForPatient.length === 1 ? '' : 's'}</strong>
-                  <span>Select one to load its medicines into this draft, then attach the new prescription for Curaleaf authentication.</span>
-                </div>
-                {activeOrder.redoContext ? (
-                  <span className={`pill ${activeOrder.redoContext.isPaidRedo ? 'pill-green' : 'pill-amber'}`}>
-                    {activeOrder.redoContext.isPaidRedo ? 'Paid redo loaded' : 'Redo loaded'}
-                  </span>
-                ) : (
-                  <span className="pill pill-amber">Action needed</span>
-                )}
-              </header>
-              <div className="rx-unresolved-list" role="listbox" aria-label="Unresolved orders">
+                  <small>Open to repair a previous order using a newly authenticated prescription.</small>
+                </span>
+                <span className="pill pill-neutral">Review</span>
+              </summary>
+              <div className="rx-unresolved-drawer__body">
+                <p>Select one to load its medicines into this draft. The old document is never reused; a new prescription must pass authentication.</p>
+                <div className="rx-unresolved-list" role="listbox" aria-label="Unresolved orders">
                 {unresolvedOrdersForPatient.map(entry => {
                   const selected = selectedUnresolvedOrderId === entry.order.id;
-                  const applied = activeOrder.redoContext?.originalOrderId === entry.order.id;
                   const itemNames = entry.order.prescriptions.flatMap(rx => rx.items.map(item => item.name));
                   return (
                     <button
@@ -686,11 +807,11 @@ export default function CreateOrder() {
                       role="option"
                       aria-selected={selected}
                       key={entry.order.id}
-                      className={`rx-unresolved-item${selected ? ' is-selected' : ''}${applied ? ' is-applied' : ''}`}
+                      className={`rx-unresolved-item${selected ? ' is-selected' : ''}`}
                       onClick={() => setSelectedUnresolvedOrderId(entry.order.id)}
                     >
                       <span className="rx-unresolved-item__meta">
-                        <strong>Order #{entry.order.id}</strong>
+                        <strong>Order {orderReference(entry.order)}</strong>
                         <small>
                           {entry.reason === 'rejected' ? 'Curaleaf rejected' : '28-day archived'}
                           {' · '}
@@ -703,12 +824,12 @@ export default function CreateOrder() {
                         {entry.itemCount} item{entry.itemCount === 1 ? '' : 's'}
                         {itemNames.length ? ` · ${itemNames.slice(0, 2).join(', ')}${itemNames.length > 2 ? '…' : ''}` : ''}
                       </span>
-                      {applied ? <em>In this draft</em> : <span className={`pill ${entry.reason === 'rejected' ? 'pill-red' : 'pill-neutral'}`}>{entry.reason === 'rejected' ? 'Rejected' : 'Archived'}</span>}
+                      <span className={`pill ${entry.reason === 'rejected' ? 'pill-red' : 'pill-neutral'}`}>{entry.reason === 'rejected' ? 'Rejected' : 'Archived'}</span>
                     </button>
                   );
                 })}
-              </div>
-              <footer className="rx-unresolved-panel__actions">
+                </div>
+                <footer className="rx-unresolved-panel__actions">
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
@@ -716,18 +837,17 @@ export default function CreateOrder() {
                   onClick={() => selectedUnresolvedOrderId && handleRedoPrescription(selectedUnresolvedOrderId)}
                 >
                   <RefreshCw size={14} />
-                  {activeOrder.redoContext?.originalOrderId === selectedUnresolvedOrderId
-                    ? 'Reload into this draft'
-                    : 'Fix in this draft'}
+                  Use this draft as replacement
                 </button>
                 <span>
                   Clears the old PDF and pre-fills medicines. New Curaleaf prescription authentication is required
                   {selectedUnresolvedOrderId && unresolvedOrdersForPatient.find(entry => entry.order.id === selectedUnresolvedOrderId)?.order.payment.status === 'paid'
-                    ? '; customer payment can be carried over after auth.'
+                    ? '; the existing verified payment is carried over after authentication, so no second payment request is created.'
                     : '.'}
                 </span>
-              </footer>
-            </section>
+                </footer>
+              </div>
+            </details>
           ) : null}
 
           <button type="button" className="rx-mobile-review-bar" onClick={() => document.getElementById('rx-order-review')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
@@ -741,8 +861,8 @@ export default function CreateOrder() {
                 <header className="rx-surface__header">
                   <div className="section-heading" style={{ margin: 0 }}>
                     <div>
-                      <p className="section-label">Step 1 · Prescription records</p>
-                      <h3><FileText size={17} /> Attach and verify the selected Rx</h3>
+                      <p className="section-label">Step 2 · Prescription evidence</p>
+                      <h3><FileText size={17} /> Authenticate each prescription record</h3>
                     </div>
                   </div>
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}><Plus size={13} /> Add record</button>
@@ -834,7 +954,7 @@ export default function CreateOrder() {
                 <header className="rx-surface__header">
                   <div className="section-heading" style={{ margin: 0 }}>
                     <div>
-                      <p className="section-label">Step 2 · Formulary and packs</p>
+                      <p className="section-label">Step 3 · Medicines and pricing</p>
                       <h3>
                         <ShieldCheck size={17} />
                         {selectedRx?.entryMode === 'manual'
@@ -895,8 +1015,9 @@ export default function CreateOrder() {
             <aside className="rx-checkout-rail">
               <section className="rx-checkout-panel card" id="rx-order-review">
                 <header>
-                  <p className="section-label">Order {activeOrder.id}</p>
-                  <strong>Review and request payment</strong>
+                  <p className="section-label">Step 4 · Order {activeOrderRef}</p>
+                  <strong>{replacementUsesNewPayment ? 'Review and restart payment' : activeOrder.redoContext?.isPaidRedo ? 'Review and carry over payment' : 'Review and request payment'}</strong>
+                  <small>{patient?.name ?? 'Patient not linked'} · {activeOrder.prescriptions.length} prescription record{activeOrder.prescriptions.length === 1 ? '' : 's'}</small>
                 </header>
                 <dl className="rx-order-totals">
                   <div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div>
@@ -906,10 +1027,13 @@ export default function CreateOrder() {
                 </dl>
                 <div className={`rx-checkout-readiness${quoteError ? ' has-error' : ''}`}>
                   <span className="section-label">{state.workspaceMode === 'training' ? 'Curaleaf test quote' : 'Live Curaleaf quote'}</span>
-                  <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{quoteAvailable ? 'Wholesale and stock verified' : quoteCurrent ? 'Pricing returned · stock unavailable' : state.workspaceMode === 'training' ? 'Optional availability and wholesale check' : 'Required for current quantities'}</span>
+                  <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : quoteBusy ? <RefreshCw size={13} className="spin" /> : <span className="rx-readiness-dot" />}{quoteAvailable ? 'Wholesale and stock verified' : quoteBusy ? 'Updating automatically for this basket…' : quoteError ? 'Automatic quote needs attention' : quoteCurrent ? 'Pricing returned · stock unavailable' : currentQuoteItems.length ? 'Automatic quote waiting to refresh' : 'Add a medicine to generate a quote'}</span>
                   {quoteSummary && quoteCurrent ? <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />} Shipping {money(quoteSummary.shippingPrice)} · tax {quoteSummary.taxRate}%</span> : null}
-                  {quoteError ? <ProviderStatusNotice title={quoteError.title} detail={quoteError.detail} /> : null}
-                  <button type="button" className="btn btn-secondary btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Requesting quote…' : quoteCurrent ? 'Refresh Curaleaf quote' : 'Get Curaleaf quote'}</button>
+                  <small className="rx-auto-quote-note">Quotes refresh after a medicine or pack quantity changes.</small>
+                  {quoteError ? <>
+                    <ProviderStatusNotice title={quoteError.title} detail={quoteError.detail} />
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Retrying quote…' : 'Retry quote now'}</button>
+                  </> : null}
                 </div>
                 <div className="rx-dispensing-charge">
                   <span><strong>Dispensing charge</strong><small>Optional pharmacy charge · patient collection only</small></span>
@@ -917,19 +1041,41 @@ export default function CreateOrder() {
                   <label className="rx-dispensing-custom"><span>Custom</span><span className="money-input"><span>£</span><input type="number" min="0" max="100" step="0.01" value={activeOrder.dispensingFee} onFocus={event => event.currentTarget.select()} onChange={event => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: Math.max(0, Math.min(100, Number(event.target.value))) })} aria-label="Custom dispensing charge" /></span></label>
                 </div>
                 <div className="rx-patient-total"><span><small>Patient total</small><em>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)} products + {money(activeOrder.dispensingFee)} dispensing</em></span><strong>{money(orderRevenue(activeOrder))}</strong></div>
-                <div className="rx-checkout-readiness">
-                  <span className="section-label">Ready to continue</span>
-                  {readiness.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}
-                </div>
+                {activeOrder.redoContext?.isPaidRedo && redoSourceOrder ? (
+                  <div className={`rx-redo-balance${paidRedoAmountMatches ? ' is-matched' : ' is-different'}`}>
+                    <span><small>Verified payment carried by order {orderReference(redoSourceOrder)}</small><strong>{money(redoSourceOrder.payment.amount)}</strong></span>
+                    <span><small>Replacement difference</small><strong>{paidRedoAmountDifference === 0 ? money(0) : `${paidRedoAmountDifference > 0 ? '+' : '−'}${money(Math.abs(paidRedoAmountDifference))}`}</strong></span>
+                    <p>{paidRedoAmountMatches ? 'Amounts match. The original verified payment may be carried over after authentication.' : activeOrder.redoContext.priceResolution === 'absorb' ? `The pharmacy will contribute ${money(paidRedoAmountDifference)}; the patient is not charged again.` : replacementUsesNewPayment ? redoSourceOrder.refund?.status === 'completed' ? 'Old payment refunded. Saving creates a fresh payment link for the replacement total.' : 'Replacement held until the old Worldpay refund is confirmed.' : 'Choose how to handle the price difference before continuing.'}</p>
+                    {!paidRedoAmountMatches ? <div className="rx-redo-balance__choices">
+                      <button type="button" className={`btn btn-sm ${replacementUsesNewPayment ? 'btn-primary' : 'btn-secondary'}`} disabled={redoRefundBusy} onClick={() => void beginRefundAndRecharge()}><RefreshCw size={12} /> Hold, refund & new link</button>
+                      {paidRedoAmountDifference > 0 ? <button type="button" className={`btn btn-sm ${activeOrder.redoContext.priceResolution === 'absorb' ? 'btn-primary' : 'btn-secondary'}`} onClick={chooseAbsorbDifference}><Banknote size={12} /> Absorb {money(paidRedoAmountDifference)}</button> : null}
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDelete(true)}><X size={12} /> Cancel replacement</button>
+                    </div> : null}
+                    {replacementUsesNewPayment && redoSourceOrder.refund?.status === 'pending_confirmation' ? <div className="rx-redo-refund-confirm">
+                      <span><small>Refund in Worldpay</small><code>{redoSourceOrder.refund.paymentReference}</code><em>Refund {money(redoSourceOrder.refund.amountPence / 100)}, then enter its confirmation ID.</em></span>
+                      <input className="input" value={redoRefundReference} onChange={event => setRedoRefundReference(event.target.value)} placeholder="Worldpay refund / command ID" />
+                      <button type="button" className="btn btn-primary btn-sm" disabled={redoRefundBusy || redoRefundReference.trim().length < 3} onClick={() => void confirmRedoRefund()}>{redoRefundBusy ? 'Recording…' : 'Confirm refund'}</button>
+                    </div> : null}
+                  </div>
+                ) : null}
+                <details className="rx-payment-gate" open={!readyForPayment}>
+                  <summary>
+                    <span><small>Payment gate</small><strong>{readyForPayment ? 'All required checks passed' : `${outstandingPaymentGates.length} requirement${outstandingPaymentGates.length === 1 ? '' : 's'} outstanding`}</strong></span>
+                    <span className={readyForPayment ? 'complete' : ''}>{paymentGate.filter(item => item.complete).length}/{paymentGate.length}</span>
+                  </summary>
+                  <div className="rx-payment-gate__checks">
+                    {paymentGate.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}
+                  </div>
+                </details>
                 <div className="rx-payment-actions">
                   <span className="section-label">Payment route</span>
                   <div className="rx-payment-route-toggle" aria-label="Pharmacy payment route">
-                    <div className="is-selected">{selectedPaymentRoute === 'worldpay' ? <CreditCard size={17} /> : <Banknote size={17} />}<span><strong>{selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy payment'}</strong><small>{selectedPaymentRoute === 'worldpay' ? 'Verified hosted checkout' : 'EPOS, cash or transfer'}</small></span><CheckCircle size={14} /></div>
+                    <div className="is-selected">{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? <ShieldCheck size={17} /> : selectedPaymentRoute === 'worldpay' ? <CreditCard size={17} /> : <Banknote size={17} />}<span><strong>{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Verified payment carry-over' : selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy payment'}</strong><small>{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? activeOrder.redoContext.priceResolution === 'absorb' ? 'Original payment retained · pharmacy pays difference' : 'No second charge to the patient' : selectedPaymentRoute === 'worldpay' ? 'Fresh hosted checkout' : 'EPOS, cash or transfer'}</small></span><CheckCircle size={14} /></div>
                   </div>
-                  <p className="rx-payment-route-note">This route is set in Pharmacy Settings and locked when the order is saved.</p>
-                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : selectedPaymentRoute === 'worldpay' ? 'Create Worldpay request' : 'Continue with pharmacy payment'}</button>
+                  <p className="rx-payment-route-note">{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'The original payment remains linked only after the replacement prescription passes every gate.' : 'This route is controlled in Settings & Assets and becomes immutable when the order is saved.'}</p>
+                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? replacementUsesNewPayment ? 'Save & create new Worldpay link' : 'Create Worldpay request' : 'Continue with pharmacy payment'}</button>
                 </div>
-                {!readyForPayment && <p className="rx-checkout-blocker"><AlertTriangle size={13} /> Complete the outstanding checks before requesting payment.</p>}
+                {!readyForPayment && <p className="rx-checkout-blocker"><AlertTriangle size={13} /><span><strong>Payment remains locked</strong>{outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}{outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}</span></p>}
               </section>
             </aside>
           </div>

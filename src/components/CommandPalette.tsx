@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Building2, CircleUserRound, Clock, FileCheck2, FilePlus, Home, Package, QrCode, ReceiptText, Search, Settings, Tags, UserSearch, Users, X } from 'lucide-react';
+import { Building2, CircleUserRound, FilePlus, Home, Package, ReceiptText, Search, Settings, Tags, UserSearch, Users, X } from 'lucide-react';
 import { useApp, type Screen } from '../context/AppContext';
 import { OPEN_COMMAND_PALETTE_EVENT } from './commandPaletteEvents';
 
@@ -42,14 +42,11 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
   const defaultCommands: CommandDefinition[] = [
     { label: 'Open overview', detail: 'Today’s position and priority queue', group: 'Navigate', icon: <Home size={16} />, run: () => navigate('home') },
     { label: 'Patients hub', detail: 'Patient records, onboarding and order history', group: 'Navigate', keywords: 'find patient directory', icon: <UserSearch size={16} />, run: () => navigate('patients') },
-    { label: 'Customer orders', detail: 'Supplier progress, holds and collections', group: 'Navigate', keywords: 'track provider prescription fulfilment', icon: <Package size={16} />, run: () => navigate('orders') },
-    { label: 'Payments and billing', detail: 'Active and cleared payment requests', group: 'Navigate', icon: <Clock size={16} />, run: () => navigate('review') },
+    { label: 'Customer orders', detail: 'Payments, Curaleaf progress, delivery and collection', group: 'Navigate', keywords: 'billing track supplier provider prescription fulfilment', icon: <Package size={16} />, run: () => navigate('orders') },
     { label: 'Curaleaf catalogue', detail: 'Products, pack sizes and patient prices', group: 'Navigate', icon: <Tags size={16} />, run: () => navigate('formulary') },
-    { label: 'Organisation settings', detail: 'Setup, services, assets and pharmacy identity', group: 'Navigate', icon: <Settings size={16} />, run: () => navigate('settings') },
+    { label: 'Organisation settings', detail: 'Setup, payment routes, forms, QR assets and pharmacy identity', group: 'Navigate', keywords: 'resources eligibility content pack', icon: <Settings size={16} />, run: () => navigate('settings') },
     { label: 'Start a prescription', detail: 'Create a new draft session', group: 'Actions', icon: <FilePlus size={16} />, run: () => { dispatch({ type: 'NEW_ORDER' }); navigate('create'); } },
-    { label: 'Review patient onboarding', detail: 'See HHH decisions and attributed enquiries', group: 'Actions', icon: <Users size={16} />, run: () => navigate('referrals') },
-    { label: 'Review provider prescriptions', detail: 'Open Curaleaf prescription records', group: 'Actions', icon: <FileCheck2 size={16} />, run: () => navigate('provider-prescriptions') },
-    { label: 'Copy forms and resources', detail: 'Eligibility link, QR and content pack', group: 'Actions', icon: <QrCode size={16} />, run: () => navigate('resources') },
+    { label: 'Review patient onboarding', detail: 'See HHH decisions and attributed enquiries', group: 'Actions', icon: <Users size={16} />, run: () => navigate('patients') },
   ];
 
   const needle = query.trim().toLowerCase();
