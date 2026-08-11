@@ -256,6 +256,29 @@ export function cancelAndArchivePortalOrder(orderId: string, organisationId: str
   });
 }
 
+export function requestPortalOrderCancellation(orderId: string, input: {
+  organisationId: string;
+  reason: 'added_in_error' | 'patient_request' | 'other';
+  note?: string;
+}) {
+  return apiRequest<PortalOrderRecord>(`/v1/portal/orders/${encodeURIComponent(orderId)}/cancellations`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function recordPortalCuraleafCancellation(orderId: string, input: {
+  organisationId: string;
+  action: 'contacted' | 'confirmed';
+  reference: string;
+  note?: string;
+}) {
+  return apiRequest<PortalOrderRecord>(`/v1/portal/orders/${encodeURIComponent(orderId)}/curaleaf-cancellation`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export function createPortalOrderRefund(orderId: string, input: { organisationId: string; reason: 'patient_cancelled' | 'replacement_price_changed'; resolution: 'cancel' | 'replace_new_payment' }) {
   return apiRequest<import('./contracts').OrderRefundState>(`/v1/portal/orders/${encodeURIComponent(orderId)}/refunds/manual`, {
     method: 'POST',

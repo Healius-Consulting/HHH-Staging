@@ -23,6 +23,7 @@ import {
   Truck,
   UserRound,
   XCircle,
+  PhoneCall,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -38,7 +39,7 @@ import {
   type Prescription,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { confirmPortalOrderRefund, createPortalOrderRefund, recordPortalGoodsReceipt, recordPortalManualPayment, submitCuraleafClinicPrescription, submitCuraleafManualPrescription, updatePortalShipmentStatus } from '../shared/api';
+import { confirmPortalOrderRefund, createPortalOrderRefund, recordPortalCuraleafCancellation, recordPortalGoodsReceipt, recordPortalManualPayment, requestPortalOrderCancellation, submitCuraleafClinicPrescription, submitCuraleafManualPrescription, updatePortalShipmentStatus } from '../shared/api';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
 
@@ -52,9 +53,10 @@ type OrderStage =
   | 'ready'
   | 'collected'
   | 'rejected'
-  | 'archived';
+  | 'archived'
+  | 'cancelled';
 
-type StageFilter = 'all' | 'awaiting-payment' | 'paid' | 'curaleaf' | 'delivery' | 'ready' | 'rejected' | 'archived' | 'completed';
+type StageFilter = 'all' | 'awaiting-payment' | 'paid' | 'curaleaf' | 'delivery' | 'ready' | 'rejected' | 'archived' | 'cancelled' | 'completed';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
 type GoodsReceiptDraft = { quantities: Record<string, number>; note: string };
 
@@ -78,6 +80,7 @@ const STAGE_META: Record<OrderStage, { label: string; description: string; tone:
   collected: { label: 'Collected', description: 'Medication handed to patient', tone: 'neutral', icon: Check },
   rejected: { label: 'Rejected', description: 'Order needs review or recreation', tone: 'danger', icon: XCircle },
   archived: { label: 'Archived', description: 'Prescription cycle expired', tone: 'neutral', icon: Archive },
+  cancelled: { label: 'Cancelled', description: 'Cancellation retained for audit', tone: 'neutral', icon: XCircle },
 };
 
 const FILTERS: Array<{ key: StageFilter; label: string }> = [
@@ -89,11 +92,13 @@ const FILTERS: Array<{ key: StageFilter; label: string }> = [
   { key: 'ready', label: 'RTC' },
   { key: 'rejected', label: 'Rejected' },
   { key: 'archived', label: 'Archived' },
+  { key: 'cancelled', label: 'Cancelled' },
   { key: 'completed', label: 'Completed' },
 ];
 
 function orderStage(order: PatientOrder, now = new Date()): { stage: OrderStage; unresolvedReason: ReturnType<typeof getUnresolvedReason> } {
   const unresolvedReason = getUnresolvedReason(order, now);
+  if (order.lifecycleStatus === 'cancelled') return { stage: 'cancelled', unresolvedReason };
   if (unresolvedReason === 'expired' || order.unresolvedReason === 'expired' || order.lifecycleStatus === 'archived' || order.isExpired) return { stage: 'archived', unresolvedReason };
   if (unresolvedReason === 'rejected' || order.unresolvedReason === 'rejected' || order.quoteReview) return { stage: 'rejected', unresolvedReason };
   if (order.payment.status === 'sent') return { stage: 'awaiting-payment', unresolvedReason };
@@ -147,6 +152,12 @@ export default function Orders() {
   const [fulfilmentBusyRxId, setFulfilmentBusyRxId] = useState<number | null>(null);
   const [refundBusyOrderId, setRefundBusyOrderId] = useState<number | null>(null);
   const [refundReferences, setRefundReferences] = useState<Record<number, string>>({});
+  const [cancelOrderId, setCancelOrderId] = useState<number | null>(null);
+  const [cancelReason, setCancelReason] = useState<'added_in_error' | 'patient_request' | 'other'>('added_in_error');
+  const [cancelNote, setCancelNote] = useState('');
+  const [cancellationReference, setCancellationReference] = useState('');
+  const [cancellationContactNote, setCancellationContactNote] = useState('');
+  const [cancellationBusyOrderId, setCancellationBusyOrderId] = useState<number | null>(null);
 
   const records = useMemo<OrderRecord[]>(() => state.orders
     .filter(order => order.organisationId === state.currentOrganisationId && order.payment.status !== 'none')
@@ -195,11 +206,74 @@ export default function Orders() {
 
   const selected = filtered.find(record => record.order.id === selectedOrderId) ?? filtered[0] ?? null;
   const outstandingValue = records.filter(record => record.stage === 'awaiting-payment').reduce((sum, record) => sum + record.order.payment.amount, 0);
-  const needsAction = records.filter(record => ['awaiting-payment', 'paid', 'rejected', 'delivered'].includes(record.stage)).length;
+  const needsAction = records.filter(record => ['awaiting-payment', 'paid', 'rejected', 'delivered'].includes(record.stage) || (
+    record.stage === 'cancelled' && record.order.refund?.status !== 'completed' && record.order.cancellation?.status === 'refund_required'
+  ) || ['contact_required', 'awaiting_confirmation'].includes(record.order.curaleafCancellation?.status ?? '')).length;
   const readyCount = records.filter(record => record.stage === 'ready').length;
-  const activeCount = records.filter(record => !['collected', 'archived', 'rejected'].includes(record.stage)).length;
+  const activeCount = records.filter(record => !['collected', 'archived', 'rejected', 'cancelled'].includes(record.stage)).length;
 
   const filterCount = (filter: StageFilter) => records.filter(record => stageMatchesFilter(record.stage, filter)).length;
+
+  const applyCancellationResponse = (order: PatientOrder, record: Awaited<ReturnType<typeof requestPortalOrderCancellation>>) => {
+    if (!record.cancellation) return;
+    dispatch({
+      type: 'SET_ORDER_CANCELLATION',
+      orderId: order.id,
+      cancellation: record.cancellation,
+      curaleafCancellation: record.curaleafCancellation,
+      lifecycleStatus: record.status,
+      paymentStatus: record.paymentStatus === 'cancelled' ? 'cancelled' : ['paid', 'refund_required', 'refunded'].includes(record.paymentStatus) ? 'paid' : 'sent',
+    });
+  };
+
+  const requestCancellation = async (order: PatientOrder) => {
+    if (cancellationBusyOrderId) return;
+    setCancellationBusyOrderId(order.id);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live' && order.backendId) {
+        const result = await requestPortalOrderCancellation(order.backendId, {
+          organisationId: state.currentOrganisationId,
+          reason: cancelReason,
+          note: cancelNote.trim() || undefined,
+        });
+        applyCancellationResponse(order, result);
+      } else {
+        dispatch({ type: 'REQUEST_ORDER_CANCELLATION', orderId: order.id, reason: cancelReason, note: cancelNote });
+      }
+      if (order.patientId) dispatch({ type: 'LOG_INTERACTION', patientId: order.patientId, interactionType: 'Order cancellation requested', detail: `Cancellation requested for ${orderReference(order)}. ${order.payment.status === 'paid' ? 'Paid order requires pharmacy action.' : 'No settled patient payment recorded.'}` });
+      const hasCuraleafOrder = order.prescriptions.some(prescription => prescription.placed || prescription.poRef);
+      dispatch({ type: 'ADD_TOAST', message: hasCuraleafOrder ? 'Cancellation opened. Contact Curaleaf and record their confirmation before refunding or reordering.' : order.payment.status === 'paid' ? 'Paid cancellation flagged for pharmacy refund action.' : 'Order cancelled and its payment link retired in the platform.', toastType: hasCuraleafOrder || order.payment.status === 'paid' ? 'warning' : 'success' });
+      setCancelOrderId(null);
+      setCancelNote('');
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The cancellation could not be recorded.', toastType: 'error' });
+    } finally { setCancellationBusyOrderId(null); }
+  };
+
+  const recordCuraleafCancellationStep = async (order: PatientOrder, action: 'contacted' | 'confirmed') => {
+    if (cancellationBusyOrderId || cancellationReference.trim().length < 3) return;
+    setCancellationBusyOrderId(order.id);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live' && order.backendId) {
+        const result = await recordPortalCuraleafCancellation(order.backendId, {
+          organisationId: state.currentOrganisationId,
+          action,
+          reference: cancellationReference.trim(),
+          note: cancellationContactNote.trim() || undefined,
+        });
+        applyCancellationResponse(order, result);
+      } else if (action === 'contacted') {
+        dispatch({ type: 'RECORD_CURALEAF_CANCELLATION_CONTACT', orderId: order.id, reference: cancellationReference.trim(), note: cancellationContactNote });
+      } else {
+        dispatch({ type: 'CONFIRM_CURALEAF_CANCELLATION', orderId: order.id, reference: cancellationReference.trim() });
+      }
+      dispatch({ type: 'ADD_TOAST', message: action === 'contacted' ? 'Curaleaf contact recorded. Refund and replacement remain locked until cancellation is confirmed.' : 'Curaleaf cancellation confirmed. The paid-order refund action is now unlocked.', toastType: action === 'contacted' ? 'info' : 'success' });
+      setCancellationReference('');
+      setCancellationContactNote('');
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The Curaleaf cancellation step could not be recorded.', toastType: 'error' });
+    } finally { setCancellationBusyOrderId(null); }
+  };
 
   const requestRefund = async (order: PatientOrder, reason: 'patient_cancelled' | 'replacement_price_changed', resolution: 'cancel' | 'replace_new_payment') => {
     if (order.refund || refundBusyOrderId) return;
@@ -450,6 +524,21 @@ export default function Orders() {
               onRequestRefund={(reason, resolution) => void requestRefund(selected.order, reason, resolution)}
               onConfirmRefund={() => void confirmRefund(selected.order)}
               refundBusy={refundBusyOrderId === selected.order.id}
+              cancellationEditorOpen={cancelOrderId === selected.order.id}
+              cancellationReason={cancelReason}
+              cancellationNote={cancelNote}
+              cancellationReference={cancellationReference}
+              cancellationContactNote={cancellationContactNote}
+              cancellationBusy={cancellationBusyOrderId === selected.order.id}
+              onOpenCancellation={() => { setCancelOrderId(selected.order.id); setCancelReason('added_in_error'); setCancelNote(''); }}
+              onCloseCancellation={() => setCancelOrderId(null)}
+              onCancellationReasonChange={setCancelReason}
+              onCancellationNoteChange={setCancelNote}
+              onCancellationReferenceChange={setCancellationReference}
+              onCancellationContactNoteChange={setCancellationContactNote}
+              onRequestCancellation={() => void requestCancellation(selected.order)}
+              onRecordCuraleafContact={() => void recordCuraleafCancellationStep(selected.order, 'contacted')}
+              onConfirmCuraleafCancellation={() => void recordCuraleafCancellationStep(selected.order, 'confirmed')}
             />
           ) : <div className="order-crm-empty order-crm-empty--detail"><Package size={38} /><strong>Select an order</strong><span>Customer journey, payment and fulfilment information will appear here.</span></div>}
         </main>
@@ -476,7 +565,7 @@ function OrderListRow({ record, selected, onSelect }: { record: OrderRecord; sel
   );
 }
 
-function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, onSendCuraleaf, onRedo, onPrint, busy, receiptDrafts, fulfilmentBusyRxId, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, refundReference, onRefundReferenceChange, onRequestRefund, onConfirmRefund, refundBusy }: {
+function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, onSendCuraleaf, onRedo, onPrint, busy, receiptDrafts, fulfilmentBusyRxId, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, refundReference, onRefundReferenceChange, onRequestRefund, onConfirmRefund, refundBusy, cancellationEditorOpen, cancellationReason, cancellationNote, cancellationReference, cancellationContactNote, cancellationBusy, onOpenCancellation, onCloseCancellation, onCancellationReasonChange, onCancellationNoteChange, onCancellationReferenceChange, onCancellationContactNoteChange, onRequestCancellation, onRecordCuraleafContact, onConfirmCuraleafCancellation }: {
   record: OrderRecord;
   manualForm: ManualPaymentForm;
   onManualFormChange: (patch: Partial<ManualPaymentForm>) => void;
@@ -496,6 +585,21 @@ function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, o
   onRequestRefund: (reason: 'patient_cancelled' | 'replacement_price_changed', resolution: 'cancel' | 'replace_new_payment') => void;
   onConfirmRefund: () => void;
   refundBusy: boolean;
+  cancellationEditorOpen: boolean;
+  cancellationReason: 'added_in_error' | 'patient_request' | 'other';
+  cancellationNote: string;
+  cancellationReference: string;
+  cancellationContactNote: string;
+  cancellationBusy: boolean;
+  onOpenCancellation: () => void;
+  onCloseCancellation: () => void;
+  onCancellationReasonChange: (reason: 'added_in_error' | 'patient_request' | 'other') => void;
+  onCancellationNoteChange: (note: string) => void;
+  onCancellationReferenceChange: (reference: string) => void;
+  onCancellationContactNoteChange: (note: string) => void;
+  onRequestCancellation: () => void;
+  onRecordCuraleafContact: () => void;
+  onConfirmCuraleafCancellation: () => void;
 }) {
   const { order, patient, stage } = record;
   const meta = STAGE_META[stage];
@@ -503,6 +607,8 @@ function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, o
   const allPlaced = order.prescriptions.length > 0 && order.prescriptions.every(prescription => prescription.placed);
   const canRedo = Boolean(record.unresolvedReason) && (stage === 'rejected' || stage === 'archived');
   const paymentFormVisible = stage === 'awaiting-payment' && order.payment.route === 'pharmacy';
+  const curaleafCancellationLocked = Boolean(order.curaleafCancellation && order.curaleafCancellation.status !== 'confirmed');
+  const mayCancel = !order.cancellation && !['collected', 'cancelled'].includes(stage);
 
   return (
     <article className="order-crm-record">
@@ -513,11 +619,32 @@ function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, o
         </div>
         <div className="order-crm-record__value"><small>Patient total</small><strong>{money(order.payment.amount)}</strong><span className={`order-stage-pill order-tone--${meta.tone}`}>{meta.label}</span></div>
         <div className="order-crm-record__actions">
+          {mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenCancellation}><XCircle size={13} /> Cancel order</button> : null}
           <button type="button" className="btn btn-secondary btn-sm" onClick={onPrint}><Printer size={13} /> Print</button>
         </div>
       </header>
 
       <JourneyRail stage={stage} paymentPaid={order.payment.status === 'paid'} />
+
+      {(cancellationEditorOpen || order.cancellation) ? (
+        <OrderCancellationPanel
+          order={order}
+          editorOpen={cancellationEditorOpen}
+          reason={cancellationReason}
+          note={cancellationNote}
+          reference={cancellationReference}
+          contactNote={cancellationContactNote}
+          busy={cancellationBusy}
+          onClose={onCloseCancellation}
+          onReasonChange={onCancellationReasonChange}
+          onNoteChange={onCancellationNoteChange}
+          onReferenceChange={onCancellationReferenceChange}
+          onContactNoteChange={onCancellationContactNoteChange}
+          onRequest={onRequestCancellation}
+          onRecordContact={onRecordCuraleafContact}
+          onConfirm={onConfirmCuraleafCancellation}
+        />
+      ) : null}
 
       {(stage === 'curaleaf-approved' || stage === 'dispatched') ? <DeliveryExpectation order={order} /> : null}
 
@@ -529,7 +656,11 @@ function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, o
       ) : null}
 
       {(stage === 'rejected' || stage === 'archived') && order.payment.status === 'paid' ? (
-        <PaidExceptionResolution order={order} canReplace={canRedo} busy={refundBusy} refundReference={refundReference} onRefundReferenceChange={onRefundReferenceChange} onReplace={onRedo} onRequestRefund={onRequestRefund} onConfirmRefund={onConfirmRefund} />
+        <PaidExceptionResolution order={order} canReplace={canRedo} lockedByCuraleaf={curaleafCancellationLocked} busy={refundBusy} refundReference={refundReference} onRefundReferenceChange={onRefundReferenceChange} onReplace={onRedo} onRequestRefund={onRequestRefund} onConfirmRefund={onConfirmRefund} />
+      ) : null}
+
+      {stage === 'cancelled' && order.payment.status === 'paid' && order.cancellation?.status === 'refund_required' ? (
+        <PaidExceptionResolution order={order} canReplace={false} lockedByCuraleaf={curaleafCancellationLocked} busy={refundBusy} refundReference={refundReference} onRefundReferenceChange={onRefundReferenceChange} onReplace={onRedo} onRequestRefund={onRequestRefund} onConfirmRefund={onConfirmRefund} />
       ) : null}
 
       <div className="order-crm-record__body">
@@ -643,9 +774,73 @@ function DeliveryExpectation({ order }: { order: PatientOrder }) {
   );
 }
 
-function PaidExceptionResolution({ order, canReplace, busy, refundReference, onRefundReferenceChange, onReplace, onRequestRefund, onConfirmRefund }: {
+function OrderCancellationPanel({ order, editorOpen, reason, note, reference, contactNote, busy, onClose, onReasonChange, onNoteChange, onReferenceChange, onContactNoteChange, onRequest, onRecordContact, onConfirm }: {
+  order: PatientOrder;
+  editorOpen: boolean;
+  reason: 'added_in_error' | 'patient_request' | 'other';
+  note: string;
+  reference: string;
+  contactNote: string;
+  busy: boolean;
+  onClose: () => void;
+  onReasonChange: (reason: 'added_in_error' | 'patient_request' | 'other') => void;
+  onNoteChange: (note: string) => void;
+  onReferenceChange: (reference: string) => void;
+  onContactNoteChange: (note: string) => void;
+  onRequest: () => void;
+  onRecordContact: () => void;
+  onConfirm: () => void;
+}) {
+  const supplier = order.curaleafCancellation;
+  const hasCuraleafOrder = order.prescriptions.some(prescription => prescription.placed || prescription.poRef);
+  if (!order.cancellation && editorOpen) return (
+    <section className="order-cancellation-card order-cancellation-card--compose">
+      <header><span><small>Controlled cancellation</small><strong>Cancel {orderReference(order)}</strong></span><button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Keep order</button></header>
+      <div className="order-cancellation-warning"><AlertTriangle size={16} /><span><strong>{hasCuraleafOrder ? 'Curaleaf must be contacted first' : order.payment.status === 'paid' ? 'This is a paid order' : 'The payment request will be retired'}</strong><small>{hasCuraleafOrder ? 'Refund and replacement actions remain locked until Curaleaf confirms cancellation.' : order.payment.status === 'paid' ? 'The pharmacy will receive an action to refund the patient and record the reference.' : 'The order and link are cancelled in HHH. A late provider payment will be flagged for refund.'}</small></span></div>
+      <div className="order-cancellation-fields">
+        <label><span>Reason</span><select className="input select" value={reason} onChange={event => onReasonChange(event.target.value as typeof reason)}><option value="added_in_error">Prescription added in error</option><option value="patient_request">Patient requested cancellation</option><option value="other">Other</option></select></label>
+        <label><span>Cancellation note</span><textarea className="input" value={note} onChange={event => onNoteChange(event.target.value)} placeholder="Briefly explain what was added incorrectly" /></label>
+      </div>
+      <footer><button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={onRequest}><XCircle size={13} /> {busy ? 'Recording…' : hasCuraleafOrder ? 'Open cancellation workflow' : 'Cancel order'}</button></footer>
+    </section>
+  );
+
+  if (!order.cancellation) return null;
+  if (supplier?.status === 'contact_required') return (
+    <section className="order-cancellation-card order-cancellation-card--supplier">
+      <header><span><small>Step 1 of 2 · Supplier cancellation</small><strong>Call Curaleaf Customer Service</strong></span><span className="pill pill-red">Refund locked</span></header>
+      <div className="order-cancellation-instruction"><PhoneCall size={18} /><span><strong>Ask Curaleaf to cancel this prescription order</strong><small>Use the pharmacy’s Curaleaf support route. Do not refund the patient or create a replacement until Curaleaf confirms cancellation.</small></span></div>
+      <dl className="order-cancellation-refs"><div><dt>Purchase order</dt><dd><code>{supplier.purchaseOrderId ?? order.prescriptions.find(prescription => prescription.poRef)?.poRef ?? 'Not returned'}</code></dd></div><div><dt>Prescription</dt><dd><code>{supplier.prescriptionId ?? order.prescriptions.find(prescription => prescription.curaleafPrescriptionId)?.curaleafPrescriptionId ?? 'Not returned'}</code></dd></div></dl>
+      <div className="order-cancellation-fields"><label><span>Curaleaf contact / case reference</span><input className="input" value={reference} onChange={event => onReferenceChange(event.target.value)} placeholder="Case, call or agent reference" /></label><label><span>Contact note</span><textarea className="input" value={contactNote} onChange={event => onContactNoteChange(event.target.value)} placeholder="Who was contacted and what they advised" /></label></div>
+      <footer><button type="button" className="btn btn-primary btn-sm" disabled={busy || reference.trim().length < 3} onClick={onRecordContact}><PhoneCall size={13} /> {busy ? 'Saving…' : 'Record Curaleaf contacted'}</button></footer>
+    </section>
+  );
+
+  if (supplier?.status === 'awaiting_confirmation') return (
+    <section className="order-cancellation-card order-cancellation-card--waiting">
+      <header><span><small>Step 2 of 2 · Supplier confirmation</small><strong>Waiting for Curaleaf to confirm cancellation</strong></span><span className="pill pill-amber">Refund locked</span></header>
+      <div className="order-cancellation-warning"><Clock3 size={16} /><span><strong>Curaleaf contact recorded</strong><small>Contact reference {supplier.contactReference ?? 'recorded'}. Only confirm below once Curaleaf has explicitly cancelled the order.</small></span></div>
+      <div className="order-cancellation-fields"><label><span>Curaleaf cancellation confirmation</span><input className="input" value={reference} onChange={event => onReferenceChange(event.target.value)} placeholder="Cancellation / confirmation reference" /></label></div>
+      <footer><button type="button" className="btn btn-primary btn-sm" disabled={busy || reference.trim().length < 3} onClick={onConfirm}><CheckCircle2 size={13} /> {busy ? 'Confirming…' : 'Confirm Curaleaf cancelled'}</button></footer>
+    </section>
+  );
+
+  if (supplier?.status === 'confirmed') return (
+    <section className="order-cancellation-card order-cancellation-card--confirmed"><CheckCircle2 size={18} /><span><strong>Curaleaf cancellation confirmed</strong><small>Confirmation {supplier.confirmationReference ?? 'recorded'}. {order.payment.status === 'paid' ? 'The pharmacy refund action is now unlocked.' : 'No settled payment requires refunding.'}</small></span></section>
+  );
+
+  return (
+    <section className={`order-cancellation-card ${order.cancellation.status === 'refund_required' ? 'order-cancellation-card--supplier' : 'order-cancellation-card--confirmed'}`}>
+      {order.cancellation.status === 'refund_required' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+      <span><strong>{order.cancellation.status === 'refund_required' ? 'Paid cancellation requires pharmacy action' : 'Order cancelled'}</strong><small>{order.cancellation.status === 'refund_required' ? `Refund the patient using payment ID ${order.cancellation.paymentReference ?? order.payment.ref ?? 'shown below'}.` : order.cancellation.paymentLinkStatus === 'cancelled_in_platform' ? 'The HHH payment request has been retired. Any late Worldpay payment will be flagged for refund.' : 'Cancellation is retained in the audit history.'}</small></span>
+    </section>
+  );
+}
+
+function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf, busy, refundReference, onRefundReferenceChange, onReplace, onRequestRefund, onConfirmRefund }: {
   order: PatientOrder;
   canReplace: boolean;
+  lockedByCuraleaf: boolean;
   busy: boolean;
   refundReference: string;
   onRefundReferenceChange: (value: string) => void;
@@ -658,7 +853,7 @@ function PaidExceptionResolution({ order, canReplace, busy, refundReference, onR
   return (
     <section className={`order-resolution${order.refund?.status === 'completed' ? ' order-resolution--complete' : ''}`}>
       <header>
-        <span><small>Paid-order resolution</small><strong>{order.refund?.status === 'completed' ? 'Refund completed' : order.refund ? 'Manual refund awaiting confirmation' : 'Choose replacement or refund'}</strong></span>
+        <span><small>Paid-order resolution</small><strong>{order.refund?.status === 'completed' ? 'Refund completed' : order.refund ? 'Manual refund awaiting confirmation' : canReplace ? 'Choose replacement or refund' : 'Prepare patient refund'}</strong></span>
         <span className="order-resolution__amount"><small>Patient paid</small><strong>{money(order.payment.amount)}</strong></span>
       </header>
       <div className="order-resolution__reference">
@@ -666,7 +861,9 @@ function PaidExceptionResolution({ order, canReplace, busy, refundReference, onR
         <span><small>{method} payment ID</small><code>{reference}</code></span>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => void navigator.clipboard.writeText(reference)}>Copy ID</button>
       </div>
-      {!order.refund ? (
+      {lockedByCuraleaf ? (
+        <div className="order-resolution__locked"><ShieldAlert size={16} /><span><strong>Refund and replacement locked</strong><small>Record Curaleaf contact and cancellation confirmation above before continuing.</small></span></div>
+      ) : !order.refund ? (
         <div className="order-resolution__choices">
           {canReplace ? <button type="button" className="btn btn-primary btn-sm" onClick={onReplace}><RefreshCw size={13} /> Create replacement</button> : null}
           <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => onRequestRefund('patient_cancelled', 'cancel')}><XCircle size={13} /> Cancel & prepare full refund</button>
@@ -686,6 +883,15 @@ function PaidExceptionResolution({ order, canReplace, busy, refundReference, onR
 }
 
 function JourneyRail({ stage, paymentPaid }: { stage: OrderStage; paymentPaid: boolean }) {
+  if (stage === 'cancelled') {
+    const phases = [
+      { label: 'Payment', detail: paymentPaid ? 'Cleared' : 'Cancelled', complete: paymentPaid },
+      { label: 'Curaleaf', detail: 'Cancelled', complete: true },
+      { label: 'Delivery', detail: 'Stopped', complete: false },
+      { label: 'Collection', detail: 'Not required', complete: false },
+    ];
+    return <ol className="order-journey-rail">{phases.map((phase, index) => <li key={phase.label} className={phase.complete ? 'complete' : ''}><span>{phase.complete ? <Check size={12} /> : index + 1}</span><div><strong>{phase.label}</strong><small>{phase.detail}</small></div></li>)}</ol>;
+  }
   const curaleafComplete = ['curaleaf-approved', 'dispatched', 'delivered', 'ready', 'collected'].includes(stage);
   const deliveryComplete = ['delivered', 'ready', 'collected'].includes(stage);
   const collectionComplete = stage === 'collected';
@@ -751,6 +957,9 @@ function OrderTimeline({ order }: { order: PatientOrder }) {
   if (order.payment.sentAt) events.push({ label: 'Payment requested', detail: order.payment.route === 'worldpay' ? 'Worldpay payment link created' : 'Pharmacy payment selected', date: order.payment.sentAt });
   if (order.payment.paidAt) events.push({ label: 'Payment cleared', detail: `${money(order.payment.amount)} received`, date: order.payment.paidAt });
   if (order.curaleafApprovedAt) events.push({ label: 'Curaleaf approved', detail: 'Delivery service window started', date: order.curaleafApprovedAt });
+  if (order.cancellation) events.push({ label: 'Cancellation requested', detail: order.curaleafCancellation ? 'Curaleaf cancellation workflow opened' : 'Order cancellation recorded', date: order.cancellation.requestedAt });
+  if (order.curaleafCancellation?.contactedAt) events.push({ label: 'Curaleaf contacted', detail: `Reference ${order.curaleafCancellation.contactReference ?? 'recorded'}`, date: order.curaleafCancellation.contactedAt });
+  if (order.curaleafCancellation?.confirmedAt) events.push({ label: 'Curaleaf cancellation confirmed', detail: `Confirmation ${order.curaleafCancellation.confirmationReference ?? 'recorded'}`, date: order.curaleafCancellation.confirmedAt });
   order.prescriptions.forEach((prescription, index) => {
     if (prescription.placed) events.push({ label: `Rx ${index + 1} sent to Curaleaf`, detail: prescription.poRef ? `PO ${prescription.poRef}` : 'Awaiting supplier reference', date: order.payment.paidAt ?? order.date });
     if (prescription.goodsInAt) events.push({ label: `Rx ${index + 1} delivered`, detail: prescription.goodsInBy ? `Received by ${prescription.goodsInBy}` : 'Received by pharmacy', date: prescription.goodsInAt });

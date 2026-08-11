@@ -80,44 +80,67 @@ export async function reconcileWorldpayPaymentDocument(
   const updatedAt = nowIso();
   const orderReference = firestore.collection('orders').doc(orderId);
   const order = await orderReference.get();
+  const orderData = order.data();
+  const cancelledOrder = orderData?.status === 'cancelled' || Boolean(orderData?.cancellation);
+  const latePaymentAfterCancellation = cancelledOrder && provider.paymentStatus === 'paid';
+  const effectivePaymentStatus: PaymentStatus = latePaymentAfterCancellation ? 'refund_required' : provider.paymentStatus;
   const batch = firestore.batch();
   batch.update(paymentDocument.ref, {
-    status: provider.paymentStatus,
+    status: effectivePaymentStatus,
     providerPaymentId: provider.paymentId,
     providerStatus: provider.providerStatus,
     providerResponse: provider.payment,
+    latePaymentAfterCancellation,
     reconciliationReason: null,
     reconciledAt: updatedAt,
     updatedAt,
   });
-  const shouldUpdateOrder = provider.paymentStatus !== 'pending'
-    && (provider.paymentStatus === 'paid' || order.data()?.paymentId === paymentDocument.id);
+  const shouldUpdateOrder = effectivePaymentStatus !== 'pending'
+    && (effectivePaymentStatus === 'paid' || effectivePaymentStatus === 'refund_required' || orderData?.paymentId === paymentDocument.id);
   if (shouldUpdateOrder) {
     batch.update(orderReference, {
-      paymentStatus: provider.paymentStatus,
+      paymentStatus: effectivePaymentStatus,
       worldpayPaymentId: provider.paymentId,
       paymentTransactionReference: transactionReference,
+      ...(latePaymentAfterCancellation ? {
+        'cancellation.status': 'refund_required',
+        'cancellation.paymentLinkStatus': 'late_payment_refund_required',
+      } : {}),
       updatedAt,
     });
+  }
+  if (latePaymentAfterCancellation) {
+    const notificationId = `${organisationId}--${orderId}--late-worldpay-payment`;
+    batch.set(firestore.collection('pharmacyNotifications').doc(notificationId), {
+      id: notificationId,
+      organisationId,
+      orderId,
+      type: 'late_payment_after_cancellation',
+      status: 'open',
+      title: 'Cancelled order was paid',
+      detail: 'Worldpay settled after the order was cancelled. Refund the patient and record the provider reference.',
+      paymentReference: provider.paymentId ?? transactionReference,
+      createdAt: updatedAt,
+      updatedAt,
+    }, { merge: true });
   }
   await batch.commit();
   invalidateCollectionCache('payments', paymentDocument.id);
   if (shouldUpdateOrder) invalidateCollectionCache('orders', orderId);
   return {
     state: 'reconciled',
-    paymentStatus: provider.paymentStatus,
+    paymentStatus: effectivePaymentStatus,
     paymentId: provider.paymentId,
     providerStatus: provider.providerStatus,
   };
 }
 
 export async function reconcilePendingWorldpayPayments(limit = 200) {
-  const snapshot = await firestore.collection('payments')
-    .where('route', '==', 'worldpay')
-    .where('status', '==', 'pending')
-    .limit(limit)
-    .get();
-  const candidates = snapshot.docs;
+  const [pendingSnapshot, cancelledSnapshot] = await Promise.all([
+    firestore.collection('payments').where('route', '==', 'worldpay').where('status', '==', 'pending').limit(limit).get(),
+    firestore.collection('payments').where('route', '==', 'worldpay').where('status', '==', 'cancelled').limit(limit).get(),
+  ]);
+  const candidates = [...pendingSnapshot.docs, ...cancelledSnapshot.docs].slice(0, limit);
   const summary = { checked: candidates.length, reconciled: 0, pending: 0, attention: 0, errors: 0 };
   for (const document of candidates) {
     try {

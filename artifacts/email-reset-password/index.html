@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Eastwood Health — Email preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #eef4f2;
+      color: #17231f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(70, 194, 171, .12), transparent 34rem),
+        #eef4f2;
+    }
+
+    button,
+    a {
+      font: inherit;
+    }
+
+    .preview-header {
+      position: sticky;
+      z-index: 5;
+      top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: 72px;
+      padding: 14px 24px;
+      border-bottom: 1px solid #d6e0dd;
+      background: rgba(249, 252, 251, .94);
+      box-shadow: 0 6px 28px rgba(31, 63, 55, .06);
+      backdrop-filter: blur(14px);
+    }
+
+    .preview-title {
+      min-width: 0;
+    }
+
+    .preview-title strong,
+    .preview-title span {
+      display: block;
+    }
+
+    .preview-title strong {
+      font-size: 15px;
+      letter-spacing: -.01em;
+    }
+
+    .preview-title span {
+      margin-top: 3px;
+      overflow: hidden;
+      color: #65736f;
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .preview-actions {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .device-toggle {
+      display: flex;
+      padding: 3px;
+      border: 1px solid #d6e0dd;
+      border-radius: 9px;
+      background: #edf3f1;
+    }
+
+    .device-button,
+    .open-email {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      border: 0;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .device-button {
+      min-width: 74px;
+      padding: 0 12px;
+      color: #65736f;
+      background: transparent;
+    }
+
+    .device-button[aria-pressed="true"] {
+      color: #124d42;
+      background: #ffffff;
+      box-shadow: 0 1px 5px rgba(28, 66, 57, .13);
+    }
+
+    .open-email {
+      padding: 0 14px;
+      color: #ffffff;
+      background: #166f5f;
+      text-decoration: none;
+    }
+
+    .preview-main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 26px auto 56px;
+    }
+
+    .message-meta {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      border: 1px solid #d4dfdc;
+      border-radius: 12px 12px 0 0;
+      background: #ffffff;
+    }
+
+    .sender-mark {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      color: #ffffff;
+      background: #21b29a;
+      font-size: 16px;
+      font-weight: 800;
+      place-items: center;
+    }
+
+    .message-copy {
+      min-width: 0;
+    }
+
+    .message-copy strong,
+    .message-copy span {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .message-copy strong {
+      font-size: 13px;
+    }
+
+    .message-copy span,
+    .message-time {
+      margin-top: 3px;
+      color: #6b7874;
+      font-size: 11px;
+    }
+
+    .message-time {
+      margin: 0;
+    }
+
+    .preview-stage {
+      display: flex;
+      justify-content: center;
+      min-height: 720px;
+      padding: 30px;
+      overflow: auto;
+      border: 1px solid #d4dfdc;
+      border-top: 0;
+      border-radius: 0 0 12px 12px;
+      background: #dfe8e5;
+      background-image: linear-gradient(45deg, rgba(255,255,255,.25) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.25) 75%), linear-gradient(45deg, rgba(255,255,255,.25) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.25) 75%);
+      background-position: 0 0, 12px 12px;
+      background-size: 24px 24px;
+    }
+
+    .preview-viewport {
+      width: 760px;
+      max-width: 100%;
+      overflow: hidden;
+      border-radius: 11px;
+      background: #f3f8f7;
+      box-shadow: 0 20px 60px rgba(28, 61, 53, .18);
+      transition: width 220ms ease;
+    }
+
+    .preview-viewport[data-device="mobile"] {
+      width: 390px;
+    }
+
+    iframe {
+      display: block;
+      width: 100%;
+      min-height: 980px;
+      border: 0;
+      background: #f3f8f7;
+    }
+
+    @media (max-width: 720px) {
+      .preview-header {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 13px 16px;
+      }
+
+      .preview-actions {
+        width: 100%;
+      }
+
+      .device-toggle {
+        flex: 1 1 auto;
+      }
+
+      .device-button {
+        flex: 1 1 50%;
+      }
+
+      .open-email {
+        flex: 0 0 auto;
+      }
+
+      .preview-main {
+        width: calc(100% - 20px);
+        margin-top: 14px;
+      }
+
+      .preview-stage {
+        padding: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="preview-header">
+    <div class="preview-title">
+      <strong>Email preview</strong>
+      <span>Eastwood Health · Password reset</span>
+    </div>
+    <div class="preview-actions">
+      <div class="device-toggle" role="group" aria-label="Preview width">
+        <button class="device-button" type="button" data-device="desktop" aria-pressed="true">Desktop</button>
+        <button class="device-button" type="button" data-device="mobile" aria-pressed="false">Mobile</button>
+      </div>
+      <a class="open-email" href="email.html" target="_blank" rel="noreferrer">Open email</a>
+    </div>
+  </header>
+
+  <main class="preview-main">
+    <section aria-label="Email message preview">
+      <div class="message-meta">
+        <div class="sender-mark" aria-hidden="true">E</div>
+        <div class="message-copy">
+          <strong>Eastwood Health</strong>
+          <span>Reset your password</span>
+        </div>
+        <span class="message-time">10:24</span>
+      </div>
+      <div class="preview-stage">
+        <div class="preview-viewport" id="previewViewport" data-device="desktop">
+          <iframe id="emailFrame" src="email.html" title="Eastwood Health password-reset email"></iframe>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const viewport = document.querySelector('#previewViewport');
+    const frame = document.querySelector('#emailFrame');
+    const deviceButtons = [...document.querySelectorAll('.device-button')];
+
+    function resizeFrame() {
+      try {
+        const documentHeight = frame.contentDocument.documentElement.scrollHeight;
+        frame.style.height = `${documentHeight}px`;
+      } catch {
+        frame.style.height = '1100px';
+      }
+    }
+
+    deviceButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        viewport.dataset.device = button.dataset.device;
+        deviceButtons.forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+        window.setTimeout(resizeFrame, 240);
+      });
+    });
+
+    frame.addEventListener('load', resizeFrame);
+    window.addEventListener('resize', resizeFrame);
+  </script>
+</body>
+</html>

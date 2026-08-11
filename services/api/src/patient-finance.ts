@@ -124,6 +124,8 @@ export async function completeReferral(submissionId: string, actorUid: string, n
       statusChangedAt: patientSnapshot.data()?.statusChangedAt ?? effectiveCompletedAt,
       conditions,
       primaryCondition,
+      referralSource: typeof current.source === 'string' ? current.source : null,
+      marketingConsent: typeof current.marketingConsent === 'boolean' ? current.marketingConsent : null,
       sourceReferralId: submissionId,
       referralCompletedAt: patientSnapshot.data()?.referralCompletedAt ?? effectiveCompletedAt,
       createdAt: patientSnapshot.data()?.createdAt ?? effectiveCompletedAt,

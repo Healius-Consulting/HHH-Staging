@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
-import type { CuraleafCatalogue, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
+import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 
@@ -32,6 +32,8 @@ export interface CRMPatient {
   address?: string;
   conditions?: string[];
   primaryCondition?: string | null;
+  referralSource?: string | null;
+  marketingConsent?: boolean | null;
   status: 'Referred' | 'HHH approved' | 'Suspended';
   interactions?: { ts: Date | string; type: string; detail: string }[];
 }
@@ -94,7 +96,7 @@ export interface Prescription {
   readyAt?: Date | string | null;
 }
 
-export type PaymentStatus = 'none' | 'sent' | 'paid';
+export type PaymentStatus = 'none' | 'sent' | 'paid' | 'cancelled';
 export type PaymentRoute = 'worldpay' | 'pharmacy' | null;
 export type ManualTender = 'epos-card' | 'cash' | 'bank-transfer' | 'other';
 
@@ -150,6 +152,8 @@ export interface PatientOrder {
   prescriptions: Prescription[];
   curaleafApprovedAt?: Date | string | null;
   refund?: OrderRefundState;
+  cancellation?: OrderCancellationState;
+  curaleafCancellation?: CuraleafCancellationState;
   pharmacyContribution?: number;
   quoteReview?: PortalOrderRecord['quoteReview'];
   redoContext?: OrderRedoContext;
@@ -410,23 +414,25 @@ export const ORGANISATIONS: PharmacyTenant[] = [
 
 
 const SEED_CRM: CRMPatient[] = [
-  { id: 'P-1001', organisationId: ORGANISATIONS[0].id, name: 'James Doe',        email: 'j.doe@email.com',      mobile: '07700 900111', dob: '1988-06-14', address: '12 High St, Leeds LS1 4AB',     status: 'HHH approved' },
+  { id: 'P-1001', organisationId: ORGANISATIONS[0].id, name: 'James Doe',        email: 'j.doe@email.com',      mobile: '07700 900111', dob: '1988-06-14', address: '12 High St, Leeds LS1 4AB',     conditions: ['chronic-pain', 'low-back-pain-and-sciatica'], primaryCondition: 'chronic-pain', referralSource: 'Google', marketingConsent: false, status: 'HHH approved' },
   { id: 'P-1002', organisationId: ORGANISATIONS[0].id, name: 'Aisha Smith',      email: 'a.smith@email.com',    mobile: '07700 900222', dob: '1992-09-03', address: '4 Oak Rd, Leeds LS2 8PQ',       status: 'HHH approved',
+    conditions: ['anxiety', 'insomnia'], primaryCondition: 'anxiety', referralSource: 'Pharmacy website', marketingConsent: true,
     interactions: [
       { ts: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), type: 'Invoice Dispatched', detail: 'Sent Worldpay invoice link for £48.00.' },
       { ts: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), type: 'Prescription Ready', detail: 'Meds received from wholesaler. Sent counter collection alert SMS.' }
     ]
   },
-  { id: 'P-1003', organisationId: ORGANISATIONS[0].id, name: 'Mohammed Khan',    email: 'm.khan@email.com',     mobile: '07700 900333', dob: '1979-12-21', address: '9 Park Ave, Leeds LS6 1RT',     status: 'HHH approved' },
+  { id: 'P-1003', organisationId: ORGANISATIONS[0].id, name: 'Mohammed Khan',    email: 'm.khan@email.com',     mobile: '07700 900333', dob: '1979-12-21', address: '9 Park Ave, Leeds LS6 1RT',     conditions: ['neuropathic-pain'], primaryCondition: 'neuropathic-pain', referralSource: 'Patient recommendation', marketingConsent: false, status: 'HHH approved' },
   { id: 'P-1004', organisationId: ORGANISATIONS[0].id, name: 'Sophie Bennett',   email: 's.bennett@email.com',  mobile: '07700 900444', dob: '1987-04-11', address: '27 Cardigan Rd, Leeds LS6 3AA', status: 'HHH approved',
+    conditions: ['insomnia'], primaryCondition: 'insomnia', referralSource: 'Text message', marketingConsent: false,
     interactions: [
       { ts: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000), type: 'Meds Collected', detail: 'Training record: medicine collected at the pharmacy counter.' }
     ]
   },
-  { id: 'P-1005', organisationId: ORGANISATIONS[0].id, name: "Daniel O'Connor",  email: 'd.oconnor@email.com',  mobile: '07700 900555', dob: '1991-01-30', address: '8 Burley St, Leeds LS3 1JX',    status: 'HHH approved' },
-  { id: 'P-1006', organisationId: ORGANISATIONS[0].id, name: 'Priya Patel',      email: 'p.patel@email.com',    mobile: '07700 900666', dob: '1984-08-16', address: '15 Roundhay Rd, Leeds LS8 5AQ', status: 'HHH approved' },
-  { id: 'P-1007', organisationId: ORGANISATIONS[0].id, name: 'Liam Murphy',      email: 'l.murphy@email.com',   mobile: '07700 900777', dob: '1975-05-24', address: '3 Kirkstall Ln, Leeds LS5 3BW', status: 'HHH approved' },
-  { id: 'P-1008', organisationId: ORGANISATIONS[0].id, name: 'Grace Thompson',   email: 'g.thompson@email.com', mobile: '07700 900888', dob: '1996-10-08', address: '41 Otley Rd, Leeds LS16 5JT',   status: 'HHH approved' },
+  { id: 'P-1005', organisationId: ORGANISATIONS[0].id, name: "Daniel O'Connor",  email: 'd.oconnor@email.com',  mobile: '07700 900555', dob: '1991-01-30', address: '8 Burley St, Leeds LS3 1JX',    conditions: ['post-traumatic-stress-disorder'], primaryCondition: 'post-traumatic-stress-disorder', referralSource: 'HHH social media', marketingConsent: true, status: 'HHH approved' },
+  { id: 'P-1006', organisationId: ORGANISATIONS[0].id, name: 'Priya Patel',      email: 'p.patel@email.com',    mobile: '07700 900666', dob: '1984-08-16', address: '15 Roundhay Rd, Leeds LS8 5AQ', conditions: ['fibromyalgia', 'chronic-pain'], primaryCondition: 'fibromyalgia', referralSource: 'In-pharmacy leaflet', marketingConsent: false, status: 'HHH approved' },
+  { id: 'P-1007', organisationId: ORGANISATIONS[0].id, name: 'Liam Murphy',      email: 'l.murphy@email.com',   mobile: '07700 900777', dob: '1975-05-24', address: '3 Kirkstall Ln, Leeds LS5 3BW', conditions: ['arthritis'], primaryCondition: 'arthritis', referralSource: 'Google', marketingConsent: false, status: 'HHH approved' },
+  { id: 'P-1008', organisationId: ORGANISATIONS[0].id, name: 'Grace Thompson',   email: 'g.thompson@email.com', mobile: '07700 900888', dob: '1996-10-08', address: '41 Otley Rd, Leeds LS16 5JT',   conditions: ['migraine'], primaryCondition: 'migraine', referralSource: 'Pharmacy website', marketingConsent: true, status: 'HHH approved' },
   { id: 'P-1009', organisationId: ORGANISATIONS[1].id, name: 'Daniel Price',     email: 'd.price@email.com',    mobile: '07700 900503', dob: '1977-07-23', address: 'LS2 7DR',                       status: 'HHH approved' },
 ];
 
@@ -639,6 +645,10 @@ export type Action =
   | { type: 'START_ORDER_REFUND'; orderId: number; reason: OrderRefundState['reason']; resolution: OrderRefundState['resolution'] }
   | { type: 'CONFIRM_ORDER_REFUND'; orderId: number; externalReference: string }
   | { type: 'SET_ORDER_REFUND'; orderId: number; refund: OrderRefundState }
+  | { type: 'REQUEST_ORDER_CANCELLATION'; orderId: number; reason: OrderCancellationState['reason']; note?: string }
+  | { type: 'RECORD_CURALEAF_CANCELLATION_CONTACT'; orderId: number; reference: string; note?: string }
+  | { type: 'CONFIRM_CURALEAF_CANCELLATION'; orderId: number; reference: string }
+  | { type: 'SET_ORDER_CANCELLATION'; orderId: number; cancellation: OrderCancellationState; curaleafCancellation?: CuraleafCancellationState; lifecycleStatus?: string; paymentStatus?: PaymentStatus }
   | { type: 'CONFIRM_PAYMENT'; orderId: number }
   | { type: 'RECORD_MANUAL_PAYMENT'; orderId: number; tender: ManualTender; reference?: string; notes?: string }
   // Submission to Curaleaf.
@@ -739,6 +749,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
         shipmentId: record.curaleaf?.shipmentIds?.[0],
       }];
   const paid = ['paid', 'refund_required', 'refunded'].includes(record.paymentStatus);
+  const cancelled = record.paymentStatus === 'cancelled';
   const redoSourceBackendId = record.redoContext ? String(record.redoOfOrderId ?? record.redoContext.originalOrderId) : null;
   let redoSource = redoSourceBackendId ? records.find(candidate => candidate.id === redoSourceBackendId) : undefined;
   let redoSequence = 0;
@@ -761,7 +772,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
     date: new Date(record.createdAt),
     dispensingFee: record.dispensingFeePence / 100,
     payment: {
-      status: paid ? 'paid' : 'sent',
+      status: paid ? 'paid' : cancelled ? 'cancelled' : 'sent',
       route: record.paymentRoute === 'manual' ? 'pharmacy' : 'worldpay',
       amount: record.totalPence / 100,
       ref: record.worldpayPaymentId ?? record.paymentTransactionReference ?? record.paymentId ?? null,
@@ -775,6 +786,8 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
     prescriptions,
     curaleafApprovedAt: record.curaleafApprovedAt ?? null,
     refund: record.refund,
+    cancellation: record.cancellation,
+    curaleafCancellation: record.curaleafCancellation,
     pharmacyContribution: record.pharmacyContributionPence ? record.pharmacyContributionPence / 100 : 0,
     quoteReview: record.quoteReview,
     lifecycleStatus: record.status,
@@ -1326,7 +1339,7 @@ function reducer(state: AppState, action: Action): AppState {
       const approvedAt = new Date();
       return {
         ...state,
-        crm: existing ? state.crm.map(patient => patient.id === existing.id ? { ...patient, dob: sub.dob, conditions: sub.conditions, primaryCondition: sub.primaryCondition, status: 'HHH approved' as const } : patient) : [...state.crm, {
+        crm: existing ? state.crm.map(patient => patient.id === existing.id ? { ...patient, dob: sub.dob, conditions: sub.conditions, primaryCondition: sub.primaryCondition, referralSource: sub.source, marketingConsent: sub.marketing, status: 'HHH approved' as const } : patient) : [...state.crm, {
           id: patientId,
           organisationId: sub.organisationId,
           name: sub.name,
@@ -1336,6 +1349,8 @@ function reducer(state: AppState, action: Action): AppState {
           address: sub.postcode,
           conditions: sub.conditions,
           primaryCondition: sub.primaryCondition,
+          referralSource: sub.source,
+          marketingConsent: sub.marketing,
           status: 'HHH approved' as const,
           interactions: [{ ts: approvedAt, type: 'HHH onboarding approved', detail: `${approvedBy} approved programme onboarding after patient review.` }],
         }],
@@ -1653,6 +1668,66 @@ function reducer(state: AppState, action: Action): AppState {
       } : order);
     case 'SET_ORDER_REFUND':
       return mapOrder(state, action.orderId, order => ({ ...order, refund: action.refund }));
+    case 'REQUEST_ORDER_CANCELLATION':
+      return mapOrder(state, action.orderId, order => {
+        const requestedAt = new Date().toISOString();
+        const hasCuraleafOrder = order.prescriptions.some(prescription => prescription.placed || prescription.poRef);
+        return {
+          ...order,
+          lifecycleStatus: hasCuraleafOrder ? order.lifecycleStatus : 'cancelled',
+          payment: hasCuraleafOrder || order.payment.status === 'paid' ? order.payment : { ...order.payment, status: 'cancelled' },
+          cancellation: {
+            status: hasCuraleafOrder ? 'curaleaf_contact_required' : order.payment.status === 'paid' ? 'refund_required' : 'cancelled',
+            reason: action.reason,
+            note: action.note?.trim() || null,
+            requestedAt,
+            requestedBy: state.staffSession?.name ?? 'Pharmacy staff',
+            paymentLinkStatus: order.payment.status === 'sent' ? 'cancelled_in_platform' : 'not_applicable',
+            paymentReference: order.payment.ref,
+          },
+          curaleafCancellation: hasCuraleafOrder ? {
+            status: 'contact_required',
+            purchaseOrderId: order.prescriptions.find(prescription => prescription.poRef)?.poRef ?? null,
+            prescriptionId: order.prescriptions.find(prescription => prescription.curaleafPrescriptionId)?.curaleafPrescriptionId ?? null,
+            requestedAt,
+            requestedBy: state.staffSession?.name ?? 'Pharmacy staff',
+          } : order.curaleafCancellation,
+        };
+      });
+    case 'RECORD_CURALEAF_CANCELLATION_CONTACT':
+      return mapOrder(state, action.orderId, order => order.curaleafCancellation ? ({
+        ...order,
+        cancellation: order.cancellation ? { ...order.cancellation, status: 'awaiting_curaleaf_confirmation' } : order.cancellation,
+        curaleafCancellation: {
+          ...order.curaleafCancellation,
+          status: 'awaiting_confirmation',
+          contactReference: action.reference,
+          contactNote: action.note?.trim() || null,
+          contactedAt: new Date().toISOString(),
+          contactedBy: state.staffSession?.name ?? 'Pharmacy staff',
+        },
+      }) : order);
+    case 'CONFIRM_CURALEAF_CANCELLATION':
+      return mapOrder(state, action.orderId, order => order.curaleafCancellation ? ({
+        ...order,
+        lifecycleStatus: 'cancelled',
+        cancellation: order.cancellation ? { ...order.cancellation, status: order.payment.status === 'paid' ? 'refund_required' : 'cancelled' } : order.cancellation,
+        curaleafCancellation: {
+          ...order.curaleafCancellation,
+          status: 'confirmed',
+          confirmationReference: action.reference,
+          confirmedAt: new Date().toISOString(),
+          confirmedBy: state.staffSession?.name ?? 'Pharmacy staff',
+        },
+      }) : order);
+    case 'SET_ORDER_CANCELLATION':
+      return mapOrder(state, action.orderId, order => ({
+        ...order,
+        cancellation: action.cancellation,
+        curaleafCancellation: action.curaleafCancellation ?? order.curaleafCancellation,
+        lifecycleStatus: action.lifecycleStatus ?? order.lifecycleStatus,
+        payment: action.paymentStatus ? { ...order.payment, status: action.paymentStatus } : order.payment,
+      }));
     case 'CONFIRM_PAYMENT':
       return mapOrder(state, action.orderId, o => ({
         ...o,
@@ -1854,6 +1929,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           address: [record.address, record.postcode].filter(Boolean).join(', '),
           conditions: record.conditions ?? (record.primaryCondition ? [record.primaryCondition] : []),
           primaryCondition: record.primaryCondition ?? record.conditions?.[0] ?? null,
+          referralSource: record.referralSource ?? null,
+          marketingConsent: record.marketingConsent ?? null,
           status: record.status === 'active' ? 'HHH approved' : record.status === 'referred' ? 'Referred' : 'Suspended',
         })),
       });

@@ -1388,6 +1388,15 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       if (originalOrder.redoneByOrderId) {
         throw new HttpError(409, 'That order has already been redone.', 'REDO_ALREADY_COMPLETED');
       }
+      const originalHasCuraleafOrder = Boolean(
+        originalOrder.curaleaf?.purchaseOrderId
+        || originalOrder.curaleafPurchaseOrderId
+        || originalOrder.curaleaf?.customerReference
+        || originalOrder.curaleafCustomerReference,
+      );
+      if (originalHasCuraleafOrder && originalOrder.curaleafCancellation?.status !== 'confirmed') {
+        throw new HttpError(409, 'Curaleaf must confirm cancellation before a replacement order can be created.', 'CURALEAF_CANCELLATION_REQUIRED');
+      }
       const evaluation = evaluateOrderCycle(originalOrder as Record<string, unknown>);
       if (!evaluation.unresolvedReason || !evaluation.redoEligible) {
         throw new HttpError(409, 'Only archived 28-day or Curaleaf-rejected orders can be redone.', 'REDO_NOT_ELIGIBLE');
@@ -1649,6 +1658,25 @@ app.post('/v1/portal/orders/:id/cancel-and-archive', async (request, response, n
       archivedReason: '28-day prescription cycle expired',
       fulfilmentStatus: evaluation.isPaid ? orderData.fulfilmentStatus : 'exception',
       purchaseOrderCancelSupportCaseId,
+      ...(purchaseOrderCancelSupportCaseId ? {
+        cancellation: {
+          status: 'curaleaf_contact_required',
+          reason: 'other',
+          note: 'Prescription cycle expired; Curaleaf cancellation must be confirmed before refund or replacement.',
+          requestedAt: nowIso(),
+          requestedBy: identity(request).uid,
+          paymentLinkStatus: 'not_applicable',
+          paymentReference: orderData.worldpayPaymentId ?? orderData.paymentTransactionReference ?? orderData.paymentId ?? null,
+        },
+        curaleafCancellation: {
+          status: 'contact_required',
+          purchaseOrderId,
+          prescriptionId: orderData.curaleaf?.prescriptionId ?? null,
+          supportCaseId: purchaseOrderCancelSupportCaseId,
+          requestedAt: nowIso(),
+          requestedBy: identity(request).uid,
+        },
+      } : {}),
       updatedAt: nowIso(),
     });
 
@@ -1668,6 +1696,169 @@ app.post('/v1/portal/orders/:id/cancel-and-archive', async (request, response, n
 /* Post-Payment Placement Engine & Refund Routes                              */
 /* ========================================================================== */
 
+function curaleafOrderReference(order: Record<string, any>) {
+  return {
+    purchaseOrderId: order.curaleaf?.purchaseOrderId ?? order.curaleafPurchaseOrderId ?? null,
+    prescriptionId: order.curaleaf?.prescriptionId ?? order.curaleafPrescriptionId ?? null,
+    customerReference: order.curaleaf?.customerReference ?? order.curaleafCustomerReference ?? null,
+  };
+}
+
+async function openPaidCancellationNotification(organisationId: string, orderId: string, paymentReference: string | null) {
+  const notificationId = createHash('sha256').update(`${organisationId}:${orderId}:paid_order_cancellation`).digest('hex');
+  await firestore.collection('pharmacyNotifications').doc(notificationId).set({
+    id: notificationId,
+    organisationId,
+    orderId,
+    type: 'paid_order_cancellation',
+    status: 'open',
+    title: 'Paid order cancellation requires action',
+    detail: 'Confirm Curaleaf cancellation where applicable, then refund the patient and record the reference.',
+    paymentReference,
+    createdAt: timestamp(),
+    updatedAt: timestamp(),
+  }, { merge: true });
+}
+
+app.post('/v1/portal/orders/:id/cancellations', async (request, response, next) => {
+  try {
+    const input = z.object({
+      organisationId: idSchema.optional(),
+      reason: z.enum(['added_in_error', 'patient_request', 'other']),
+      note: z.string().trim().max(1000).optional(),
+    }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    if (order.status === 'cancelled' && order.cancellation) return response.status(200).json(enrichOrderRecord(order as Record<string, unknown>));
+    if (order.fulfilmentStatus === 'collected') throw new HttpError(409, 'A collected order cannot be cancelled.', 'ORDER_ALREADY_COLLECTED');
+
+    const references = curaleafOrderReference(order);
+    const hasCuraleafOrder = Boolean(references.purchaseOrderId || references.prescriptionId || references.customerReference);
+    const paid = ['paid', 'refund_required'].includes(String(order.paymentStatus));
+    const paymentReference = order.worldpayPaymentId ?? order.paymentTransactionReference ?? order.paymentId ?? null;
+    const requestedAt = nowIso();
+    let supportCaseId: string | null = null;
+
+    if (hasCuraleafOrder) {
+      supportCaseId = createHash('sha256').update(`${organisationId}:${orderId}:purchase_order_cancellation:${references.purchaseOrderId ?? references.customerReference}`).digest('hex');
+      await firestore.collection('curaleafSupportCases').doc(supportCaseId).set({
+        id: supportCaseId,
+        organisationId,
+        orderId,
+        reason: 'purchase_order_cancellation',
+        status: 'open',
+        note: input.note || 'Pharmacy cancellation requested. Contact Curaleaf Customer Service and obtain confirmation before refunding or reordering.',
+        prescriptionId: references.prescriptionId,
+        purchaseOrderId: references.purchaseOrderId,
+        openedBy: identity(request).uid,
+        openedByRole: identity(request).role,
+        openedAt: requestedAt,
+        createdAt: requestedAt,
+        updatedAt: requestedAt,
+      }, { merge: true });
+      invalidateCollectionCache('curaleafSupportCases');
+    }
+
+    const cancellation = {
+      status: hasCuraleafOrder ? 'curaleaf_contact_required' : paid ? 'refund_required' : 'cancelled',
+      reason: input.reason,
+      note: input.note ?? null,
+      requestedAt,
+      requestedBy: identity(request).uid,
+      paymentLinkStatus: order.paymentStatus === 'pending' && order.paymentRoute === 'worldpay' ? 'cancelled_in_platform' : 'not_applicable',
+      paymentReference,
+    };
+    const curaleafCancellation = hasCuraleafOrder ? {
+      status: 'contact_required',
+      purchaseOrderId: references.purchaseOrderId,
+      prescriptionId: references.prescriptionId,
+      supportCaseId,
+      requestedAt,
+      requestedBy: identity(request).uid,
+    } : null;
+
+    const batch = firestore.batch();
+    const orderRef = firestore.collection('orders').doc(orderId);
+    batch.update(orderRef, {
+      cancellation,
+      ...(curaleafCancellation ? { curaleafCancellation } : {}),
+      ...(!hasCuraleafOrder ? { status: 'cancelled', cancelledAt: requestedAt, paymentStatus: paid ? 'refund_required' : 'cancelled' } : {}),
+      updatedAt: requestedAt,
+    });
+    if (!hasCuraleafOrder && !paid && typeof order.paymentId === 'string') {
+      const paymentRef = firestore.collection('payments').doc(order.paymentId);
+      batch.set(paymentRef, { status: 'cancelled', cancelledAt: requestedAt, cancellationReason: input.reason, linkExpiresAt: requestedAt, updatedAt: requestedAt }, { merge: true });
+    }
+    await batch.commit();
+    if (paid) await openPaidCancellationNotification(organisationId, orderId, paymentReference);
+    invalidateCollectionCache('orders', orderId);
+    if (typeof order.paymentId === 'string') invalidateCollectionCache('payments', order.paymentId);
+    await audit(request, 'order.cancellation_requested', { organisationId, orderId, reason: input.reason, paid, hasCuraleafOrder, supportCaseId });
+    const updated = await getTenantRecord('orders', orderId, organisationId);
+    response.status(201).json(enrichOrderRecord(updated as Record<string, unknown>));
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/orders/:id/curaleaf-cancellation', async (request, response, next) => {
+  try {
+    const input = z.object({
+      organisationId: idSchema.optional(),
+      action: z.enum(['contacted', 'confirmed']),
+      reference: z.string().trim().min(3).max(200),
+      note: z.string().trim().max(1000).optional(),
+    }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    const current = order.curaleafCancellation && typeof order.curaleafCancellation === 'object' ? order.curaleafCancellation as Record<string, unknown> : null;
+    if (!current) throw new HttpError(409, 'Request the order cancellation before recording Curaleaf contact.', 'ORDER_CANCELLATION_REQUIRED');
+    if (input.action === 'confirmed' && current.status !== 'awaiting_confirmation') {
+      throw new HttpError(409, 'Record that Curaleaf was contacted before confirming cancellation.', 'CURALEAF_CONTACT_REQUIRED');
+    }
+    const updatedAt = nowIso();
+    const paid = ['paid', 'refund_required'].includes(String(order.paymentStatus));
+    const curaleafCancellation = input.action === 'contacted' ? {
+      ...current,
+      status: 'awaiting_confirmation',
+      contactReference: input.reference,
+      contactNote: input.note ?? null,
+      contactedAt: updatedAt,
+      contactedBy: identity(request).uid,
+    } : {
+      ...current,
+      status: 'confirmed',
+      confirmationReference: input.reference,
+      confirmedAt: updatedAt,
+      confirmedBy: identity(request).uid,
+    };
+    const cancellation = {
+      ...(order.cancellation as Record<string, unknown>),
+      status: input.action === 'contacted' ? 'awaiting_curaleaf_confirmation' : paid ? 'refund_required' : 'cancelled',
+    };
+    await firestore.collection('orders').doc(orderId).update({
+      curaleafCancellation,
+      cancellation,
+      ...(input.action === 'confirmed' ? { status: 'cancelled', cancelledAt: updatedAt, paymentStatus: paid ? 'refund_required' : 'cancelled' } : {}),
+      updatedAt,
+    });
+    if (typeof current.supportCaseId === 'string') {
+      await firestore.collection('curaleafSupportCases').doc(current.supportCaseId).set({
+        status: input.action === 'contacted' ? 'awaiting_supplier' : 'resolved',
+        contactReference: input.action === 'contacted' ? input.reference : current.contactReference ?? null,
+        confirmationReference: input.action === 'confirmed' ? input.reference : null,
+        updatedAt,
+        ...(input.action === 'confirmed' ? { resolvedAt: updatedAt, resolvedBy: identity(request).uid } : {}),
+      }, { merge: true });
+      invalidateCollectionCache('curaleafSupportCases');
+    }
+    invalidateCollectionCache('orders', orderId);
+    await audit(request, input.action === 'contacted' ? 'order.curaleaf_cancellation_contacted' : 'order.curaleaf_cancellation_confirmed', { organisationId, orderId, reference: input.reference });
+    const updated = await getTenantRecord('orders', orderId, organisationId);
+    response.json(enrichOrderRecord(updated as Record<string, unknown>));
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/orders/:id/refunds/manual', async (request, response, next) => {
   try {
     const input = z.object({
@@ -1678,6 +1869,10 @@ app.post('/v1/portal/orders/:id/refunds/manual', async (request, response, next)
     const organisationId = tenantFor(request, input.organisationId);
     const orderId = idSchema.parse(request.params.id);
     const order = await getTenantRecord('orders', orderId, organisationId);
+    const references = curaleafOrderReference(order);
+    if ((references.purchaseOrderId || references.prescriptionId || references.customerReference) && order.curaleafCancellation?.status !== 'confirmed') {
+      throw new HttpError(409, 'Curaleaf must confirm cancellation before the patient refund can be prepared.', 'CURALEAF_CANCELLATION_REQUIRED');
+    }
     if (!['paid', 'refund_required'].includes(String(order.paymentStatus))) throw new HttpError(409, 'Only a paid order can be refunded.', 'PAYMENT_REQUIRED');
     if (order.refund && typeof order.refund === 'object') return response.status(200).json(order.refund);
 
@@ -1727,6 +1922,10 @@ app.post('/v1/portal/orders/:id/refunds/:refundId/confirm', async (request, resp
     const orderId = idSchema.parse(request.params.id);
     const refundId = idSchema.parse(request.params.refundId);
     const order = await getTenantRecord('orders', orderId, organisationId);
+    const references = curaleafOrderReference(order);
+    if ((references.purchaseOrderId || references.prescriptionId || references.customerReference) && order.curaleafCancellation?.status !== 'confirmed') {
+      throw new HttpError(409, 'Curaleaf must confirm cancellation before the patient refund can be completed.', 'CURALEAF_CANCELLATION_REQUIRED');
+    }
     const refundState = order.refund && typeof order.refund === 'object' ? order.refund as Record<string, unknown> : null;
     if (!refundState || refundState.id !== refundId) throw new HttpError(404, 'Refund task not found for this order.', 'NOT_FOUND');
     const refundSnapshot = await firestore.collection('refundRecords').doc(refundId).get();

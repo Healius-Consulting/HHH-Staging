@@ -50,6 +50,7 @@ export default function CreateOrder() {
   const [patientSearchOpen, setPatientSearchOpen] = useState(false);
   const [patientActiveIndex, setPatientActiveIndex] = useState(0);
   const [confirmingDraftDelete, setConfirmingDraftDelete] = useState(false);
+  const [confirmingRxDeleteId, setConfirmingRxDeleteId] = useState<number | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [quoteError, setQuoteError] = useState<{ title: string; detail: string } | null>(null);
   const [quotedSignature, setQuotedSignature] = useState<string | null>(null);
@@ -77,6 +78,7 @@ export default function CreateOrder() {
     setPatientSearchOpen(false);
     setPatientActiveIndex(0);
     setConfirmingDraftDelete(false);
+    setConfirmingRxDeleteId(null);
     setQuoteError(null);
     setQuotedSignature(null);
     setQuoteSummary(null);
@@ -889,11 +891,18 @@ export default function CreateOrder() {
                           <strong>Prescription {selectedRxIndex + 1}</strong>
                         </div>
                         {activeOrder.prescriptions.length > 1 && (
-                          <button type="button" className="icon-button danger" aria-label={`Delete prescription ${selectedRxIndex + 1}`} title="Delete prescription record" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Removed Rx ${selectedRxIndex + 1}.`, toastType: 'info' }); }}>
+                          <button type="button" className="icon-button danger" aria-label={`Delete prescription ${selectedRxIndex + 1}`} title="Cancel this prescription record" onClick={() => setConfirmingRxDeleteId(selectedRx.id)}>
                             <Trash2 size={14} />
                           </button>
                         )}
                       </div>
+                      {confirmingRxDeleteId === selectedRx.id ? (
+                        <div className="rx-prescription-cancel-confirm" role="alert">
+                          <AlertTriangle size={16} />
+                          <span><strong>Cancel prescription {selectedRxIndex + 1}?</strong><small>This removes only this unpaid draft prescription. Once a payment request exists, cancellation is handled from Customer Orders with the payment and Curaleaf safeguards.</small></span>
+                          <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingRxDeleteId(null)}>Keep it</button><button type="button" className="btn btn-danger btn-sm" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Cancelled prescription ${selectedRxIndex + 1}.`, toastType: 'info' }); setConfirmingRxDeleteId(null); }}>Cancel prescription</button></div>
+                        </div>
+                      ) : null}
                       <div className="rx-entry-mode" role="group" aria-label="Prescription entry route">
                         <button type="button" aria-pressed={selectedRx.entryMode === 'clinic'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' }); }}>
                           <FileScan size={15} /><span><strong>Curaleaf Clinic QR</strong><small>Preferred automatic route</small></span>

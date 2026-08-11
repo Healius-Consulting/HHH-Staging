@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Activity, AlertTriangle, Building2, CalendarDays, FileText, Hash, Mail, MapPin, Phone, Search, ChevronRight, Plus, Users, Clipboard, Package, CheckCircle } from 'lucide-react';
+import { Activity, AlertTriangle, Building2, CalendarDays, FileText, Hash, Mail, MapPin, Phone, Search, ChevronRight, Plus, Users, Clipboard, Package, CheckCircle, HeartPulse, Route } from 'lucide-react';
 import { getUnresolvedReason, orderReference, useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
@@ -43,7 +43,7 @@ function orderExceptionReason(order: PatientOrder): 'rejected' | 'expired' | nul
 }
 
 function operationalOrder(order: PatientOrder) {
-  return !orderExceptionReason(order);
+  return order.lifecycleStatus !== 'cancelled' && !orderExceptionReason(order);
 }
 
 function orderNeedsResolution(order: PatientOrder) {
@@ -53,6 +53,12 @@ function orderNeedsResolution(order: PatientOrder) {
 /* ── Status derivation ── */
 function deriveStatus(p: UnifiedPatient): { label: string; compactLabel: string; pill: string } {
   if (p.orders.length > 0) {
+    const cancellationAction = p.orders.find(order => order.refund?.status !== 'completed' && (
+      order.curaleafCancellation?.status === 'contact_required'
+      || order.curaleafCancellation?.status === 'awaiting_confirmation'
+      || order.cancellation?.status === 'refund_required'
+    ));
+    if (cancellationAction) return { label: 'Cancellation needs action', compactLabel: 'Action needed', pill: 'pill-red' };
     const unresolved = p.orders.find(order => orderExceptionReason(order) && !order.redoneByOrderId);
     if (unresolved?.refund?.status === 'pending_confirmation') return { label: 'Refund confirmation needed', compactLabel: 'Refund pending', pill: 'pill-amber' };
     if (unresolved?.refund?.status === 'completed') return { label: 'Refunded', compactLabel: 'Refunded', pill: 'pill-neutral' };
@@ -128,7 +134,7 @@ type PatientIndicatorTone = 'active' | 'journey' | 'ready' | 'attention' | 'comp
 
 function patientIndicatorTone(status: ReturnType<typeof deriveStatus>): PatientIndicatorTone {
   const label = status.label.toLowerCase();
-  if (label.includes('needs resolution') || label.includes('refund confirmation') || label.includes('declined')) return 'attention';
+  if (label.includes('needs resolution') || label.includes('needs action') || label.includes('refund confirmation') || label.includes('declined')) return 'attention';
   if (label.includes('ready for collection')) return 'ready';
   if (label.includes('collected') || label === 'refunded') return 'complete';
   if (label === 'active' || label.includes('approved')) return 'active';
@@ -242,6 +248,18 @@ export default function Patients() {
   }, [patients, search, activeTab, sortKey]);
 
   const selectedPatient = processedPatients.find(patient => patient.id === selectedPatientId) ?? processedPatients[0] ?? null;
+  const selectedConditions = selectedPatient
+    ? selectedPatient.submission?.conditions ?? selectedPatient.crmPatient?.conditions ?? []
+    : [];
+  const selectedPrimaryCondition = selectedPatient
+    ? selectedPatient.submission?.primaryCondition ?? selectedPatient.crmPatient?.primaryCondition ?? selectedConditions[0] ?? ''
+    : '';
+  const selectedReferralSource = selectedPatient
+    ? selectedPatient.submission?.source ?? selectedPatient.crmPatient?.referralSource ?? null
+    : null;
+  const selectedMarketingConsent = selectedPatient
+    ? selectedPatient.submission?.marketing ?? selectedPatient.crmPatient?.marketingConsent ?? null
+    : null;
 
   useEffect(() => {
     if (selectedPatient && selectedPatient.id !== selectedPatientId) setSelectedPatientId(selectedPatient.id);
@@ -440,10 +458,6 @@ export default function Patients() {
                 <div>
                   <span className="section-label">Patient record</span>
                   <h3 id="patient-drawer-title">{selectedPatient.name}</h3>
-                  {(selectedPatient.submission || selectedPatient.crmPatient?.primaryCondition) && <ConditionList
-                    conditions={selectedPatient.submission?.conditions ?? selectedPatient.crmPatient?.conditions ?? [selectedPatient.crmPatient?.primaryCondition ?? '']}
-                    primaryCondition={selectedPatient.submission?.primaryCondition ?? selectedPatient.crmPatient?.primaryCondition ?? ''}
-                  />}
                   <span className={`pill patient-record-drawer__status ${deriveStatus(selectedPatient).pill}`}>
                     {deriveStatus(selectedPatient).label}
                   </span>
@@ -483,6 +497,42 @@ export default function Patients() {
                   </div>
                 );
               })()}
+
+              <section className="patient-care-context" aria-labelledby="patient-care-context-title">
+                <header className="patient-care-context__header">
+                  <span className="patient-care-context__title">
+                    <HeartPulse size={17} aria-hidden="true" />
+                    <span><small>Patient context</small><h4 id="patient-care-context-title">Conditions and referral</h4></span>
+                  </span>
+                  <span className="patient-care-context__record-type">
+                    {selectedPatient.submission ? 'HHH eligibility record' : 'Patient record'}
+                  </span>
+                </header>
+                <div className="patient-care-context__grid">
+                  <div className="patient-care-context__conditions">
+                    <span>Conditions disclosed</span>
+                    {selectedConditions.length > 0 && selectedPrimaryCondition ? (
+                      <ConditionList conditions={selectedConditions} primaryCondition={selectedPrimaryCondition} />
+                    ) : (
+                      <strong className="patient-care-context__empty">Not recorded</strong>
+                    )}
+                  </div>
+                  <dl className="patient-care-context__details">
+                    <div>
+                      <dt><Route size={13} aria-hidden="true" /> How they found the service</dt>
+                      <dd>{selectedReferralSource || 'Not recorded'}</dd>
+                    </div>
+                    <div>
+                      <dt>Primary condition</dt>
+                      <dd>{selectedPrimaryCondition ? conditionLabel(selectedPrimaryCondition) : 'Not recorded'}</dd>
+                    </div>
+                    <div>
+                      <dt>Marketing contact</dt>
+                      <dd>{selectedMarketingConsent === null ? 'Not recorded' : selectedMarketingConsent ? 'Consent given' : 'No consent'}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </section>
 
               <div className="patient-record-facts">
                 <section className="patient-record-panel" aria-labelledby="patient-contact-title">
@@ -534,10 +584,6 @@ export default function Patients() {
                   <header><FileText size={15} aria-hidden="true" /><h4 id="patient-eligibility-title">Eligibility intake</h4><span>{onboardingStatusLabel(selectedPatient.submission.status)}</span></header>
 
                   <div className="patient-eligibility-grid">
-                    <div className="kv-line">
-                      <span className="text-secondary">Selected conditions:</span>
-                      <ConditionList conditions={selectedPatient.submission.conditions} primaryCondition={selectedPatient.submission.primaryCondition} />
-                    </div>
                     <div className="kv-line">
                       <span className="text-secondary">HHH onboarding decision:</span>
                       <span className="font-semibold text-info">{onboardingStatusLabel(selectedPatient.submission.status)}</span>

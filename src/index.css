@@ -3439,6 +3439,12 @@ body{ background: var(--bg-app); }
 
 .rx-record-evidence__heading strong{ margin-top: 2px; color: var(--text-primary); font-size: 12px; }
 
+.rx-prescription-cancel-confirm{ display: grid; grid-column: 1 / -1; grid-template-columns: auto minmax(0, 1fr) auto; width: 100%; align-items: center; gap: 10px; margin-bottom: 13px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--color-danger) 30%, var(--border)); border-radius: 8px; color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 6%, var(--bg-surface)); }
+.rx-prescription-cancel-confirm > span{ display: grid; gap: 2px; }
+.rx-prescription-cancel-confirm strong{ color: var(--text-primary); font-size: 10px; }
+.rx-prescription-cancel-confirm small{ color: var(--text-secondary); font-size: 9px; line-height: 1.45; }
+.rx-prescription-cancel-confirm > div{ display: flex; gap: 6px; }
+
 .rx-clinic-note{ display: grid; gap: 3px; margin-bottom: 12px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--primary) 5%, var(--bg-surface)); }
 
 .rx-clinic-note strong{ color: var(--primary-dark); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
@@ -3764,6 +3770,8 @@ body{ background: var(--bg-app); }
 .rx-patient-change__cancel{ justify-self: start; }
 .rx-draft-delete-confirm{ align-items: stretch; flex-direction: column; }
 .rx-draft-delete-confirm > div{ justify-content: flex-end; }
+.rx-prescription-cancel-confirm{ grid-template-columns: auto minmax(0, 1fr); }
+.rx-prescription-cancel-confirm > div{ grid-column: 1 / -1; justify-content: flex-end; }
 .rx-surface__header{ align-items: flex-start; }
 .rx-checkout-panel{ display: block; }
 .rx-payment-route-toggle{ grid-template-columns: 1fr; }
@@ -4832,7 +4840,42 @@ html.modal-open .page-container{ overflow: hidden; }
 
 .patient-record-alert small{ margin-top: 3px; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
 
-.patient-record-facts{ order: 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.patient-care-context{
+  order: 2;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--tenant-primary) 22%, var(--border));
+  border-radius: 9px;
+  background: var(--bg-surface);
+}
+
+.patient-care-context__header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tenant-primary) 5%, var(--bg-surface));
+}
+
+.patient-care-context__title{ display: flex; min-width: 0; align-items: center; gap: 9px; }
+.patient-care-context__title > svg{ flex: 0 0 auto; color: var(--tenant-primary-strong); }
+.patient-care-context__title small{ display: block; color: var(--tenant-primary-strong); font-size: 8px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.patient-care-context__title h4{ margin: 2px 0 0; font-size: 13px; letter-spacing: -.01em; }
+.patient-care-context__record-type{ flex: 0 0 auto; color: var(--text-tertiary); font-size: 9px; }
+
+.patient-care-context__grid{ display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(240px, .75fr); }
+.patient-care-context__conditions{ min-width: 0; padding: 15px; border-right: 1px solid var(--border); }
+.patient-care-context__conditions > span{ display: block; margin-bottom: 9px; color: var(--text-tertiary); font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.patient-care-context__conditions .condition-pill{ min-height: 28px; padding: 6px 9px; font-size: 11px; }
+.patient-care-context__empty{ color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+.patient-care-context__details{ display: grid; margin: 0; }
+.patient-care-context__details > div{ min-width: 0; padding: 10px 13px; border-bottom: 1px solid var(--border); }
+.patient-care-context__details > div:last-child{ border-bottom: 0; }
+.patient-care-context__details dt{ display: flex; align-items: center; gap: 5px; color: var(--text-tertiary); font-size: 8px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.patient-care-context__details dd{ margin: 3px 0 0; overflow-wrap: anywhere; color: var(--text-primary); font-size: 11px; font-weight: 650; }
+
+.patient-record-facts{ order: 3; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 
 .patient-record-panel{
   min-width: 0;
@@ -4862,7 +4905,7 @@ html.modal-open .page-container{ overflow: hidden; }
 
 .patient-record-ellipsis{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.patient-order-history{ order: 3; display: grid; gap: 10px; }
+.patient-order-history{ order: 4; display: grid; gap: 10px; }
 
 .patient-order-history__header{ display: flex; align-items: end; justify-content: space-between; gap: 12px; padding: 3px 1px 8px; border-bottom: 1px solid var(--border); }
 
@@ -4969,9 +5012,9 @@ html.modal-open .page-container{ overflow: hidden; }
 
 .patient-order-progress__step.active > span{ color: var(--color-warning); border-color: var(--color-warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 15%, transparent); }
 
-.patient-eligibility-panel, .patient-record-note{ order: 4; }
+.patient-eligibility-panel, .patient-record-note{ order: 5; }
 
-.patient-record-audit{ order: 5; }
+.patient-record-audit{ order: 6; }
 
 .patient-audit-list{ display: grid; gap: 0; }
 
@@ -5261,6 +5304,8 @@ html.modal-open .page-container{ overflow: hidden; }
   .patients-page{ grid-template-columns: 300px minmax(0, 1fr); }
   .patients-page > .filter-grid .filter-card{ min-width: 122px; }
   .patients-page .patient-record-facts{ grid-template-columns: 1fr; }
+  .patients-page .patient-care-context__grid{ grid-template-columns: 1fr; }
+  .patients-page .patient-care-context__conditions{ border-right: 0; border-bottom: 1px solid var(--border); }
   .patients-page .crm-status-warning{ display: none; }
 }
 
@@ -5280,6 +5325,8 @@ html.modal-open .page-container{ overflow: hidden; }
 .patient-record-drawer__actions .btn-primary{ flex: 1; }
 .patient-record-drawer__body{ padding: 14px 16px calc(88px + env(safe-area-inset-bottom)); }
 .patient-record-facts{ grid-template-columns: 1fr; }
+.patient-care-context__header{ align-items: flex-start; flex-direction: column; }
+.patient-care-context__record-type{ align-self: flex-start; }
 .patient-order-summary{ grid-template-columns: 1fr 1fr; }
 .patient-order-summary > div:nth-child(2){ border-right: 0; }
 .patient-order-summary > div:last-child{ grid-column: 1 / -1; border-top: 1px solid var(--border); }
@@ -9473,6 +9520,33 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-delivery-warning--overdue{ border-color: color-mix(in srgb, var(--color-danger) 38%, var(--border)); color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 7%, var(--bg-surface)); }
 .order-delivery-warning--missing{ border-style: dashed; color: var(--text-tertiary); background: var(--bg-elevated); }
 
+.order-cancellation-card{ margin: 14px 16px 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-warning) 34%, var(--border)); border-radius: 9px; background: var(--bg-surface); }
+.order-cancellation-card > header{ display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--color-warning) 7%, var(--bg-surface)); }
+.order-cancellation-card > header small, .order-cancellation-card > header strong{ display: block; }
+.order-cancellation-card > header small{ color: var(--text-tertiary); font-size: 8px; font-weight: 730; letter-spacing: .06em; text-transform: uppercase; }
+.order-cancellation-card > header strong{ margin-top: 2px; color: var(--text-primary); font-size: 12px; }
+.order-cancellation-warning, .order-cancellation-instruction{ display: flex; align-items: flex-start; gap: 9px; padding: 12px 13px; border-bottom: 1px solid var(--border); color: var(--color-warning); }
+.order-cancellation-warning > svg, .order-cancellation-instruction > svg{ flex: 0 0 auto; margin-top: 1px; }
+.order-cancellation-warning > span, .order-cancellation-instruction > span{ display: grid; gap: 3px; }
+.order-cancellation-warning strong, .order-cancellation-instruction strong{ color: var(--text-primary); font-size: 10px; }
+.order-cancellation-warning small, .order-cancellation-instruction small{ color: var(--text-secondary); font-size: 9px; line-height: 1.5; }
+.order-cancellation-fields{ display: grid; grid-template-columns: minmax(180px, .65fr) minmax(260px, 1.35fr); gap: 10px; padding: 12px 13px; }
+.order-cancellation-fields label{ display: grid; align-content: start; gap: 5px; color: var(--text-secondary); font-size: 9px; }
+.order-cancellation-fields textarea{ min-height: 62px; resize: vertical; }
+.order-cancellation-card > footer{ display: flex; justify-content: flex-end; padding: 0 13px 12px; }
+.order-cancellation-refs{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-bottom: 1px solid var(--border); }
+.order-cancellation-refs > div{ min-width: 0; padding: 10px 13px; border-right: 1px solid var(--border); }
+.order-cancellation-refs > div:last-child{ border-right: 0; }
+.order-cancellation-refs dt{ color: var(--text-tertiary); font-size: 8px; font-weight: 720; letter-spacing: .05em; text-transform: uppercase; }
+.order-cancellation-refs dd{ margin: 3px 0 0; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.order-cancellation-card--supplier{ border-color: color-mix(in srgb, var(--color-danger) 36%, var(--border)); }
+.order-cancellation-card--supplier > header{ background: color-mix(in srgb, var(--color-danger) 6%, var(--bg-surface)); }
+.order-cancellation-card--supplier .order-cancellation-instruction{ color: var(--color-danger); }
+.order-cancellation-card--confirmed{ display: flex; align-items: flex-start; gap: 9px; padding: 12px 13px; border-color: color-mix(in srgb, var(--color-success) 32%, var(--border)); color: var(--color-success); background: color-mix(in srgb, var(--color-success) 5%, var(--bg-surface)); }
+.order-cancellation-card--confirmed > span{ display: grid; gap: 3px; }
+.order-cancellation-card--confirmed strong{ color: var(--text-primary); font-size: 10px; }
+.order-cancellation-card--confirmed small{ color: var(--text-secondary); font-size: 9px; line-height: 1.45; }
+
 .order-resolution{ margin: 14px 16px 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-danger) 28%, var(--border)); border-radius: 9px; background: var(--bg-surface); }
 .order-resolution > header{ display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 13px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--color-danger) 5%, var(--bg-surface)); }
 .order-resolution > header small, .order-resolution > header strong{ display: block; }
@@ -9485,6 +9559,10 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-resolution__reference code{ overflow: hidden; color: var(--text-primary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .order-resolution__choices{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 13px; }
 .order-resolution__choices > small{ flex: 1 1 300px; color: var(--text-secondary); font-size: 9px; line-height: 1.45; }
+.order-resolution__locked{ display: flex; align-items: flex-start; gap: 9px; padding: 12px 13px; color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 5%, var(--bg-surface)); }
+.order-resolution__locked > span{ display: grid; gap: 3px; }
+.order-resolution__locked strong{ color: var(--text-primary); font-size: 10px; }
+.order-resolution__locked small{ color: var(--text-secondary); font-size: 9px; line-height: 1.45; }
 .order-resolution__confirm{ display: grid; grid-template-columns: minmax(250px, 1fr) minmax(220px, .8fr) auto; align-items: end; gap: 12px; padding: 12px 13px; }
 .order-resolution__confirm ol{ margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 9px; line-height: 1.55; }
 .order-resolution__confirm label{ display: grid; gap: 5px; color: var(--text-secondary); font-size: 9px; }
@@ -9621,6 +9699,9 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   .order-crm-manual-payment__fields{ grid-template-columns: 1fr; }
   .order-crm-next-action{ align-items: stretch; flex-direction: column; }
   .order-crm-next-action .btn{ align-self: flex-start; }
+  .order-cancellation-fields, .order-cancellation-refs{ grid-template-columns: 1fr; }
+  .order-cancellation-refs > div{ border-right: 0; border-bottom: 1px solid var(--border); }
+  .order-cancellation-refs > div:last-child{ border-bottom: 0; }
   .order-resolution__confirm{ grid-template-columns: 1fr; align-items: stretch; }
   .order-resolution__confirm .btn{ justify-self: start; }
 }

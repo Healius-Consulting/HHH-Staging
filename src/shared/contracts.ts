@@ -320,6 +320,8 @@ export interface PortalPatientRecord {
   status: 'referred' | 'active' | 'inactive';
   conditions?: string[];
   primaryCondition?: string | null;
+  referralSource?: string | null;
+  marketingConsent?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -369,6 +371,8 @@ export interface PortalOrderRecord {
   worldpayPaymentId?: string;
   paymentTransactionReference?: string;
   refund?: OrderRefundState;
+  cancellation?: OrderCancellationState;
+  curaleafCancellation?: CuraleafCancellationState;
   curaleafApprovedAt?: string;
   status?: 'open' | 'archived' | 'rejected' | string;
   isExpired?: boolean;
@@ -435,6 +439,32 @@ export interface OrderRefundState {
   confirmedAt?: string | null;
   confirmedBy?: string | null;
   externalReference?: string | null;
+}
+
+export interface CuraleafCancellationState {
+  status: 'contact_required' | 'awaiting_confirmation' | 'confirmed';
+  purchaseOrderId?: string | null;
+  prescriptionId?: string | null;
+  supportCaseId?: string | null;
+  requestedAt: string;
+  requestedBy?: string | null;
+  contactReference?: string | null;
+  contactNote?: string | null;
+  contactedAt?: string | null;
+  contactedBy?: string | null;
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
+  confirmationReference?: string | null;
+}
+
+export interface OrderCancellationState {
+  status: 'curaleaf_contact_required' | 'awaiting_curaleaf_confirmation' | 'refund_required' | 'cancelled';
+  reason: 'added_in_error' | 'patient_request' | 'other';
+  note?: string | null;
+  requestedAt: string;
+  requestedBy?: string | null;
+  paymentLinkStatus?: 'not_applicable' | 'cancelled_in_platform' | 'late_payment_refund_required';
+  paymentReference?: string | null;
 }
 
 export interface PrescriptionUploadRequest {

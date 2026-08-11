@@ -16,11 +16,13 @@ export default function Dashboard() {
   const awaitingPayment = tenantOrders.filter(o => o.payment.status === 'sent').length;
 
   const inFulfilment = tenantOrders.filter(o =>
+    o.lifecycleStatus !== 'cancelled' &&
     o.payment.status === 'paid' &&
     o.prescriptions.some(rx => !['ready', 'collected'].includes(rx.status))
   ).length;
 
   const readyForCollection = tenantOrders.filter(o =>
+    o.lifecycleStatus !== 'cancelled' &&
     o.payment.status === 'paid' &&
     o.prescriptions.length > 0 &&
     o.prescriptions.every(rx => rx.status === 'ready')
@@ -28,6 +30,7 @@ export default function Dashboard() {
 
   // 1. Uncollected warnings (10+ days)
   const uncollectedAlerts = tenantOrders.flatMap(o => {
+    if (o.lifecycleStatus === 'cancelled') return [];
     const pName = tenantPatients.find(p => p.id === o.patientId)?.name ?? 'Unknown';
     const pMobile = tenantPatients.find(p => p.id === o.patientId)?.mobile ?? '';
     return o.prescriptions
@@ -93,7 +96,24 @@ export default function Dashboard() {
       days: Math.floor((Date.now() - new Date(s.submittedAt).getTime()) / (1000 * 60 * 60 * 24)),
     }));
 
-  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length;
+  const cancellationAlerts = tenantOrders
+    .filter(order => order.cancellation && order.refund?.status !== 'completed' && (
+      order.curaleafCancellation?.status === 'contact_required'
+      || order.curaleafCancellation?.status === 'awaiting_confirmation'
+      || order.cancellation.status === 'refund_required'
+    ))
+    .map(order => ({
+      id: `cancellation-${order.id}`,
+      orderId: order.id,
+      patientName: tenantPatients.find(patient => patient.id === order.patientId)?.name ?? 'Unknown patient',
+      step: order.curaleafCancellation?.status === 'contact_required'
+        ? 'Call Curaleaf Customer Service before refunding or reordering.'
+        : order.curaleafCancellation?.status === 'awaiting_confirmation'
+          ? 'Waiting for Curaleaf cancellation confirmation.'
+          : `Refund ${order.payment.ref ?? 'the recorded payment'} and confirm the reference.`,
+    }));
+
+  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length + cancellationAlerts.length;
 
   /* ── Recent orders (last 5) ── */
   const recentOrders = [...tenantOrders]
@@ -137,6 +157,19 @@ export default function Dashboard() {
             <section className="card card-urgent priority-queue">
               <div className="section-heading"><div><p className="section-label">Attention required</p><h3><Activity size={17} /> Priority work queue</h3></div><span>{totalUrgent} open</span></div>
               <div className="alert-list">
+                {cancellationAlerts.map(alert => (
+                  <div key={alert.id} className="alert-item alert-item--danger">
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Order cancellation</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
+                      <span className="alert-item__desc">{alert.step}</span>
+                    </div>
+                    <button className="priority-action" onClick={() => { dispatch({ type: 'SET_NAVIGATION_TARGET', target: { kind: 'order', key: String(alert.orderId) } }); dispatch({ type: 'SET_SCREEN', screen: 'orders' }); }}>
+                      Open order <ArrowRight size={14} />
+                    </button>
+                  </div>
+                ))}
+
                 {intakeAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--danger">
                     <div className="alert-item__copy">

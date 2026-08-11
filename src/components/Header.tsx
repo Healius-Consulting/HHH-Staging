@@ -17,7 +17,7 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
   },
   orders: {
     title: 'Customer orders',
-    subtitle: 'One customer journey from payment through Curaleaf approval, delivery, collection, rejection, or archive.',
+    subtitle: 'One customer journey from payment through Curaleaf approval, delivery, collection, cancellation, rejection, or archive.',
   },
   patients: {
     title: 'Patients hub',
