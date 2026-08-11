@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import {
   AlertCircle,
@@ -11,6 +11,7 @@ import {
   Globe2,
   LayoutDashboard,
   Link2,
+  ImagePlus,
   LockKeyhole,
   LogOut,
   MapPin,
@@ -23,6 +24,7 @@ import {
   Settings2,
   ShieldCheck,
   TrendingUp,
+  Trash2,
   UserPlus,
   UserCheck,
   UserX,
@@ -40,7 +42,7 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removePharmacyStaff, updateOrganisation } from '../shared/api';
+import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
 import type { AdminReferralFinanceReport, CuraleafConnectionStatus, CuraleafValidationReport, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
@@ -53,6 +55,7 @@ import SummaryTiles from '../components/SummaryTiles';
 import CompactPatientCell from '../components/CompactPatientCell';
 import { formatPatientDob } from '../utils/patientDob';
 import ConditionList from '../components/ConditionList';
+import { EMAIL_LOGO_SPEC, normalisePharmacyLogo } from '../utils/pharmacyLogo';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'finance' | 'platform';
 type PlatformTab = 'setup' | 'curaleaf';
@@ -247,13 +250,42 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
   const [domains, setDomains] = useState(organisation.websiteDomains.join('\n'));
   const [status, setStatus] = useState(organisation.status);
   const [logoText] = useState(organisation.logoText);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(organisation.emailLogoUrl ?? null);
+  const [pendingLogo, setPendingLogo] = useState<File | null>(null);
+  const [removeLogo, setRemoveLogo] = useState(false);
   const [primaryColour, setPrimaryColour] = useState(organisation.brand.primary);
   const [platformFee, setPlatformFee] = useState(organisation.platformFeeMonthly?.toString() ?? '');
   const [modules, setModules] = useState({ ...organisation.modules });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const editTheme = deriveTenantTheme(primaryColour);
   const editDialogRef = useModalFocus<HTMLElement>(true, onClose);
+
+  useEffect(() => () => {
+    if (logoPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(logoPreviewUrl);
+  }, [logoPreviewUrl]);
+
+  const selectLogo = async (event: ChangeEvent<HTMLInputElement>) => {
+    const source = event.target.files?.[0];
+    event.target.value = '';
+    if (!source) return;
+    setError(null);
+    try {
+      const normalised = await normalisePharmacyLogo(source);
+      setPendingLogo(normalised);
+      setRemoveLogo(false);
+      setLogoPreviewUrl(URL.createObjectURL(normalised));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The logo could not be prepared.');
+    }
+  };
+
+  const clearLogo = () => {
+    setPendingLogo(null);
+    setLogoPreviewUrl(null);
+    setRemoveLogo(Boolean(organisation.emailLogoStoragePath || organisation.emailLogoUrl));
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -265,12 +297,33 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
       primaryColour, portalName: name.trim(), platformFeeMonthly: platformFee === '' ? null : Number(platformFee), modules,
     };
     try {
-      await updateOrganisation(organisation.id, input);
+      if (!isLocalPortalPreview) await updateOrganisation(organisation.id, input);
+      let logoUpdates: Partial<PharmacyTenant> = {};
+      if (isLocalPortalPreview) {
+        if (removeLogo) {
+          logoUpdates = { emailLogoUrl: null, emailLogoStoragePath: null, emailLogoWidth: null, emailLogoHeight: null, emailLogoUpdatedAt: null };
+        } else if (pendingLogo) {
+          const localUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(new Error('The logo preview could not be saved.'));
+            reader.readAsDataURL(pendingLogo);
+          });
+          logoUpdates = { emailLogoUrl: localUrl, emailLogoStoragePath: 'local-preview/email-logo.png', emailLogoWidth: EMAIL_LOGO_SPEC.assetWidth, emailLogoHeight: EMAIL_LOGO_SPEC.assetHeight, emailLogoUpdatedAt: new Date() };
+        }
+      } else if (removeLogo) {
+        const updated = await removeOrganisationLogo(organisation.id);
+        logoUpdates = { emailLogoUrl: updated.emailLogoUrl ?? null, emailLogoStoragePath: updated.emailLogoStoragePath ?? null, emailLogoWidth: updated.emailLogoWidth ?? null, emailLogoHeight: updated.emailLogoHeight ?? null, emailLogoUpdatedAt: updated.emailLogoUpdatedAt ?? null };
+      } else if (pendingLogo) {
+        const updated = await uploadOrganisationLogo(organisation.id, pendingLogo);
+        logoUpdates = { emailLogoUrl: updated.emailLogoUrl ?? null, emailLogoStoragePath: updated.emailLogoStoragePath ?? null, emailLogoWidth: updated.emailLogoWidth ?? null, emailLogoHeight: updated.emailLogoHeight ?? null, emailLogoUpdatedAt: updated.emailLogoUpdatedAt ?? null };
+      }
       onSaved({
         name: name.trim(), tradingName: tradingName.trim(), gphcNumber: gphcNumber.trim(), superintendent: superintendent.trim(), companyNumber: companyNumber.trim(), mainContactName: mainContactName.trim(), mainContactPhone: mainContactPhone.trim(), mainContactEmail: mainContactEmail.trim(), address: address.trim(),
         websiteDomains, status, logoText: logoText.trim().toUpperCase(), platformFeeMonthly: input.platformFeeMonthly,
         brand: { primary: primaryColour, portalName: name.trim() }, modules,
         slug: slugify(tradingName || name),
+        ...logoUpdates,
       });
       onClose();
     } catch (cause) {
@@ -297,7 +350,26 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
           <div className="form-grid-two"><label>Account status<select className="input" value={status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option><option value="live">Live</option><option value="paused">Paused</option></select></label><label>Monthly HHH platform fee (£)<input className="input" type="number" min="0" max="100000" step="0.01" value={platformFee} onChange={event => setPlatformFee(event.target.value)} placeholder="Not set" /></label></div>
 
           <div className="form-section-heading"><span>02</span><div><strong>Brand Customisation</strong><small>The portal name follows the pharmacy name automatically.</small></div></div>
-          <div className="form-grid-two"><label>Pharmacy name<input className="input" value={name} readOnly /><small>Also used as the portal name.</small></label><label>Add logo<button className="btn" type="button" disabled>Choose logo file</button><small>Upload requirements are awaiting approval.</small></label></div>
+          <label>Pharmacy name<input className="input" value={name} readOnly /><small>Also used as the portal name.</small></label>
+          <section className="pharmacy-logo-editor" aria-labelledby="pharmacy-logo-heading">
+            <div className={`pharmacy-logo-preview${logoPreviewUrl ? ' has-image' : ''}`}>
+              {logoPreviewUrl
+                ? <img src={logoPreviewUrl} alt={`${name} email logo preview`} />
+                : <span aria-hidden="true">{logoText}</span>}
+            </div>
+            <div className="pharmacy-logo-editor__copy">
+              <small>Email identity</small>
+              <strong id="pharmacy-logo-heading">Pharmacy logo</strong>
+              <p>PNG, JPEG or WebP. It is automatically centred on a transparent {EMAIL_LOGO_SPEC.assetWidth} × {EMAIL_LOGO_SPEC.assetHeight}px canvas for a consistent {EMAIL_LOGO_SPEC.displayWidth} × {EMAIL_LOGO_SPEC.displayHeight}px email header.</p>
+              <div className="pharmacy-logo-editor__actions">
+                <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={selectLogo} hidden />
+                <button className="btn" type="button" onClick={() => logoInputRef.current?.click()} disabled={busy}><ImagePlus size={14} /> {logoPreviewUrl ? 'Replace logo' : 'Choose logo'}</button>
+                {logoPreviewUrl && <button className="btn btn-danger" type="button" onClick={clearLogo} disabled={busy}><Trash2 size={14} /> Remove</button>}
+              </div>
+              {pendingLogo && <em>{pendingLogo.name} · ready to save</em>}
+              {removeLogo && <em>Logo will be removed when changes are saved.</em>}
+            </div>
+          </section>
           <div className="brand-colour-field"><input type="color" value={primaryColour} onChange={event => setPrimaryColour(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primaryColour.toUpperCase()} · accessible palette generated automatically</small></div><div className="onboarding-palette"><i style={{ background: editTheme.primary }} /><i style={{ background: editTheme.secondary }} /><i style={{ background: editTheme.primarySoft }} /></div></div>
 
           <div className="form-section-heading"><span>03</span><div><strong>Available modules</strong><small>Choose the areas pharmacy staff can access.</small></div></div>

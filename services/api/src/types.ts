@@ -40,6 +40,11 @@ export interface PortalOrganisation {
   name: string;
   tradingName: string;
   logoText: string;
+  emailLogoUrl?: string | null;
+  emailLogoStoragePath?: string | null;
+  emailLogoWidth?: number | null;
+  emailLogoHeight?: number | null;
+  emailLogoUpdatedAt?: string | null;
   gphcNumber: string;
   superintendent: string;
   companyNumber?: string;

@@ -454,6 +454,23 @@ export function updateOrganisation(organisationId: string, input: UpdateOrganisa
   });
 }
 
+export async function uploadOrganisationLogo(organisationId: string, file: File) {
+  const target = await apiRequest<import('./contracts').OrganisationLogoUploadTarget>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/logo/upload-url`, {
+    method: 'POST',
+    body: JSON.stringify({ filename: file.name, contentType: file.type, sizeBytes: file.size }),
+  });
+  const upload = await fetch(target.uploadUrl, { method: 'PUT', headers: target.requiredHeaders, body: file });
+  if (!upload.ok) throw new Error(`Logo upload failed with status ${upload.status}.`);
+  return apiRequest<PortalOrganisation>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/logo/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ storagePath: target.storagePath }),
+  });
+}
+
+export function removeOrganisationLogo(organisationId: string) {
+  return apiRequest<PortalOrganisation>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/logo`, { method: 'DELETE' });
+}
+
 export function getPharmacyStaff(organisationId: string) {
   return apiRequest<PharmacyStaffAccount[]>(`/v1/portal/admin/staff?organisationId=${encodeURIComponent(organisationId)}`);
 }

@@ -812,6 +812,11 @@ export interface PortalOrganisation {
   name: string;
   tradingName: string;
   logoText: string;
+  emailLogoUrl?: string | null;
+  emailLogoStoragePath?: string | null;
+  emailLogoWidth?: number | null;
+  emailLogoHeight?: number | null;
+  emailLogoUpdatedAt?: string | null;
   gphcNumber: string;
   superintendent: string;
   companyNumber?: string;
@@ -831,6 +836,12 @@ export interface PortalOrganisation {
   defaultPaymentRoute?: 'manual' | 'worldpay';
   curaleafTestValidation?: CuraleafValidationRecord | null;
   curaleafLiveValidation?: CuraleafValidationRecord | null;
+}
+
+export interface OrganisationLogoUploadTarget {
+  uploadUrl: string;
+  requiredHeaders: Record<string, string>;
+  storagePath: string;
 }
 
 export interface PaymentSettings {

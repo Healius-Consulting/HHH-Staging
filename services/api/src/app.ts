@@ -36,6 +36,10 @@ const tokenHash = (token: string) => createHash('sha256').update(token).digest('
 const timestamp = () => nowIso();
 const MAX_PRESCRIPTION_FILE_BYTES = 16_000_000;
 const PRESCRIPTION_CONTENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'] as const;
+const EMAIL_LOGO_WIDTH = 640;
+const EMAIL_LOGO_HEIGHT = 192;
+const MAX_EMAIL_LOGO_BYTES = 2_000_000;
+const EMAIL_LOGO_CONTENT_TYPE = 'image/png';
 const firebaseAuthErrorCode = (error: unknown) => {
   if (!error || typeof error !== 'object') return null;
   const candidate = error as { code?: unknown; errorInfo?: { code?: unknown } };
@@ -52,6 +56,21 @@ const firstPartyPasswordResetLink = (firebaseLink: string) => {
   }
   return destination.toString();
 };
+
+async function withEmailLogoUrl<T extends Record<string, unknown>>(organisation: T) {
+  const storagePath = typeof organisation.emailLogoStoragePath === 'string' ? organisation.emailLogoStoragePath : '';
+  if (!storagePath) return { ...organisation, emailLogoUrl: null };
+  try {
+    const [emailLogoUrl] = await storage.bucket().file(storagePath).getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + 60 * 60 * 1000,
+    });
+    return { ...organisation, emailLogoUrl };
+  } catch {
+    return { ...organisation, emailLogoUrl: null };
+  }
+}
 
 const tenantModulesSchema = z.object({
   intake: z.boolean(),
@@ -2878,11 +2897,12 @@ app.get('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (reque
         firestore.collection('integrationConnections').where('integration', '==', 'curaleaf').limit(500).get(),
       ]);
       const curaleafCodes = new Map(connections.docs.map(document => [document.data().organisationId, document.data().maskedIdentifier]));
-      return snapshot.docs
-        .map(document => {
+      const organisations = await Promise.all(snapshot.docs
+        .map(async document => {
           const data = document.data();
-          return { ...data, name: String(data.name ?? ''), tradingName: String(data.tradingName ?? data.name ?? ''), curaleafPharmacyCode: curaleafCodes.get(document.id) };
-        })
+          return withEmailLogoUrl({ ...data, name: String(data.name ?? ''), tradingName: String(data.tradingName ?? data.name ?? ''), curaleafPharmacyCode: curaleafCodes.get(document.id) });
+        }));
+      return organisations
         .sort((a, b) => a.tradingName.localeCompare(b.tradingName));
     });
     response.json(organisations);
@@ -2941,6 +2961,93 @@ app.patch('/v1/portal/admin/organisations/:id', requireRole('hhh_admin'), async 
     const record = await getRecord('organisations', organisationId);
     await audit(request, 'organisation.updated', { organisationId, changedFields });
     response.json(record);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/organisations/:id/logo/upload-url', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const organisationId = idSchema.parse(request.params.id);
+    await getRecord('organisations', organisationId);
+    const input = z.object({
+      filename: z.string().trim().min(1).max(180),
+      contentType: z.literal(EMAIL_LOGO_CONTENT_TYPE),
+      sizeBytes: z.number().int().positive().max(MAX_EMAIL_LOGO_BYTES),
+    }).parse(request.body);
+    const storagePath = `pharmacy-branding/${organisationId}/email-logo-${randomUUID()}.png`;
+    const [uploadUrl] = await storage.bucket().file(storagePath).getSignedUrl({
+      version: 'v4',
+      action: 'write',
+      expires: Date.now() + 15 * 60 * 1000,
+      contentType: EMAIL_LOGO_CONTENT_TYPE,
+    });
+    await audit(request, 'organisation.logo_upload_authorised', { organisationId, storagePath, sourceFilename: input.filename, sizeBytes: input.sizeBytes });
+    response.json({ uploadUrl, storagePath, requiredHeaders: { 'Content-Type': EMAIL_LOGO_CONTENT_TYPE } });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/organisations/:id/logo/complete', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const organisationId = idSchema.parse(request.params.id);
+    const input = z.object({ storagePath: z.string().min(1).max(500) }).parse(request.body);
+    const expectedPrefix = `pharmacy-branding/${organisationId}/email-logo-`;
+    if (!input.storagePath.startsWith(expectedPrefix) || !input.storagePath.endsWith('.png')) {
+      throw new HttpError(400, 'The logo upload path is invalid.', 'INVALID_LOGO_PATH');
+    }
+    const organisation = await getRecord('organisations', organisationId);
+    const object = storage.bucket().file(input.storagePath);
+    const [metadata] = await object.getMetadata();
+    const actualSize = Number(metadata.size ?? 0);
+    if (metadata.contentType !== EMAIL_LOGO_CONTENT_TYPE || actualSize <= 0 || actualSize > MAX_EMAIL_LOGO_BYTES) {
+      await object.delete({ ignoreNotFound: true });
+      throw new HttpError(400, 'The uploaded logo is not a valid email PNG.', 'INVALID_LOGO_FILE');
+    }
+    const [header] = await object.download({ start: 0, end: 23 });
+    const pngSignature = header.length >= 24 && header.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const width = pngSignature ? header.readUInt32BE(16) : 0;
+    const height = pngSignature ? header.readUInt32BE(20) : 0;
+    if (!pngSignature || width !== EMAIL_LOGO_WIDTH || height !== EMAIL_LOGO_HEIGHT) {
+      await object.delete({ ignoreNotFound: true });
+      throw new HttpError(400, `Logos must be normalised to ${EMAIL_LOGO_WIDTH} × ${EMAIL_LOGO_HEIGHT} pixels.`, 'INVALID_LOGO_DIMENSIONS');
+    }
+    const updatedAt = timestamp();
+    await firestore.collection('organisations').doc(organisationId).update({
+      emailLogoStoragePath: input.storagePath,
+      emailLogoContentType: EMAIL_LOGO_CONTENT_TYPE,
+      emailLogoWidth: EMAIL_LOGO_WIDTH,
+      emailLogoHeight: EMAIL_LOGO_HEIGHT,
+      emailLogoUpdatedAt: updatedAt,
+      updatedAt,
+      updatedBy: identity(request).uid,
+    });
+    const previousPath = typeof organisation.emailLogoStoragePath === 'string' ? organisation.emailLogoStoragePath : '';
+    if (previousPath && previousPath !== input.storagePath) await storage.bucket().file(previousPath).delete({ ignoreNotFound: true });
+    invalidateCollectionCache('organisations', organisationId);
+    invalidateCache('admin:organisations', 'referral:');
+    await audit(request, 'organisation.logo_updated', { organisationId, storagePath: input.storagePath, width, height, sizeBytes: actualSize });
+    response.json(await withEmailLogoUrl(await getRecord('organisations', organisationId)));
+  } catch (error) { next(error); }
+});
+
+app.delete('/v1/portal/admin/organisations/:id/logo', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const organisationId = idSchema.parse(request.params.id);
+    const organisation = await getRecord('organisations', organisationId);
+    const storagePath = typeof organisation.emailLogoStoragePath === 'string' ? organisation.emailLogoStoragePath : '';
+    if (storagePath) await storage.bucket().file(storagePath).delete({ ignoreNotFound: true });
+    const updatedAt = timestamp();
+    await firestore.collection('organisations').doc(organisationId).update({
+      emailLogoStoragePath: null,
+      emailLogoContentType: null,
+      emailLogoWidth: null,
+      emailLogoHeight: null,
+      emailLogoUpdatedAt: null,
+      updatedAt,
+      updatedBy: identity(request).uid,
+    });
+    invalidateCollectionCache('organisations', organisationId);
+    invalidateCache('admin:organisations', 'referral:');
+    await audit(request, 'organisation.logo_removed', { organisationId, storagePath: storagePath || null });
+    response.json(await withEmailLogoUrl(await getRecord('organisations', organisationId)));
   } catch (error) { next(error); }
 });
 

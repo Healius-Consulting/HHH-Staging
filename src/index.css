@@ -1714,6 +1714,28 @@ td.font-semibold{
 
 .brand-colour-field small{ color: var(--text-tertiary); }
 
+.pharmacy-logo-editor{ display: grid; grid-template-columns: minmax(220px, 260px) minmax(0, 1fr); align-items: center; gap: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); }
+
+.pharmacy-logo-preview{ display: grid; width: 100%; aspect-ratio: 10 / 3; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; color: var(--tenant-primary-strong); background-color: #fff; background-image: linear-gradient(45deg, #f3f5f7 25%, transparent 25%), linear-gradient(-45deg, #f3f5f7 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f5f7 75%), linear-gradient(-45deg, transparent 75%, #f3f5f7 75%); background-position: 0 0, 0 6px, 6px -6px, -6px 0; background-size: 12px 12px; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+
+.pharmacy-logo-preview img{ display: block; width: 100%; height: 100%; object-fit: contain; }
+
+.pharmacy-logo-preview > span{ display: grid; width: 42px; height: 42px; place-items: center; border-radius: 9px; background: var(--tenant-primary-soft); font-size: 14px; font-weight: 780; letter-spacing: .04em; }
+
+.pharmacy-logo-editor__copy{ min-width: 0; }
+
+.pharmacy-logo-editor__copy > small, .pharmacy-logo-editor__copy > strong{ display: block; }
+
+.pharmacy-logo-editor__copy > small{ color: var(--tenant-primary-strong); font-size: 9px; font-weight: 760; letter-spacing: .07em; text-transform: uppercase; }
+
+.pharmacy-logo-editor__copy > strong{ margin-top: 2px; color: var(--text-primary); font-size: 13px; }
+
+.pharmacy-logo-editor__copy > p{ margin: 5px 0 0; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }
+
+.pharmacy-logo-editor__actions{ display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+
+.pharmacy-logo-editor__copy > em{ display: block; margin-top: 7px; overflow: hidden; color: var(--text-tertiary); font-size: 9px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+
 .onboarding-palette{ display: flex; gap: 4px; margin-left: auto; }
 
 .onboarding-palette i{ width: 24px; height: 30px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .1); }
@@ -1832,6 +1854,8 @@ td.font-semibold{
 .readiness-cell{ min-width: 130px; }
 .integration-cards, .module-grid, .brand-editor-row{ grid-template-columns: 1fr; }
 .form-grid-two{ grid-template-columns: 1fr; }
+.pharmacy-logo-editor{ grid-template-columns: 1fr; }
+.pharmacy-logo-preview{ max-width: 320px; }
 .admin-finance-filters{ grid-template-columns: 1fr; }
 .tenant-brand-preview{ grid-template-columns: 38px minmax(0, 1fr); }
 .tenant-brand-preview button{ justify-self: stretch; }
