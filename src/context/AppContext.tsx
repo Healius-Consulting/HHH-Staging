@@ -4,6 +4,7 @@ import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationSta
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
+import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -688,17 +689,7 @@ function blankOrder(id: number, patientId: string | null, organisationId: string
 
 function mapPortalOrder(record: PortalOrderRecord, index: number, records: PortalOrderRecord[]): PatientOrder {
   const orderId = index + 1;
-  const rxStatus: RxStatus = ({
-    supplier_pending: 'awaiting-approval',
-    supplier_processing: 'approved',
-    supplier_allocated: 'approved',
-    dispatched_to_pharmacy: 'dispatched',
-    partially_received: 'partially-received',
-    received: 'received',
-    ready_for_collection: 'ready',
-    collected: 'collected',
-    exception: 'awaiting-approval',
-  } as Record<string, RxStatus>)[record.fulfilmentStatus] ?? 'awaiting-approval';
+  const rxStatus: RxStatus = portalPrescriptionStatus(record);
   const persistedQuote = record.pricingQuote ?? record.curaleaf?.quote;
   const quoteItems = new Map(persistedQuote?.items.map(item => [item.packId, item]) ?? []);
   const orderItems = (items: Array<{ packId: string; formulaId: string; quantity: number; unitsNeededCount?: number }>): LineItem[] => items.map(item => {
