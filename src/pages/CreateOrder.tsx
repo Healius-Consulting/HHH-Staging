@@ -21,6 +21,7 @@ import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { confirmPortalOrderRefund, createPortalOrder, createPortalOrderRefund, createWorldpaySession, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
 import { checkPatientIdentity } from '../utils/patientIdentity';
+import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 
 function prescriptionDateIsCurrent(issueDate?: string, suppliedExpiryDate?: string) {
   if (!issueDate) return false;
@@ -34,7 +35,7 @@ function prescriptionDateIsCurrent(issueDate?: string, suppliedExpiryDate?: stri
 
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
-  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && patient.status === 'HHH approved');
+  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && canCreateOrderForPatient(patient));
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
   const canUseWorldpay = organisation.worldpay.enabled && organisation.worldpay.status === 'connected';
   const selectedPaymentRoute = organisation.defaultPaymentRoute === 'worldpay' && canUseWorldpay ? 'worldpay' : 'pharmacy';
@@ -137,7 +138,7 @@ export default function CreateOrder() {
   }) : null;
   const hasPrescriptionRecords = Boolean(activeOrder?.prescriptions.length);
   const readiness = activeOrder ? [
-    { label: 'HHH-approved patient linked', complete: patient?.status === 'HHH approved' },
+    { label: 'Approved referral or active patient linked', complete: canCreateOrderForPatient(patient) },
     { label: 'Prescription evidence attached', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => Boolean(rx.copyFileName) && (!requiresLiveCuraleafEvidence || Boolean(rx.fileId))) },
     { label: 'Serial number / Clinic source verified', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => rx.entryMode === 'manual' ? Boolean(rx.serialNumber?.trim()) : Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
     { label: 'Prescription inside its 28-day window', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => prescriptionDateIsCurrent(rx.issueDate, rx.expiryDate)) },

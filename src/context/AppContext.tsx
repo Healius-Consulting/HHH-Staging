@@ -3,6 +3,7 @@ import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingC
 import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 import { checkPatientIdentity } from '../utils/patientIdentity';
+import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -1379,7 +1380,7 @@ function reducer(state: AppState, action: Action): AppState {
 
     // ---- Orders ----
     case 'NEW_ORDER': {
-      if (action.patientId && !state.crm.some(patient => patient.id === action.patientId && patient.organisationId === state.currentOrganisationId && patient.status !== 'Suspended')) return state;
+      if (action.patientId && !state.crm.some(patient => patient.id === action.patientId && patient.organisationId === state.currentOrganisationId && canCreateOrderForPatient(patient))) return state;
       const id = state.nextIds.order;
       const rxId = state.nextIds.rx;
       const newOrder = blankOrder(id, action.patientId || null, state.currentOrganisationId);
@@ -1396,7 +1397,7 @@ function reducer(state: AppState, action: Action): AppState {
       if (!source?.patientId || source.payment.status === 'none') return state;
       const reason = getUnresolvedReason(source);
       if (!reason) return state;
-      if (!state.crm.some(patient => patient.id === source.patientId && patient.organisationId === state.currentOrganisationId && patient.status !== 'Suspended')) return state;
+      if (!state.crm.some(patient => patient.id === source.patientId && patient.organisationId === state.currentOrganisationId && canCreateOrderForPatient(patient))) return state;
       const existingDraft = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none' && order.redoContext?.originalOrderId === source.id);
       if (existingDraft) return {
         ...state,
@@ -1439,7 +1440,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, activeOrderId: action.orderId };
     case 'SET_ORDER_PATIENT': {
       const order = state.orders.find(item => item.id === action.orderId);
-      const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && item.status === 'HHH approved');
+      const patient = state.crm.find(item => item.id === action.patientId && item.organisationId === order?.organisationId && canCreateOrderForPatient(item));
       return patient ? mapOrder(state, action.orderId, o => ({
         ...o,
         patientId: patient.id,
@@ -1465,7 +1466,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_RX_ENTRY_MODE':
       return mapOrder(state, action.orderId, order => {
         const patient = order.patientId
-          ? state.crm.find(item => item.id === order.patientId && item.organisationId === order.organisationId && item.status === 'HHH approved')
+          ? state.crm.find(item => item.id === order.patientId && item.organisationId === order.organisationId && canCreateOrderForPatient(item))
           : null;
         return mapRx(order, action.rxId, prescription => ({
           ...blankRx(prescription.id),
@@ -1584,7 +1585,7 @@ function reducer(state: AppState, action: Action): AppState {
     // ---- Payment ----
     case 'SEND_PAYMENT_LINK': {
       const order = findOrder(state, action.orderId);
-      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && candidate.status === 'HHH approved');
+      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && canCreateOrderForPatient(candidate));
       const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
       if (!order || !patient || !prescriptionReady) return state;
       const amount = orderRevenue(order);
@@ -1599,7 +1600,7 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'START_MANUAL_PAYMENT': {
       const order = findOrder(state, action.orderId);
-      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && candidate.status === 'HHH approved');
+      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && canCreateOrderForPatient(candidate));
       const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
       if (!order || !patient || !prescriptionReady) return state;
       const amount = orderRevenue(order);
@@ -1755,7 +1756,7 @@ function reducer(state: AppState, action: Action): AppState {
     // ---- Curaleaf submission simulation ----
     case 'PLACE_ORDER': {
       const order = findOrder(state, action.orderId);
-      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && candidate.status === 'HHH approved');
+      const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && canCreateOrderForPatient(candidate));
       const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
       if (!order || order.payment.status !== 'paid' || !patient || !prescriptionReady) return state;
       return {

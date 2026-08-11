@@ -7,6 +7,7 @@ import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
 import { conditionLabel } from '@hhh/domain';
 import ConditionList from '../components/ConditionList';
+import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 
 /* ── Unified patient row model ── */
 interface UnifiedPatient {
@@ -279,12 +280,12 @@ export default function Patients() {
   }, [dispatch, patients, state.navigationTarget]);
 
   const handleCreateOrder = (patient: UnifiedPatient) => {
-    const finalPatientId = patient.crmPatient?.status === 'HHH approved' ? patient.crmPatient.id : null;
-    if (!finalPatientId) {
-      dispatch({ type: 'ADD_TOAST', message: `${patient.name} cannot be added to an order until HHH approves programme onboarding.`, toastType: 'warning' });
+    const crmPatient = patient.crmPatient;
+    if (!canCreateOrderForPatient(crmPatient)) {
+      dispatch({ type: 'ADD_TOAST', message: `${patient.name} cannot be added to an order until HHH completes programme onboarding.`, toastType: 'warning' });
       return;
     }
-    dispatch({ type: 'NEW_ORDER', patientId: finalPatientId });
+    dispatch({ type: 'NEW_ORDER', patientId: crmPatient.id });
     dispatch({ type: 'ADD_TOAST', message: `Created new order draft linked to ${patient.name}`, toastType: 'success' });
     dispatch({ type: 'SET_SCREEN', screen: 'create' });
   };
@@ -466,10 +467,12 @@ export default function Patients() {
               <div className="patient-record-drawer__actions">
                 <button
                   className="btn btn-primary btn-sm"
-                  disabled={selectedPatient.crmPatient?.status !== 'HHH approved'}
-                  title={selectedPatient.crmPatient?.status === 'HHH approved'
-                    ? 'Create a new prescription order'
-                    : 'HHH onboarding approval is required before creating an order'}
+                  disabled={!canCreateOrderForPatient(selectedPatient.crmPatient)}
+                  title={canCreateOrderForPatient(selectedPatient.crmPatient)
+                    ? selectedPatient.crmPatient?.status === 'Referred'
+                      ? 'Create this approved referral’s first prescription order'
+                      : 'Create a new prescription order'
+                    : 'HHH onboarding must be completed before creating an order'}
                   onClick={() => handleCreateOrder(selectedPatient)}
                 >
                   <Plus size={12} /> New order

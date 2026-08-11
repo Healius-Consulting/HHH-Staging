@@ -25,6 +25,7 @@ import { allocateDispensingFee, calculateExpiryBoundaryDate, calculatePrescripti
 import { canMarkShipmentReady, shipmentReceiptStatus } from './shipment-workflow.js';
 import { enrichOrderRecord, evaluateOrderCycle } from './order-cycle.js';
 import { refundAdapter } from './refund-adapter.js';
+import { canPatientCreateOrder } from './patient-order-eligibility.js';
 import type { Company, CuraleafValidationRecord, PortalOrganisation, PrescriptionPlacement } from './types.js';
 
 
@@ -1385,6 +1386,9 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       }
     }
     const patient = await getTenantRecord('patients', input.patientId, organisationId);
+    if (!canPatientCreateOrder(patient.status)) {
+      throw new HttpError(409, 'HHH onboarding must be completed before this patient can be added to an order.', 'PATIENT_NOT_ORDER_ELIGIBLE');
+    }
     let authoritativeRedoContext: {
       originalOrderId: string;
       isPaidRedo: boolean;
