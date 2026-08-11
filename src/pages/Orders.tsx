@@ -683,10 +683,10 @@ function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, o
             />)}
           </div>
 
-          {stage === 'paid' && !allPlaced ? (
+          {stage === 'paid' && !allPlaced && !busy ? (
             <div className="order-crm-next-action">
               <span><strong>Payment cleared</strong><small>This order is ready to move into the Curaleaf workflow.</small></span>
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={onSendCuraleaf}><Send size={14} /> {busy ? 'Submitting…' : 'Send to Curaleaf'}</button>
+              <button type="button" className="btn btn-primary" onClick={onSendCuraleaf}><Send size={14} /> Send to Curaleaf</button>
             </div>
           ) : null}
 
