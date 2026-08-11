@@ -13,7 +13,13 @@ export default function Dashboard() {
 
   /* ── Computed stats ── */
   const newReferrals = state.submissions.filter(s => s.organisationId === organisationId && (s.status === 'New' || s.status === 'Under HHH review')).length;
-  const awaitingPayment = tenantOrders.filter(o => o.payment.status === 'sent').length;
+  const awaitingPaymentOrders = tenantOrders.filter(order =>
+    order.lifecycleStatus !== 'cancelled'
+    && !order.cancellation
+    && order.payment.status === 'sent'
+  );
+  const awaitingPayment = awaitingPaymentOrders.length;
+  const activeWorldpayLinks = awaitingPaymentOrders.filter(order => order.payment.route === 'worldpay').length;
 
   const inFulfilment = tenantOrders.filter(o =>
     o.lifecycleStatus !== 'cancelled' &&
@@ -48,8 +54,8 @@ export default function Dashboard() {
   });
 
   // 2. Overdue payments (3+ days)
-  const overduePaymentAlerts = tenantOrders
-    .filter(o => o.payment.status === 'sent' && o.payment.sentAt && (Date.now() - new Date(o.payment.sentAt).getTime()) >= 3 * 24 * 60 * 60 * 1000)
+  const overduePaymentAlerts = awaitingPaymentOrders
+    .filter(o => o.payment.sentAt && (Date.now() - new Date(o.payment.sentAt).getTime()) >= 3 * 24 * 60 * 60 * 1000)
     .map(o => {
       const pName = tenantPatients.find(p => p.id === o.patientId)?.name ?? 'Unknown';
       const pEmail = tenantPatients.find(p => p.id === o.patientId)?.email ?? '';
@@ -125,8 +131,11 @@ export default function Dashboard() {
     return tenantPatients.find(p => p.id === patientId)?.name ?? 'Unknown';
   };
 
-  const paymentPill = (status: string) => {
-    switch (status) {
+  const paymentPill = (order: (typeof tenantOrders)[number]) => {
+    if (order.refund?.status === 'completed') return <span className="pill pill-neutral">Refunded</span>;
+    if (order.cancellation?.status === 'refund_required') return <span className="pill pill-red">Refund due</span>;
+    if (order.lifecycleStatus === 'cancelled' || order.payment.status === 'cancelled') return <span className="pill pill-neutral">Cancelled</span>;
+    switch (order.payment.status) {
       case 'paid': return <span className="pill pill-green">Paid</span>;
       case 'sent': return <span className="pill pill-amber">Awaiting</span>;
       default:     return <span className="pill pill-neutral">Draft</span>;
@@ -296,7 +305,7 @@ export default function Dashboard() {
                         <button type="button" onClick={openSession} title={patientName(order.patientId)}>{compactPatientName(patientName(order.patientId))}</button>
                         <span>{order.prescriptions.length} prescription{order.prescriptions.length === 1 ? '' : 's'} · {sessionDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <div className="session-ledger__status"><small>Payment</small>{paymentPill(order.payment.status)}</div>
+                      <div className="session-ledger__status"><small>Status</small>{paymentPill(order)}</div>
                       <button type="button" className="session-ledger__open" onClick={openSession} aria-label={`Open ${patientName(order.patientId)} prescription session`}>
                         {order.payment.status === 'none' ? 'Continue' : 'Review'} <ArrowRight size={14} aria-hidden="true" />
                       </button>
@@ -326,7 +335,7 @@ export default function Dashboard() {
               <input type="checkbox" checked={awaitingPayment === 0} readOnly aria-label="Outstanding billing links cleared" />
               <div>
                 <span className="font-semibold" style={{ display: 'block' }}>Outstanding Billing Links</span>
-                <span className="text-muted text-xs">{awaitingPayment} Worldpay requests currently active.</span>
+                <span className="text-muted text-xs">{activeWorldpayLinks} active Worldpay payment link{activeWorldpayLinks === 1 ? '' : 's'}.</span>
               </div>
             </div>
             <div className="duty-item">
