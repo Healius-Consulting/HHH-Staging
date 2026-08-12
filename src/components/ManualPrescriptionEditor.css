@@ -22,8 +22,10 @@
 .manual-rx-date-label { display: grid; gap: 6px; min-width: 0; }
 .manual-rx-fields label > span { color: var(--text-secondary); font-size: 11px; font-weight: 700; }
 .manual-rx-field-help { color: var(--text-tertiary); font-size: 9px; font-weight: 500; line-height: 1.4; }
+.manual-rx-field-error { color: var(--color-danger); font-size: 9px; font-weight: 650; line-height: 1.4; }
 .manual-rx-date-field { display: grid; grid-template-columns: minmax(34px, .65fr) auto minmax(34px, .65fr) auto minmax(58px, 1fr); min-height: 38px; align-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); }
 .manual-rx-date-field:focus-within { border-color: var(--tenant-primary); box-shadow: 0 0 0 3px var(--tenant-primary-soft); }
+.manual-rx-date-field[aria-invalid='true'] { border-color: var(--color-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger) 10%, transparent); }
 .manual-rx-date-field input { width: 100%; min-width: 0; min-height: 36px; padding: 7px 5px; border: 0; outline: 0; color: var(--text-primary); background: transparent; font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; }
 .manual-rx-date-field input::placeholder { color: var(--text-tertiary); }
 .manual-rx-date-field i { color: var(--text-tertiary); font-size: 11px; font-style: normal; }

@@ -11,6 +11,10 @@
     "./delivery": {
       "types": "./delivery.d.ts",
       "default": "./delivery.js"
+    },
+    "./prescription-date": {
+      "types": "./prescription-date.d.ts",
+      "default": "./prescription-date.js"
     }
   }
 }

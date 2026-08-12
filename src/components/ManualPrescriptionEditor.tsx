@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { calculatePrescriptionExpiryDate, prescriptionIssueDateBounds } from '@hhh/domain/prescription-date';
 import { Check, FileText, Minus, Package, Plus, Search, Stethoscope, Trash2 } from 'lucide-react';
 import type { CatalogueItem, LineItem, Prescription } from '../context/AppContext';
 import { money } from '../context/AppContext';
@@ -23,11 +24,12 @@ const dateParts = (value?: string) => {
   return match ? { day: match[3], month: match[2], year: match[1] } : { day: '', month: '', year: '' };
 };
 
-function ManualDateField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => void }) {
+function ManualDateField({ label, value, min, max, onChange }: { label: string; value?: string; min: string; max: string; onChange: (value: string) => void }) {
   const initial = dateParts(value);
   const [day, setDay] = useState(initial.day);
   const [month, setMonth] = useState(initial.month);
   const [year, setYear] = useState(initial.year);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     const next = dateParts(value);
@@ -38,6 +40,7 @@ function ManualDateField({ label, value, onChange }: { label: string; value?: st
 
   const commit = (nextDay: string, nextMonth: string, nextYear: string) => {
     if (!nextDay && !nextMonth && !nextYear) {
+      setValidationError(null);
       onChange('');
       return;
     }
@@ -46,9 +49,19 @@ function ManualDateField({ label, value, onChange }: { label: string; value?: st
     const monthNumber = Number(nextMonth);
     const yearNumber = Number(nextYear);
     const candidate = new Date(Date.UTC(yearNumber, monthNumber - 1, dayNumber));
-    if (candidate.getUTCFullYear() === yearNumber && candidate.getUTCMonth() === monthNumber - 1 && candidate.getUTCDate() === dayNumber) {
-      onChange(`${nextYear}-${nextMonth}-${nextDay}`);
+    if (candidate.getUTCFullYear() !== yearNumber || candidate.getUTCMonth() !== monthNumber - 1 || candidate.getUTCDate() !== dayNumber) {
+      setValidationError('Enter a real calendar date.');
+      onChange('');
+      return;
     }
+    const candidateDate = `${nextYear}-${nextMonth}-${nextDay}`;
+    if (candidateDate < min || candidateDate > max) {
+      setValidationError('That date is outside the current 28-day prescription window.');
+      onChange('');
+      return;
+    }
+    setValidationError(null);
+    onChange(candidateDate);
   };
 
   const updatePart = (part: 'day' | 'month' | 'year', rawValue: string) => {
@@ -66,13 +79,16 @@ function ManualDateField({ label, value, onChange }: { label: string; value?: st
   return (
     <label className="manual-rx-date-label">
       <span>{label}</span>
-      <span className="manual-rx-date-field" role="group" aria-label={label}>
+      <span className="manual-rx-date-field" role="group" aria-label={label} aria-invalid={Boolean(validationError) || undefined}>
         <input aria-label={`${label} day`} inputMode="numeric" placeholder="DD" value={day} onChange={event => updatePart('day', event.target.value)} />
         <i>/</i>
         <input aria-label={`${label} month`} inputMode="numeric" placeholder="MM" value={month} onChange={event => updatePart('month', event.target.value)} />
         <i>/</i>
         <input aria-label={`${label} year`} inputMode="numeric" placeholder="YYYY" value={year} onChange={event => updatePart('year', event.target.value)} />
       </span>
+      <small className={validationError ? 'manual-rx-field-error' : 'manual-rx-field-help'}>
+        {validationError ?? `Choose a date from ${new Date(`${min}T00:00:00`).toLocaleDateString('en-GB')} to ${new Date(`${max}T00:00:00`).toLocaleDateString('en-GB')}.`}
+      </small>
     </label>
   );
 }
@@ -116,6 +132,7 @@ export default function ManualPrescriptionEditor({
       .filter(product => !needle || `${product.name} ${product.type} ${product.unit ?? ''}`.toLocaleLowerCase('en-GB').includes(needle));
   }, [activeProducts, query, typeFilter]);
   const visibleProducts = filteredProducts.slice(0, 16);
+  const issueDateBounds = prescriptionIssueDateBounds() ?? { min: '', max: '' };
 
   const addProduct = (product: CatalogueItem) => {
     if (selectedProductIds.has(product.id)) return;
@@ -162,11 +179,11 @@ export default function ManualPrescriptionEditor({
                 />
                 <small className="manual-rx-field-help">Required by the current Curaleaf submission process.</small>
               </label>
-              <ManualDateField label="Issue date" value={prescription.issueDate} onChange={issueDate => onMetadataChange('issueDate', issueDate)} />
+              <ManualDateField label="Issue date" value={prescription.issueDate} min={issueDateBounds.min} max={issueDateBounds.max} onChange={issueDate => onMetadataChange('issueDate', issueDate)} />
               {prescription.issueDate ? (
                 <label>
                   <span>Derived 28-day expiry</span>
-                  <input className="input" disabled value={new Date(new Date(prescription.issueDate).setDate(new Date(prescription.issueDate).getDate() + 28)).toISOString().split('T')[0]} />
+                  <input className="input" disabled value={calculatePrescriptionExpiryDate(prescription.issueDate) ?? ''} />
                 </label>
               ) : null}
             </div>

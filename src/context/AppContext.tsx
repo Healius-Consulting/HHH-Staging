@@ -1,4 +1,5 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
+import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
 import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
 import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
@@ -458,16 +459,6 @@ export const lineMargin = (item: LineItem) => {
   return rev > 0 ? Math.round((rev - lineCost(item)) / rev * 100) : 0;
 };
 
-function prescriptionDateIsCurrent(prescription: Prescription, now = new Date()) {
-  if (!prescription.issueDate) return false;
-  const issueDate = new Date(`${prescription.issueDate}T00:00:00`);
-  if (Number.isNaN(issueDate.getTime()) || issueDate.getTime() > now.getTime()) return false;
-  const expiryDate = prescription.expiryDate
-    ? new Date(`${prescription.expiryDate}T23:59:59.999`)
-    : new Date(issueDate.getTime() + 28 * 24 * 60 * 60 * 1000);
-  return !Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() >= now.getTime();
-}
-
 function prescriptionIsPaymentReady(prescription: Prescription, patient: CRMPatient) {
   const sourceVerified = prescription.entryMode === 'manual'
     ? Boolean(prescription.serialNumber?.trim())
@@ -486,7 +477,7 @@ function prescriptionIsPaymentReady(prescription: Prescription, patient: CRMPati
   return Boolean(prescription.copyFileName)
     && sourceVerified
     && prescriberComplete
-    && prescriptionDateIsCurrent(prescription)
+    && prescriptionDateIsCurrent(prescription.issueDate, prescription.expiryDate)
     && medicinesComplete
     && checkPatientIdentity({
       selectedName: patient.name,

@@ -4,6 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import { z } from 'zod';
+import { prescriptionDateWindowStatus } from '@hhh/domain/prescription-date';
 import { CONDITION_IDS, normaliseConditionId, type ConditionId } from './conditions.js';
 import type { DocumentReference } from 'firebase-admin/firestore';
 import { audit } from './audit.js';
@@ -961,6 +962,17 @@ const curaleafQuoteSchema = z.object({
     patientPackPrice: z.string().trim().min(1).max(40),
   })).min(1).max(100),
 });
+function addPrescriptionDateIssue(issueDate: string, expiryDate: string | undefined, context: z.RefinementCtx) {
+  const status = prescriptionDateWindowStatus(issueDate, expiryDate);
+  if (status === 'current') return;
+  const message = status === 'future'
+    ? 'Prescription issue date cannot be in the future.'
+    : status === 'expired'
+      ? 'Prescription issue date is outside the current 28-day window.'
+      : 'Prescription dates must define a valid 28-day window.';
+  context.addIssue({ code: 'custom', path: ['issueDate'], message });
+}
+
 const orderPrescriptionSchema = z.object({
   fileId: idSchema,
   clinicScanId: idSchema.optional(),
@@ -987,7 +999,7 @@ const orderPrescriptionSchema = z.object({
     packId: idSchema,
     quantity: z.number().int().positive().max(100),
   })).min(1).max(50),
-});
+}).superRefine((prescription, context) => addPrescriptionDateIssue(prescription.issueDate, prescription.expiryDate, context));
 const orderSchema = z.object({
   patientId: idSchema,
   lineItems: z.array(orderLineItemSchema).min(1).max(50),
@@ -2587,7 +2599,7 @@ const manualPrescriptionSchema = z.object({
   organisationId: idSchema.optional(), orderId: idSchema, subOrderId: idSchema.optional(), fileId: idSchema, serialNumber: z.string().min(1).max(200), issueDate: z.iso.date(),
   prescriber: z.object({ pin: z.string().min(1).max(100), gmcNumber: z.number().int().positive().nullable(), gphcNumber: z.string().max(100).nullable(), name: z.string().min(1).max(200), initials: z.string().min(1).max(20) }),
   items: z.array(z.object({ formulaId: idSchema, unitsNeededCount: z.number().int().positive().max(100), packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1).max(50),
-});
+}).superRefine((prescription, context) => addPrescriptionDateIssue(prescription.issueDate, undefined, context));
 app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request, response, next) => {
   let operation: Awaited<ReturnType<typeof startOperation>> | undefined;
   try {

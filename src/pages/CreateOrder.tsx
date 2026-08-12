@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
 import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
@@ -22,16 +23,6 @@ import { confirmPortalOrderRefund, createPortalOrder, createPortalOrderRefund, c
 import { formatPatientDob } from '../utils/patientDob';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
-
-function prescriptionDateIsCurrent(issueDate?: string, suppliedExpiryDate?: string) {
-  if (!issueDate) return false;
-  const issued = new Date(`${issueDate}T00:00:00`);
-  if (Number.isNaN(issued.getTime()) || issued.getTime() > Date.now()) return false;
-  const expires = suppliedExpiryDate
-    ? new Date(`${suppliedExpiryDate}T23:59:59.999`)
-    : new Date(issued.getTime() + 28 * 24 * 60 * 60 * 1000);
-  return !Number.isNaN(expires.getTime()) && expires.getTime() >= Date.now();
-}
 
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
