@@ -4,7 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import { z } from 'zod';
-import { prescriptionDateWindowStatus } from '@hhh/domain/prescription-date';
+import { prescriptionDateWindowStatus } from './prescription-date.js';
 import { CONDITION_IDS, normaliseConditionId, type ConditionId } from './conditions.js';
 import type { DocumentReference } from 'firebase-admin/firestore';
 import { audit } from './audit.js';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculatePrescriptionExpiryDate, prescriptionDateIsCurrent, prescriptionDateWindowStatus, prescriptionIssueDateBounds } from '@hhh/domain/prescription-date';
+import { calculatePrescriptionExpiryDate, prescriptionDateIsCurrent, prescriptionDateWindowStatus, prescriptionIssueDateBounds } from './prescription-date.js';
 
 const NOW = new Date('2026-08-12T12:00:00.000Z');
 
