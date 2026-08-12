@@ -16,6 +16,16 @@ test('a Curaleaf-pending prescription is shown as awaiting approval', () => {
   }), 'awaiting-approval');
 });
 
+test('a pending sub-order remains awaiting approval when another sub-order is processing', () => {
+  assert.equal(portalPrescriptionStatus({
+    fulfilmentStatus: 'supplier_processing',
+    curaleaf: {
+      status: 'prescription_pending',
+      customerReference: 'HHH-order-pending-rx',
+    },
+  }), 'awaiting-approval');
+});
+
 test('a submitted Curaleaf purchase order follows its fulfilment state', () => {
   assert.equal(portalPrescriptionStatus({
     fulfilmentStatus: 'supplier_processing',

@@ -4,6 +4,7 @@ import { nowIso } from './http.js';
 import { invalidateCollectionCache } from './repository.js';
 import { reconcileWorldpayPayment } from './worldpay.js';
 import type { PaymentStatus } from './types.js';
+import { autoSubmitPaidPrescriptions } from './curaleaf-reconciliation.js';
 
 const PAYMENT_QUERY_LAG_GRACE_MS = 2 * 60 * 1_000;
 
@@ -127,6 +128,19 @@ export async function reconcileWorldpayPaymentDocument(
   await batch.commit();
   invalidateCollectionCache('payments', paymentDocument.id);
   if (shouldUpdateOrder) invalidateCollectionCache('orders', orderId);
+  if (effectivePaymentStatus === 'paid' && !latePaymentAfterCancellation) {
+    try {
+      await autoSubmitPaidPrescriptions(organisationId, orderId);
+    } catch (error) {
+      // Payment reconciliation is authoritative and must still succeed. The
+      // scheduled Curaleaf worker will retry the idempotent placement operation.
+      console.error('Automatic Curaleaf placement after Worldpay settlement failed', {
+        organisationId,
+        orderId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
   return {
     state: 'reconciled',
     paymentStatus: effectivePaymentStatus,

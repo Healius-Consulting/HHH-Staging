@@ -346,6 +346,20 @@ export interface PatientRegisterExportResult {
   recordScopeHash: string;
 }
 
+export interface PortalCuraleafOrderState {
+  status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'quote_review_required' | 'purchase_order_submitted';
+  prescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
+  prescriptionId?: string;
+  prescriberId?: string;
+  prescriberName?: string;
+  customerReference: string;
+  purchaseOrderId?: string | null;
+  purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
+  courier?: string;
+  shipmentIds?: string[];
+  quote?: CuraleafQuote;
+}
+
 export interface PortalOrderRecord {
   id: string;
   organisationId: string;
@@ -408,19 +422,8 @@ export interface PortalOrderRecord {
     approvedAt?: string;
     approvalNote?: string;
   };
-  curaleaf?: {
-    status: 'prescription_processing' | 'prescription_pending' | 'prescription_mismatch' | 'prescription_closed' | 'reconciliation_required' | 'quote_review_required' | 'purchase_order_submitted';
-    prescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
-    prescriptionId?: string;
-    prescriberId?: string;
-    prescriberName?: string;
-    customerReference: string;
-    purchaseOrderId?: string | null;
-    purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
-    courier?: string;
-    shipmentIds?: string[];
-    quote?: CuraleafQuote;
-  };
+  curaleaf?: PortalCuraleafOrderState;
+  curaleafSubOrders?: Record<string, PortalCuraleafOrderState>;
   createdAt: string;
   updatedAt: string;
 }

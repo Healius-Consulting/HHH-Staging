@@ -706,31 +706,34 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
     };
   });
   const prescriptions: Prescription[] = record.prescriptions?.length
-    ? record.prescriptions.map((prescription, rxIndex) => ({
-        id: orderId * 100 + rxIndex + 1,
-        entryMode: prescription.clinicScanId ? 'clinic' : 'manual',
-        clinicScanId: prescription.clinicScanId,
-        curaleafPrescriptionId: prescription.curaleafPrescriptionId,
-        curaleafPrescriptionState: record.curaleaf?.prescriptionState,
-        prescriber: record.curaleaf?.prescriberName ?? prescription.prescriber.name,
-        prescriberId: prescription.prescriber.id,
-        prescriberPin: prescription.prescriber.pin,
-        prescriberGmcNumber: prescription.prescriber.gmcNumber?.toString(),
-        prescriberGphcNumber: prescription.prescriber.gphcNumber ?? undefined,
-        serialNumber: prescription.serialNumber,
-        issueDate: prescription.issueDate,
-        expiryDate: prescription.expiryDate,
-        copyFileName: null,
-        fileId: prescription.fileId,
-        items: orderItems(prescription.items),
-        placed: record.curaleaf?.status === 'purchase_order_submitted',
-        poRef: record.curaleaf?.customerReference ?? null,
-        status: rxStatus,
-        invoiceRef: null,
-        trackingNumber: null,
-        carrier: record.curaleaf?.courier ?? null,
-        shipmentId: record.curaleaf?.shipmentIds?.[rxIndex] ?? record.curaleaf?.shipmentIds?.[0],
-      }))
+    ? record.prescriptions.map((prescription, rxIndex) => {
+        const curaleaf = record.curaleafSubOrders?.[prescription.fileId] ?? record.curaleaf;
+        return {
+          id: orderId * 100 + rxIndex + 1,
+          entryMode: prescription.clinicScanId ? 'clinic' : 'manual',
+          clinicScanId: prescription.clinicScanId,
+          curaleafPrescriptionId: prescription.curaleafPrescriptionId,
+          curaleafPrescriptionState: curaleaf?.prescriptionState,
+          prescriber: curaleaf?.prescriberName ?? prescription.prescriber.name,
+          prescriberId: prescription.prescriber.id,
+          prescriberPin: prescription.prescriber.pin,
+          prescriberGmcNumber: prescription.prescriber.gmcNumber?.toString(),
+          prescriberGphcNumber: prescription.prescriber.gphcNumber ?? undefined,
+          serialNumber: prescription.serialNumber,
+          issueDate: prescription.issueDate,
+          expiryDate: prescription.expiryDate,
+          copyFileName: null,
+          fileId: prescription.fileId,
+          items: orderItems(prescription.items),
+          placed: curaleaf?.status === 'purchase_order_submitted',
+          poRef: curaleaf?.customerReference ?? null,
+          status: portalPrescriptionStatus({ curaleaf, fulfilmentStatus: record.fulfilmentStatus }),
+          invoiceRef: null,
+          trackingNumber: null,
+          carrier: curaleaf?.courier ?? null,
+          shipmentId: curaleaf?.shipmentIds?.[0],
+        };
+      })
     : [{
         id: orderId * 100 + 1,
         entryMode: 'clinic',

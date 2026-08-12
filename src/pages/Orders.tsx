@@ -18,7 +18,6 @@ import {
   Printer,
   RefreshCw,
   Search,
-  Send,
   ShieldAlert,
   Truck,
   UserRound,
@@ -39,7 +38,7 @@ import {
   type Prescription,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { confirmPortalOrderRefund, createPortalOrderRefund, recordPortalCuraleafCancellation, recordPortalGoodsReceipt, recordPortalManualPayment, requestPortalOrderCancellation, submitCuraleafClinicPrescription, submitCuraleafManualPrescription, updatePortalShipmentStatus } from '../shared/api';
+import { confirmPortalOrderRefund, createPortalOrderRefund, recordPortalCuraleafCancellation, recordPortalGoodsReceipt, recordPortalManualPayment, requestPortalOrderCancellation, updatePortalShipmentStatus } from '../shared/api';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
 
@@ -71,7 +70,7 @@ const DEFAULT_MANUAL_FORM: ManualPaymentForm = { tender: 'epos-card', reference:
 
 const STAGE_META: Record<OrderStage, { label: string; description: string; tone: string; icon: LucideIcon }> = {
   'awaiting-payment': { label: 'Awaiting payment', description: 'Payment request sent to patient', tone: 'warning', icon: Clock3 },
-  paid: { label: 'Paid', description: 'Cleared and ready for Curaleaf', tone: 'success', icon: CreditCard },
+  paid: { label: 'Paid', description: 'Automatic Curaleaf checks in progress', tone: 'success', icon: CreditCard },
   'curaleaf-pending': { label: 'With Curaleaf', description: 'Awaiting supplier decision', tone: 'info', icon: CircleDot },
   'curaleaf-approved': { label: 'Curaleaf approved', description: 'Supplier accepted the prescription', tone: 'success', icon: CheckCircle2 },
   dispatched: { label: 'In delivery', description: 'Dispatched to the pharmacy', tone: 'info', icon: Truck },
@@ -323,64 +322,6 @@ export default function Orders() {
     [prescription.id]: { ...receiptDraftFor(prescription), ...current[prescription.id], ...patch },
   }));
 
-  const submitLiveOrder = async (order: PatientOrder) => {
-    if (!order.backendId) throw new Error('This order has not been saved to the HHH backend.');
-    let pendingAcceptance = 0;
-    for (const prescription of order.prescriptions.filter(candidate => !candidate.placed)) {
-      if (!prescription.fileId || !prescription.issueDate) throw new Error(`Rx ${prescription.id} does not have a complete prescription record.`);
-      if (prescription.items.some(item => !item.formulaId || !item.unitsNeededCount)) throw new Error(`Rx ${prescription.id} has a product without a formula ID or prescribed-unit count.`);
-      const result = prescription.entryMode === 'manual'
-        ? await submitCuraleafManualPrescription({
-            organisationId: state.currentOrganisationId,
-            orderId: order.backendId,
-            subOrderId: String(prescription.id),
-            fileId: prescription.fileId,
-            serialNumber: prescription.serialNumber || '',
-            issueDate: prescription.issueDate,
-            prescriber: {
-              pin: prescription.prescriberPin?.trim() ?? '',
-              gmcNumber: prescription.prescriberGmcNumber?.trim() ? Number(prescription.prescriberGmcNumber) : null,
-              gphcNumber: prescription.prescriberGphcNumber?.trim() || null,
-              name: prescription.prescriber,
-              initials: prescription.prescriber.split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 20),
-            },
-            items: prescription.items.map(item => ({
-              formulaId: item.formulaId!,
-              unitsNeededCount: item.unitsNeededCount!,
-              packId: item.productId,
-              quantity: item.qty,
-            })),
-          })
-        : await submitCuraleafClinicPrescription({
-            organisationId: state.currentOrganisationId,
-            orderId: order.backendId,
-            subOrderId: String(prescription.id),
-            fileId: prescription.fileId,
-            serialNumber: prescription.serialNumber || '',
-          });
-      if (result.status !== 'purchase_order_submitted') pendingAcceptance += 1;
-      dispatch({ type: 'CONFIRM_CURALEAF_SUBMISSION', orderId: order.id, rxId: prescription.id, customerReference: result.customerReference });
-    }
-    return pendingAcceptance;
-  };
-
-  const handlePlaceOrder = async (order: PatientOrder) => {
-    setSubmittingOrderId(order.id);
-    try {
-      if (!isLocalPortalPreview && state.workspaceMode === 'live') {
-        const pendingAcceptance = await submitLiveOrder(order);
-        dispatch({ type: 'ADD_TOAST', message: pendingAcceptance ? `${pendingAcceptance} prescription${pendingAcceptance === 1 ? ' is' : 's are'} awaiting Curaleaf review.` : 'Curaleaf purchase orders submitted.', toastType: 'success' });
-      } else {
-        dispatch({ type: 'PLACE_ORDER', orderId: order.id });
-        dispatch({ type: 'ADD_TOAST', message: 'Training Curaleaf submission simulated locally. Nothing was sent.', toastType: 'info' });
-      }
-    } catch (error) {
-      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Curaleaf submission failed.', toastType: 'error' });
-    } finally {
-      setSubmittingOrderId(null);
-    }
-  };
-
   const handleRecordManualPayment = async (order: PatientOrder) => {
     const form = manualForms[order.id] ?? DEFAULT_MANUAL_FORM;
     if (!form.confirmed) return;
@@ -398,7 +339,7 @@ export default function Orders() {
           notes: form.notes.trim() || undefined,
         });
         dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
-        dispatch({ type: 'ADD_TOAST', message: 'Payment recorded. The order is ready to send to Curaleaf.', toastType: 'success' });
+        dispatch({ type: 'ADD_TOAST', message: 'Payment recorded. Curaleaf placement started automatically.', toastType: 'success' });
       } else {
         dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
         dispatch({ type: 'ADD_TOAST', message: 'Training payment recorded locally.', toastType: 'info' });
@@ -505,7 +446,6 @@ export default function Orders() {
               manualForm={manualForms[selected.order.id] ?? DEFAULT_MANUAL_FORM}
               onManualFormChange={patch => updateManualForm(selected.order.id, patch)}
               onRecordManual={() => void handleRecordManualPayment(selected.order)}
-              onSendCuraleaf={() => void handlePlaceOrder(selected.order)}
               onRedo={() => {
                 const existingDraft = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none' && order.redoContext?.originalOrderId === selected.order.id);
                 dispatch({ type: 'START_REDO_ORDER', sourceOrderId: selected.order.id });
@@ -565,12 +505,11 @@ function OrderListRow({ record, selected, onSelect }: { record: OrderRecord; sel
   );
 }
 
-function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, onSendCuraleaf, onRedo, onPrint, busy, receiptDrafts, fulfilmentBusyRxId, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, refundReference, onRefundReferenceChange, onRequestRefund, onConfirmRefund, refundBusy, cancellationEditorOpen, cancellationReason, cancellationNote, cancellationReference, cancellationContactNote, cancellationBusy, onOpenCancellation, onCloseCancellation, onCancellationReasonChange, onCancellationNoteChange, onCancellationReferenceChange, onCancellationContactNoteChange, onRequestCancellation, onRecordCuraleafContact, onConfirmCuraleafCancellation }: {
+function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, onRedo, onPrint, busy, receiptDrafts, fulfilmentBusyRxId, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, refundReference, onRefundReferenceChange, onRequestRefund, onConfirmRefund, refundBusy, cancellationEditorOpen, cancellationReason, cancellationNote, cancellationReference, cancellationContactNote, cancellationBusy, onOpenCancellation, onCloseCancellation, onCancellationReasonChange, onCancellationNoteChange, onCancellationReferenceChange, onCancellationContactNoteChange, onRequestCancellation, onRecordCuraleafContact, onConfirmCuraleafCancellation }: {
   record: OrderRecord;
   manualForm: ManualPaymentForm;
   onManualFormChange: (patch: Partial<ManualPaymentForm>) => void;
   onRecordManual: () => void;
-  onSendCuraleaf: () => void;
   onRedo: () => void;
   onPrint: () => void;
   busy: boolean;
@@ -684,9 +623,8 @@ function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, o
           </div>
 
           {stage === 'paid' && !allPlaced && !busy ? (
-            <div className="order-crm-next-action">
-              <span><strong>Payment cleared</strong><small>This order is ready to move into the Curaleaf workflow.</small></span>
-              <button type="button" className="btn btn-primary" onClick={onSendCuraleaf}><Send size={14} /> Send to Curaleaf</button>
+            <div className="order-crm-next-action order-crm-next-action--waiting">
+              <Clock3 size={16} /><span><strong>Automatic Curaleaf placement in progress</strong><small>The prescription and prescriber are checked continuously. As soon as Curaleaf marks the prescription active, the paid order is sent through <code>/purchase-order-from-prescriptions/</code>.</small></span>
             </div>
           ) : null}
 

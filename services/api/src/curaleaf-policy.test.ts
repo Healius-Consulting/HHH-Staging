@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compareQuotes, quoteFingerprint, validPrescriptionSignature } from './app.js';
-import { CuraleafRequestError } from './curaleaf.js';
+import { clinicPrescriptionReadyForPurchaseOrder, CuraleafRequestError } from './curaleaf.js';
 import { eventPollBackoffSeconds } from './curaleaf-events.js';
 
 const baseline = {
@@ -32,4 +32,12 @@ test('quote fingerprints are insensitive to item order', () => {
 test('event polling honours Curaleaf retry-after and caps exponential backoff', () => {
   assert.equal(eventPollBackoffSeconds(new CuraleafRequestError(429, 'limited', false, 37), 1), 37);
   assert.equal(eventPollBackoffSeconds(new Error('offline'), 10), 300);
+});
+
+test('Clinic prescription purchase ordering waits for ACTIVE supplier state', () => {
+  assert.equal(clinicPrescriptionReadyForPurchaseOrder('PENDING'), false);
+  assert.equal(clinicPrescriptionReadyForPurchaseOrder('ACTIVE'), true);
+  assert.equal(clinicPrescriptionReadyForPurchaseOrder('FULFILLED'), false);
+  assert.equal(clinicPrescriptionReadyForPurchaseOrder('EXPIRED'), false);
+  assert.equal(clinicPrescriptionReadyForPurchaseOrder('CANCELLED'), false);
 });

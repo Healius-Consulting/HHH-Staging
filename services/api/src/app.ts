@@ -27,6 +27,8 @@ import { enrichOrderRecord, evaluateOrderCycle } from './order-cycle.js';
 import { refundAdapter } from './refund-adapter.js';
 import { canPatientCreateOrder } from './patient-order-eligibility.js';
 import type { Company, CuraleafValidationRecord, PortalOrganisation, PrescriptionPlacement } from './types.js';
+import { autoSubmitPaidPrescriptions, prepareManualPrescriptionsForOrder } from './curaleaf-reconciliation.js';
+import { loadUploadedPrescriptionFile } from './prescription-file.js';
 
 
 
@@ -292,18 +294,6 @@ function safeFilename(value: string) {
 function maskedIdentifier(value: string) {
   const tail = value.slice(-4);
   return `${'•'.repeat(Math.min(8, Math.max(4, value.length - tail.length)))}${tail}`;
-}
-
-async function uploadedFile(organisationId: string, fileId: string) {
-  const record = await getTenantRecord('prescriptionFiles', fileId, organisationId);
-  if (record.status !== 'uploaded') throw new HttpError(409, 'Complete and verify the prescription file upload first.', 'UPLOAD_INCOMPLETE');
-  const object = storage.bucket().file(record.storagePath as string);
-  const [exists] = await object.exists();
-  if (!exists) throw new HttpError(409, 'Complete the prescription file upload first.', 'UPLOAD_INCOMPLETE');
-  const [metadata] = await object.getMetadata();
-  if (!metadata.size || Number(metadata.size) > MAX_PRESCRIPTION_FILE_BYTES) throw new HttpError(400, 'Prescription files must be 16 MB or smaller.', 'FILE_TOO_LARGE');
-  const [bytes] = await object.download();
-  return { bytes, contentType: record.contentType as string, filename: record.filename as string };
 }
 
 export function validPrescriptionSignature(contentType: typeof PRESCRIPTION_CONTENT_TYPES[number], bytes: Buffer) {
@@ -1301,7 +1291,7 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/scan', async (request, 
         response.status(202).json({ scanId, status: 'processing' });
         return;
       }
-      const file = await uploadedFile(organisationId, input.fileId);
+      const file = await loadUploadedPrescriptionFile(organisationId, input.fileId);
       prescriptionId = await uploadClinicPrescriptionImage(organisationId, file);
       await document.update({ prescriptionId, status: 'processing', updatedAt: timestamp() });
     }
@@ -1609,6 +1599,19 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       redoOfOrderId: authoritativeRedoContext?.originalOrderId ?? null,
       isPaidRedo: authoritativeRedoContext?.isPaidRedo ?? false,
     });
+    if (authoritativeRedoContext?.isPaidRedo) {
+      try {
+        await autoSubmitPaidPrescriptions(organisationId, String(record.id));
+      } catch (error) {
+        console.error('Automatic Curaleaf placement for paid replacement failed', { organisationId, orderId: record.id, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    } else {
+      try {
+        await prepareManualPrescriptionsForOrder(organisationId, String(record.id));
+      } catch (error) {
+        console.error('Manual prescription pre-registration failed', { organisationId, orderId: record.id, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    }
     response.status(201).json(enrichOrderRecord(record as Record<string, unknown>));
   } catch (error) { next(error); }
 });
@@ -2609,8 +2612,8 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
       items: storedPrescription.items,
     } : input;
     const quote = await requireApprovedFinalQuote(request, organisationId, input.orderId, order, authoritativeInput.items.map(({ packId, quantity }) => ({ packId, quantity })));
-    operation = await startOperation(organisationId, input.orderId, 'manual', input.subOrderId);
-    const file = await uploadedFile(organisationId, authoritativeInput.fileId);
+    operation = await startOperation(organisationId, input.orderId, 'manual', authoritativeInput.fileId);
+    const file = await loadUploadedPrescriptionFile(organisationId, authoritativeInput.fileId);
     const result = await submitManualPrescription(organisationId, { ...authoritativeInput, customerReference: operation.reference, file, quote });
     const fulfilmentStatus: FulfilmentStatus = result.status === 'prescription_pending' ? 'supplier_pending' : 'supplier_processing';
     const operationStatus = result.status === 'prescription_pending' ? 'awaiting_prescription_approval' : 'purchase_order_submitted';
@@ -2643,8 +2646,8 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
     const storedPrescription = storedPrescriptions.find(prescription => prescription.fileId === input.fileId || prescription.serialNumber === input.serialNumber);
     if (!storedPrescription) throw new HttpError(409, 'The submitted Clinic prescription is not part of this saved order.', 'ORDER_PRESCRIPTION_MISMATCH');
     const quote = await requireApprovedFinalQuote(request, organisationId, input.orderId, order, storedPrescription.items.map(({ packId, quantity }) => ({ packId, quantity })));
-    operation = await startOperation(organisationId, input.orderId, 'barcode', input.subOrderId);
-    const file = storedPrescription.curaleafPrescriptionId ? undefined : await uploadedFile(organisationId, storedPrescription.fileId);
+    operation = await startOperation(organisationId, input.orderId, 'barcode', storedPrescription.fileId);
+    const file = storedPrescription.curaleafPrescriptionId ? undefined : await loadUploadedPrescriptionFile(organisationId, storedPrescription.fileId);
     const result = await submitClinicPrescription(organisationId, {
       prescriptionId: storedPrescription.curaleafPrescriptionId,
       serialNumber: storedPrescription.serialNumber,
@@ -2685,8 +2688,15 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
 
 app.post('/v1/portal/orders/:id/payments/manual', async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), amountPence: z.number().int().positive(), tender: z.enum(['cash', 'epos', 'bank_transfer', 'other']), reference: z.string().trim().min(1).max(200), notes: z.string().trim().max(1000).optional() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if ((order.paymentRoute ?? 'manual') !== 'manual') throw new HttpError(409, 'This order is locked to Worldpay.', 'PAYMENT_ROUTE_LOCKED'); if (input.amountPence !== order.totalPence) throw new HttpError(400, 'Payment amount must match the order total.', 'AMOUNT_MISMATCH');
-    const payment = await createRecord('payments', { organisationId, orderId, route: 'manual', status: 'paid' satisfies PaymentStatus, amountPence: input.amountPence, currency: 'GBP', tender: input.tender, reference: input.reference, notes: input.notes ?? null, confirmedBy: identity(request).uid, confirmedAt: timestamp() }); await firestore.collection('orders').doc(orderId).update({ paymentStatus: 'paid', paymentId: payment.id, updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.manual_confirmed', { organisationId, orderId, paymentId: payment.id, amountPence: input.amountPence }); response.status(201).json(payment);
+    const input = z.object({ organisationId: idSchema.optional(), amountPence: z.number().int().positive(), tender: z.enum(['cash', 'epos', 'bank_transfer', 'other']), reference: z.string().trim().min(1).max(200), notes: z.string().trim().max(1000).optional() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if ((order.paymentRoute ?? 'manual') !== 'manual') throw new HttpError(409, 'This order is locked to Worldpay.', 'PAYMENT_ROUTE_LOCKED'); if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID'); if (input.amountPence !== order.totalPence) throw new HttpError(400, 'Payment amount must match the order total.', 'AMOUNT_MISMATCH');
+    const payment = await createRecord('payments', { organisationId, orderId, route: 'manual', status: 'paid' satisfies PaymentStatus, amountPence: input.amountPence, currency: 'GBP', tender: input.tender, reference: input.reference, notes: input.notes ?? null, confirmedBy: identity(request).uid, confirmedAt: timestamp() }); await firestore.collection('orders').doc(orderId).update({ paymentStatus: 'paid', paymentId: payment.id, updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.manual_confirmed', { organisationId, orderId, paymentId: payment.id, amountPence: input.amountPence });
+    let curaleafAutomation: Record<string, number> | null = null;
+    try {
+      curaleafAutomation = await autoSubmitPaidPrescriptions(organisationId, orderId);
+    } catch (error) {
+      console.error('Automatic Curaleaf placement after pharmacy payment failed', { organisationId, orderId, error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+    response.status(201).json({ ...payment, curaleafAutomation });
   } catch (error) { next(error); }
 });
 

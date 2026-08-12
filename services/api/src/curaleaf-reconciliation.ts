@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import type { DocumentSnapshot, QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import {
   curaleafRequest,
   findCuraleafPurchaseOrder,
   findCuraleafShipments,
+  registerManualPrescription,
   reconcileClinicPrescription,
   reconcileManualPrescription,
   type CuraleafPurchaseOrderRecord,
@@ -15,6 +16,7 @@ import { nowIso } from './http.js';
 import { invalidateCollectionCache } from './repository.js';
 import { activatePatientForOrder } from './patient-finance.js';
 import type { FulfilmentStatus } from './types.js';
+import { loadUploadedPrescriptionFile } from './prescription-file.js';
 
 type OperationRecord = {
   organisationId?: unknown;
@@ -25,13 +27,21 @@ type OperationRecord = {
   status?: unknown;
   result?: unknown;
   kind?: unknown;
+  subOrderId?: unknown;
   prescriptionId?: unknown;
+  prescriptionState?: unknown;
+  prescriberId?: unknown;
   prescriberPin?: unknown;
   prescriptionItems?: unknown;
 };
 
 type SavedPrescription = {
+  fileId?: unknown;
+  clinicScanId?: unknown;
+  curaleafPrescriptionId?: unknown;
   serialNumber?: unknown;
+  issueDate?: unknown;
+  prescriber?: unknown;
   items?: unknown;
 };
 
@@ -125,6 +135,11 @@ function operationInput(operation: OperationRecord, order: Record<string, unknow
     serialNumber,
     items: items.length ? items : fallbackItems,
     prescriptionItems: prescriptionItems.length ? prescriptionItems : fallbackPrescriptionItems,
+    prescriberId: typeof operation.prescriberId === 'string'
+      ? operation.prescriberId
+      : prescriptions.length === 1 && fallbackPrescription && typeof fallbackPrescription.prescriber === 'object' && fallbackPrescription.prescriber
+        ? String((fallbackPrescription.prescriber as Record<string, unknown>).id ?? '')
+        : '',
     prescriberPin: typeof operation.prescriberPin === 'string'
       ? operation.prescriberPin
       : prescriptions.length === 1 && fallbackPrescription && typeof (fallbackPrescription as Record<string, unknown>).prescriber === 'object'
@@ -198,10 +213,20 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     return 'failed';
   }
   const order = orderSnapshot.data()!;
-  if (order.organisationId !== operation.organisationId || order.paymentStatus !== 'paid') {
+  if (order.organisationId !== operation.organisationId) {
     await document.ref.update({ status: 'failed', errorCode: 'ORDER_NOT_ELIGIBLE', updatedAt: nowIso() });
     return 'failed';
   }
+  if (order.paymentStatus !== 'paid') {
+    if (operation.kind === 'manual') {
+      await ensureManualOperationRegistered(document, operation, order);
+      await document.ref.update({ status: 'awaiting_payment', errorCode: null, lastCheckedAt: nowIso(), updatedAt: nowIso() });
+      return 'awaiting_payment';
+    }
+    await document.ref.update({ status: 'failed', errorCode: 'ORDER_NOT_ELIGIBLE', updatedAt: nowIso() });
+    return 'failed';
+  }
+  if (operation.kind === 'manual') await ensureManualOperationRegistered(document, operation, order);
   const input = operationInput(operation, order);
   if (!input.serialNumber || !input.items.length) {
     await document.ref.update({ status: 'reconciliation_required', errorCode: 'PRESCRIPTION_METADATA_MISSING', updatedAt: nowIso() });
@@ -209,7 +234,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
   }
 
   const clinicOperation = operation.kind === 'barcode';
-  if (clinicOperation && (!input.prescriberPin || !input.prescriptionItems.length)) {
+  if (clinicOperation && ((!input.prescriberId && !input.prescriberPin) || !input.prescriptionItems.length)) {
     await document.ref.update({ status: 'reconciliation_required', errorCode: 'CLINIC_VERIFICATION_METADATA_MISSING', updatedAt: nowIso() });
     return 'attention';
   }
@@ -219,6 +244,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
         serialNumber: input.serialNumber,
         customerReference: operation.customerReference,
         quoteItems: input.items,
+        expectedPrescriberId: input.prescriberId || undefined,
         expectedPrescriberPin: input.prescriberPin,
         expectedItems: input.prescriptionItems,
         allowPurchaseOrderCreate: false,
@@ -257,6 +283,23 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
       lastCheckedAt: nowIso(),
       updatedAt: nowIso(),
     });
+    const pendingResult = {
+      status: 'prescription_pending',
+      customerReference: operation.customerReference,
+      prescriptionId: reconciliation.prescriptionId,
+      prescriptionState: reconciliation.prescriptionState,
+      ...('prescriberId' in reconciliation ? { prescriberId: reconciliation.prescriberId } : {}),
+      ...('prescriberName' in reconciliation ? { prescriberName: reconciliation.prescriberName } : {}),
+    };
+    const subOrderKey = typeof operation.subOrderId === 'string' ? operation.subOrderId : null;
+    await orderRef.update({
+      curaleaf: pendingResult,
+      ...(subOrderKey ? { [`curaleafSubOrders.${subOrderKey}`]: pendingResult } : {}),
+      integrationStatus: clinicOperation ? 'awaiting_clinic_prescription' : 'awaiting_prescription_approval',
+      fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus,
+      updatedAt: nowIso(),
+    });
+    invalidateCollectionCache('orders', operation.orderId);
     return 'pending';
   }
   if (reconciliation.status === 'prescription_closed') {
@@ -299,6 +342,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
         serialNumber: input.serialNumber,
         customerReference: operation.customerReference,
         quoteItems: input.items,
+        expectedPrescriberId: input.prescriberId || undefined,
         expectedPrescriberPin: input.prescriberPin,
         expectedItems: input.prescriptionItems,
         allowPurchaseOrderCreate: true,
@@ -319,14 +363,34 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     ? await findCuraleafPurchaseOrder(operation.organisationId, operation.customerReference)
     : null;
   if (!purchaseOrder) {
+    const submittedResult = {
+      status: 'purchase_order_submitted',
+      customerReference: operation.customerReference,
+      prescriptionId: reconciliation.prescriptionId,
+      prescriptionState: reconciliation.prescriptionState,
+      ...('prescriberId' in reconciliation ? { prescriberId: reconciliation.prescriberId } : {}),
+      ...('prescriberName' in reconciliation ? { prescriberName: reconciliation.prescriberName } : {}),
+      purchaseOrderId: null,
+      purchaseOrderState: null,
+    };
     await document.ref.update({
       status: 'purchase_order_submitted',
+      result: submittedResult,
       prescriptionId: reconciliation.prescriptionId,
       prescriptionState: reconciliation.prescriptionState,
       lastError: null,
       lastCheckedAt: nowIso(),
       updatedAt: nowIso(),
     });
+    const subOrderKey = typeof operation.subOrderId === 'string' ? operation.subOrderId : null;
+    await orderRef.update({
+      curaleaf: submittedResult,
+      ...(subOrderKey ? { [`curaleafSubOrders.${subOrderKey}`]: submittedResult } : {}),
+      integrationStatus: 'submitted',
+      fulfilmentStatus: 'supplier_processing' satisfies FulfilmentStatus,
+      updatedAt: nowIso(),
+    });
+    invalidateCollectionCache('orders', operation.orderId);
     await activatePatientForOrder(operation.orderId);
     return 'submitted';
   }
@@ -364,8 +428,10 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
   });
   const currentCuraleaf = order.curaleaf && typeof order.curaleaf === 'object' ? order.curaleaf as Record<string, unknown> : {};
   const ownsLegacyResult = currentCuraleaf.customerReference === operation.customerReference || !currentCuraleaf.customerReference;
+  const subOrderKey = typeof operation.subOrderId === 'string' ? operation.subOrderId : null;
   await orderRef.update({
     ...(ownsLegacyResult ? { curaleaf: result } : {}),
+    ...(subOrderKey ? { [`curaleafSubOrders.${subOrderKey}`]: result } : {}),
     ...(curaleafApprovedAt ? { curaleafApprovedAt } : {}),
     fulfilmentStatus: nextFulfilmentStatus,
     integrationStatus: purchaseOrder.state === 'CANCELLED' ? 'attention' : 'submitted',
@@ -379,8 +445,270 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
   return shipments.length ? 'dispatched' : 'processing';
 }
 
+function savedClinicPrescriptions(order: Record<string, unknown>) {
+  if (!Array.isArray(order.prescriptions)) return [];
+  return (order.prescriptions as SavedPrescription[]).flatMap(prescription => {
+    if (
+      typeof prescription.fileId !== 'string'
+      || typeof prescription.clinicScanId !== 'string'
+      || typeof prescription.curaleafPrescriptionId !== 'string'
+      || typeof prescription.serialNumber !== 'string'
+      || !prescription.prescriber
+      || typeof prescription.prescriber !== 'object'
+    ) return [];
+    const prescriber = prescription.prescriber as Record<string, unknown>;
+    const items = orderItems(prescription.items);
+    const prescriptionItems = prescribedFormulaItems(prescription.items);
+    if (!items.length || !prescriptionItems.length || typeof prescriber.id !== 'string') return [];
+    return [{
+      fileId: prescription.fileId,
+      prescriptionId: prescription.curaleafPrescriptionId,
+      serialNumber: prescription.serialNumber,
+      prescriberId: prescriber.id,
+      items,
+      prescriptionItems,
+    }];
+  });
+}
+
+function savedManualPrescription(order: Record<string, unknown>, operation: OperationRecord) {
+  if (!Array.isArray(order.prescriptions)) return null;
+  const prescription = (order.prescriptions as SavedPrescription[]).find(candidate =>
+    typeof candidate.serialNumber === 'string'
+    && (candidate.serialNumber === operation.prescriptionSerialNumber || candidate.fileId === operation.subOrderId)
+  );
+  if (
+    !prescription
+    || typeof prescription.fileId !== 'string'
+    || typeof prescription.serialNumber !== 'string'
+    || typeof prescription.issueDate !== 'string'
+    || prescription.clinicScanId
+    || !prescription.prescriber
+    || typeof prescription.prescriber !== 'object'
+  ) return null;
+  const prescriber = prescription.prescriber as Record<string, unknown>;
+  const items = Array.isArray(prescription.items) ? prescription.items.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const line = item as Record<string, unknown>;
+    return typeof line.formulaId === 'string'
+      && Number.isInteger(line.unitsNeededCount)
+      && typeof line.packId === 'string'
+      && Number.isInteger(line.quantity)
+      ? [{ formulaId: line.formulaId, unitsNeededCount: Number(line.unitsNeededCount), packId: line.packId, quantity: Number(line.quantity) }]
+      : [];
+  }) : [];
+  if (
+    !items.length
+    || typeof prescriber.pin !== 'string'
+    || typeof prescriber.name !== 'string'
+    || typeof prescriber.initials !== 'string'
+  ) return null;
+  return {
+    fileId: prescription.fileId,
+    serialNumber: prescription.serialNumber,
+    issueDate: prescription.issueDate,
+    prescriber: {
+      pin: prescriber.pin,
+      gmcNumber: typeof prescriber.gmcNumber === 'number' ? prescriber.gmcNumber : null,
+      gphcNumber: typeof prescriber.gphcNumber === 'string' ? prescriber.gphcNumber : null,
+      name: prescriber.name,
+      initials: prescriber.initials,
+    },
+    items,
+  };
+}
+
+async function ensureManualOperationRegistered(document: QueryDocumentSnapshot, operation: OperationRecord, order: Record<string, unknown>) {
+  if (typeof operation.prescriptionId === 'string' && typeof operation.prescriberId === 'string') {
+    return {
+      prescriptionId: operation.prescriptionId,
+      prescriptionState: typeof operation.prescriptionState === 'string'
+        ? operation.prescriptionState
+        : 'PENDING',
+      prescriberId: operation.prescriberId,
+    };
+  }
+  const prescription = savedManualPrescription(order, operation);
+  if (!prescription || typeof operation.organisationId !== 'string') {
+    await document.ref.update({ status: 'reconciliation_required', errorCode: 'MANUAL_PRESCRIPTION_METADATA_MISSING', updatedAt: nowIso() });
+    throw new Error('The saved manual prescription is incomplete.');
+  }
+  const file = await loadUploadedPrescriptionFile(operation.organisationId, prescription.fileId);
+  const registered = await registerManualPrescription(operation.organisationId, { ...prescription, file });
+  await document.ref.update({
+    prescriptionId: registered.prescriptionId,
+    prescriptionState: registered.prescriptionState,
+    prescriberId: registered.prescriberId,
+    status: order.paymentStatus === 'paid' ? 'awaiting_prescription_approval' : 'awaiting_payment',
+    errorCode: null,
+    lastError: null,
+    lastCheckedAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+  return registered;
+}
+
+async function seedManualOrderOperations(orderDocument: QueryDocumentSnapshot | DocumentSnapshot) {
+  if (!orderDocument.exists) return 0;
+  const order = orderDocument.data() as Record<string, unknown>;
+  const organisationId = typeof order.organisationId === 'string' ? order.organisationId : '';
+  if (!organisationId || order.status === 'cancelled' || order.cancellation || !Array.isArray(order.prescriptions)) return 0;
+  const existing = await firestore.collection('integrationOperations').where('orderId', '==', orderDocument.id).get();
+  const existingSerials = new Set(existing.docs
+    .filter(document => document.data().organisationId === organisationId)
+    .map(document => String(document.data().prescriptionSerialNumber ?? '')));
+  let created = 0;
+  for (const prescription of order.prescriptions as SavedPrescription[]) {
+    if (
+      prescription.clinicScanId
+      || typeof prescription.fileId !== 'string'
+      || typeof prescription.serialNumber !== 'string'
+      || existingSerials.has(prescription.serialNumber)
+    ) continue;
+    const items = orderItems(prescription.items);
+    if (!items.length) continue;
+    const id = createHash('sha256').update(`${organisationId}:${orderDocument.id}:${prescription.fileId}:curaleaf`).digest('hex');
+    const referenceHash = createHash('sha256').update(prescription.fileId).digest('hex').slice(0, 10);
+    const operation = firestore.collection('integrationOperations').doc(id);
+    try {
+      await operation.create({
+        id,
+        schemaVersion: 1,
+        organisationId,
+        orderId: orderDocument.id,
+        subOrderId: prescription.fileId,
+        integration: 'curaleaf',
+        kind: 'manual',
+        autoPlacement: true,
+        trigger: 'manual_prescription_saved',
+        customerReference: `HHH-${orderDocument.id.slice(0, 72)}-${referenceHash}`,
+        status: 'registering_prescription',
+        prescriptionSerialNumber: prescription.serialNumber,
+        items,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      });
+      created += 1;
+      existingSerials.add(prescription.serialNumber);
+    } catch (error) {
+      if ((error as { code?: number | string }).code !== 6 && (error as { code?: number | string }).code !== 'already-exists') throw error;
+    }
+  }
+  return created;
+}
+
+async function seedPaidClinicOrder(orderDocument: QueryDocumentSnapshot | DocumentSnapshot) {
+  if (!orderDocument.exists) return 0;
+  const order = orderDocument.data() as Record<string, unknown>;
+  const organisationId = typeof order.organisationId === 'string' ? order.organisationId : '';
+  if (!organisationId || order.paymentStatus !== 'paid' || order.status === 'cancelled' || order.cancellation) return 0;
+  const prescriptions = savedClinicPrescriptions(order);
+  if (!prescriptions.length) return 0;
+  const existing = await firestore.collection('integrationOperations').where('orderId', '==', orderDocument.id).get();
+  const existingSerials = new Set(existing.docs
+    .filter(document => document.data().organisationId === organisationId)
+    .map(document => String(document.data().prescriptionSerialNumber ?? '')));
+  let created = 0;
+  for (const prescription of prescriptions) {
+    if (existingSerials.has(prescription.serialNumber)) continue;
+    const id = createHash('sha256').update(`${organisationId}:${orderDocument.id}:${prescription.fileId}:curaleaf`).digest('hex');
+    const referenceHash = createHash('sha256').update(prescription.fileId).digest('hex').slice(0, 10);
+    const customerReference = `HHH-${orderDocument.id.slice(0, 72)}-${referenceHash}`;
+    const operation = firestore.collection('integrationOperations').doc(id);
+    try {
+      await operation.create({
+        id,
+        schemaVersion: 1,
+        organisationId,
+        orderId: orderDocument.id,
+        subOrderId: prescription.fileId,
+        integration: 'curaleaf',
+        kind: 'barcode',
+        autoPlacement: true,
+        trigger: 'payment_confirmed',
+        customerReference,
+        status: 'awaiting_clinic_prescription',
+        prescriptionId: prescription.prescriptionId,
+        prescriptionSerialNumber: prescription.serialNumber,
+        prescriberId: prescription.prescriberId,
+        prescriptionItems: prescription.prescriptionItems,
+        items: prescription.items,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      });
+      created += 1;
+      existingSerials.add(prescription.serialNumber);
+    } catch (error) {
+      if ((error as { code?: number | string }).code !== 6 && (error as { code?: number | string }).code !== 'already-exists') throw error;
+    }
+  }
+  return created;
+}
+
+/**
+ * Starts and immediately evaluates every paid Curaleaf prescription on
+ * an order. The deterministic operation record makes webhook, staff-payment,
+ * and scheduled retries safe to run more than once.
+ */
+export async function prepareManualPrescriptionsForOrder(organisationId: string, orderId: string) {
+  const orderDocument = await firestore.collection('orders').doc(orderId).get();
+  if (!orderDocument.exists || orderDocument.data()?.organisationId !== organisationId) return { seeded: 0, checked: 0 };
+  const seeded = await seedManualOrderOperations(orderDocument);
+  const order = orderDocument.data()!;
+  const operations = await firestore.collection('integrationOperations').where('orderId', '==', orderId).get();
+  const candidates = operations.docs.filter(document => {
+    const data = document.data();
+    return data.organisationId === organisationId
+      && data.integration === 'curaleaf'
+      && data.kind === 'manual'
+      && ['registering_prescription', 'awaiting_payment', 'reconciliation_required'].includes(String(data.status));
+  });
+  const summary: Record<string, number> = { seeded, checked: candidates.length };
+  for (const document of candidates) {
+    try {
+      await ensureManualOperationRegistered(document, document.data() as OperationRecord, order);
+      summary.registered = (summary.registered ?? 0) + 1;
+    } catch (error) {
+      await document.ref.update({ lastError: error instanceof Error ? error.message : 'Unknown manual prescription registration error', lastCheckedAt: nowIso(), updatedAt: nowIso() });
+      summary.error = (summary.error ?? 0) + 1;
+    }
+  }
+  return summary;
+}
+
+export async function autoSubmitPaidPrescriptions(organisationId: string, orderId: string) {
+  const orderDocument = await firestore.collection('orders').doc(orderId).get();
+  if (!orderDocument.exists || orderDocument.data()?.organisationId !== organisationId) return { seeded: 0, checked: 0 };
+  const seeded = await seedPaidClinicOrder(orderDocument) + await seedManualOrderOperations(orderDocument);
+  const operations = await firestore.collection('integrationOperations').where('orderId', '==', orderId).get();
+  const candidates = operations.docs.filter(document => {
+    const data = document.data();
+    return data.organisationId === organisationId
+      && data.integration === 'curaleaf'
+      && ['manual', 'barcode'].includes(String(data.kind))
+      && ['registering_prescription', 'awaiting_payment', 'awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'reconciliation_required'].includes(String(data.status));
+  });
+  const summary: Record<string, number> = { seeded, checked: candidates.length };
+  for (const document of candidates) {
+    try {
+      const result = await reconcileOperation(document);
+      summary[result] = (summary[result] ?? 0) + 1;
+    } catch (error) {
+      await document.ref.update({ lastError: error instanceof Error ? error.message : 'Unknown automatic placement error', lastCheckedAt: nowIso(), updatedAt: nowIso() });
+      summary.error = (summary.error ?? 0) + 1;
+    }
+  }
+  return summary;
+}
+
 export async function reconcilePendingCuraleafOrders(organisationId?: string) {
-  const statuses = ['awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'reconciliation_required'];
+  const paidOrders = await firestore.collection('orders').where('paymentStatus', '==', 'paid').limit(500).get();
+  let seeded = 0;
+  for (const order of paidOrders.docs) {
+    if (organisationId && order.data().organisationId !== organisationId) continue;
+    seeded += await seedPaidClinicOrder(order) + await seedManualOrderOperations(order);
+  }
+  const statuses = ['registering_prescription', 'awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'reconciliation_required'];
   const snapshots = organisationId
     ? [await firestore.collection('integrationOperations').where('organisationId', '==', organisationId).limit(500).get()]
     : await Promise.all(statuses.map(status => firestore.collection('integrationOperations').where('status', '==', status).limit(100).get()));
@@ -388,7 +716,7 @@ export async function reconcilePendingCuraleafOrders(organisationId?: string) {
     .filter(document => statuses.includes(String(document.data().status)))
     .filter(document => document.data().integration === 'curaleaf' && ['manual', 'barcode'].includes(document.data().kind))
     .map(document => [document.id, document])).values()];
-  const summary: Record<string, number> = {};
+  const summary: Record<string, number> = { seeded };
   for (const document of documents) {
     try {
       const result = await reconcileOperation(document);

@@ -19,6 +19,7 @@ export function portalPrescriptionStatus(
   record: Pick<PortalOrderRecord, 'curaleaf' | 'fulfilmentStatus'>,
 ): PortalPrescriptionStatus {
   if (!record.curaleaf) return 'draft';
+  if (record.curaleaf.status !== 'purchase_order_submitted') return 'awaiting-approval';
 
   return ({
     supplier_pending: 'awaiting-approval',
