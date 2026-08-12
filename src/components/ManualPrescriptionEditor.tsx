@@ -228,7 +228,7 @@ export default function ManualPrescriptionEditor({
 
                   <div className="manual-pack-card__body">
                     <div className="manual-pack-fact">
-                      <span><Package size={15} /><small>API pack size</small></span>
+                      <span><Package size={15} /><small>Supplier pack size</small></span>
                       <strong>{packSize ?? '—'} {packUnit}</strong>
                       <em>Fixed by Curaleaf</em>
                     </div>

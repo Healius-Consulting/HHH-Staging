@@ -93,7 +93,7 @@ export function usePharmacySetup(organisationId: string | undefined) {
         if (!cancelled) {
           setStatus(local || emptyStatus(organisationId));
           setError(import.meta.env.DEV
-            ? 'The setup API is unavailable, so changes are stored in this browser for local development only.'
+            ? 'The setup service is unavailable, so changes are stored in this browser for local development only.'
             : loadError instanceof Error ? loadError.message : 'Setup status could not be loaded.');
         }
       } finally {
@@ -133,7 +133,7 @@ export function usePharmacySetup(organisationId: string | undefined) {
     } catch (saveError) {
       if (import.meta.env.DEV) {
         writeDevelopmentStatus(optimistic);
-        setError('The setup API is unavailable. This change is stored locally for development and is not production evidence.');
+        setError('The setup service is unavailable. This change is stored locally for development and is not production evidence.');
       } else {
         setStatus(previous);
         setError(saveError instanceof Error ? saveError.message : 'The setup task could not be saved.');

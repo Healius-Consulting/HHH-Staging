@@ -149,7 +149,7 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
             <input className="input" value={currentEvidence} placeholder={activeDefinition.placeholder} onChange={event => setEvidence(current => ({ ...current, [activeDefinition.id]: event.target.value }))} />
           </label>}
 
-          <div className="setup-security-note"><LockKeyhole size={16} /><span>Do not enter passwords, API keys, card details, or patient information here. Secrets are connected separately through the secure backend.</span></div>
+          <div className="setup-security-note"><LockKeyhole size={16} /><span>Do not enter passwords, access keys, card details, or patient information here. Account details are connected separately and securely.</span></div>
 
           <div className="setup-step-actions">
             <button type="button" className="btn" disabled={activeIndex === 0} onClick={() => setActiveIndex(index => index - 1)}><ArrowLeft size={15} /> Previous</button>

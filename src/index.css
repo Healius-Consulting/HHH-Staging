@@ -1159,6 +1159,34 @@ td.font-semibold{
 
 .staff-login-note{ color: var(--text-faint); text-align: center; font-size: 10px; margin-top: 14px; }
 
+.payment-return-page{
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f4f7f6;
+}
+
+.payment-return-card{
+  width: min(100%, 480px);
+  padding: clamp(32px, 7vw, 52px);
+  border: 1px solid #dce5e2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 20px 55px rgba(15, 42, 36, .1);
+  color: #13231f;
+  text-align: center;
+}
+
+.payment-return-brand{ display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 32px; color: #163f36; font-size: 14px; font-weight: 700; }
+.payment-return-brand .hhh-brand-mark{ width: 34px; height: 32px; color: #d28a4b; }
+.payment-return-icon{ display: grid; width: 68px; height: 68px; margin: 0 auto 20px; place-items: center; border-radius: 50%; }
+.payment-return-icon--complete{ color: #08745d; background: #e6f6f1; }
+.payment-return-icon--cancelled{ color: #a34a32; background: #fbeeea; }
+.payment-return-card h1{ margin: 0; font-size: clamp(28px, 6vw, 38px); letter-spacing: -.035em; }
+.payment-return-card p{ max-width: 340px; margin: 14px auto 0; color: #586b66; font-size: 15px; line-height: 1.65; }
+
 .admin-shell{
   height: 100vh;
   height: 100dvh;

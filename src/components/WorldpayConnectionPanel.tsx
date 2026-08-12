@@ -65,7 +65,7 @@ export default function WorldpayConnectionPanel({
         <span className="worldpay-connect-panel__icon"><KeyRound size={17} /></span>
         <span>
           <strong>{status?.connected ? 'Worldpay merchant connected' : status?.configured ? 'Worldpay verification required' : 'Connect this pharmacy’s merchant account'}</strong>
-          <small>TRY or live API credentials are verified with Worldpay Payment Queries, then stored in Google Secret Manager. They are never shown again.</small>
+          <small>Your Worldpay details are verified securely and are never displayed again after saving.</small>
         </span>
         {status?.connected ? <span className="pill pill-green"><CheckCircle2 size={11} /> Connected</span> : null}
       </header>
@@ -74,8 +74,8 @@ export default function WorldpayConnectionPanel({
 
       {!status?.connected && (
         <div className="worldpay-connect-panel__fields">
-          <label><span>API username</span><input className="input" autoComplete="off" value={form.username} onChange={event => setForm(current => ({ ...current, username: event.target.value }))} /></label>
-          <label><span>API password</span><input className="input" type={showSecrets ? 'text' : 'password'} autoComplete="new-password" value={form.password} onChange={event => setForm(current => ({ ...current, password: event.target.value }))} /></label>
+          <label><span>Worldpay username</span><input className="input" autoComplete="off" value={form.username} onChange={event => setForm(current => ({ ...current, username: event.target.value }))} /></label>
+          <label><span>Worldpay password</span><input className="input" type={showSecrets ? 'text' : 'password'} autoComplete="new-password" value={form.password} onChange={event => setForm(current => ({ ...current, password: event.target.value }))} /></label>
           <label><span>Merchant entity ID</span><input className="input" autoComplete="off" placeholder="PO…" value={form.entityId} onChange={event => setForm(current => ({ ...current, entityId: event.target.value }))} /></label>
           <button type="button" className="btn btn-sm worldpay-connect-panel__reveal" onClick={() => setShowSecrets(value => !value)}>{showSecrets ? <EyeOff size={13} /> : <Eye size={13} />}{showSecrets ? 'Hide secrets' : 'Show while entering'}</button>
           <button type="button" className="btn btn-primary" disabled={busy || !form.username.trim() || !form.password || !form.entityId.trim()} onClick={() => void connect()}>{busy ? <RefreshCw size={14} className="spin" /> : <ShieldCheck size={14} />}{busy ? 'Verifying with Worldpay…' : 'Save and verify connection'}</button>

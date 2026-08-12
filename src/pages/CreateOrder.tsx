@@ -370,8 +370,8 @@ export default function CreateOrder() {
           const origin = window.location.origin;
           const session = await createWorldpaySession(persisted.id, {
             organisationId: state.currentOrganisationId,
-            successUrl: `${origin}/?payment=success`,
-            cancelUrl: `${origin}/?payment=cancelled`,
+            successUrl: `${origin}/payment-complete`,
+            cancelUrl: `${origin}/payment-cancelled`,
           });
           const provider = session.provider as { url?: string; _links?: { redirect?: { href?: string } } };
           const paymentUrl = provider.url ?? provider._links?.redirect?.href;

@@ -70,7 +70,7 @@ const DEFAULT_MANUAL_FORM: ManualPaymentForm = { tender: 'epos-card', reference:
 
 const STAGE_META: Record<OrderStage, { label: string; description: string; tone: string; icon: LucideIcon }> = {
   'awaiting-payment': { label: 'Awaiting payment', description: 'Payment request sent to patient', tone: 'warning', icon: Clock3 },
-  paid: { label: 'Paid', description: 'Automatic Curaleaf checks in progress', tone: 'success', icon: CreditCard },
+  paid: { label: 'Paid', description: 'Payment received; awaiting supplier update', tone: 'success', icon: CreditCard },
   'curaleaf-pending': { label: 'With Curaleaf', description: 'Awaiting supplier decision', tone: 'info', icon: CircleDot },
   'curaleaf-approved': { label: 'Curaleaf approved', description: 'Supplier accepted the prescription', tone: 'success', icon: CheckCircle2 },
   dispatched: { label: 'In delivery', description: 'Dispatched to the pharmacy', tone: 'info', icon: Truck },
@@ -124,6 +124,12 @@ function stageMatchesFilter(stage: OrderStage, filter: StageFilter) {
   return stage === filter;
 }
 
+function orderStagePriority(stage: OrderStage) {
+  if (stage === 'cancelled' || stage === 'archived') return 2;
+  if (stage === 'collected') return 1;
+  return 0;
+}
+
 function formatDate(value: Date | string | null | undefined, includeTime = false) {
   if (!value) return 'Not recorded';
   return new Date(value).toLocaleString('en-GB', includeTime
@@ -167,7 +173,10 @@ export default function Orders() {
       const resolvedStage = orderStage(order);
       return { order, patient, ...resolvedStage };
     })
-    .sort((left, right) => right.order.date.getTime() - left.order.date.getTime()), [state.crm, state.currentOrganisationId, state.orders]);
+    .sort((left, right) => {
+      const priorityDifference = orderStagePriority(left.stage) - orderStagePriority(right.stage);
+      return priorityDifference || right.order.date.getTime() - left.order.date.getTime();
+    }), [state.crm, state.currentOrganisationId, state.orders]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -328,7 +337,7 @@ export default function Orders() {
     setSubmittingOrderId(order.id);
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live') {
-        if (!order.backendId) throw new Error('This order has not been saved to the HHH backend.');
+        if (!order.backendId) throw new Error('This order has not finished saving. Refresh and try again.');
         if (!form.reference.trim()) throw new Error('Enter the pharmacy receipt reference before recording a live payment.');
         const tender = ({ 'epos-card': 'epos', cash: 'cash', 'bank-transfer': 'bank_transfer', other: 'other' } as const)[form.tender];
         await recordPortalManualPayment(order.backendId, {
@@ -339,7 +348,7 @@ export default function Orders() {
           notes: form.notes.trim() || undefined,
         });
         dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
-        dispatch({ type: 'ADD_TOAST', message: 'Payment recorded. Curaleaf placement started automatically.', toastType: 'success' });
+        dispatch({ type: 'ADD_TOAST', message: 'Payment recorded. Order processing will continue.', toastType: 'success' });
       } else {
         dispatch({ type: 'RECORD_MANUAL_PAYMENT', orderId: order.id, tender: form.tender, reference: form.reference, notes: form.notes });
         dispatch({ type: 'ADD_TOAST', message: 'Training payment recorded locally.', toastType: 'info' });
@@ -431,7 +440,7 @@ export default function Orders() {
 
       <div className="order-crm-workspace">
         <aside className="order-crm-list" aria-label="Customer orders">
-          <header><span><small>Customer orders</small><strong>{filtered.length} result{filtered.length === 1 ? '' : 's'}</strong></span><span>Newest first</span></header>
+          <header><span><small>Customer orders</small><strong>{filtered.length} result{filtered.length === 1 ? '' : 's'}</strong></span></header>
           <div className="order-crm-list__rows">
             {filtered.length ? filtered.map(record => (
               <OrderListRow key={record.order.id} record={record} selected={selected?.order.id === record.order.id} onSelect={() => setSelectedOrderId(record.order.id)} />
@@ -624,13 +633,13 @@ function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, o
 
           {stage === 'paid' && !allPlaced && !busy ? (
             <div className="order-crm-next-action order-crm-next-action--waiting">
-              <Clock3 size={16} /><span><strong>Automatic Curaleaf placement in progress</strong><small>The prescription and prescriber are checked continuously. As soon as Curaleaf marks the prescription active, the paid order is sent through <code>/purchase-order-from-prescriptions/</code>.</small></span>
+              <Clock3 size={16} /><span><strong>Waiting for supplier update</strong><small>No action is needed. This order will update here when it moves forward.</small></span>
             </div>
           ) : null}
 
           {stage === 'awaiting-payment' && order.payment.route === 'worldpay' ? (
             <div className="order-crm-next-action order-crm-next-action--waiting">
-              <Clock3 size={16} /><span><strong>Waiting for verified Worldpay payment</strong><small>The order will move to Paid automatically after Worldpay submits it for settlement.</small></span>
+              <Clock3 size={16} /><span><strong>Waiting for payment</strong><small>This order will update when the payment is confirmed.</small></span>
             </div>
           ) : null}
 
@@ -663,7 +672,7 @@ function OrderDetail({ record, manualForm, onManualFormChange, onRecordManual, o
           <section>
             <div className="order-crm-section-heading"><span><small>Payment</small><strong>{order.payment.status === 'paid' ? 'Cleared' : 'Outstanding'}</strong></span>{order.payment.route === 'worldpay' ? <CreditCard size={15} /> : <Banknote size={15} />}</div>
             <dl className="order-crm-facts">
-              <div><dt>Route</dt><dd>{order.payment.route === 'worldpay' ? 'Worldpay HPP' : 'Pharmacy managed'}</dd></div>
+              <div><dt>Route</dt><dd>{order.payment.route === 'worldpay' ? 'Worldpay' : 'Pharmacy managed'}</dd></div>
               <div><dt>Requested</dt><dd>{formatDate(order.payment.sentAt, true)}</dd></div>
               <div><dt>Paid</dt><dd>{formatDate(order.payment.paidAt, true)}</dd></div>
               <div><dt>Reference</dt><dd>{order.payment.manualReference ?? order.payment.ref ?? 'Pending'}</dd></div>
@@ -681,7 +690,7 @@ function DeliveryExpectation({ order }: { order: PatientOrder }) {
     return (
       <div className="order-delivery-warning order-delivery-warning--missing">
         <AlertTriangle size={17} />
-        <span><strong>Delivery estimate needs an approval timestamp</strong><small>The Curaleaf order is approved, but its approval time has not yet synced. Reconciliation will add the delivery window automatically.</small></span>
+        <span><strong>Delivery estimate pending</strong><small>The delivery window will appear when the supplier approval time is available.</small></span>
       </div>
     );
   }
