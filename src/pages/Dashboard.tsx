@@ -3,6 +3,7 @@ import { orderRevenue, useApp } from '../context/AppContext';
 import SummaryTiles from '../components/SummaryTiles';
 import { compactPatientName } from '../utils/patientName';
 import { conditionLabel } from '@hhh/domain';
+import { orderCancellationResolution } from '../utils/orderStage';
 
 export default function Dashboard() {
   const { state, dispatch } = useApp();
@@ -23,12 +24,14 @@ export default function Dashboard() {
 
   const inFulfilment = tenantOrders.filter(o =>
     o.lifecycleStatus !== 'cancelled' &&
+    !o.cancellation &&
     o.payment.status === 'paid' &&
     o.prescriptions.some(rx => !['ready', 'collected'].includes(rx.status))
   ).length;
 
   const readyForCollection = tenantOrders.filter(o =>
     o.lifecycleStatus !== 'cancelled' &&
+    !o.cancellation &&
     o.payment.status === 'paid' &&
     o.prescriptions.length > 0 &&
     o.prescriptions.every(rx => rx.status === 'ready')
@@ -36,7 +39,7 @@ export default function Dashboard() {
 
   // 1. Uncollected warnings (10+ days)
   const uncollectedAlerts = tenantOrders.flatMap(o => {
-    if (o.lifecycleStatus === 'cancelled') return [];
+    if (o.lifecycleStatus === 'cancelled' || o.cancellation) return [];
     const pName = tenantPatients.find(p => p.id === o.patientId)?.name ?? 'Unknown';
     const pMobile = tenantPatients.find(p => p.id === o.patientId)?.mobile ?? '';
     return o.prescriptions
@@ -74,7 +77,7 @@ export default function Dashboard() {
 
   // 3. Repeat overdue (30+ days)
   const repeatAlerts = tenantPatients.map(p => {
-    const pOrders = tenantOrders.filter(o => o.patientId === p.id);
+    const pOrders = tenantOrders.filter(o => o.patientId === p.id && orderCancellationResolution(o) === 'none');
     if (pOrders.length === 0) return null;
     const latestOrder = [...pOrders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
     const daysSince = Math.floor((Date.now() - new Date(latestOrder.date).getTime()) / (1000 * 60 * 60 * 24));
@@ -103,11 +106,7 @@ export default function Dashboard() {
     }));
 
   const cancellationAlerts = tenantOrders
-    .filter(order => order.cancellation && order.refund?.status !== 'completed' && (
-      order.curaleafCancellation?.status === 'contact_required'
-      || order.curaleafCancellation?.status === 'awaiting_confirmation'
-      || order.cancellation.status === 'refund_required'
-    ))
+    .filter(order => orderCancellationResolution(order) === 'needs-action')
     .map(order => ({
       id: `cancellation-${order.id}`,
       orderId: order.id,
@@ -122,7 +121,8 @@ export default function Dashboard() {
   const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length + cancellationAlerts.length;
 
   /* ── Recent orders (last 5) ── */
-  const recentOrders = [...tenantOrders]
+  const recentOrders = tenantOrders
+    .filter(order => orderCancellationResolution(order) === 'none')
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5);
 
@@ -277,7 +277,7 @@ export default function Dashboard() {
 
           {/* Recent Pharmacy Sessions */}
           <section className="card card-flush activity-ledger">
-            <div className="section-heading section-heading--padded"><div><p className="section-label">Activity ledger</p><h3><History size={16} /> Recent pharmacy sessions</h3><p>Continue a draft or inspect the latest prescription activity.</p></div><span>{recentOrders.length} latest</span></div>
+            <div className="section-heading section-heading--padded"><div><p className="section-label">Activity ledger</p><h3><History size={16} /> Recent pharmacy sessions</h3><p>Continue active work or review the latest completed sessions.</p></div><span>{recentOrders.length} latest</span></div>
             {recentOrders.length === 0 ? (
               <div className="empty-state">No active sessions or order history.</div>
             ) : (

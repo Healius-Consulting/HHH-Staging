@@ -13,7 +13,27 @@ export type OrderStage =
   | 'archived'
   | 'cancelled';
 
-export type StageFilter = 'all' | 'awaiting-payment' | 'awaiting-fulfilment' | 'ready' | 'rejected' | 'archived' | 'completed';
+export type StageFilter = 'current' | 'all' | 'awaiting-payment' | 'awaiting-fulfilment' | 'ready' | 'rejected' | 'archived' | 'completed' | 'cancelled';
+
+export type CancellationResolution = 'none' | 'needs-action' | 'resolved' | 'refunded';
+
+/**
+ * Cancellation is an order outcome, not a patient status. Keep unfinished
+ * supplier/refund work operational while demoting closed cancellations.
+ */
+export function orderCancellationResolution(order: PatientOrder): CancellationResolution {
+  if (!order.cancellation && order.lifecycleStatus !== 'cancelled') return 'none';
+  if (order.refund?.status === 'completed') return 'refunded';
+
+  const supplierActionOutstanding = ['contact_required', 'awaiting_confirmation'].includes(order.curaleafCancellation?.status ?? '')
+    || ['curaleaf_contact_required', 'awaiting_curaleaf_confirmation'].includes(order.cancellation?.status ?? '');
+  const refundActionOutstanding = order.cancellation?.status === 'refund_required'
+    || order.refund?.status === 'pending_confirmation'
+    || order.payment.status === 'paid';
+
+  if (supplierActionOutstanding || refundActionOutstanding) return 'needs-action';
+  return 'resolved';
+}
 
 function unresolvedOrderReason(order: PatientOrder, now: Date): UnresolvedOrderReason | null {
   if (order.payment.status === 'none') return null;
@@ -50,9 +70,11 @@ export function orderStage(order: PatientOrder, now = new Date()): { stage: Orde
 }
 
 export function stageMatchesFilter(stage: OrderStage, filter: StageFilter) {
+  if (filter === 'current') return !['archived', 'collected', 'cancelled'].includes(stage);
   if (filter === 'all') return true;
   if (filter === 'awaiting-fulfilment') return ['paid', 'curaleaf-pending', 'curaleaf-approved', 'dispatched', 'delivered'].includes(stage);
-  if (filter === 'archived') return stage === 'archived' || stage === 'cancelled';
+  if (filter === 'archived') return stage === 'archived';
+  if (filter === 'cancelled') return stage === 'cancelled';
   if (filter === 'completed') return stage === 'collected';
   return stage === filter;
 }

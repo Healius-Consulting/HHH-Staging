@@ -41,7 +41,7 @@ import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { confirmPortalOrderRefund, createPortalOrderRefund, handoutPortalOrder, placePrescriptionManually, recordCuraleafRejection, recordPortalCuraleafCancellation, recordPortalGoodsReceipt, recordPortalManualPayment, requestPortalOrderCancellation, resendWorldpayPaymentLink, updatePortalShipmentStatus } from '../shared/api';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
-import { orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../utils/orderStage';
+import { orderCancellationResolution, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../utils/orderStage';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
 type GoodsReceiptDraft = { quantities: Record<string, number>; batches: Record<string, string>; expiries: Record<string, string>; note: string };
 
@@ -69,7 +69,7 @@ const STAGE_META: Record<OrderStage, { label: string; description: string; tone:
 };
 
 const PRIMARY_FILTERS: Array<{ key: StageFilter; label: string }> = [
-  { key: 'all', label: 'All orders' },
+  { key: 'current', label: 'Current' },
   { key: 'awaiting-payment', label: 'Awaiting payment' },
   { key: 'awaiting-fulfilment', label: 'Awaiting fulfilment' },
   { key: 'ready', label: 'Ready to collect' },
@@ -79,12 +79,35 @@ const SECONDARY_FILTERS: Array<{ key: StageFilter; label: string }> = [
   { key: 'rejected', label: 'Rejected' },
   { key: 'archived', label: 'Archived' },
   { key: 'completed', label: 'Completed' },
+  { key: 'cancelled', label: 'Cancellations' },
+  { key: 'all', label: 'All history' },
 ];
 
-function orderStagePriority(stage: OrderStage) {
-  if (stage === 'cancelled' || stage === 'archived') return 2;
-  if (stage === 'collected') return 1;
+function orderRecordPriority(record: OrderRecord) {
+  const cancellationResolution = orderCancellationResolution(record.order);
+  if (cancellationResolution === 'needs-action') return 0;
+  if (cancellationResolution !== 'none' || record.stage === 'archived') return 3;
+  if (record.stage === 'collected') return 2;
+  if (record.stage === 'rejected') return 1;
   return 0;
+}
+
+function recordMatchesFilter(record: OrderRecord, filter: StageFilter) {
+  const cancellationResolution = orderCancellationResolution(record.order);
+  if (cancellationResolution !== 'none') {
+    if (filter === 'current') return cancellationResolution === 'needs-action';
+    if (filter === 'cancelled' || filter === 'all') return true;
+    return false;
+  }
+  return stageMatchesFilter(record.stage, filter);
+}
+
+function recordStageMeta(record: OrderRecord) {
+  const resolution = orderCancellationResolution(record.order);
+  if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'warning', icon: AlertTriangle };
+  if (resolution === 'refunded') return { label: 'Refunded', description: 'Cancellation closed and patient refund completed', tone: 'success', icon: CheckCircle2 };
+  if (resolution === 'resolved') return { label: 'Resolved', description: 'Cancellation closed with no action outstanding', tone: 'neutral', icon: CheckCircle2 };
+  return STAGE_META[record.stage];
 }
 
 function formatDate(value: Date | string | null | undefined, includeTime = false) {
@@ -105,7 +128,7 @@ function formatDeliveryDate(dateKey: string) {
 
 export default function Orders() {
   const { state, dispatch } = useApp();
-  const [activeFilter, setActiveFilter] = useState<StageFilter>('all');
+  const [activeFilter, setActiveFilter] = useState<StageFilter>('current');
   const [query, setQuery] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [manualForms, setManualForms] = useState<Record<number, ManualPaymentForm>>({});
@@ -168,14 +191,14 @@ export default function Orders() {
       return { order, patient, ...resolvedStage };
     })
     .sort((left, right) => {
-      const priorityDifference = orderStagePriority(left.stage) - orderStagePriority(right.stage);
+      const priorityDifference = orderRecordPriority(left) - orderRecordPriority(right);
       return priorityDifference || right.order.date.getTime() - left.order.date.getTime();
     }), [state.crm, state.currentOrganisationId, state.orders]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return records.filter(record => {
-      if (!stageMatchesFilter(record.stage, activeFilter)) return false;
+      if (!recordMatchesFilter(record, activeFilter)) return false;
       if (!needle) return true;
       const order = record.order;
       return [
@@ -198,8 +221,9 @@ export default function Orders() {
     const target = state.navigationTarget;
     if (target?.kind !== 'order') return;
     const orderId = Number(target.key.split('-')[0]);
-    if (records.some(record => record.order.id === orderId)) {
-      setActiveFilter('all');
+    const targetRecord = records.find(record => record.order.id === orderId);
+    if (targetRecord) {
+      setActiveFilter(['resolved', 'refunded'].includes(orderCancellationResolution(targetRecord.order)) ? 'cancelled' : 'current');
       setQuery('');
       setSelectedOrderId(orderId);
     }
@@ -207,14 +231,18 @@ export default function Orders() {
   }, [dispatch, records, state.navigationTarget]);
 
   const selected = filtered.find(record => record.order.id === selectedOrderId) ?? filtered[0] ?? null;
-  const outstandingValue = records.filter(record => record.stage === 'awaiting-payment').reduce((sum, record) => sum + record.order.payment.amount, 0);
-  const needsAction = records.filter(record => ['awaiting-payment', 'paid', 'rejected', 'delivered'].includes(record.stage) || (
-    record.stage === 'cancelled' && record.order.refund?.status !== 'completed' && record.order.cancellation?.status === 'refund_required'
-  ) || ['contact_required', 'awaiting_confirmation'].includes(record.order.curaleafCancellation?.status ?? '')).length;
-  const readyCount = records.filter(record => record.stage === 'ready').length;
-  const activeCount = records.filter(record => !['collected', 'archived', 'rejected', 'cancelled'].includes(record.stage)).length;
+  const outstandingValue = records.filter(record => orderCancellationResolution(record.order) === 'none' && record.stage === 'awaiting-payment').reduce((sum, record) => sum + record.order.payment.amount, 0);
+  const needsAction = records.filter(record => {
+    const cancellationResolution = orderCancellationResolution(record.order);
+    return cancellationResolution === 'needs-action'
+      || cancellationResolution === 'none' && ['awaiting-payment', 'paid', 'rejected', 'delivered'].includes(record.stage);
+  }).length;
+  const readyCount = records.filter(record => orderCancellationResolution(record.order) === 'none' && record.stage === 'ready').length;
+  const activeCount = records.filter(record => orderCancellationResolution(record.order) === 'none' && !['collected', 'archived', 'rejected', 'cancelled'].includes(record.stage)).length;
 
-  const filterCount = (filter: StageFilter) => records.filter(record => stageMatchesFilter(record.stage, filter)).length;
+  const filterCount = (filter: StageFilter) => records.filter(record => recordMatchesFilter(record, filter)).length;
+  const cancellationNeedsAction = activeFilter === 'cancelled' ? filtered.filter(record => orderCancellationResolution(record.order) === 'needs-action') : [];
+  const cancellationClosed = activeFilter === 'cancelled' ? filtered.filter(record => ['resolved', 'refunded'].includes(orderCancellationResolution(record.order))) : [];
 
   const applyCancellationResponse = (order: PatientOrder, record: Awaited<ReturnType<typeof requestPortalOrderCancellation>>) => {
     if (!record.cancellation) return;
@@ -517,9 +545,14 @@ export default function Orders() {
 
       <div className="order-crm-workspace">
         <aside className="order-crm-list" aria-label="Orders">
-          <header><span><small>Orders</small><strong>{filtered.length} result{filtered.length === 1 ? '' : 's'}</strong></span></header>
+          <header><span><small>{activeFilter === 'cancelled' ? 'Cancellation history' : 'Orders'}</small><strong>{filtered.length} result{filtered.length === 1 ? '' : 's'}</strong></span></header>
           <div className="order-crm-list__rows">
-            {filtered.length ? filtered.map(record => (
+            {filtered.length ? activeFilter === 'cancelled' ? (
+              <>
+                <OrderListGroup label="Needs action" detail="Supplier or refund follow-up" records={cancellationNeedsAction} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} />
+                <OrderListGroup label="Resolved & refunded" detail="Closed order history" records={cancellationClosed} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} />
+              </>
+            ) : filtered.map(record => (
               <OrderListRow key={record.order.id} record={record} selected={selected?.order.id === record.order.id} now={now} onSelect={() => setSelectedOrderId(record.order.id)} />
             )) : <div className="order-crm-empty"><Package size={26} /><strong>No orders in this stage</strong><span>Try another filter or search term.</span></div>}
           </div>
@@ -595,12 +628,30 @@ function SummaryMetric({ label, value, detail, icon: Icon, tone }: { label: stri
   return <article className={`order-crm-metric order-crm-metric--${tone}`}><span className="order-crm-metric__icon"><Icon size={16} /></span><span><small>{label}</small><strong>{value}</strong><em>{detail}</em></span></article>;
 }
 
+function OrderListGroup({ label, detail, records, selectedOrderId, now, onSelect }: {
+  label: string;
+  detail: string;
+  records: OrderRecord[];
+  selectedOrderId: number | null;
+  now: Date;
+  onSelect: (orderId: number) => void;
+}) {
+  if (!records.length) return null;
+  return (
+    <section className="order-crm-list-group" aria-label={label}>
+      <header><span><strong>{label}</strong><small>{detail}</small></span><b>{records.length}</b></header>
+      {records.map(record => <OrderListRow key={record.order.id} record={record} selected={selectedOrderId === record.order.id} now={now} onSelect={() => onSelect(record.order.id)} />)}
+    </section>
+  );
+}
+
 function OrderListRow({ record, selected, now, onSelect }: { record: OrderRecord; selected: boolean; now: Date; onSelect: () => void }) {
-  const meta = STAGE_META[record.stage];
+  const meta = recordStageMeta(record);
   const Icon = meta.icon;
   const patientName = record.patient?.name ?? 'Unknown patient';
+  const isCancellation = orderCancellationResolution(record.order) !== 'none';
   return (
-    <button type="button" className={`order-crm-row${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={onSelect}>
+    <button type="button" className={`order-crm-row${isCancellation ? ' order-crm-row--cancelled' : ''}${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={onSelect}>
       <span className={`order-crm-row__stage order-tone--${meta.tone}`}><Icon size={15} /></span>
       <span className="order-crm-row__identity"><strong title={patientName}>{compactPatientName(patientName)}</strong><small>{record.order.redoContext ? 'Replacement' : 'Order'} {orderReference(record.order)} · {record.order.prescriptions.length} Rx</small></span>
       <span className="order-crm-row__position"><strong>{money(record.order.payment.amount)}</strong><small>{shipmentListCopy(record, now) ?? formatDate(record.order.date)}</small></span>
@@ -654,8 +705,10 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
 }) {
   const [expanded, setExpanded] = useState(false);
   const { order, patient, stage } = record;
-  const meta = STAGE_META[stage];
+  const meta = recordStageMeta(record);
   const Icon = meta.icon;
+  const cancellationResolution = orderCancellationResolution(order);
+  const cancellationClosed = ['resolved', 'refunded'].includes(cancellationResolution);
   const allPlaced = order.prescriptions.length > 0 && order.prescriptions.every(prescription => prescription.placed);
   const canRedo = Boolean(record.unresolvedReason) && (stage === 'rejected' || stage === 'archived');
   const paymentFormVisible = stage === 'awaiting-payment' && order.payment.route === 'pharmacy';
@@ -678,9 +731,9 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
         </div>
       </header>
 
-      <JourneyRail stage={stage} paymentPaid={order.payment.status === 'paid'} />
+      {cancellationClosed ? <CancellationClosureSummary order={order} resolution={cancellationResolution as 'resolved' | 'refunded'} /> : <JourneyRail stage={stage} paymentPaid={order.payment.status === 'paid'} />}
 
-      {(cancellationEditorOpen || order.cancellation) ? (
+      {!cancellationClosed && (cancellationEditorOpen || order.cancellation) ? (
         <OrderCancellationPanel
           order={order}
           editorOpen={cancellationEditorOpen}
@@ -715,14 +768,14 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
         <PaidExceptionResolution order={order} canReplace={canRedo} lockedByCuraleaf={curaleafCancellationLocked} busy={refundBusy} refundReference={refundReference} onRefundReferenceChange={onRefundReferenceChange} onReplace={onRedo} onRequestRefund={onRequestRefund} onConfirmRefund={onConfirmRefund} />
       ) : null}
 
-      {stage === 'cancelled' && order.payment.status === 'paid' && order.cancellation?.status === 'refund_required' ? (
+      {cancellationResolution === 'needs-action' && order.payment.status === 'paid' && order.cancellation?.status === 'refund_required' ? (
         <PaidExceptionResolution order={order} canReplace={false} lockedByCuraleaf={curaleafCancellationLocked} busy={refundBusy} refundReference={refundReference} onRefundReferenceChange={onRefundReferenceChange} onReplace={onRedo} onRequestRefund={onRequestRefund} onConfirmRefund={onConfirmRefund} />
       ) : null}
 
       {!expanded ? (
-        <section className="order-fulfilment-collapsed">
-          <div><FileText size={17} /><span><small>Prescription fulfilment</small><strong>{order.prescriptions.length} prescription{order.prescriptions.length === 1 ? '' : 's'} · {meta.label}</strong><em>{collapsedActionCopy(stage)}</em></span></div>
-          <button type="button" className="btn btn-primary" onClick={() => setExpanded(true)}>Open full order view <ChevronDown size={14} /></button>
+        <section className={`order-fulfilment-collapsed${cancellationClosed ? ' order-fulfilment-collapsed--audit' : ''}`}>
+          <div><FileText size={17} /><span><small>{cancellationClosed ? 'Order audit' : 'Prescription fulfilment'}</small><strong>{order.prescriptions.length} prescription{order.prescriptions.length === 1 ? '' : 's'} · {meta.label}</strong><em>{cancellationClosed ? 'Closed history is available for reference; no operational action is required.' : collapsedActionCopy(stage)}</em></span></div>
+          <button type="button" className={`btn ${cancellationClosed ? 'btn-secondary' : 'btn-primary'}`} onClick={() => setExpanded(true)}>{cancellationClosed ? 'View audit details' : 'Open full order view'} <ChevronDown size={14} /></button>
         </section>
       ) : (
       <>
@@ -890,6 +943,27 @@ function collapsedActionCopy(stage: OrderStage) {
   if (stage === 'cancelled') return 'Cancellation is retained for audit.';
   if (stage === 'collected') return 'The medication handout is complete.';
   return 'Open the full view for prescription, supplier and activity details.';
+}
+
+function CancellationClosureSummary({ order, resolution }: { order: PatientOrder; resolution: 'resolved' | 'refunded' }) {
+  const refunded = resolution === 'refunded';
+  const closedAt = refunded ? order.refund?.confirmedAt : order.curaleafCancellation?.confirmedAt ?? order.cancellation?.requestedAt;
+  const supplierCopy = order.curaleafCancellation?.status === 'confirmed'
+    ? 'Curaleaf cancellation confirmed.'
+    : order.prescriptions.some(prescription => prescription.placed || prescription.poRef)
+      ? 'Supplier cancellation recorded.'
+      : 'No supplier order required cancellation.';
+  return (
+    <section className="order-cancellation-closure" aria-label="Resolved cancellation">
+      <span className="order-cancellation-closure__icon"><CheckCircle2 size={18} /></span>
+      <span className="order-cancellation-closure__copy">
+        <small>Closed order</small>
+        <strong>{refunded ? `${money((order.refund?.amountPence ?? Math.round(order.payment.amount * 100)) / 100)} refunded` : 'Cancellation resolved'}</strong>
+        <em>{supplierCopy} This closes this order only; the patient can place another order in future.</em>
+      </span>
+      <span className="order-cancellation-closure__status"><b>No action needed</b><small>{formatDate(closedAt, true)}</small></span>
+    </section>
+  );
 }
 
 function OrderCancellationPanel({ order, editorOpen, reason, note, reference, contactNote, busy, onClose, onReasonChange, onNoteChange, onReferenceChange, onContactNoteChange, onRequest, onRecordContact, onConfirm }: {

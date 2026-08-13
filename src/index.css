@@ -9626,6 +9626,12 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-crm-list > header strong{ margin-top: 2px; color: var(--text-primary); font-size: 13px; }
 .order-crm-list > header > span:last-child{ color: var(--text-tertiary); font-size: 9px; text-transform: uppercase; }
 .order-crm-list__rows{ max-height: calc(100vh - 310px); overflow-y: auto; }
+.order-crm-list-group > header{ display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg-elevated); }
+.order-crm-list-group > header span{ display: grid; gap: 2px; }
+.order-crm-list-group > header strong{ color: var(--text-primary); font-size: 10px; font-weight: 740; letter-spacing: .035em; text-transform: uppercase; }
+.order-crm-list-group > header small{ color: var(--text-tertiary); font-size: 9px; }
+.order-crm-list-group > header b{ display: grid; min-width: 22px; height: 22px; place-items: center; border-radius: 999px; color: var(--text-secondary); background: var(--bg-surface); font-size: 9px; }
+.order-crm-list-group + .order-crm-list-group{ border-top: 5px solid var(--bg-page); }
 
 .order-crm-row{
   display: grid;
@@ -9649,6 +9655,7 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-crm-row:hover{ background: var(--bg-elevated); }
 .order-crm-row.selected{ background: var(--tenant-primary-soft); box-shadow: inset 3px 0 0 var(--tenant-primary); }
 .order-crm-row:active{ transform: translateX(1px); }
+.order-crm-row--cancelled{ min-height: 82px; }
 .order-crm-row__stage{ display: grid; width: 31px; height: 31px; place-items: center; border-radius: 7px; }
 .order-crm-row__identity, .order-crm-row__position{ min-width: 0; }
 .order-crm-row__identity strong, .order-crm-row__identity small, .order-crm-row__position strong, .order-crm-row__position small{ display: block; }
@@ -9757,6 +9764,16 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-placement-confirmation strong{ color: var(--text-primary); font-size: 10px; }
 .order-placement-confirmation small{ color: var(--text-secondary); font-size: 9px; line-height: 1.5; }
 
+.order-cancellation-closure{ display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 14px 18px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--color-success) 5%, var(--bg-elevated)); }
+.order-cancellation-closure__icon{ display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; color: var(--color-success); background: color-mix(in srgb, var(--color-success) 11%, var(--bg-surface)); }
+.order-cancellation-closure__copy{ display: grid; min-width: 0; gap: 2px; }
+.order-cancellation-closure__copy small{ color: var(--text-tertiary); font-size: 8px; font-weight: 740; letter-spacing: .06em; text-transform: uppercase; }
+.order-cancellation-closure__copy strong{ color: var(--text-primary); font-size: 12px; }
+.order-cancellation-closure__copy em{ color: var(--text-secondary); font-size: 9px; font-style: normal; line-height: 1.45; }
+.order-cancellation-closure__status{ display: grid; justify-items: end; gap: 3px; text-align: right; }
+.order-cancellation-closure__status b{ color: var(--color-success); font-size: 9px; }
+.order-cancellation-closure__status small{ color: var(--text-tertiary); font-size: 8px; }
+
 .order-fulfilment-collapsed{ display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 14px 16px 16px; padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); }
 .order-fulfilment-collapsed > div{ display: flex; min-width: 0; align-items: flex-start; gap: 10px; color: var(--tenant-primary-strong); }
 .order-fulfilment-collapsed > div > span{ display: grid; min-width: 0; gap: 2px; }
@@ -9764,6 +9781,7 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-fulfilment-collapsed strong{ color: var(--text-primary); font-size: 12px; }
 .order-fulfilment-collapsed em{ color: var(--text-secondary); font-size: 9px; font-style: normal; line-height: 1.45; }
 .order-fulfilment-collapsed .btn{ flex: 0 0 auto; }
+.order-fulfilment-collapsed--audit{ margin-top: 12px; background: var(--bg-surface); }
 .order-full-view-controls{ display: flex; justify-content: flex-end; padding: 14px 16px 0; }
 
 .order-handout-backdrop{ position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(13, 25, 21, .48); backdrop-filter: blur(3px); }
@@ -9935,6 +9953,7 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   .order-crm-workspace{ grid-template-columns: 1fr; }
   .order-crm-list{ position: static; }
   .order-crm-list__rows{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 360px; }
+  .order-crm-list__rows:has(.order-crm-list-group){ display: block; }
   .order-crm-row:nth-child(odd){ border-right: 1px solid var(--border); }
 }
 
@@ -9960,6 +9979,8 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   .order-crm-next-action{ align-items: stretch; flex-direction: column; }
   .order-crm-next-action .btn{ align-self: flex-start; }
   .order-cancellation-fields, .order-cancellation-refs{ grid-template-columns: 1fr; }
+  .order-cancellation-closure{ grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+  .order-cancellation-closure__status{ grid-column: 2; justify-items: start; text-align: left; }
   .order-cancellation-refs > div{ border-right: 0; border-bottom: 1px solid var(--border); }
   .order-cancellation-refs > div:last-child{ border-bottom: 0; }
   .order-resolution__confirm{ grid-template-columns: 1fr; align-items: stretch; }
