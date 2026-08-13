@@ -31,21 +31,26 @@ export type EligibilitySubmissionRecord = Omit<EligibilitySubmissionInput, 'refe
   id: string;
   organisationId: string;
   pharmacyName: string;
-  status: 'New' | 'Under HHH review' | 'Approved' | 'Declined';
+  status: 'New' | 'Under HHH review' | 'Approved' | 'Declined' | 'Rejected';
   reviewedAt: string | null;
-  reviewedBy: string | null;
-  decisionNote: string | null;
+  reviewerDisplay: string | null;
+  pharmacyDecisionReason: string | null;
+  pharmacyDecisionReasonNeedsReview: boolean;
+  /** HHH-admin response only. Never returned to pharmacy staff. */
+  reviewedBy?: string | null;
+  /** HHH-admin response only. Never returned to pharmacy staff. */
+  decisionNote?: string | null;
   recordsCheck: {
     status: 'pending' | 'completed';
-    notes: string | null;
+    notes?: string | null;
     completedAt: string | null;
-    completedBy: string | null;
+    completedBy?: string | null;
   };
   referral: {
     status: 'pending' | 'completed' | 'declined';
-    notes: string | null;
+    notes?: string | null;
     completedAt: string | null;
-    completedBy: string | null;
+    completedBy?: string | null;
   };
   emailDelivery: {
     status: 'not_sent' | 'queued' | 'sent' | 'failed';

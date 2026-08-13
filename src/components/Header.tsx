@@ -20,7 +20,6 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle?: string }> = {
   },
   patients: {
     title: 'Patients hub',
-    subtitle: 'Approved patients, intake eligibility submissions, and clinical history for this pharmacy.',
   },
   finance: {
     title: 'Prescription financials',

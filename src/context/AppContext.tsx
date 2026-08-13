@@ -7,6 +7,7 @@ import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
 import { nextDraftIdAfterDeletion, preferredDraftPaymentRoute } from '../utils/createOrderDraft';
+import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeEligibilityStatus } from '../utils/eligibilityPresentation';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -208,7 +209,7 @@ export function getUnresolvedReason(order: PatientOrder, now = new Date()): Unre
   return null;
 }
 
-export type SubmissionStatus = 'New' | 'Under HHH review' | 'Approved' | 'Declined';
+export type SubmissionStatus = 'New' | 'Under HHH review' | 'Approved' | 'Declined' | 'Rejected';
 
 export interface EligibilitySubmission {
   id: number | string;
@@ -229,18 +230,21 @@ export interface EligibilitySubmission {
   calls: { ts: Date }[];
   reviewedAt: Date | string | null;
   reviewedBy: string | null;
+  reviewerDisplay: string | null;
   decisionNote: string | null;
+  pharmacyDecisionReason: string | null;
+  pharmacyDecisionReasonNeedsReview: boolean;
   recordsCheck?: {
     status: 'pending' | 'completed';
-    notes: string | null;
+    notes?: string | null;
     completedAt: Date | string | null;
-    completedBy: string | null;
+    completedBy?: string | null;
   };
   referral?: {
     status: 'pending' | 'completed' | 'declined';
-    notes: string | null;
+    notes?: string | null;
     completedAt: Date | string | null;
-    completedBy: string | null;
+    completedBy?: string | null;
   };
   emailDelivery?: {
     status: 'not_sent' | 'queued' | 'sent' | 'failed';
@@ -610,7 +614,7 @@ export type Action =
   | { type: 'UPDATE_SUBMISSION'; subId: EligibilitySubmission['id']; updates: Partial<EligibilitySubmission> }
   | { type: 'LOG_CALL'; subId: EligibilitySubmission['id'] }
   | { type: 'APPROVE_ONBOARDING'; subId: EligibilitySubmission['id']; note?: string }
-  | { type: 'DECLINE_ONBOARDING'; subId: EligibilitySubmission['id']; note?: string }
+  | { type: 'DECLINE_ONBOARDING'; subId: EligibilitySubmission['id']; note?: string; pharmacyDecisionReason: string }
   // Orders
   | { type: 'NEW_ORDER'; patientId?: string }
   | { type: 'START_REDO_ORDER'; sourceOrderId: number }
@@ -870,30 +874,30 @@ function mapPortalDraft(record: OrderDraftRecord, index: number, defaultPaymentR
 }
 
 function buildSeedSubmissions(): EligibilitySubmission[] {
-  const base = { tried2: true, psychExclusion: false, consentReferral: true, consentShare: true, organisationId: '11111111-1111-4111-8111-111111111111', pharmacyName: 'Holistic Health Hub Pharmacy — Leeds', referralToken: 'hhh-leeds-7x4p9k' };
+  const base = { tried2: true, psychExclusion: false, consentReferral: true, consentShare: true, organisationId: ORGANISATIONS[0].id, pharmacyName: ORGANISATIONS[0].name, referralToken: ORGANISATIONS[0].referralToken };
   const s1: EligibilitySubmission = {
     id: 1, name: 'Tom Hughes', dob: '1989-04-12', mobile: '07700 900501', email: 't.hughes@email.com',
     postcode: 'LS1 6PJ', conditions: ['chronic-pain', 'neuropathic-pain', 'arthritis'], primaryCondition: 'chronic-pain', ...base, marketing: false, source: 'Google',
-    status: 'New', calls: [], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(),
+    status: 'New', calls: [], reviewedAt: null, reviewedBy: null, reviewerDisplay: null, decisionNote: null, pharmacyDecisionReason: null, pharmacyDecisionReasonNeedsReview: false, submittedAt: new Date(),
   };
   const s2: EligibilitySubmission = {
     id: 2, name: 'Rebecca Allen', dob: '1994-11-02', mobile: '07700 900502', email: 'r.allen@email.com',
     postcode: 'LS2 8PQ', conditions: ['anxiety'], primaryCondition: 'anxiety', ...base, marketing: true, source: 'Website',
-    status: 'Under HHH review', calls: [{ ts: new Date(Date.now() - 24 * 60 * 60 * 1000) }], reviewedAt: null, reviewedBy: null, decisionNote: null, submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
+    status: 'Under HHH review', calls: [{ ts: new Date(Date.now() - 24 * 60 * 60 * 1000) }], reviewedAt: null, reviewedBy: null, reviewerDisplay: null, decisionNote: null, pharmacyDecisionReason: null, pharmacyDecisionReasonNeedsReview: false, submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
   };
   const s3: EligibilitySubmission = {
     id: 3, name: 'Daniel Price', dob: '1977-07-23', mobile: '07700 900503', email: 'd.price@email.com',
     postcode: 'LS2 7DR', conditions: ['chronic-pain', 'low-back-pain-and-sciatica'], primaryCondition: 'chronic-pain', ...base, marketing: false, source: 'Poster',
-    status: 'Approved', calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Approved for programme onboarding after telephone review.', submittedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+    status: 'Approved', calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', reviewerDisplay: PHARMACY_REVIEWER_DISPLAY, decisionNote: 'Approved for programme onboarding after telephone review.', pharmacyDecisionReason: null, pharmacyDecisionReasonNeedsReview: false, submittedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
   };
   const s4: EligibilitySubmission = {
     id: 4, name: 'Sara Knight', dob: '1985-02-15', mobile: '07700 900504', email: 's.knight@email.com',
     postcode: 'LS1 5DA', conditions: ['insomnia'], primaryCondition: 'insomnia', ...base, marketing: false, source: 'Text',
-    status: 'Declined', calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', decisionNote: 'Not onboarded following HHH review.', submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+    status: 'Declined', calls: [{ ts: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) }], reviewedAt: new Date(Date.now() - 24 * 60 * 60 * 1000), reviewedBy: 'Shaylen Patel', reviewerDisplay: PHARMACY_REVIEWER_DISPLAY, decisionNote: 'Not onboarded following HHH review.', pharmacyDecisionReason: LEGACY_PHARMACY_DECISION_REASON, pharmacyDecisionReasonNeedsReview: false, submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
   };
-  s3.organisationId = '22222222-2222-4222-8222-222222222222';
-  s3.pharmacyName = 'East Midlands Pharmacy Lincoln';
-  s3.referralToken = 'emp-lincoln-3m8q2v';
+  s3.organisationId = ORGANISATIONS[1].id;
+  s3.pharmacyName = ORGANISATIONS[1].name;
+  s3.referralToken = ORGANISATIONS[1].referralToken;
   return [s1, s2, s3, s4];
 }
 
@@ -1077,7 +1081,7 @@ const initialToken = urlParams?.get('token');
 const initialOrganisation = ORGANISATIONS.find(org => org.referralToken === initialToken || org.id === storedStaffSession?.organisationId) ?? ORGANISATIONS[0];
 
 const initialState: AppState = {
-  screen: 'home',
+  screen: urlParams?.has('patient') ? 'patients' : 'home',
   screenHistory: [],
   navigationTarget: null,
   catalogue: [],
@@ -1387,7 +1391,7 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         submissions: state.submissions.map(s =>
-          s.id === action.subId && s.status !== 'Approved' && s.status !== 'Declined'
+          s.id === action.subId && s.status !== 'Approved' && !isNegativeEligibilityStatus(s.status)
             ? { ...s, calls: [...s.calls, { ts: new Date() }], status: 'Under HHH review' as const }
             : s
         ),
@@ -1395,7 +1399,7 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'APPROVE_ONBOARDING': {
       const sub = state.submissions.find(s => s.id === action.subId);
-      if (!sub || sub.calls.length === 0 || sub.status === 'Declined') return state;
+      if (!sub || sub.calls.length === 0 || isNegativeEligibilityStatus(sub.status)) return state;
       const existing = state.crm.find(patient => patient.organisationId === sub.organisationId && patient.email.toLowerCase() === sub.email.toLowerCase());
       const patientId = existing?.id ?? `P-${state.nextIds.patient}`;
       const approvedBy = state.staffSession?.name ?? 'HHH administrator';
@@ -1415,22 +1419,22 @@ function reducer(state: AppState, action: Action): AppState {
           referralSource: sub.source,
           marketingConsent: sub.marketing,
           status: 'HHH approved' as const,
-          interactions: [{ ts: approvedAt, type: 'HHH onboarding approved', detail: `${approvedBy} approved programme onboarding after patient review.` }],
+          interactions: [{ ts: approvedAt, type: 'HHH onboarding approved', detail: `${PHARMACY_REVIEWER_DISPLAY} approved programme onboarding after patient review.` }],
         }],
         nextIds: { ...state.nextIds, patient: existing ? state.nextIds.patient : state.nextIds.patient + 1 },
         submissions: state.submissions.map(s =>
-          s.id === action.subId ? { ...s, status: 'Approved' as const, reviewedAt: approvedAt, reviewedBy: approvedBy, decisionNote: action.note?.trim() || 'Approved for programme onboarding after HHH telephone review.' } : s
+          s.id === action.subId ? { ...s, status: 'Approved' as const, reviewedAt: approvedAt, reviewedBy: approvedBy, reviewerDisplay: PHARMACY_REVIEWER_DISPLAY, decisionNote: action.note?.trim() || 'Approved for programme onboarding after HHH telephone review.', pharmacyDecisionReason: null, pharmacyDecisionReasonNeedsReview: false } : s
         ),
       };
     }
     case 'DECLINE_ONBOARDING': {
       const sub = state.submissions.find(s => s.id === action.subId);
-      if (!sub || sub.calls.length === 0 || sub.status === 'Approved') return state;
+      if (!sub || sub.calls.length === 0 || sub.status === 'Approved' || isNegativeEligibilityStatus(sub.status)) return state;
       const reviewedBy = state.staffSession?.name ?? 'HHH administrator';
       return {
         ...state,
         submissions: state.submissions.map(s =>
-          s.id === action.subId ? { ...s, status: 'Declined' as const, reviewedAt: new Date(), reviewedBy, decisionNote: action.note?.trim() || 'Not onboarded following HHH review.' } : s
+          s.id === action.subId ? { ...s, status: 'Declined' as const, reviewedAt: new Date(), reviewedBy, reviewerDisplay: PHARMACY_REVIEWER_DISPLAY, decisionNote: action.note?.trim() || 'Not onboarded following HHH review.', pharmacyDecisionReason: action.pharmacyDecisionReason.trim(), pharmacyDecisionReasonNeedsReview: false } : s
         ),
       };
     }
@@ -2124,8 +2128,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             status: record.status,
             calls: [],
             reviewedAt: record.reviewedAt,
-            reviewedBy: record.reviewedBy,
-            decisionNote: record.decisionNote,
+            reviewedBy: record.reviewedBy ?? null,
+            reviewerDisplay: record.reviewerDisplay,
+            decisionNote: record.decisionNote ?? null,
+            pharmacyDecisionReason: record.pharmacyDecisionReason,
+            pharmacyDecisionReasonNeedsReview: record.pharmacyDecisionReasonNeedsReview,
             recordsCheck: record.recordsCheck,
             referral: record.referral,
             emailDelivery: record.emailDelivery,

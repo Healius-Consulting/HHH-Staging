@@ -168,6 +168,14 @@ function StaffWorkspace() {
   const liveWorkspaceReady = Boolean(setup.status?.completed);
 
   useEffect(() => {
+    if (state.screen === 'patients') return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('patient')) return;
+    url.searchParams.delete('patient');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [state.screen]);
+
+  useEffect(() => {
     if (authState.staff?.role !== 'pharmacy_staff' || !setup.status || !authState.staff.organisationId) return;
     dispatch({ type: 'SET_WORKSPACE_MODE', mode: liveWorkspaceReady ? 'live' : 'training', organisationId: authState.staff.organisationId });
     if (liveWorkspaceReady && organisation?.status === 'onboarding') {

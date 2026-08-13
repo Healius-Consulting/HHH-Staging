@@ -36,6 +36,7 @@ import { queuePatientMessage } from './notification-outbox.js';
 import { callCuraleafExtension } from './supplier-extension.js';
 import { migrateMasterFlowV2 } from './flow-migration.js';
 import { planOrderHandout, shipmentsReadyForHandout } from './order-handout.js';
+import { eligibilityReviewProjection, negativeEligibilityStatus, pharmacyDecisionReasonSchema, pharmacyReasonAuditDetails } from './eligibility-view.js';
 
 
 
@@ -633,24 +634,25 @@ app.get('/v1/portal/eligibility-submissions', async (request, response, next) =>
   try {
     const organisationId = tenantFor(request, request.query.organisationId);
     const [records, organisation] = await Promise.all([listTenantRecords('eligibilitySubmissions', organisationId, 500), getRecord('organisations', organisationId)]);
-    const statusLabels: Record<string, string> = { new: 'New', reviewing: 'Under HHH review', approved: 'Approved', declined: 'Declined' };
     response.json(records.map(record => {
       const { conditions, primaryCondition } = conditionSet(record);
+      const review = eligibilityReviewProjection(record, identity(request).role);
+      const emailDelivery = record.emailDelivery && typeof record.emailDelivery === 'object'
+        ? record.emailDelivery as Record<string, unknown>
+        : {};
       return {
       id: record.id, organisationId, pharmacyName: organisation.name,
       firstName: record.firstName, surname: record.surname, dob: record.dob, mobile: record.mobile, email: record.email,
       postcode: record.postcode, conditions, primaryCondition, tried2: record.triedTwoTreatments,
       psychExclusion: record.psychosisExclusion, consentReferral: record.consentReferral, consentShare: record.consentShare,
-      marketing: record.marketingConsent, source: record.source, status: statusLabels[String(record.status)] ?? 'New',
-      reviewedAt: record.reviewedAt ?? null, reviewedBy: record.reviewedBy ?? null, decisionNote: record.decisionNote ?? null,
-      recordsCheck: record.recordsCheck ?? { status: 'pending', notes: null, completedAt: null, completedBy: null },
-      referral: record.referral ?? {
-        status: record.status === 'approved' ? 'completed' : record.status === 'declined' ? 'declined' : 'pending',
-        notes: record.decisionNote ?? null,
-        completedAt: record.status === 'approved' || record.status === 'declined' ? record.reviewedAt ?? null : null,
-        completedBy: record.status === 'approved' || record.status === 'declined' ? record.reviewedBy ?? null : null,
+      marketing: record.marketingConsent, source: record.source,
+      ...review,
+      emailDelivery: {
+        status: typeof emailDelivery.status === 'string' ? emailDelivery.status : 'not_sent',
+        queuedAt: typeof emailDelivery.queuedAt === 'string' ? emailDelivery.queuedAt : null,
+        sentAt: typeof emailDelivery.sentAt === 'string' ? emailDelivery.sentAt : null,
+        failedAt: typeof emailDelivery.failedAt === 'string' ? emailDelivery.failedAt : null,
       },
-      emailDelivery: record.emailDelivery ?? { status: 'not_sent', queuedAt: null, sentAt: null, failedAt: null },
       patientId: record.patientId ?? null,
       submittedAt: record.lastSubmittedAt ?? record.createdAt,
     }; }));
@@ -666,7 +668,7 @@ app.post('/v1/portal/admin/eligibility-submissions/:id/records-check', requireRo
     }).parse(request.body);
     const recordId = idSchema.parse(request.params.id);
     const current = await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
-    if (current.referral?.status === 'completed' || current.status === 'approved') {
+    if (current.referral?.status === 'completed' || current.status === 'approved' || negativeEligibilityStatus(current.status)) {
       throw new HttpError(409, 'The completed referral record can no longer be changed.', 'REFERRAL_ALREADY_COMPLETED');
     }
     const completedAt = timestamp();
@@ -685,23 +687,32 @@ app.post('/v1/portal/admin/eligibility-submissions/:id/referral-decision', requi
       organisationId: idSchema,
       decision: z.enum(['completed', 'declined']),
       notes: z.string().trim().max(2_000).nullable().optional(),
+      pharmacyDecisionReason: pharmacyDecisionReasonSchema.optional(),
+    }).superRefine((value, context) => {
+      if (value.decision === 'declined' && !value.pharmacyDecisionReason) {
+        context.addIssue({ code: 'custom', path: ['pharmacyDecisionReason'], message: 'A pharmacy-facing reason is required for a declined decision.' });
+      }
     }).parse(request.body);
     const recordId = idSchema.parse(request.params.id);
     if (input.decision === 'completed') {
-      await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
+      const current = await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
+      if (negativeEligibilityStatus(current.status)) throw new HttpError(409, 'A declined or rejected referral cannot be completed.', 'REFERRAL_DECLINED');
       const result = await completeReferral(recordId, identity(request).uid, input.notes ?? null);
       await audit(request, 'eligibility.referral_completed', { organisationId: input.organisationId, recordId, patientId: result.patientId, feeEventId: result.feeEventId });
       response.json({ ...result, status: 'approved', referralStatus: 'completed' });
       return;
     }
     const current = await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
-    if (current.referral?.status === 'completed' || current.status === 'approved') {
+    if (current.referral?.status === 'completed' || current.status === 'approved' || negativeEligibilityStatus(current.status)) {
       throw new HttpError(409, 'A completed referral cannot be declined.', 'REFERRAL_ALREADY_COMPLETED');
     }
     const completedAt = timestamp();
     const result = await updateTenantRecord('eligibilitySubmissions', recordId, input.organisationId, {
       status: 'declined',
       decisionNote: input.notes ?? null,
+      pharmacyDecisionReason: input.pharmacyDecisionReason,
+      pharmacyDecisionReasonReviewedAt: completedAt,
+      pharmacyDecisionReasonReviewedBy: identity(request).uid,
       referral: { status: 'declined', notes: input.notes ?? null, completedAt, completedBy: identity(request).uid },
       reviewedAt: completedAt,
       reviewedBy: identity(request).uid,
@@ -711,12 +722,34 @@ app.post('/v1/portal/admin/eligibility-submissions/:id/referral-decision', requi
   } catch (error) { next(error); }
 });
 
+app.patch('/v1/portal/admin/eligibility-submissions/:id/pharmacy-reason', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const input = z.object({
+      organisationId: idSchema,
+      pharmacyDecisionReason: pharmacyDecisionReasonSchema.nullable(),
+    }).parse(request.body);
+    const recordId = idSchema.parse(request.params.id);
+    const current = await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
+    if (!negativeEligibilityStatus(current.status)) {
+      throw new HttpError(409, 'Only declined or rejected records have a pharmacy-facing reason.', 'ELIGIBILITY_REASON_NOT_APPLICABLE');
+    }
+    const reviewedAt = timestamp();
+    const result = await updateTenantRecord('eligibilitySubmissions', recordId, input.organisationId, {
+      pharmacyDecisionReason: input.pharmacyDecisionReason,
+      pharmacyDecisionReasonReviewedAt: reviewedAt,
+      pharmacyDecisionReasonReviewedBy: identity(request).uid,
+    });
+    await audit(request, 'eligibility.pharmacy_reason_updated', pharmacyReasonAuditDetails(input.organisationId, recordId, input.pharmacyDecisionReason));
+    response.json(result);
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/admin/eligibility-submissions/:id/email', requireRole('hhh_admin'), async (request, response, next) => {
   try {
     const input = z.object({ organisationId: idSchema }).parse(request.body);
     const recordId = idSchema.parse(request.params.id);
     const submission = await getTenantRecord('eligibilitySubmissions', recordId, input.organisationId);
-    if (submission.referral?.status !== 'completed' && submission.status !== 'approved') {
+    if (negativeEligibilityStatus(submission.status) || (submission.referral?.status !== 'completed' && submission.status !== 'approved')) {
       throw new HttpError(409, 'Complete the referral before sending the patient email.', 'REFERRAL_NOT_COMPLETED');
     }
     const outboxId = `${recordId}--referral-completed`;
@@ -755,11 +788,23 @@ app.post('/v1/portal/admin/eligibility-submissions/:id/email', requireRole('hhh_
 
 app.patch('/v1/portal/eligibility-submissions/:id', requireRole('hhh_admin'), async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), status: z.enum(['reviewing', 'approved', 'declined']), decisionNote: z.string().trim().max(2000).nullable().optional() }).parse(request.body);
+    const input = z.object({
+      organisationId: idSchema.optional(),
+      status: z.enum(['reviewing', 'approved', 'declined']),
+      decisionNote: z.string().trim().max(2000).nullable().optional(),
+      pharmacyDecisionReason: pharmacyDecisionReasonSchema.optional(),
+    }).superRefine((value, context) => {
+      if (value.status === 'declined' && !value.pharmacyDecisionReason) {
+        context.addIssue({ code: 'custom', path: ['pharmacyDecisionReason'], message: 'A pharmacy-facing reason is required for a declined decision.' });
+      }
+    }).parse(request.body);
     const organisationId = tenantFor(request, input.organisationId);
     const recordId = idSchema.parse(request.params.id);
+    const current = await getTenantRecord('eligibilitySubmissions', recordId, organisationId);
+    if (negativeEligibilityStatus(current.status)) {
+      throw new HttpError(409, 'A declined or rejected eligibility decision is terminal.', 'REFERRAL_DECLINED');
+    }
     if (input.status === 'approved') {
-      await getTenantRecord('eligibilitySubmissions', recordId, organisationId);
       const result = await completeReferral(recordId, identity(request).uid, input.decisionNote ?? null);
       await audit(request, 'eligibility.reviewed', { organisationId, recordId, status: input.status, patientId: result.patientId });
       response.json(result);
@@ -772,6 +817,9 @@ app.patch('/v1/portal/eligibility-submissions/:id', requireRole('hhh_admin'), as
       reviewedAt,
       reviewedBy: identity(request).uid,
       ...(input.status === 'declined' ? {
+        pharmacyDecisionReason: input.pharmacyDecisionReason,
+        pharmacyDecisionReasonReviewedAt: reviewedAt,
+        pharmacyDecisionReasonReviewedBy: identity(request).uid,
         referral: { status: 'declined', notes: input.decisionNote ?? null, completedAt: reviewedAt, completedBy: identity(request).uid },
       } : {}),
     });

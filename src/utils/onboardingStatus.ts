@@ -3,6 +3,7 @@ const ONBOARDING_STATUS_LABELS: Record<string, string> = {
   'Under HHH review': 'Under Review',
   Approved: 'Referred',
   Declined: 'Declined',
+  Rejected: 'Rejected',
   'HHH approved': 'Active',
 };
 
@@ -12,7 +13,7 @@ export function onboardingStatusLabel(status: string) {
 
 export function onboardingStatusPillClass(status: string) {
   if (status === 'Approved' || status === 'HHH approved') return 'pill-green';
-  if (status === 'Declined' || status === 'Suspended') return 'pill-red';
+  if (status === 'Declined' || status === 'Rejected' || status === 'Suspended') return 'pill-red';
   if (status === 'Under HHH review') return 'pill-amber';
   return 'pill-info';
 }

@@ -42,7 +42,7 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getGoLiveReadiness, getPharmacySetupStatus, getPharmacyStaff, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getGoLiveReadiness, getPharmacySetupStatus, getPharmacyStaff, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
 import type { AdminReferralFinanceReport, CuraleafConnectionStatus, CuraleafValidationReport, GoLiveReadiness, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
@@ -56,6 +56,7 @@ import CompactPatientCell from '../components/CompactPatientCell';
 import { formatPatientDob } from '../utils/patientDob';
 import ConditionList from '../components/ConditionList';
 import { EMAIL_LOGO_SPEC, normalisePharmacyLogo } from '../utils/pharmacyLogo';
+import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeEligibilityStatus, pharmacyDecisionReason } from '../utils/eligibilityPresentation';
 
 type AdminView = 'overview' | 'referrals' | 'patients' | 'finance' | 'platform';
 type PlatformTab = 'setup' | 'curaleaf';
@@ -548,14 +549,15 @@ export default function AdminPortal() {
   const [adminFinanceLoading, setAdminFinanceLoading] = useState(false);
   const [adminFinanceError, setAdminFinanceError] = useState<string | null>(null);
   const [adminFinanceRefresh, setAdminFinanceRefresh] = useState(0);
-  const [referralDialog, setReferralDialog] = useState<{ id: string | number; organisationId: string; patientName: string; action: 'records' | 'complete' | 'decline' | 'email' } | null>(null);
+  const [referralDialog, setReferralDialog] = useState<{ id: string | number; organisationId: string; patientName: string; action: 'records' | 'complete' | 'decline' | 'email' | 'reason' } | null>(null);
   const [referralNotes, setReferralNotes] = useState('');
+  const [referralPharmacyReason, setReferralPharmacyReason] = useState('');
   const [referralBusy, setReferralBusy] = useState(false);
   const [referralError, setReferralError] = useState<string | null>(null);
 
   const selectedOrganisation = state.organisations.find(org => org.id === selectedOrganisationId);
 
-  const runReferralAction = async () => {
+  const runReferralAction = async (redactPharmacyReason = false) => {
     if (!referralDialog) return;
     const submission = state.submissions.find(item => item.id === referralDialog.id);
     if (!submission) return;
@@ -569,12 +571,15 @@ export default function AdminPortal() {
           await completeReferralRecordsCheck(String(referralDialog.id), { organisationId: referralDialog.organisationId, notes: referralNotes.trim() });
         } else if (referralDialog.action === 'email') {
           await queueReferralPatientEmail(String(referralDialog.id), referralDialog.organisationId);
-        } else {
-          await recordReferralDecision(String(referralDialog.id), {
+        } else if (referralDialog.action === 'reason') {
+          await updateEligibilityPharmacyReason(String(referralDialog.id), {
             organisationId: referralDialog.organisationId,
-            decision: referralDialog.action === 'complete' ? 'completed' : 'declined',
-            notes: referralNotes.trim() || null,
+            pharmacyDecisionReason: redactPharmacyReason ? null : referralPharmacyReason.trim(),
           });
+        } else {
+          await recordReferralDecision(String(referralDialog.id), referralDialog.action === 'complete'
+            ? { organisationId: referralDialog.organisationId, decision: 'completed', notes: referralNotes.trim() || null }
+            : { organisationId: referralDialog.organisationId, decision: 'declined', notes: referralNotes.trim() || null, pharmacyDecisionReason: referralPharmacyReason.trim() });
         }
       }
 
@@ -589,7 +594,10 @@ export default function AdminPortal() {
           status: 'Approved',
           reviewedAt: now,
           reviewedBy: actor,
+          reviewerDisplay: PHARMACY_REVIEWER_DISPLAY,
           decisionNote: referralNotes.trim() || 'Referral completed.',
+          pharmacyDecisionReason: null,
+          pharmacyDecisionReasonNeedsReview: false,
           referral: { status: 'completed', notes: referralNotes.trim() || null, completedAt: now, completedBy: actor },
         } });
       } else if (referralDialog.action === 'decline') {
@@ -597,17 +605,26 @@ export default function AdminPortal() {
           status: 'Declined',
           reviewedAt: now,
           reviewedBy: actor,
+          reviewerDisplay: PHARMACY_REVIEWER_DISPLAY,
           decisionNote: referralNotes.trim() || 'Referral declined.',
+          pharmacyDecisionReason: referralPharmacyReason.trim(),
+          pharmacyDecisionReasonNeedsReview: false,
           referral: { status: 'declined', notes: referralNotes.trim() || null, completedAt: now, completedBy: actor },
+        } });
+      } else if (referralDialog.action === 'reason') {
+        dispatch({ type: 'UPDATE_SUBMISSION', subId: submission.id, updates: {
+          pharmacyDecisionReason: redactPharmacyReason ? null : referralPharmacyReason.trim(),
+          pharmacyDecisionReasonNeedsReview: redactPharmacyReason,
         } });
       } else {
         dispatch({ type: 'UPDATE_SUBMISSION', subId: submission.id, updates: {
           emailDelivery: { status: 'queued', queuedAt: now, sentAt: null, failedAt: null },
         } });
       }
-      dispatch({ type: 'ADD_TOAST', message: referralDialog.action === 'records' ? 'Call and records check saved.' : referralDialog.action === 'email' ? 'Patient email queued separately.' : referralDialog.action === 'complete' ? 'Referral completed. The £50 event starts at the patient’s first collected dispense.' : 'Referral declined.', toastType: referralDialog.action === 'decline' ? 'warning' : 'success' });
+      dispatch({ type: 'ADD_TOAST', message: referralDialog.action === 'records' ? 'Call and records check saved.' : referralDialog.action === 'email' ? 'Patient email queued separately.' : referralDialog.action === 'complete' ? 'Referral completed. The £50 event starts at the patient’s first collected dispense.' : referralDialog.action === 'reason' ? redactPharmacyReason ? 'Pharmacy reason redacted to the approved fallback.' : 'Pharmacy-facing reason updated.' : 'Referral declined.', toastType: referralDialog.action === 'decline' || redactPharmacyReason ? 'warning' : 'success' });
       setReferralDialog(null);
       setReferralNotes('');
+      setReferralPharmacyReason('');
     } catch (error) {
       setReferralError(error instanceof Error ? error.message : 'The referral action could not be saved.');
     } finally {
@@ -1236,14 +1253,15 @@ export default function AdminPortal() {
 
   const renderReferrals = () => {
     const pending = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review');
-    const reviewed = state.submissions.filter(submission => submission.status === 'Approved' || submission.status === 'Declined');
+    const reviewed = state.submissions.filter(submission => submission.status === 'Approved' || isNegativeEligibilityStatus(submission.status));
     const referralCard = (submission: typeof state.submissions[number], section: 'queue' | 'history') => {
       const organisation = state.organisations.find(org => org.id === submission.organisationId);
       const recordsComplete = submission.recordsCheck?.status === 'completed' || submission.calls.length > 0;
-      const referralComplete = submission.referral?.status === 'completed' || submission.status === 'Approved';
+      const referralComplete = !isNegativeEligibilityStatus(submission.status) && (submission.referral?.status === 'completed' || submission.status === 'Approved');
       const emailStatus = submission.emailDelivery?.status ?? 'not_sent';
-      const openAction = (action: 'records' | 'complete' | 'decline' | 'email') => {
+      const openAction = (action: 'records' | 'complete' | 'decline' | 'email' | 'reason') => {
         setReferralNotes(action === 'records' ? submission.recordsCheck?.notes ?? '' : action === 'complete' || action === 'decline' ? submission.decisionNote ?? '' : '');
+        setReferralPharmacyReason(action === 'reason' && !submission.pharmacyDecisionReasonNeedsReview ? submission.pharmacyDecisionReason ?? '' : '');
         setReferralError(null);
         setReferralDialog({ id: submission.id, organisationId: submission.organisationId, patientName: submission.name, action });
       };
@@ -1272,14 +1290,16 @@ export default function AdminPortal() {
             </div>
             <div>
               <span className="admin-referral-item__label">Referral</span>
-              <div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(submission.status)}`}>{onboardingStatusLabel(submission.status)}</span>{submission.reviewedBy && <small>{submission.reviewedBy} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</div>
+              <div className="onboarding-status-stack"><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(submission.status)}`}>{onboardingStatusLabel(submission.status)}</span>{submission.reviewerDisplay && <small>{submission.reviewerDisplay} · {submission.reviewedAt ? new Date(submission.reviewedAt).toLocaleDateString('en-GB') : ''}</small>}</div>
             </div>
+            {isNegativeEligibilityStatus(submission.status) && <div className="admin-referral-item__pharmacy-reason"><span className="admin-referral-item__label">Pharmacy-facing reason</span><strong>{pharmacyDecisionReason(submission)}</strong>{submission.pharmacyDecisionReasonNeedsReview && <small><AlertCircle size={12} /> Legacy fallback — HHH review required</small>}</div>}
           </div>
 
           <div className="admin-referral-actions" aria-label={`Actions for ${submission.name}`}>
             {!recordsComplete && <button className="btn btn-sm" onClick={() => openAction('records')}><PhoneCall size={13} /> Log call / records check</button>}
-            {!referralComplete && submission.status !== 'Declined' && <button className="btn btn-sm btn-primary" disabled={!recordsComplete} onClick={() => openAction('complete')}><UserCheck size={13} /> Complete referral</button>}
-            {!referralComplete && submission.status !== 'Declined' && <button className="btn btn-sm" disabled={!recordsComplete} onClick={() => openAction('decline')}><UserX size={13} /> Decline</button>}
+            {!referralComplete && !isNegativeEligibilityStatus(submission.status) && <button className="btn btn-sm btn-primary" disabled={!recordsComplete} onClick={() => openAction('complete')}><UserCheck size={13} /> Complete referral</button>}
+            {!referralComplete && !isNegativeEligibilityStatus(submission.status) && <button className="btn btn-sm" disabled={!recordsComplete} onClick={() => openAction('decline')}><UserX size={13} /> Decline</button>}
+            {isNegativeEligibilityStatus(submission.status) && <button className="btn btn-sm" onClick={() => openAction('reason')}><Pencil size={13} /> {submission.pharmacyDecisionReasonNeedsReview ? 'Review pharmacy reason' : 'Edit pharmacy reason'}</button>}
             {referralComplete && emailStatus === 'not_sent' && <button className="btn btn-sm btn-primary" onClick={() => openAction('email')}><ExternalLink size={13} /> Send email</button>}
             {referralComplete && emailStatus !== 'not_sent' && <span className={`pill ${emailStatus === 'failed' ? 'pill-red' : 'pill-green'}`}>Email {emailStatus.replace('_', ' ')}</span>}
           </div>
@@ -1644,14 +1664,16 @@ export default function AdminPortal() {
         <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
           <aside className="drawer admin-referral-drawer" role="dialog" aria-modal="true" aria-labelledby="referral-action-title">
             <div className="drawer-header">
-              <div><p className="section-label">Patient referral</p><h2 id="referral-action-title">{referralDialog.action === 'records' ? 'Log call and records check' : referralDialog.action === 'complete' ? 'Complete referral' : referralDialog.action === 'decline' ? 'Decline referral' : 'Send patient email'}</h2></div>
+              <div><p className="section-label">Patient referral</p><h2 id="referral-action-title">{referralDialog.action === 'records' ? 'Log call and records check' : referralDialog.action === 'complete' ? 'Complete referral' : referralDialog.action === 'decline' ? 'Decline referral' : referralDialog.action === 'reason' ? 'Review pharmacy-facing reason' : 'Send patient email'}</h2></div>
               <button className="icon-btn" disabled={referralBusy} onClick={() => setReferralDialog(null)} aria-label="Close"><X size={18} /></button>
             </div>
             <div className="drawer-body onboarding-form">
-              <div className="integration-boundary"><ShieldCheck size={17} /><div><strong>{referralDialog.patientName}</strong><p>{referralDialog.action === 'records' ? 'Record the outcome only. Do not upload or paste Summary Care Records or supporting health documents.' : referralDialog.action === 'email' ? 'This queues the approved referral template as a separate, audited action.' : 'This decision is recorded in the audit trail and cannot be silently changed.'}</p></div></div>
-              {referralDialog.action !== 'email' && <label>{referralDialog.action === 'records' ? 'Call / records-check notes' : 'Decision notes'}<textarea className="input" rows={6} value={referralNotes} onChange={event => setReferralNotes(event.target.value)} placeholder="Record the operational outcome without attaching health records." /></label>}
+              <div className="integration-boundary"><ShieldCheck size={17} /><div><strong>{referralDialog.patientName}</strong><p>{referralDialog.action === 'records' ? 'Record the outcome only. Do not upload or paste Summary Care Records or supporting health documents.' : referralDialog.action === 'email' ? 'This queues the approved referral template as a separate, audited action.' : referralDialog.action === 'decline' || referralDialog.action === 'reason' ? 'The pharmacy-facing reason must be suitable for disclosure. Keep confidential clinical detail in the internal notes only.' : 'This decision is recorded in the audit trail and cannot be silently changed.'}</p></div></div>
+              {(referralDialog.action === 'decline' || referralDialog.action === 'reason') && <label>Pharmacy-facing reason<textarea className="input" rows={4} minLength={3} maxLength={500} required value={referralPharmacyReason} onChange={event => setReferralPharmacyReason(event.target.value)} placeholder={LEGACY_PHARMACY_DECISION_REASON} /><small className="field-help">Shown read-only in the pharmacy Patients Hub. 3–500 characters.</small></label>}
+              {referralDialog.action !== 'email' && referralDialog.action !== 'reason' && <label>{referralDialog.action === 'records' ? 'Call / records-check notes' : 'Internal HHH decision notes'}<textarea className="input" rows={6} maxLength={2000} value={referralNotes} onChange={event => setReferralNotes(event.target.value)} placeholder="Record the operational outcome without attaching health records." /></label>}
+              {referralDialog.action === 'reason' && <div className="banner banner-amber"><AlertCircle size={15} /><span><strong>Current pharmacy display</strong><small>{pharmacyDecisionReason(state.submissions.find(item => item.id === referralDialog.id)!)}</small></span></div>}
               {referralError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {referralError}</div>}
-              <div className="drawer-actions"><button type="button" className="btn" disabled={referralBusy} onClick={() => setReferralDialog(null)}>Cancel</button><button type="button" className={`btn ${referralDialog.action === 'decline' ? 'btn-danger' : 'btn-primary'}`} disabled={referralBusy || (referralDialog.action === 'records' && !referralNotes.trim())} onClick={() => void runReferralAction()}>{referralBusy ? 'Saving…' : referralDialog.action === 'records' ? 'Save check' : referralDialog.action === 'complete' ? 'Complete referral' : referralDialog.action === 'decline' ? 'Record decline' : 'Queue patient email'}</button></div>
+              <div className="drawer-actions">{referralDialog.action === 'reason' && <button type="button" className="btn btn-danger" disabled={referralBusy} onClick={() => void runReferralAction(true)}>Redact to fallback</button>}<button type="button" className="btn" disabled={referralBusy} onClick={() => setReferralDialog(null)}>Cancel</button><button type="button" className={`btn ${referralDialog.action === 'decline' ? 'btn-danger' : 'btn-primary'}`} disabled={referralBusy || (referralDialog.action === 'records' && !referralNotes.trim()) || ((referralDialog.action === 'decline' || referralDialog.action === 'reason') && referralPharmacyReason.trim().length < 3)} onClick={() => void runReferralAction()}>{referralBusy ? 'Saving…' : referralDialog.action === 'records' ? 'Save check' : referralDialog.action === 'complete' ? 'Complete referral' : referralDialog.action === 'decline' ? 'Record decline' : referralDialog.action === 'reason' ? 'Save pharmacy reason' : 'Queue patient email'}</button></div>
             </div>
           </aside>
         </div>

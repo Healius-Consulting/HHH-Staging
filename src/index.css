@@ -4789,6 +4789,10 @@ html[data-reduced-motion='true'] :is(.summary-tile, .rx-prescribed-item){ transi
 
 .admin-referral-register td, .pharmacy-referral-register td, .admin-master-patients td{ min-width: 0; overflow: hidden; }
 
+.admin-referral-item__pharmacy-reason{ display: grid; gap: 4px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-danger) 24%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--color-danger) 5%, var(--bg-surface)); }
+.admin-referral-item__pharmacy-reason > strong{ color: var(--text-primary); font-size: 10px; line-height: 1.45; }
+.admin-referral-item__pharmacy-reason > small{ display: flex; align-items: center; gap: 5px; color: var(--color-warning); font-size: 9px; font-weight: 700; }
+
 .admin-patient-filters{ display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(170px, 1fr) minmax(145px, .75fr) minmax(145px, .75fr) auto; gap: 12px; align-items: end; padding: 0 20px 18px; }
 
 .admin-patient-filters label{ display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }
@@ -4858,7 +4862,7 @@ html.modal-open .page-container{ overflow: hidden; }
 
 .patient-record-drawer__identity > div:last-child{ min-width: 0; }
 
-.patient-record-drawer__identity h3{ overflow: hidden; margin: 2px 0 5px; font-size: 18px; letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
+.patient-record-drawer__identity :is(h2, h3){ overflow: hidden; margin: 2px 0 5px; font-size: 18px; letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
 
 .patient-record-drawer__avatar{ width: 46px !important; height: 46px !important; flex: 0 0 46px; font-size: 15px !important; }
 
@@ -5334,7 +5338,7 @@ html.modal-open .page-container{ overflow: hidden; }
   background: var(--bg-surface);
 }
 
-.patients-page .patient-record-drawer__identity h3{ font-size: 17px; }
+.patients-page .patient-record-drawer__identity :is(h2, h3){ font-size: 17px; }
 .patients-page .patient-record-drawer__avatar{ width: 42px !important; height: 42px !important; flex-basis: 42px; }
 .patients-page .patient-record-drawer__body{
   display: flex;
@@ -5383,6 +5387,126 @@ html.modal-open .page-container{ overflow: hidden; }
 .patient-order-summary > div:nth-child(2){ border-right: 0; }
 .patient-order-summary > div:last-child{ grid-column: 1 / -1; border-top: 1px solid var(--border); }
 .patient-order-progress__step small{ display: none; }
+}
+
+/* Directory-led Patients Hub and distinct full-page patient profile. */
+.patients-page{ display: block; }
+.patients-page > .filter-grid:has(> button.filter-card){ width: 100%; margin-bottom: 10px; }
+.patients-page > .filter-toolbar{ margin-bottom: 12px !important; }
+.patients-page > .table-wrap{
+  position: relative;
+  top: auto;
+  width: 100%;
+  height: auto;
+  min-height: 420px;
+  max-height: calc(100dvh - 270px);
+  overflow: auto;
+}
+.patient-directory-key > small{ color: var(--text-tertiary); font-size: 10px; }
+.patients-page .patient-directory-table{ display: table; width: 100% !important; min-width: 880px; table-layout: fixed; }
+.patients-page .patient-directory-table thead{ display: table-header-group; }
+.patients-page .patient-directory-table tbody{ display: table-row-group; }
+.patients-page .patient-directory-table tr{
+  display: table-row;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.patients-page .patient-directory-table tbody tr:hover{ background: var(--bg-elevated); }
+.patients-page .patient-directory-table tbody tr:focus-visible{ outline: 3px solid var(--tenant-primary-soft); outline-offset: -3px; background: var(--bg-elevated); }
+.patients-page .patient-directory-table td{
+  display: table-cell;
+  width: auto !important;
+  min-width: 0;
+  padding: 12px 14px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: transparent !important;
+  vertical-align: middle;
+}
+.patients-page .patient-directory-table td:nth-child(2),
+.patients-page .patient-directory-table td:nth-child(3),
+.patients-page .patient-directory-table td:nth-child(4){ display: table-cell; }
+.patients-page .patient-directory-table th:nth-child(1){ width: 21%; }
+.patients-page .patient-directory-table th:nth-child(2){ width: 11%; }
+.patients-page .patient-directory-table th:nth-child(3){ width: 19%; }
+.patients-page .patient-directory-table th:nth-child(4){ width: 14%; }
+.patients-page .patient-directory-table th:nth-child(5){ width: 29%; }
+.patients-page .patient-directory-table th:nth-child(6){ width: 6%; }
+.patient-directory-status{ display: grid; min-width: 0; justify-items: start; gap: 5px; }
+.patient-directory-status > .pill{ min-height: 24px; }
+.patient-directory-status > small{ display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 9px; font-weight: 650; }
+.patient-directory-reason{
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-danger);
+  font-size: 10px;
+  font-weight: 620;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.patient-directory-warning{ color: var(--color-danger) !important; }
+.patient-profile-view{ width: min(1180px, 100%); margin-inline: auto; }
+.patient-profile-toolbar{ display: flex; margin-bottom: 10px; }
+.patients-page > .patient-record-page{
+  position: relative;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: none;
+  background: var(--bg-surface);
+}
+.patients-page .patient-record-page .patient-record-drawer__header{ position: relative; top: auto; }
+.patients-page .patient-record-page .patient-record-drawer__body{ display: flex; height: auto; overflow: visible; }
+.patient-record-page .patient-eligibility-panel,
+.patient-record-page .patient-record-note{ order: 2; }
+.patient-record-page .patient-care-context{ order: 3; }
+.patient-record-page .patient-record-facts{ order: 4; }
+.patient-record-page .patient-order-history{ order: 5; }
+.patient-record-page .patient-record-audit{ order: 6; }
+.patient-profile-unavailable{ display: grid; gap: 18px; width: min(760px, 100%); margin: 0 auto; }
+.patient-profile-unavailable > .btn{ justify-self: start; }
+.patient-profile-unavailable > div{ display: grid; justify-items: center; gap: 8px; padding: 48px 24px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-tertiary); background: var(--bg-surface); text-align: center; }
+.patient-profile-unavailable h2{ margin: 0; color: var(--text-primary); font-size: 18px; }
+.patient-profile-unavailable p{ max-width: 460px; margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
+.patient-eligibility-reason{ display: grid; gap: 4px; padding: 12px; border: 1px solid color-mix(in srgb, var(--color-danger) 28%, var(--border)); border-left: 3px solid var(--color-danger); border-radius: 7px; background: color-mix(in srgb, var(--color-danger) 6%, var(--bg-surface)); }
+.patient-eligibility-reason > span{ color: var(--color-danger); font-size: 8px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.patient-eligibility-reason > strong{ color: var(--text-primary); font-size: 11px; line-height: 1.5; }
+
+@media (max-width: 1100px) {
+  .patients-page > .table-wrap{ min-height: 0; max-height: none; overflow: visible; border: 0; background: transparent; }
+  .patients-page .patient-directory-table{ display: block; min-width: 0; }
+  .patients-page .patient-directory-table thead{ display: none; }
+  .patients-page .patient-directory-table tbody{ display: grid; gap: 8px; }
+  .patients-page .patient-directory-table tr{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(130px, .7fr) 28px;
+    align-items: center;
+    gap: 10px;
+    padding: 11px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--bg-surface);
+  }
+  .patients-page .patient-directory-table td{ display: block; padding: 0; border: 0; }
+  .patients-page .patient-directory-table td:nth-child(2),
+  .patients-page .patient-directory-table td:nth-child(3),
+  .patients-page .patient-directory-table td:nth-child(4){ display: none; }
+  .patients-page .patient-directory-table td:nth-child(1){ grid-column: 1; }
+  .patients-page .patient-directory-table td:nth-child(5){ grid-column: 2; }
+  .patients-page .patient-directory-table td:nth-child(6){ grid-column: 3; }
+  .patient-directory-status{ justify-items: end; text-align: right; }
+  .patient-directory-reason{ max-width: 220px; }
+  .patient-profile-toolbar .btn{ width: 100%; }
 }
 
 @media (max-width: 1250px) {

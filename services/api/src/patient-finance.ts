@@ -83,7 +83,7 @@ export async function completeReferral(submissionId: string, actorUid: string, n
     if (current.recordsCheck?.status !== 'completed') {
       throw new HttpError(409, 'Complete the call and records check before recording the referral.', 'RECORDS_CHECK_REQUIRED');
     }
-    if (current.referral?.status === 'declined' || current.status === 'declined') {
+    if (current.referral?.status === 'declined' || current.status === 'declined' || current.status === 'rejected') {
       throw new HttpError(409, 'A declined referral cannot be completed.', 'REFERRAL_DECLINED');
     }
 

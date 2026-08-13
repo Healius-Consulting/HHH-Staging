@@ -135,9 +135,19 @@ export function completeReferralRecordsCheck(submissionId: string, input: { orga
   });
 }
 
-export function recordReferralDecision(submissionId: string, input: { organisationId: string; decision: 'completed' | 'declined'; notes?: string | null }) {
+export function recordReferralDecision(submissionId: string, input:
+  | { organisationId: string; decision: 'completed'; notes?: string | null }
+  | { organisationId: string; decision: 'declined'; notes?: string | null; pharmacyDecisionReason: string }
+) {
   return apiRequest<Record<string, unknown>>(`/v1/portal/admin/eligibility-submissions/${encodeURIComponent(submissionId)}/referral-decision`, {
     method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateEligibilityPharmacyReason(submissionId: string, input: { organisationId: string; pharmacyDecisionReason: string | null }) {
+  return apiRequest<Record<string, unknown>>(`/v1/portal/admin/eligibility-submissions/${encodeURIComponent(submissionId)}/pharmacy-reason`, {
+    method: 'PATCH',
     body: JSON.stringify(input),
   });
 }
