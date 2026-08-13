@@ -105,8 +105,8 @@ function recordMatchesFilter(record: OrderRecord, filter: StageFilter) {
 function recordStageMeta(record: OrderRecord) {
   const resolution = orderCancellationResolution(record.order);
   if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'warning', icon: AlertTriangle };
-  if (resolution === 'refunded') return { label: 'Refunded', description: 'Cancellation closed and patient refund completed', tone: 'success', icon: CheckCircle2 };
-  if (resolution === 'resolved') return { label: 'Resolved', description: 'Cancellation closed with no action outstanding', tone: 'neutral', icon: CheckCircle2 };
+  if (resolution === 'refunded') return { label: 'Refunded', description: 'Cancellation closed and patient refund completed', tone: 'refunded', icon: Banknote };
+  if (resolution === 'resolved') return { label: 'Resolved', description: 'Cancellation closed with no action outstanding', tone: 'resolved', icon: CheckCircle2 };
   return STAGE_META[record.stage];
 }
 
@@ -649,9 +649,10 @@ function OrderListRow({ record, selected, now, onSelect }: { record: OrderRecord
   const meta = recordStageMeta(record);
   const Icon = meta.icon;
   const patientName = record.patient?.name ?? 'Unknown patient';
-  const isCancellation = orderCancellationResolution(record.order) !== 'none';
+  const cancellationResolution = orderCancellationResolution(record.order);
+  const isCancellation = cancellationResolution !== 'none';
   return (
-    <button type="button" className={`order-crm-row${isCancellation ? ' order-crm-row--cancelled' : ''}${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={onSelect}>
+    <button type="button" className={`order-crm-row${isCancellation ? ` order-crm-row--cancelled order-crm-row--${cancellationResolution}` : ''}${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={onSelect}>
       <span className={`order-crm-row__stage order-tone--${meta.tone}`}><Icon size={15} /></span>
       <span className="order-crm-row__identity"><strong title={patientName}>{compactPatientName(patientName)}</strong><small>{record.order.redoContext ? 'Replacement' : 'Order'} {orderReference(record.order)} · {record.order.prescriptions.length} Rx</small></span>
       <span className="order-crm-row__position"><strong>{money(record.order.payment.amount)}</strong><small>{shipmentListCopy(record, now) ?? formatDate(record.order.date)}</small></span>
@@ -954,8 +955,8 @@ function CancellationClosureSummary({ order, resolution }: { order: PatientOrder
       ? 'Supplier cancellation recorded.'
       : 'No supplier order required cancellation.';
   return (
-    <section className="order-cancellation-closure" aria-label="Resolved cancellation">
-      <span className="order-cancellation-closure__icon"><CheckCircle2 size={18} /></span>
+    <section className={`order-cancellation-closure order-cancellation-closure--${resolution}`} aria-label="Resolved cancellation">
+      <span className="order-cancellation-closure__icon">{refunded ? <Banknote size={18} /> : <CheckCircle2 size={18} />}</span>
       <span className="order-cancellation-closure__copy">
         <small>Closed order</small>
         <strong>{refunded ? `${money((order.refund?.amountPence ?? Math.round(order.payment.amount * 100)) / 100)} refunded` : 'Cancellation resolved'}</strong>

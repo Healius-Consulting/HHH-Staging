@@ -9656,6 +9656,8 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-crm-row.selected{ background: var(--tenant-primary-soft); box-shadow: inset 3px 0 0 var(--tenant-primary); }
 .order-crm-row:active{ transform: translateX(1px); }
 .order-crm-row--cancelled{ min-height: 82px; }
+.order-crm-row--refunded.selected{ background: color-mix(in srgb, var(--info-500) 13%, var(--bg-surface)); box-shadow: inset 3px 0 0 var(--info-500); }
+.order-crm-row--resolved.selected{ background: color-mix(in srgb, var(--color-success) 10%, var(--bg-surface)); box-shadow: inset 3px 0 0 var(--color-success); }
 .order-crm-row__stage{ display: grid; width: 31px; height: 31px; place-items: center; border-radius: 7px; }
 .order-crm-row__identity, .order-crm-row__position{ min-width: 0; }
 .order-crm-row__identity strong, .order-crm-row__identity small, .order-crm-row__position strong, .order-crm-row__position small{ display: block; }
@@ -9682,6 +9684,8 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-tone--danger{ color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 9%, var(--bg-surface)); }
 .order-tone--info{ color: var(--color-info, var(--tenant-primary-strong)); background: color-mix(in srgb, var(--color-info, var(--tenant-primary)) 9%, var(--bg-surface)); }
 .order-tone--neutral{ color: var(--text-secondary); background: var(--bg-elevated); }
+.order-tone--refunded{ color: var(--info-700); background: color-mix(in srgb, var(--info-500) 14%, var(--bg-surface)); }
+.order-tone--resolved{ color: var(--color-success); background: color-mix(in srgb, var(--color-success) 11%, var(--bg-surface)); }
 
 .order-crm-record__header{
   display: grid;
@@ -9773,6 +9777,9 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-cancellation-closure__status{ display: grid; justify-items: end; gap: 3px; text-align: right; }
 .order-cancellation-closure__status b{ color: var(--color-success); font-size: 9px; }
 .order-cancellation-closure__status small{ color: var(--text-tertiary); font-size: 8px; }
+.order-cancellation-closure--refunded{ background: color-mix(in srgb, var(--info-500) 8%, var(--bg-elevated)); }
+.order-cancellation-closure--refunded .order-cancellation-closure__icon{ color: var(--info-700); background: color-mix(in srgb, var(--info-500) 14%, var(--bg-surface)); }
+.order-cancellation-closure--refunded .order-cancellation-closure__status b{ color: var(--info-700); }
 
 .order-fulfilment-collapsed{ display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 14px 16px 16px; padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); }
 .order-fulfilment-collapsed > div{ display: flex; min-width: 0; align-items: flex-start; gap: 10px; color: var(--tenant-primary-strong); }
