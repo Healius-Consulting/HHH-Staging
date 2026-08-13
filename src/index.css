@@ -9555,13 +9555,13 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 
 .order-crm-filters{
   display: flex;
+  flex-wrap: wrap;
   gap: 5px;
-  overflow-x: auto;
-  padding-bottom: 1px;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 
 .order-filter-more{ position: relative; flex: 0 0 auto; }
+.order-crm-controls:has(.order-filter-more[open]){ position: relative; z-index: 30; }
 .order-filter-more > summary{
   display: inline-flex;
   min-height: 32px;
