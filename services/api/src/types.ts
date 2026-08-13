@@ -67,6 +67,8 @@ export interface PortalOrganisation {
   curaleafLiveValidation?: CuraleafValidationRecord | null;
   curaleafLiveSecretStoredAt?: string | null;
   gdprComplianceFlag?: boolean;
+  testAccount?: boolean;
+  gdprExempt?: boolean;
 }
 
 export interface Company {

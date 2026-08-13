@@ -499,11 +499,12 @@ export interface PrescriberDirectoryRecord {
 export interface GoLiveReadiness {
   organisationId: string;
   companyId: string | null;
+  testAccount?: boolean;
   ready: boolean;
   status: 'onboarding' | 'live' | 'paused';
   gates: {
-    gdprEvidence: { passed: boolean; evidenceUrl: string | null };
-    curaleafLive: { passed: boolean; validatedAt: string | null; secretStored: boolean };
+    gdprEvidence: { passed: boolean; exempt?: boolean; evidenceUrl: string | null };
+    curaleafLive: { passed: boolean; environment?: 'test' | 'production'; validatedAt: string | null; secretStored: boolean };
   };
 }
 
@@ -920,6 +921,8 @@ export interface PortalOrganisation {
   curaleafTestValidation?: CuraleafValidationRecord | null;
   curaleafLiveValidation?: CuraleafValidationRecord | null;
   curaleafLiveSecretStoredAt?: string | null;
+  testAccount?: boolean;
+  gdprExempt?: boolean;
 }
 
 export interface OrganisationLogoUploadTarget {

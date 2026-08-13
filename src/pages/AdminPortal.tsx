@@ -686,7 +686,7 @@ export default function AdminPortal() {
       const readiness = await goLiveOrganisation(organisationId);
       setGoLiveByOrganisation(current => ({ ...current, [organisationId]: readiness }));
       dispatch({ type: 'UPDATE_ORGANISATION', organisationId, updates: { status: 'live' } });
-      dispatch({ type: 'ADD_TOAST', message: 'Both hard gates passed. The pharmacy is now live.', toastType: 'success' });
+      dispatch({ type: 'ADD_TOAST', message: readiness.testAccount ? 'TEST-key gate passed. The test account is active; public intake remains disabled.' : 'Both hard gates passed. The pharmacy is now live.', toastType: 'success' });
     } catch (error) {
       setSetupError(error instanceof Error ? error.message : 'The pharmacy could not go live.');
     } finally {
@@ -1180,10 +1180,10 @@ export default function AdminPortal() {
                   <div className="readiness-cell">
                     <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
                     <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
-                    <div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>GDPR evidence</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>LIVE key</span></div>
+                    <div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.testAccount ? 'GDPR test exemption' : 'GDPR evidence'}</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.gates.curaleafLive.environment === 'test' ? 'TEST key' : 'LIVE key'}</span></div>
                   </div>
                   <div className="admin-org-actions">
-                    <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>
+                    <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>{goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
                     <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button>
                     {org.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === org.id} onClick={() => void activateGoLive(org.id)}>{goLiveBusy === org.id ? 'Going live…' : 'Go live'}</button> : null}
                   </div>
@@ -1211,7 +1211,7 @@ export default function AdminPortal() {
                         <small>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
                       </div>
                       <div className="company-group-card__meta">
-                        <span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.gates.gdprEvidence.passed ? 'GDPR evidence confirmed' : 'GDPR evidence required'}</span>
+                        <span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.testAccount ? 'Test only · public intake disabled' : goLive?.gates.gdprEvidence.passed ? 'GDPR evidence confirmed' : 'GDPR evidence required'}</span>
                         <div>
                           <strong>{earningPatientsCount}</strong> earning patients · <strong>£{accruedCommission}</strong> accrued
                         </div>
@@ -1232,10 +1232,10 @@ export default function AdminPortal() {
                       <div className="readiness-cell">
                         <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
                         <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
-                        <div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>GDPR evidence</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>LIVE key</span></div>
+                        <div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.testAccount ? 'GDPR test exemption' : 'GDPR evidence'}</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.gates.curaleafLive.environment === 'test' ? 'TEST key' : 'LIVE key'}</span></div>
                       </div>
                       <div className="admin-org-actions">
-                        <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>
+                        <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>{goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
                         <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage branch</button>
                         {org.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === org.id} onClick={() => void activateGoLive(org.id)}>{goLiveBusy === org.id ? 'Going live…' : 'Go live'}</button> : null}
                       </div>
@@ -1503,7 +1503,9 @@ export default function AdminPortal() {
       dispatch({
         type: 'ADD_TOAST',
         message: readiness?.gates.curaleafLive.passed
-          ? `${pharmacy?.tradingName ?? 'Pharmacy'} LIVE Curaleaf key validated. The Go live button unlocks when company GDPR evidence also passes.`
+          ? readiness.testAccount
+            ? `${pharmacy?.tradingName ?? 'Pharmacy'} TEST Curaleaf key validated. Its explicit test exemption is active and public intake is disabled.`
+            : `${pharmacy?.tradingName ?? 'Pharmacy'} LIVE Curaleaf key validated. The Go live button unlocks when company GDPR evidence also passes.`
           : `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf connection approved for UAT; LIVE validation is still required.`,
         toastType: 'success',
       });
@@ -1576,9 +1578,9 @@ export default function AdminPortal() {
             </div>
           </section>
           <section className="card admin-patient-table compliance-register">
-            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Operational steps remain visible for UAT. Only company GDPR evidence and a validated, securely stored LIVE Curaleaf key unlock the admin Go live action.</p></div></div>
+            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Production pharmacies require company GDPR evidence and a validated LIVE Curaleaf key. Explicit TRAINING accounts use a TEST-key gate and cannot accept public intake.</p></div></div>
             {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
-            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Operational checklist</th><th>Hard go-live gates</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const readiness = tenantReadiness(organisation.id); const goLive = goLiveByOrganisation[organisation.id]; return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>Useful for UAT; does not unlock live</small></td><td><div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>GDPR evidence</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>LIVE key</span></div></td><td><span className={`pill ${organisation.status === 'live' ? 'pill-green' : organisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{organisation.status}</span></td><td><div className="flex gap-sm"><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button>{organisation.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === organisation.id} onClick={() => void activateGoLive(organisation.id)}>{goLiveBusy === organisation.id ? 'Going live…' : 'Go live'}</button> : null}</div></td></tr>; })}</tbody></table></div>}
+            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Operational checklist</th><th>Hard go-live gates</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const readiness = tenantReadiness(organisation.id); const goLive = goLiveByOrganisation[organisation.id]; return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>Useful for UAT; does not unlock live</small></td><td><div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.testAccount ? 'GDPR test exemption' : 'GDPR evidence'}</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.gates.curaleafLive.environment === 'test' ? 'TEST key' : 'LIVE key'}</span></div></td><td><span className={`pill ${organisation.status === 'live' ? 'pill-green' : organisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{organisation.status}</span>{goLive?.testAccount && <span className="pill pill-info">TEST only</span>}</td><td><div className="flex gap-sm"><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button>{organisation.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === organisation.id} onClick={() => void activateGoLive(organisation.id)}>{goLiveBusy === organisation.id ? 'Going live…' : 'Go live'}</button> : null}</div></td></tr>; })}</tbody></table></div>}
           </section>
         </>
       )}

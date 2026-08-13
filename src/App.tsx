@@ -56,6 +56,8 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
     address: record.address,
     websiteDomains: record.websiteDomains ?? [],
     status: record.status,
+    testAccount: record.testAccount,
+    gdprExempt: record.gdprExempt,
     staffCount: 0,
     platformFeeMonthly: record.platformFeeMonthly ?? null,
     defaultPaymentRoute: record.defaultPaymentRoute ?? 'manual',

@@ -37,6 +37,7 @@ import { callCuraleafExtension } from './supplier-extension.js';
 import { migrateMasterFlowV2 } from './flow-migration.js';
 import { planOrderHandout, shipmentsReadyForHandout } from './order-handout.js';
 import { eligibilityReviewProjection, negativeEligibilityStatus, pharmacyDecisionReasonSchema, pharmacyReasonAuditDetails } from './eligibility-view.js';
+import { goLiveGateState, isExplicitCuraleafTestAccount } from './go-live.js';
 
 
 
@@ -272,6 +273,7 @@ async function resolveReferralToken(rawToken: string) {
     const token = tokens.docs[0]?.data();
     if (!token) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
     const organisation = await getRecord('organisations', token.organisationId as string);
+    if (isExplicitCuraleafTestAccount(organisation)) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
     if (organisation.status !== 'live') throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
     return { token, organisation };
   });
@@ -312,23 +314,21 @@ async function companyForOrganisation(organisationId: string, organisation?: Rec
 
 async function goLiveReadiness(organisationId: string) {
   const organisation = await getRecord('organisations', organisationId);
-  const company = await companyForOrganisation(organisationId, organisation);
-  const gdprPassed = Boolean(company?.gdprConfirmed) && validGdprEvidenceUrl(company?.gdprDocUrl);
-  const validation = organisation.curaleafLiveValidation && typeof organisation.curaleafLiveValidation === 'object'
-    ? organisation.curaleafLiveValidation as Record<string, unknown>
-    : null;
-  const secretStored = typeof organisation.curaleafLiveSecretStoredAt === 'string';
-  const curaleafPassed = validation?.environment === 'production'
-    && typeof validation.validatedAt === 'string'
-    && secretStored;
+  const [company, connectionSnapshot] = await Promise.all([
+    companyForOrganisation(organisationId, organisation),
+    firestore.collection('integrationConnections').doc(`${organisationId}--curaleaf`).get(),
+  ]);
+  const companyGdprPassed = Boolean(company?.gdprConfirmed) && validGdprEvidenceUrl(company?.gdprDocUrl);
+  const gates = goLiveGateState(organisation, companyGdprPassed, connectionSnapshot.exists ? connectionSnapshot.data()! : null);
   return {
     organisationId,
     companyId: company?.id ?? null,
-    ready: gdprPassed && curaleafPassed,
+    testAccount: gates.testAccount,
+    ready: gates.gdprPassed && gates.curaleafPassed,
     status: String(organisation.status ?? 'onboarding') as 'onboarding' | 'live' | 'paused',
     gates: {
-      gdprEvidence: { passed: gdprPassed, evidenceUrl: validGdprEvidenceUrl(company?.gdprDocUrl) ? String(company!.gdprDocUrl) : null },
-      curaleafLive: { passed: curaleafPassed, validatedAt: typeof validation?.validatedAt === 'string' ? validation.validatedAt : null, secretStored },
+      gdprEvidence: { passed: gates.gdprPassed, exempt: gates.gdprExempt, evidenceUrl: validGdprEvidenceUrl(company?.gdprDocUrl) ? String(company!.gdprDocUrl) : null },
+      curaleafLive: { passed: gates.curaleafPassed, environment: gates.curaleafEnvironment, validatedAt: gates.curaleafValidatedAt, secretStored: gates.secretStored },
     },
   };
 }
@@ -339,7 +339,7 @@ export async function auditLiveOrganisationGates() {
   for (const document of snapshot.docs) {
     const readiness = await goLiveReadiness(document.id);
     if (readiness.ready) continue;
-    await document.ref.set({ status: 'paused', gdprComplianceFlag: !readiness.gates.gdprEvidence.passed, pausedReason: 'go_live_gate_audit_failed', pausedAt: timestamp(), updatedAt: timestamp() }, { merge: true });
+    await document.ref.set({ status: 'paused', gdprComplianceFlag: !readiness.gates.gdprEvidence.passed && !readiness.testAccount, pausedReason: 'go_live_gate_audit_failed', pausedAt: timestamp(), updatedAt: timestamp() }, { merge: true });
     invalidateCollectionCache('organisations', document.id);
     paused.push(document.id);
   }
@@ -350,7 +350,9 @@ export async function auditLiveOrganisationGates() {
 async function requireSetupComplete(organisationId: string) {
   const readiness = await goLiveReadiness(organisationId);
   if (!readiness.ready || readiness.status !== 'live') {
-    throw new HttpError(409, 'This pharmacy is not live. Confirm company GDPR evidence and the validated LIVE Curaleaf key.', 'PHARMACY_NOT_LIVE');
+    throw new HttpError(409, readiness.testAccount
+      ? 'This TEST account is inactive. Confirm its explicit test exemption and validated TEST Curaleaf key.'
+      : 'This pharmacy is not live. Confirm company GDPR evidence and the validated LIVE Curaleaf key.', 'PHARMACY_NOT_LIVE');
   }
 }
 
@@ -3109,7 +3111,9 @@ app.post('/v1/portal/admin/organisations/:id/go-live', requireRole('hhh_admin'),
     const organisationId = idSchema.parse(request.params.id);
     const readiness = await goLiveReadiness(organisationId);
     if (!readiness.ready) {
-      throw new HttpError(409, 'Go live requires signed company GDPR evidence and a validated, securely stored LIVE Curaleaf key.', 'GO_LIVE_GATES_INCOMPLETE');
+      throw new HttpError(409, readiness.testAccount
+        ? 'Test activation requires the explicit test-account exemption and a validated TEST Curaleaf key.'
+        : 'Go live requires signed company GDPR evidence and a validated, securely stored LIVE Curaleaf key.', 'GO_LIVE_GATES_INCOMPLETE');
     }
     const updatedAt = timestamp();
     await firestore.collection('organisations').doc(organisationId).set({

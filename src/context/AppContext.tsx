@@ -281,6 +281,8 @@ export interface PharmacyTenant {
   address: string;
   websiteDomains: string[];
   status: 'live' | 'onboarding' | 'paused';
+  testAccount?: boolean;
+  gdprExempt?: boolean;
   staffCount: number;
   platformFeeMonthly: number | null;
   defaultPaymentRoute: 'manual' | 'worldpay';
@@ -423,6 +425,7 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     gphcNumber: 'TRAINING-PHARM1', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'spatel@healiusconsulting.com', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
     address: 'Primary Training Branch, United Kingdom', websiteDomains: ['training-pharm1.co.uk'],
     status: 'live', staffCount: 2,
+    testAccount: true, gdprExempt: true,
     platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
     brand: { primary: '#0f766e', portalName: 'Primary Branch' },
@@ -435,6 +438,7 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     gphcNumber: 'TRAINING-PHARM2', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'shaylenpatel.locum@hotmail.com', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
     address: 'Alternate Training Branch, United Kingdom', websiteDomains: ['training-pharm2.co.uk'],
     status: 'live', staffCount: 2,
+    testAccount: true, gdprExempt: true,
     platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
     brand: { primary: '#1e40af', portalName: 'Alternate Branch' },
