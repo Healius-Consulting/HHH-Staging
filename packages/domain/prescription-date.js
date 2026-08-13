@@ -29,6 +29,39 @@ function ordinalDate(ordinal) {
   return new Date(ordinal * DAY_MS).toISOString().slice(0, 10);
 }
 
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
+
+export function normalisePrescriptionDateParts(day, month, year) {
+  const values = [day, month, year].map(value => String(value ?? '').trim());
+  if (values.every(value => !value)) return { status: 'empty', value: '' };
+  if (values.some(value => !value) || !/^\d{1,2}$/.test(values[0]) || !/^\d{1,2}$/.test(values[1]) || !/^\d{2}(?:\d{2})?$/.test(values[2])) {
+    return { status: 'incomplete', value: '' };
+  }
+  const fullYear = values[2].length === 2 ? `20${values[2]}` : values[2];
+  const candidate = `${fullYear}-${values[1].padStart(2, '0')}-${values[0].padStart(2, '0')}`;
+  if (dateOrdinal(candidate) === null) return { status: 'invalid', value: '' };
+  return { status: 'valid', value: candidate, display: `${values[0].padStart(2, '0')}/${values[1].padStart(2, '0')}/${fullYear}` };
+}
+
+export function prescriptionExpiryDisplay(issueDate, now = new Date()) {
+  const issued = dateOrdinal(issueDate);
+  const today = londonTodayOrdinal(now);
+  if (issued === null || today === null) return null;
+  const expiryOrdinal = issued + PRESCRIPTION_WINDOW_DAYS;
+  const expiryDate = ordinalDate(expiryOrdinal);
+  const [, month, day] = expiryDate.split('-').map(Number);
+  const daysRemaining = expiryOrdinal - today;
+  const formattedExpiry = `${String(day).padStart(2, '0')} ${MONTH_LABELS[month - 1]} ${expiryDate.slice(0, 4)}`;
+  return {
+    expiryDate,
+    daysRemaining,
+    tone: daysRemaining < 0 ? 'red' : daysRemaining < 7 ? 'amber' : 'green',
+    text: daysRemaining < 0
+      ? `Expired on ${formattedExpiry} · ${Math.abs(daysRemaining)}d ago.`
+      : `Valid until ${formattedExpiry} · ${daysRemaining}d left.`,
+  };
+}
+
 export function prescriptionIssueDateBounds(now = new Date()) {
   const today = londonTodayOrdinal(now);
   if (today === null) return null;

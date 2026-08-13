@@ -42,7 +42,7 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
   const defaultCommands: CommandDefinition[] = [
     { label: 'Open overview', detail: 'Today’s position and priority queue', group: 'Navigate', icon: <Home size={16} />, run: () => navigate('home') },
     { label: 'Patients hub', detail: 'Patient records, onboarding and order history', group: 'Navigate', keywords: 'find patient directory', icon: <UserSearch size={16} />, run: () => navigate('patients') },
-    { label: 'Customer orders', detail: 'Payments, Curaleaf progress, delivery and collection', group: 'Navigate', keywords: 'billing track supplier provider prescription fulfilment', icon: <Package size={16} />, run: () => navigate('orders') },
+    { label: 'Orders', detail: 'Payments, Curaleaf progress, delivery and collection', group: 'Navigate', keywords: 'billing track supplier provider prescription fulfilment', icon: <Package size={16} />, run: () => navigate('orders') },
     { label: 'Curaleaf catalogue', detail: 'Products, pack sizes and patient prices', group: 'Navigate', icon: <Tags size={16} />, run: () => navigate('formulary') },
     { label: 'Organisation settings', detail: 'Setup, payment routes, forms, QR assets and pharmacy identity', group: 'Navigate', keywords: 'resources eligibility content pack', icon: <Settings size={16} />, run: () => navigate('settings') },
     { label: 'Start a prescription', detail: 'Create a new draft session', group: 'Actions', icon: <FilePlus size={16} />, run: () => { dispatch({ type: 'NEW_ORDER' }); navigate('create'); } },

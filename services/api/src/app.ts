@@ -16,20 +16,26 @@ import { appCheck, auth, firestore, storage } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
 import { cached, invalidateCache } from './cache.js';
 import { createRecord, getRecord, getTenantRecord, invalidateCollectionCache, listTenantRecords, listTenantRecordsByField, updateTenantRecord } from './repository.js';
-import { writeIntegrationSecret } from './secrets.js';
+import { readIntegrationSecret, writeIntegrationSecret } from './secrets.js';
 import type { FulfilmentStatus, IntegrationName, PaymentStatus } from './types.js';
 import { createHostedPaymentSession, parseWorldpayWebhookEvent, validateWorldpayCredentials, type WorldpayCredential } from './worldpay.js';
 import { reconcileWorldpayPaymentDocument } from './worldpay-reconciliation.js';
-import { activatePatientForOrder, completeReferral } from './patient-finance.js';
+import { activatePatientForOrder, completeReferral, recordCollectedDispense } from './patient-finance.js';
 import { adminReferralFinance, pharmacyPrescriptionFinance } from './finance-reporting.js';
-import { allocateDispensingFee, calculateExpiryBoundaryDate, calculatePrescriptionExpiry, recordPlacementLedgerEvent, rankSubstitutions, satisfiesMarginFloor } from './placement-engine.js';
-import { canMarkShipmentReady, shipmentReceiptStatus } from './shipment-workflow.js';
+import { allocateDispensingFee, calculateExpiryBoundaryDate, calculatePrescriptionExpiry, recordPlacementLedgerEvent } from './placement-engine.js';
+import { canMarkShipmentReady, prescriptionCollectionRollup, receivedLinesHaveBatchDetails, shipmentReceiptStatus } from './shipment-workflow.js';
 import { enrichOrderRecord, evaluateOrderCycle } from './order-cycle.js';
 import { refundAdapter } from './refund-adapter.js';
 import { canPatientCreateOrder } from './patient-order-eligibility.js';
-import type { Company, CuraleafValidationRecord, PortalOrganisation, PrescriptionPlacement } from './types.js';
+import type { Company, CuraleafValidationRecord, PrescriptionPlacement } from './types.js';
 import { autoSubmitPaidPrescriptions, prepareManualPrescriptionsForOrder } from './curaleaf-reconciliation.js';
 import { loadUploadedPrescriptionFile } from './prescription-file.js';
+import { FLOW_CONFIG, validDispensingFeePence } from './flow-config.js';
+import { deterministicSubOrderId, messageId, paymentLinkExpiryAt, prescriptionIsCurrent } from './order-flow.js';
+import { queuePatientMessage } from './notification-outbox.js';
+import { callCuraleafExtension } from './supplier-extension.js';
+import { migrateMasterFlowV2 } from './flow-migration.js';
+import { planOrderHandout, shipmentsReadyForHandout } from './order-handout.js';
 
 
 
@@ -104,6 +110,7 @@ const organisationDetailsSchema = z.object({
   modules: tenantModulesSchema,
   worldpayEnabled: z.boolean(),
   defaultPaymentRoute: z.enum(['manual', 'worldpay']),
+  autoPlacementEnabled: z.boolean().optional(),
 });
 
 const setupDefinitions = [
@@ -216,8 +223,22 @@ async function platformCuraleafCatalogue() {
   });
 }
 
+const londonDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' });
+
+function millisecondsUntilNextLondonMidnight(now = Date.now()) {
+  const currentDay = londonDay.format(new Date(now));
+  let lower = now;
+  let upper = now + 26 * 60 * 60 * 1_000;
+  while (upper - lower > 1_000) {
+    const middle = Math.floor((lower + upper) / 2);
+    if (londonDay.format(new Date(middle)) === currentDay) lower = middle;
+    else upper = middle;
+  }
+  return Math.max(60_000, upper - now);
+}
+
 async function tenantCuraleafCatalogue(organisationId: string) {
-  return cached(`curaleaf:catalog:${organisationId}`, 5 * 60_000, async () => {
+  return cached(`curaleaf:catalog:${organisationId}`, millisecondsUntilNextLondonMidnight(), async () => {
     const formulaPage = await curaleafList<Record<string, unknown>>(organisationId, '/v1/formulas/', 'formulas');
     const productPage = await curaleafList<Record<string, unknown>>(organisationId, '/v1/products/', 'products');
     return {
@@ -250,7 +271,7 @@ async function resolveReferralToken(rawToken: string) {
     const token = tokens.docs[0]?.data();
     if (!token) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
     const organisation = await getRecord('organisations', token.organisationId as string);
-    if (!['live', 'onboarding'].includes(String(organisation.status))) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
+    if (organisation.status !== 'live') throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
     return { token, organisation };
   });
 }
@@ -267,21 +288,69 @@ async function setupStatus(organisationId: string) {
   });
 }
 
-/** When all six setup steps are done, leave onboarding so the pharmacy workspace can go live. */
-async function promoteOrganisationToLiveIfReady(organisationId: string) {
-  const status = await setupStatus(organisationId);
-  if (!status.completed) return status;
-  const organisation = await getRecord('organisations', organisationId);
-  if (organisation.status === 'onboarding') {
-    await firestore.collection('organisations').doc(organisationId).set({ status: 'live', updatedAt: timestamp() }, { merge: true });
-    invalidateCollectionCache('organisations', organisationId);
-    invalidateCache('admin:organisations');
+function validGdprEvidenceUrl(value: unknown) {
+  return typeof value === 'string' && (value.startsWith('https://drive.google.com/') || value.startsWith('https://docs.google.com/'));
+}
+
+async function companyForOrganisation(organisationId: string, organisation?: Record<string, unknown>): Promise<(Record<string, unknown> & { id: string }) | null> {
+  const branch = organisation ?? await getRecord('organisations', organisationId);
+  const declaredId = typeof branch.orgId === 'string' ? branch.orgId : '';
+  if (declaredId) {
+    const declared = await firestore.collection('companies').doc(declaredId).get();
+    if (declared.exists) return { id: declared.id, ...declared.data()! };
   }
-  return status;
+  const owner = await firestore.collection('companies').where('branchesOwned', 'array-contains', organisationId).limit(1).get();
+  if (!owner.empty) return { id: owner.docs[0]!.id, ...owner.docs[0]!.data() };
+  const companyNumber = typeof branch.companyNumber === 'string' ? branch.companyNumber.trim() : '';
+  if (companyNumber) {
+    const match = await firestore.collection('companies').where('companyNumber', '==', companyNumber).limit(1).get();
+    if (!match.empty) return { id: match.docs[0]!.id, ...match.docs[0]!.data() };
+  }
+  return null;
+}
+
+async function goLiveReadiness(organisationId: string) {
+  const organisation = await getRecord('organisations', organisationId);
+  const company = await companyForOrganisation(organisationId, organisation);
+  const gdprPassed = Boolean(company?.gdprConfirmed) && validGdprEvidenceUrl(company?.gdprDocUrl);
+  const validation = organisation.curaleafLiveValidation && typeof organisation.curaleafLiveValidation === 'object'
+    ? organisation.curaleafLiveValidation as Record<string, unknown>
+    : null;
+  const secretStored = typeof organisation.curaleafLiveSecretStoredAt === 'string';
+  const curaleafPassed = validation?.environment === 'production'
+    && typeof validation.validatedAt === 'string'
+    && secretStored;
+  return {
+    organisationId,
+    companyId: company?.id ?? null,
+    ready: gdprPassed && curaleafPassed,
+    status: String(organisation.status ?? 'onboarding') as 'onboarding' | 'live' | 'paused',
+    gates: {
+      gdprEvidence: { passed: gdprPassed, evidenceUrl: validGdprEvidenceUrl(company?.gdprDocUrl) ? String(company!.gdprDocUrl) : null },
+      curaleafLive: { passed: curaleafPassed, validatedAt: typeof validation?.validatedAt === 'string' ? validation.validatedAt : null, secretStored },
+    },
+  };
+}
+
+export async function auditLiveOrganisationGates() {
+  const snapshot = await firestore.collection('organisations').where('status', '==', 'live').limit(500).get();
+  const paused: string[] = [];
+  for (const document of snapshot.docs) {
+    const readiness = await goLiveReadiness(document.id);
+    if (readiness.ready) continue;
+    await document.ref.set({ status: 'paused', gdprComplianceFlag: !readiness.gates.gdprEvidence.passed, pausedReason: 'go_live_gate_audit_failed', pausedAt: timestamp(), updatedAt: timestamp() }, { merge: true });
+    invalidateCollectionCache('organisations', document.id);
+    paused.push(document.id);
+  }
+  if (paused.length) invalidateCache('admin:organisations', 'referral:');
+  return { checked: snapshot.size, paused };
 }
 
 async function requireSetupComplete(organisationId: string) {
-  if (!(await setupStatus(organisationId)).completed) throw new HttpError(409, 'Complete pharmacy setup before processing live workflow actions.', 'SETUP_INCOMPLETE');
+  const readiness = await goLiveReadiness(organisationId);
+  if (!readiness.ready || readiness.status !== 'live') {
+    throw new HttpError(409, 'This pharmacy is not live. Confirm company GDPR evidence and the validated LIVE Curaleaf key.', 'PHARMACY_NOT_LIVE');
+  }
 }
 
 function ensureFreshAuthentication(request: Request) {
@@ -342,11 +411,12 @@ app.get('/v1/dev/curaleaf/catalog', publicReadLimit, localDevelopmentOnly, async
 app.post('/v1/dev/curaleaf/quote', publicReadLimit, localDevelopmentOnly, async (request, response, next) => {
   try {
     const input = z.object({ items: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1).max(50) }).parse(request.body);
-    response.json(await curaleafPlatformRequest('/v1/quotes/', {
+    const raw = await curaleafPlatformRequest('/v1/quotes/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
-    }));
+    });
+    response.json(parsedCuraleafQuote(raw));
   } catch (error) { next(error); }
 });
 
@@ -555,7 +625,7 @@ app.patch('/v1/portal/setup/:taskId', async (request, response, next) => {
     await firestore.collection('setupTasks').doc(docId).set({ id: docId, schemaVersion: 1, organisationId, taskId, completed: input.completed, evidence: input.evidence ?? null, completedAt: input.completed ? timestamp() : null, completedBy: input.completed ? identity(request).uid : null, updatedAt: timestamp() }, { merge: true });
     invalidateCache(`setup:${organisationId}`);
     await audit(request, 'setup.task_updated', { organisationId, taskId, completed: input.completed });
-    response.json(await promoteOrganisationToLiveIfReady(organisationId));
+    response.json(await setupStatus(organisationId));
   } catch (error) { next(error); }
 });
 
@@ -875,22 +945,23 @@ app.post('/v1/portal/admin/companies/:id/gdpr/clear', requireRole('hhh_admin'), 
       updatedAt: clearedAt,
     });
 
-    // Handle owned branches:
-    // Non-live branches are re-blocked. Already-live branches remain operational but get gdprComplianceFlag.
-    for (const pharmacyId of company.branchesOwned || []) {
-      const pharmRef = firestore.collection('pharmacies').doc(pharmacyId);
-      const pharmSnap = await pharmRef.get();
-      if (pharmSnap.exists) {
-        const pharmData = pharmSnap.data() as PortalOrganisation;
-        if (pharmData.status === 'live') {
-          await pharmRef.update({ gdprComplianceFlag: true, updatedAt: clearedAt });
-        } else {
-          await pharmRef.update({ status: 'onboarding', updatedAt: clearedAt });
-        }
-      }
+    const declaredBranches = new Set(company.branchesOwned || []);
+    const linkedBranches = await firestore.collection('organisations').where('orgId', '==', companyId).get();
+    linkedBranches.docs.forEach(document => declaredBranches.add(document.id));
+    const companyNumberBranches = company.companyNumber
+      ? await firestore.collection('organisations').where('companyNumber', '==', company.companyNumber).get()
+      : null;
+    companyNumberBranches?.docs.forEach(document => declaredBranches.add(document.id));
+    for (const organisationId of declaredBranches) {
+      const organisationRef = firestore.collection('organisations').doc(organisationId);
+      if (!(await organisationRef.get()).exists) continue;
+      await organisationRef.set({ status: 'paused', gdprComplianceFlag: true, pausedReason: 'company_gdpr_evidence_removed', pausedAt: clearedAt, updatedAt: clearedAt }, { merge: true });
+      invalidateCollectionCache('organisations', organisationId);
+      await audit(request, 'organisation.auto_paused', { organisationId, companyId, reason: 'company_gdpr_evidence_removed' });
     }
 
     invalidateCollectionCache('companies', companyId);
+    invalidateCache('admin:organisations', 'referral:');
     await audit(request, 'company.gdpr_cleared', { companyId, priorDocUrl: company.gdprDocUrl });
     response.json({ success: true, companyId, gdprConfirmed: false });
   } catch (error) { next(error); }
@@ -899,6 +970,7 @@ app.post('/v1/portal/admin/companies/:id/gdpr/clear', requireRole('hhh_admin'), 
 app.post('/v1/portal/admin/pharmacies/:id/validate-curaleaf', requireRole('hhh_admin'), async (request, response, next) => {
   try {
     const pharmacyId = idSchema.parse(request.params.id);
+    await getRecord('organisations', pharmacyId);
     const { environment, apiKey } = z.object({
       environment: z.enum(['test', 'production']),
       apiKey: z.string().min(16),
@@ -929,9 +1001,8 @@ app.post('/v1/portal/admin/pharmacies/:id/validate-curaleaf', requireRole('hhh_a
       observedCustomerId,
     };
 
-    const pharmRef = firestore.collection('pharmacies').doc(pharmacyId);
+    const pharmRef = firestore.collection('organisations').doc(pharmacyId);
     const fieldToUpdate = environment === 'test' ? 'curaleafTestValidation' : 'curaleafLiveValidation';
-    await pharmRef.set({ [fieldToUpdate]: validationRecord, updatedAt: nowIso() }, { merge: true });
 
     // Store key in Secret Manager
     const secretIntegration = environment === 'test' ? 'curaleaf_test' : 'curaleaf_live';
@@ -939,8 +1010,14 @@ app.post('/v1/portal/admin/pharmacies/:id/validate-curaleaf', requireRole('hhh_a
       writeApiKey: apiKey,
       customerId: observedCustomerId || '',
     });
+    await pharmRef.set({
+      [fieldToUpdate]: validationRecord,
+      ...(environment === 'production' ? { curaleafLiveSecretStoredAt: validationRecord.validatedAt } : {}),
+      updatedAt: nowIso(),
+    }, { merge: true });
 
-    invalidateCollectionCache('pharmacies', pharmacyId);
+    invalidateCollectionCache('organisations', pharmacyId);
+    invalidateCache('admin:organisations');
     await audit(request, 'pharmacy.curaleaf_validated', { pharmacyId, environment, maskedKey, observedCustomerId });
     response.json({ success: true, pharmacyId, validationRecord });
   } catch (error) { next(error); }
@@ -951,6 +1028,27 @@ app.post('/v1/portal/admin/pharmacies/:id/validate-curaleaf', requireRole('hhh_a
 
 
 const orderLineItemSchema = z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) });
+export type NormalisedStockStatus = 'in_stock' | 'low_stock' | 'out_of_stock';
+export function normaliseStockStatus(inStock: boolean, stockStatus?: NormalisedStockStatus): NormalisedStockStatus {
+  return !inStock ? 'out_of_stock' : stockStatus === 'low_stock' ? 'low_stock' : 'in_stock';
+}
+
+export function resolveOrderPaymentRoute(requested: 'manual' | 'worldpay' | undefined, configuredDefault: unknown) {
+  return requested ?? (configuredDefault === 'worldpay' ? 'worldpay' as const : 'manual' as const);
+}
+
+export function draftHasPaymentBoundary(order: Record<string, unknown>, paymentRecordExists: boolean) {
+  return order.paymentRoute === 'manual'
+    || order.paymentStatus === 'awaiting_manual_payment'
+    || typeof order.paymentId === 'string'
+    || paymentRecordExists
+    || order.paymentStatus === 'paid';
+}
+
+export function prescriptionFileRemovalAllowed(status: unknown, linkedToOrder: boolean) {
+  return status === 'uploaded' && !linkedToOrder;
+}
+
 const curaleafQuoteSchema = z.object({
   shippingPrice: z.string().trim().min(1).max(40),
   taxRate: z.string().trim().min(1).max(40),
@@ -958,10 +1056,20 @@ const curaleafQuoteSchema = z.object({
     packId: idSchema,
     quantity: z.number().int().positive().max(100),
     inStock: z.boolean(),
+    stockStatus: z.enum(['in_stock', 'low_stock', 'out_of_stock']).optional(),
     wholesalePackPrice: z.string().trim().min(1).max(40),
     patientPackPrice: z.string().trim().min(1).max(40),
-  })).min(1).max(100),
+  }).transform(item => ({
+    ...item,
+    stockStatus: normaliseStockStatus(item.inStock, item.stockStatus),
+  }))).min(1).max(100),
 });
+
+function parsedCuraleafQuote(raw: unknown, message = 'Curaleaf returned an invalid quote response.') {
+  const parsed = curaleafQuoteSchema.safeParse(raw);
+  if (!parsed.success) throw new HttpError(502, message, 'INVALID_SUPPLIER_QUOTE');
+  return parsed.data;
+}
 function addPrescriptionDateIssue(issueDate: string, expiryDate: string | undefined, context: z.RefinementCtx) {
   const status = prescriptionDateWindowStatus(issueDate, expiryDate);
   if (status === 'current') return;
@@ -974,6 +1082,7 @@ function addPrescriptionDateIssue(issueDate: string, expiryDate: string | undefi
 }
 
 const orderPrescriptionSchema = z.object({
+  id: idSchema.optional(),
   fileId: idSchema,
   clinicScanId: idSchema.optional(),
   curaleafPrescriptionId: idSchema.optional(),
@@ -1001,10 +1110,12 @@ const orderPrescriptionSchema = z.object({
   })).min(1).max(50),
 }).superRefine((prescription, context) => addPrescriptionDateIssue(prescription.issueDate, prescription.expiryDate, context));
 const orderSchema = z.object({
+  draftId: idSchema.optional(),
   patientId: idSchema,
   lineItems: z.array(orderLineItemSchema).min(1).max(50),
-  prescriptions: z.array(orderPrescriptionSchema).max(20).default([]),
-  dispensingFeePence: z.number().int().nonnegative().max(10_000).default(0),
+  prescriptions: z.array(orderPrescriptionSchema).min(1).max(20),
+  dispensingFeePence: z.number().int().nonnegative().max(FLOW_CONFIG.dispensingFeeMaxPence).default(0)
+    .refine(validDispensingFeePence, 'Dispensing fee must be £0 or between £5 and £15.'),
   currency: z.literal('GBP').default('GBP'),
   paymentRoute: z.enum(['manual', 'worldpay']).optional(),
   redoContext: z.object({
@@ -1018,23 +1129,14 @@ const orderSchema = z.object({
 });
 
 const WORLDPAY_MIN_LINK_EXPIRY_SECONDS = 300;
-const WORLDPAY_MAX_LINK_EXPIRY_SECONDS = 28 * 24 * 60 * 60;
+const WORLDPAY_MAX_LINK_EXPIRY_SECONDS = FLOW_CONFIG.linkExpiryHours * 60 * 60;
 
 function worldpayLinkExpirySeconds(order: Record<string, unknown>, now = new Date()) {
-  const prescriptions = Array.isArray(order.prescriptions) ? order.prescriptions : [];
-  const expiryTimes = prescriptions.flatMap(prescription => {
-    if (!prescription || typeof prescription !== 'object') return [];
-    const record = prescription as Record<string, unknown>;
-    const issueDate = typeof record.issueDate === 'string' ? record.issueDate : null;
-    const supplierExpiry = typeof record.expiryDate === 'string' ? record.expiryDate : undefined;
-    if (!issueDate) return [];
-    const expiryDate = calculatePrescriptionExpiry(issueDate, supplierExpiry);
-    const expiresAt = Date.parse(`${expiryDate}T23:59:59.999Z`);
-    return Number.isFinite(expiresAt) ? [expiresAt] : [];
-  });
-  const remainingSeconds = expiryTimes.length
-    ? Math.floor((Math.min(...expiryTimes) - now.getTime()) / 1_000)
-    : WORLDPAY_MAX_LINK_EXPIRY_SECONDS;
+  const prescriptions = Array.isArray(order.prescriptions)
+    ? order.prescriptions.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object')
+    : [];
+  const linkExpiresAt = paymentLinkExpiryAt(prescriptions, now);
+  const remainingSeconds = Math.floor((Date.parse(linkExpiresAt) - now.getTime()) / 1_000);
   if (remainingSeconds < WORLDPAY_MIN_LINK_EXPIRY_SECONDS) {
     throw new HttpError(409, 'The prescription expires too soon to create a Worldpay link. Review or replace the prescription first.', 'PRESCRIPTION_EXPIRY_TOO_CLOSE');
   }
@@ -1082,7 +1184,7 @@ function curaleafMoneyPence(value: unknown, field = 'price') {
   return Number(pence);
 }
 
-type ParsedCuraleafQuote = z.infer<typeof curaleafQuoteSchema>;
+type ParsedCuraleafQuote = z.input<typeof curaleafQuoteSchema>;
 type QuoteDifference = {
   category: 'stock' | 'patient_price' | 'supplier_cost';
   field: string;
@@ -1099,6 +1201,7 @@ export function normalisedQuote(quote: ParsedCuraleafQuote) {
       packId: item.packId,
       quantity: item.quantity,
       inStock: item.inStock,
+      stockStatus: normaliseStockStatus(item.inStock, item.stockStatus),
       wholesalePence: curaleafMoneyPence(item.wholesalePackPrice, 'wholesale pack price'),
       patientPence: curaleafMoneyPence(item.patientPackPrice, 'patient pack price'),
     })),
@@ -1117,7 +1220,7 @@ export function compareQuotes(baseline: ParsedCuraleafQuote, latest: ParsedCural
   for (const item of next.items) {
     const earlier = priorItems.get(item.packId);
     if (!earlier) continue;
-    if (item.inStock !== earlier.inStock) differences.push({ category: 'stock', field: 'inStock', packId: item.packId, previous: earlier.inStock, latest: item.inStock });
+    if (item.stockStatus !== earlier.stockStatus) differences.push({ category: 'stock', field: 'stockStatus', packId: item.packId, previous: earlier.stockStatus, latest: item.stockStatus });
     if (item.patientPence !== earlier.patientPence) differences.push({ category: 'patient_price', field: 'patientPackPrice', packId: item.packId, previous: String(earlier.patientPence), latest: String(item.patientPence) });
     if (item.wholesalePence !== earlier.wholesalePence) differences.push({ category: 'supplier_cost', field: 'wholesalePackPrice', packId: item.packId, previous: String(earlier.wholesalePence), latest: String(item.wholesalePence) });
   }
@@ -1132,12 +1235,11 @@ async function finalCuraleafQuote(organisationId: string, items: Array<{ packId:
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items }),
   });
-  const parsed = curaleafQuoteSchema.safeParse(raw);
-  if (!parsed.success) throw new HttpError(502, 'Curaleaf returned an invalid final quote.', 'INVALID_SUPPLIER_QUOTE');
-  if (!samePackQuantities(packQuantities(items), packQuantities(parsed.data.items))) {
+  const quote = parsedCuraleafQuote(raw, 'Curaleaf returned an invalid final quote.');
+  if (!samePackQuantities(packQuantities(items), packQuantities(quote.items))) {
     throw new HttpError(409, 'Curaleaf’s final quote does not match this order.', 'SUPPLIER_QUOTE_MISMATCH');
   }
-  return parsed.data;
+  return quote;
 }
 
 async function requireApprovedFinalQuote(request: Request, organisationId: string, orderId: string, order: Record<string, unknown>, items: Array<{ packId: string; quantity: number }>) {
@@ -1146,7 +1248,7 @@ async function requireApprovedFinalQuote(request: Request, organisationId: strin
   const fingerprint = quoteFingerprint(latest);
   const existingReview = order.quoteReview && typeof order.quoteReview === 'object' ? order.quoteReview as Record<string, unknown> : {};
   const differences = baselineResult.success ? compareQuotes(baselineResult.data, latest) : [{ category: 'patient_price' as const, field: 'missingOriginalQuote', previous: 'missing', latest: 'present' }];
-  const outOfStock = latest.items.some(item => !item.inStock);
+  const outOfStock = latest.items.some(item => item.stockStatus === 'out_of_stock');
   if (!outOfStock && differences.length === 0) return latest;
   const reviewType = outOfStock ? 'out_of_stock' : differences.some(item => item.category === 'patient_price') ? 'patient_price_changed' : 'supplier_cost_changed';
   if (reviewType === 'supplier_cost_changed' && existingReview.status === 'approved' && existingReview.approvedFingerprint === fingerprint) return latest;
@@ -1361,6 +1463,232 @@ app.get('/v1/portal/orders', async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
+app.post('/v1/portal/orders/:id/handout', async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional() }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const orderRef = firestore.collection('orders').doc(orderId);
+    const actor = identity(request);
+    const completedAt = nowIso();
+    const auditId = createHash('sha256').update(`${organisationId}:${orderId}:patient-handout`).digest('hex');
+
+    const result = await firestore.runTransaction(async transaction => {
+      const orderSnapshot = await transaction.get(orderRef);
+      if (!orderSnapshot.exists || orderSnapshot.data()?.organisationId !== organisationId) {
+        throw new HttpError(404, 'Order record not found.', 'NOT_FOUND');
+      }
+      const order = orderSnapshot.data()!;
+      if (order.fulfilmentStatus === 'collected' || order.handout?.status === 'completed') {
+        return { order: { ...order, id: orderId }, idempotent: true, completedAt: String(order.handout?.completedAt ?? order.collectedAt ?? completedAt) };
+      }
+
+      const flow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object'
+        ? order.prescriptionFlow as Record<string, Record<string, unknown>>
+        : {};
+      const handoutPlan = planOrderHandout(flow);
+      if (!handoutPlan.ready && handoutPlan.code === 'ORDER_NOT_READY_FOR_HANDOUT') {
+        throw new HttpError(409, 'Every active prescription must be ready to collect before handout.', 'ORDER_NOT_READY_FOR_HANDOUT');
+      }
+      if (!handoutPlan.ready) throw new HttpError(409, 'The order has no ready shipments to hand out.', handoutPlan.code ?? 'SHIPMENT_REQUIRED');
+      const { activeFlows, shipmentIds } = handoutPlan;
+      const shipmentRefs = shipmentIds.map(shipmentId => firestore.collection('shipments').doc(shipmentId));
+      const shipmentSnapshots = await Promise.all(shipmentRefs.map(reference => transaction.get(reference)));
+      if (shipmentSnapshots.some(snapshot => !snapshot.exists || snapshot.data()?.organisationId !== organisationId)) {
+        throw new HttpError(409, 'One or more linked shipments could not be verified.', 'SHIPMENT_ORDER_LINK_REQUIRED');
+      }
+      const shipmentStatuses = Object.fromEntries(shipmentSnapshots.map(snapshot => [snapshot.id, String(snapshot.data()?.status ?? '')]));
+      if (!shipmentsReadyForHandout(shipmentIds, shipmentStatuses)) {
+        throw new HttpError(409, 'Every shipment must be ready to collect before handout.', 'ORDER_NOT_READY_FOR_HANDOUT');
+      }
+
+      const nextFlow = Object.fromEntries(Object.entries(flow).map(([prescriptionId, prescription]) => {
+        if (!activeFlows.some(([activeId]) => activeId === prescriptionId) || prescription.state === 'COLLECTED') return [prescriptionId, prescription];
+        const lines = (Array.isArray(prescription.lines) ? prescription.lines as Array<Record<string, unknown>> : []).map(line => ({
+          ...line,
+          collected: Math.max(0, Number(line.received ?? 0)),
+        }));
+        const shipmentStates = prescription.shipmentStates && typeof prescription.shipmentStates === 'object'
+          ? Object.fromEntries(Object.keys(prescription.shipmentStates as Record<string, unknown>).map(shipmentId => [shipmentId, 'collected']))
+          : Object.fromEntries((Array.isArray(prescription.shipmentIds) ? prescription.shipmentIds : []).map(shipmentId => [String(shipmentId), 'collected']));
+        return [prescriptionId, { ...prescription, state: 'COLLECTED', lines, shipmentStates, collectedAt: completedAt, updatedAt: completedAt }];
+      }));
+      shipmentSnapshots.forEach(snapshot => {
+        if (snapshot.data()?.status !== 'collected') transaction.update(snapshot.ref, { status: 'collected', collectedAt: completedAt, collectedBy: actor.uid, updatedAt: completedAt });
+      });
+      const handout = { status: 'completed', completedAt, completedBy: actor.uid, shipmentIds };
+      transaction.set(orderRef, { prescriptionFlow: nextFlow, fulfilmentStatus: 'collected', collectedAt: completedAt, handout, updatedAt: completedAt }, { merge: true });
+      transaction.create(firestore.collection('auditLogs').doc(auditId), {
+        id: auditId,
+        schemaVersion: 1,
+        event: 'order.patient_handout_recorded',
+        actorUid: actor.uid,
+        actorEmail: actor.email ?? null,
+        actorRole: actor.role,
+        organisationId,
+        orderId,
+        shipmentIds,
+        requestId: request.get('x-request-id') ?? null,
+        ipHash: null,
+        occurredAt: completedAt,
+      });
+      return { order: { ...order, prescriptionFlow: nextFlow, fulfilmentStatus: 'collected', collectedAt: completedAt, handout, updatedAt: completedAt, id: orderId }, idempotent: false, completedAt };
+    });
+
+    await recordCollectedDispense(orderId, actor.uid, 'order-handout', result.completedAt);
+    invalidateCollectionCache('orders', orderId);
+    invalidateCollectionCache('shipments');
+    response.json({ order: enrichOrderRecord(result.order as Record<string, unknown>), idempotent: result.idempotent });
+  } catch (error) { next(error); }
+});
+
+const orderDraftSchema = z.object({
+  organisationId: idSchema.optional(),
+  patientId: idSchema.nullable().optional(),
+  payload: z.record(z.string(), z.unknown()).default({}),
+});
+
+app.get('/v1/portal/order-drafts', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    const records = await listTenantRecords('orderDrafts', organisationId, 200);
+    response.json(records.filter(record => record.status === 'draft'));
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/order-drafts', async (request, response, next) => {
+  try {
+    const input = orderDraftSchema.parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    if (input.patientId) await getTenantRecord('patients', input.patientId, organisationId);
+    const record = await createRecord('orderDrafts', {
+      organisationId,
+      patientId: input.patientId ?? null,
+      status: 'draft',
+      paymentStatus: 'none',
+      payload: input.payload,
+      createdBy: identity(request).uid,
+    });
+    await audit(request, 'order_draft.created', { organisationId, draftId: record.id });
+    response.status(201).json(record);
+  } catch (error) { next(error); }
+});
+
+app.patch('/v1/portal/order-drafts/:id', async (request, response, next) => {
+  try {
+    const input = orderDraftSchema.partial().parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const draftId = idSchema.parse(request.params.id);
+    const draft = await getTenantRecord('orderDrafts', draftId, organisationId);
+    if (draft.status !== 'draft' || draft.paymentStatus !== 'none') throw new HttpError(409, 'Only unpaid drafts can be edited.', 'DRAFT_LOCKED');
+    if (input.patientId) await getTenantRecord('patients', input.patientId, organisationId);
+    const result = await updateTenantRecord('orderDrafts', draftId, organisationId, {
+      ...(input.patientId !== undefined ? { patientId: input.patientId } : {}),
+      ...(input.payload ? { payload: input.payload } : {}),
+      updatedBy: identity(request).uid,
+    });
+    response.json(result);
+  } catch (error) { next(error); }
+});
+
+app.delete('/v1/portal/order-drafts/:id', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    const draftId = idSchema.parse(request.params.id);
+    const draft = await getTenantRecord('orderDrafts', draftId, organisationId);
+    const linkedOrderId = draft.status === 'promoted' && typeof draft.orderId === 'string' ? draft.orderId : null;
+    if (draft.status !== 'draft' && !linkedOrderId) throw new HttpError(409, 'A draft cannot be deleted after payment activity begins.', 'DRAFT_LOCKED');
+    if (linkedOrderId) {
+      const order = await getTenantRecord('orders', linkedOrderId, organisationId);
+      const payments = await firestore.collection('payments').where('orderId', '==', linkedOrderId).limit(1).get();
+      if (draftHasPaymentBoundary(order, !payments.empty)) {
+        throw new HttpError(409, 'A draft cannot be deleted after a payment link or manual-payment process begins.', 'DRAFT_LOCKED');
+      }
+      const [placements, operations] = await Promise.all([
+        firestore.collection('prescriptionPlacements').where('orderId', '==', linkedOrderId).get(),
+        firestore.collection('integrationOperations').where('orderId', '==', linkedOrderId).get(),
+      ]);
+      const batch = firestore.batch();
+      placements.docs.forEach(document => batch.delete(document.ref));
+      operations.docs.forEach(document => batch.set(document.ref, { status: 'abandoned', abandonedAt: timestamp(), abandonedBy: identity(request).uid, updatedAt: timestamp() }, { merge: true }));
+      if (typeof order.redoOfOrderId === 'string') {
+        const source = firestore.collection('orders').doc(order.redoOfOrderId);
+        batch.set(source, { redoneByOrderId: null, unresolvedClosedAt: null, redoEligible: true, updatedAt: timestamp() }, { merge: true });
+      }
+      batch.delete(firestore.collection('orders').doc(linkedOrderId));
+      batch.delete(firestore.collection('orderDrafts').doc(draftId));
+      await batch.commit();
+      invalidateCollectionCache('orders', linkedOrderId);
+      invalidateCollectionCache('prescriptionPlacements');
+      invalidateCollectionCache('integrationOperations');
+    } else {
+      if (draft.paymentStatus !== 'none') throw new HttpError(409, 'A draft cannot be deleted after payment activity begins.', 'DRAFT_LOCKED');
+      await firestore.collection('orderDrafts').doc(draftId).delete();
+    }
+    invalidateCollectionCache('orderDrafts', draftId);
+    await audit(request, 'order_draft.deleted', { organisationId, draftId, linkedOrderId });
+    response.status(204).end();
+  } catch (error) { next(error); }
+});
+
+const prescriberDirectoryInputSchema = z.object({
+  organisationId: idSchema.optional(),
+  name: z.string().trim().min(2).max(200),
+  initials: z.string().trim().min(1).max(20).optional(),
+  pin: z.string().trim().min(1).max(100),
+  gmcNumber: z.number().int().positive().nullable().default(null),
+  gphcNumber: z.string().trim().max(100).nullable().default(null),
+});
+
+app.get('/v1/portal/prescribers', async (request, response, next) => {
+  try {
+    tenantFor(request, request.query.organisationId);
+    const query = String(request.query.query ?? '').trim().toLocaleLowerCase('en-GB');
+    const snapshot = await firestore.collection('prescriberDirectory').where('active', '==', true).limit(500).get();
+    const records = snapshot.docs.map(document => document.data()).filter(record => !query || `${record.name} ${record.pin} ${record.gmcNumber ?? ''} ${record.gphcNumber ?? ''}`.toLocaleLowerCase('en-GB').includes(query));
+    response.json(records.slice(0, 50));
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/prescribers', async (request, response, next) => {
+  try {
+    const input = prescriberDirectoryInputSchema.parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const normalPin = input.pin.toLocaleLowerCase('en-GB');
+    const normalGphc = input.gphcNumber?.toLocaleLowerCase('en-GB') ?? '';
+    const directory = await firestore.collection('prescriberDirectory').where('active', '==', true).limit(500).get();
+    const duplicate = directory.docs.find(document => {
+      const candidate = document.data();
+      return String(candidate.pin ?? '').toLocaleLowerCase('en-GB') === normalPin
+        || Boolean(input.gmcNumber && Number(candidate.gmcNumber) === input.gmcNumber)
+        || Boolean(normalGphc && String(candidate.gphcNumber ?? '').toLocaleLowerCase('en-GB') === normalGphc);
+    });
+    const unique = input.gmcNumber ? `gmc:${input.gmcNumber}` : normalGphc ? `gphc:${normalGphc}` : `pin:${normalPin}`;
+    const id = duplicate?.id ?? createHash('sha256').update(unique).digest('hex');
+    const reference = firestore.collection('prescriberDirectory').doc(id);
+    const existing = await reference.get();
+    const now = timestamp();
+    const record = {
+      id,
+      schemaVersion: 1,
+      name: input.name,
+      initials: input.initials ?? input.name.split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 20),
+      pin: input.pin,
+      gmcNumber: input.gmcNumber,
+      gphcNumber: input.gphcNumber,
+      active: true,
+      curaleafIds: existing.data()?.curaleafIds ?? {},
+      createdAt: existing.data()?.createdAt ?? now,
+      createdBy: existing.data()?.createdBy ?? identity(request).uid,
+      updatedAt: now,
+      updatedBy: identity(request).uid,
+    };
+    await reference.set(record, { merge: true });
+    await audit(request, existing.exists ? 'prescriber_directory.updated' : 'prescriber_directory.created', { organisationId, prescriberId: id });
+    response.status(existing.exists ? 200 : 201).json(record);
+  } catch (error) { next(error); }
+});
+
 app.get('/v1/portal/patients/:patientId/unresolved-orders', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.query.organisationId);
@@ -1379,8 +1707,9 @@ app.post('/v1/portal/orders', async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.body.organisationId);
     const input = orderSchema.parse(request.body);
+    await requireSetupComplete(organisationId);
     const organisation = await getRecord('organisations', organisationId);
-    const paymentRoute = organisation.defaultPaymentRoute === 'worldpay' ? 'worldpay' : 'manual';
+    const paymentRoute = resolveOrderPaymentRoute(input.paymentRoute, organisation.defaultPaymentRoute);
     if (paymentRoute === 'worldpay') {
       const connection = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
       if (!connection.exists || connection.data()?.status !== 'connected') {
@@ -1390,6 +1719,10 @@ app.post('/v1/portal/orders', async (request, response, next) => {
     const patient = await getTenantRecord('patients', input.patientId, organisationId);
     if (!canPatientCreateOrder(patient.status)) {
       throw new HttpError(409, 'HHH onboarding must be completed before this patient can be added to an order.', 'PATIENT_NOT_ORDER_ELIGIBLE');
+    }
+    if (input.draftId) {
+      const draft = await getTenantRecord('orderDrafts', input.draftId, organisationId);
+      if (draft.status !== 'draft' || draft.paymentStatus !== 'none') throw new HttpError(409, 'The source draft is already locked.', 'DRAFT_LOCKED');
     }
     let authoritativeRedoContext: {
       originalOrderId: string;
@@ -1449,6 +1782,8 @@ app.post('/v1/portal/orders', async (request, response, next) => {
     }
     const prescriptions = await Promise.all(input.prescriptions.map(async prescription => {
       if (!prescription.clinicScanId) {
+        const file = await getTenantRecord('prescriptionFiles', prescription.fileId, organisationId);
+        if (file.status !== 'uploaded') throw new HttpError(409, 'Attach an active prescription copy before creating the order.', 'PRESCRIPTION_FILE_UNAVAILABLE');
         requireMatchingPatient(prescription.patient, patient);
         return prescription;
       }
@@ -1479,7 +1814,13 @@ app.post('/v1/portal/orders', async (request, response, next) => {
         items: matchedItems,
       });
     }));
-    const prescribedItems = prescriptions.flatMap(prescription => prescription.items);
+    const normalisedPrescriptions = prescriptions.map((prescription, index) => ({
+      ...prescription,
+      id: prescription.id ?? prescription.fileId ?? deterministicSubOrderId('new', prescription.serialNumber, index),
+      expiryDate: calculatePrescriptionExpiry(prescription.issueDate, prescription.expiryDate),
+      payable: true,
+    }));
+    const prescribedItems = normalisedPrescriptions.flatMap(prescription => prescription.items);
     if (prescribedItems.length && !samePackQuantities(packQuantities(input.lineItems), packQuantities(prescribedItems))) {
       throw new HttpError(400, 'The order lines must exactly match the products and quantities assigned to its prescriptions.', 'ORDER_ITEM_MISMATCH');
     }
@@ -1495,11 +1836,7 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       records: catalogue.products as Array<{ id: string; formulaId: string; formulaName: string; patientPackPrice: string; state: string }>,
       totalRecordCount: catalogue.productTotal,
     };
-    const parsedQuote = curaleafQuoteSchema.safeParse(rawQuote);
-    if (!parsedQuote.success) {
-      throw new HttpError(502, 'Curaleaf returned an invalid quote response.', 'INVALID_SUPPLIER_QUOTE');
-    }
-    const quote = parsedQuote.data;
+    const quote = parsedCuraleafQuote(rawQuote);
     if (!samePackQuantities(packQuantities(input.lineItems), packQuantities(quote.items))) {
       throw new HttpError(409, 'Curaleaf’s quote does not match the requested products and quantities. Refresh the catalogue and try again.', 'SUPPLIER_QUOTE_MISMATCH');
     }
@@ -1515,7 +1852,7 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       }
       quoteByPack.set(item.packId, item);
     });
-    const unavailablePack = quote.items.find(item => !item.inStock);
+    const unavailablePack = quote.items.find(item => item.stockStatus === 'out_of_stock');
     if (unavailablePack) {
       throw new HttpError(409, 'One or more selected Curaleaf packs are currently unavailable. Review the prescription before taking payment.', 'PRODUCT_OUT_OF_STOCK');
     }
@@ -1563,10 +1900,39 @@ app.post('/v1/portal/orders', async (request, response, next) => {
         }
       }
     }
-    const { paymentRoute: _ignoredRequestedRoute, redoContext: _ignoredClientRedo, ...authoritativeInput } = input;
+    const lineRevenuePence = normalisedPrescriptions.flatMap(prescription => prescription.items.map(item => {
+      const quoted = quoteByPack.get(item.packId)!;
+      return curaleafMoneyPence(quoted.patientPackPrice, 'patient pack price') * item.quantity;
+    }));
+    const feeAllocations = allocateDispensingFee(lineRevenuePence, input.dispensingFeePence);
+    let feeIndex = 0;
+    const prescriptionFlow = Object.fromEntries(normalisedPrescriptions.map(prescription => [prescription.id, {
+      id: prescription.id,
+      state: authoritativeRedoContext?.isPaidRedo ? 'PAID' : 'AWAITING_PAYMENT',
+      payable: true,
+      expiryDate: prescription.expiryDate,
+      purchaseOrderId: null,
+      shipmentIds: [],
+      lines: prescription.items.map(item => ({
+        lineId: createHash('sha256').update(`${prescription.id}:${item.packId}`).digest('hex').slice(0, 32),
+        productId: item.packId,
+        ordered: item.quantity,
+        allocated: 0,
+        shipped: 0,
+        returned: 0,
+        received: 0,
+        collected: 0,
+        backordered: false,
+        allocatedDispensingFeePence: feeAllocations[feeIndex++] ?? 0,
+      })),
+      renewal: { state: 'none' },
+      collectedAt: null,
+    }]));
+    const { paymentRoute: _ignoredRequestedRoute, redoContext: _ignoredClientRedo, draftId, ...authoritativeInput } = input;
     const record = await createRecord('orders', {
       ...authoritativeInput,
-      prescriptions,
+      prescriptions: normalisedPrescriptions,
+      prescriptionFlow,
       lineItems,
       totalPence,
       quotedTotalPence,
@@ -1583,12 +1949,62 @@ app.post('/v1/portal/orders', async (request, response, next) => {
         shippingPence,
       },
       fulfilmentMethod: 'patient_collection',
-      paymentStatus: authoritativeRedoContext?.isPaidRedo ? 'paid' : 'pending',
+      autoPlacementEnabled: organisation.autoPlacementEnabled !== false,
+      paymentStatus: authoritativeRedoContext?.isPaidRedo ? 'paid' : paymentRoute === 'manual' ? 'awaiting_manual_payment' : 'pending',
       fulfilmentStatus: 'supplier_pending' satisfies FulfilmentStatus,
       status: 'open',
       redoContext: authoritativeRedoContext,
       redoOfOrderId: authoritativeRedoContext?.originalOrderId ?? null,
     });
+
+    let placementFeeIndex = 0;
+    for (const prescription of normalisedPrescriptions) {
+      const placementId = createHash('sha256').update(`${record.id}:${prescription.id}:placement`).digest('hex');
+      const placementLines = prescription.items.map(item => {
+        const quoted = quoteByPack.get(item.packId)!;
+        const patientPackPence = curaleafMoneyPence(quoted.patientPackPrice, 'patient pack price');
+        const wholesalePackPence = curaleafMoneyPence(quoted.wholesalePackPrice, 'wholesale pack price');
+        return {
+          id: createHash('sha256').update(`${placementId}:${item.packId}`).digest('hex'),
+          prescriptionId: prescription.id,
+          orderId: record.id,
+          formulaId: item.formulaId,
+          formulaName: lineItems.find(line => line.packId === item.packId)?.name ?? item.formulaId,
+          unit: '',
+          unitsNeededCount: item.unitsNeededCount,
+          packId: item.packId,
+          quantity: item.quantity,
+          fixedPatientPricePence: patientPackPence * item.quantity,
+          allocatedDispensingFeePence: feeAllocations[placementFeeIndex++] ?? 0,
+          lineMedicineRevenuePence: patientPackPence * item.quantity,
+          linkSendWholesalePence: wholesalePackPence * item.quantity,
+          latestWholesalePence: wholesalePackPence * item.quantity,
+          placementState: authoritativeRedoContext?.isPaidRedo ? 'PENDING_PLACEMENT' : 'PENDING_PLACEMENT',
+          holdEpisodeStartedAt: null,
+          notifiedAt48h: null,
+          boundaryScheduledAt: calculateExpiryBoundaryDate(prescription.expiryDate),
+          updatedAt: timestamp(),
+        };
+      });
+      await firestore.collection('prescriptionPlacements').doc(placementId).set({
+        id: placementId,
+        schemaVersion: 2,
+        prescriptionId: prescription.id,
+        orderId: record.id,
+        pharmacyId: organisationId,
+        lines: placementLines,
+        overallState: 'PENDING_PLACEMENT',
+        purchaseOrderId: null,
+        placedAt: null,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+      });
+    }
+    invalidateCollectionCache('prescriptionPlacements');
+    if (draftId) {
+      await firestore.collection('orderDrafts').doc(draftId).set({ status: 'promoted', orderId: record.id, promotedAt: timestamp(), paymentStatus: paymentRoute === 'manual' ? 'awaiting_manual_payment' : 'pending', paymentRoute, updatedAt: timestamp() }, { merge: true });
+      invalidateCollectionCache('orderDrafts', draftId);
+    }
 
     if (authoritativeRedoContext) {
       await updateTenantRecord('orders', authoritativeRedoContext.originalOrderId, organisationId, {
@@ -1978,6 +2394,25 @@ app.post('/v1/portal/orders/:id/refunds/:refundId/confirm', async (request, resp
 });
 
 
+app.post('/v1/portal/orders/:id/prescriptions/:prescriptionId/place', externalProviderLimit, async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional() }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const prescriptionId = idSchema.parse(request.params.prescriptionId);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    if (order.paymentStatus !== 'paid') throw new HttpError(409, 'Only paid prescriptions can be placed.', 'PAYMENT_REQUIRED');
+    const operations = await firestore.collection('integrationOperations').where('orderId', '==', orderId).get();
+    const operation = operations.docs.find(document => document.data().organisationId === organisationId && document.data().subOrderId === prescriptionId);
+    if (!operation) throw new HttpError(404, 'Prescription placement operation not found.', 'NOT_FOUND');
+    if (operation.data().autoPlacement !== false) throw new HttpError(409, 'Automatic placement is enabled for this prescription.', 'AUTO_PLACEMENT_ENABLED');
+    await operation.ref.set({ manualPlacementRequested: true, manualPlacementRequestedAt: timestamp(), manualPlacementRequestedBy: identity(request).uid, updatedAt: timestamp() }, { merge: true });
+    const result = await autoSubmitPaidPrescriptions(organisationId, orderId);
+    await audit(request, 'prescription.manual_place_requested', { organisationId, orderId, prescriptionId, operationId: operation.id });
+    response.json({ orderId, prescriptionId, operationId: operation.id, result });
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/orders/:id/placement/absorb', async (request, response, next) => {
   try {
     const pharmacyId = tenantFor(request, request.body.pharmacyId);
@@ -2013,15 +2448,15 @@ app.post('/v1/portal/orders/:id/placement/absorb', async (request, response, nex
       if (line.id === lineId) {
         return {
           ...line,
-          placementState: 'PLACED' as const,
+          placementState: 'PENDING_PLACEMENT' as const,
           updatedAt: nowIso(),
         };
       }
       return line;
     });
 
-    const allPlaced = updatedLines.every(l => l.placementState === 'PLACED');
-    const newOverallState = allPlaced ? ('PLACED' as const) : targetPlacement.overallState;
+    const allReleased = updatedLines.every(l => l.placementState !== 'HELD_PRICE');
+    const newOverallState = allReleased ? ('PENDING_PLACEMENT' as const) : targetPlacement.overallState;
 
     await targetPlacementDoc.update({
       lines: updatedLines,
@@ -2039,8 +2474,15 @@ app.post('/v1/portal/orders/:id/placement/absorb', async (request, response, nex
       details: { lineId, action: 'absorb_and_place' },
     });
 
+    if (allReleased) {
+      await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${targetPlacement.prescriptionId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${targetPlacement.prescriptionId}.updatedAt`]: timestamp(), updatedAt: timestamp() }, { merge: true });
+      const operations = await firestore.collection('integrationOperations').where('orderId', '==', orderId).get();
+      for (const operation of operations.docs.filter(document => document.data().subOrderId === targetPlacement!.prescriptionId)) await operation.ref.set({ status: 'reconciliation_required', updatedAt: timestamp() }, { merge: true });
+      await autoSubmitPaidPrescriptions(pharmacyId, orderId);
+    }
+
     invalidateCollectionCache('prescriptionPlacements');
-    response.json({ success: true, lineId, placementState: 'PLACED', overallState: newOverallState });
+    response.json({ success: true, lineId, placementState: 'PENDING_PLACEMENT', overallState: newOverallState });
   } catch (error) { next(error); }
 });
 
@@ -2134,6 +2576,22 @@ app.post('/v1/portal/orders/:id/placement/cancel-line', async (request, response
 
     const line = targetPlacement.lines.find(l => l.id === lineId)!;
     const refundAmountPence = line.fixedPatientPricePence + line.allocatedDispensingFeePence;
+    const order = await getTenantRecord('orders', orderId, pharmacyId);
+    const prescription = Array.isArray(order.prescriptions)
+      ? (order.prescriptions as Array<Record<string, unknown>>).find(candidate => candidate.id === targetPlacement!.prescriptionId || candidate.fileId === targetPlacement!.prescriptionId)
+      : null;
+    if (prescription?.clinicScanId) {
+      const extension = await callCuraleafExtension(pharmacyId, 'line_exclusion', {
+        prescriptionId: String(prescription.curaleafPrescriptionId ?? targetPlacement.prescriptionId),
+        lineId,
+        packId: line.packId,
+      }, { orderId, reason, quantity: line.quantity });
+      if (!extension.completed) {
+        const taskId = createHash('sha256').update(`${pharmacyId}:${orderId}:${lineId}:line-exclusion`).digest('hex');
+        await firestore.collection('staffTasks').doc(taskId).set({ id: taskId, schemaVersion: 1, organisationId: pharmacyId, orderId, prescriptionId: targetPlacement.prescriptionId, lineId, type: 'curaleaf_line_exclusion', status: 'open', priority: 'urgent', detail: 'Curaleaf line-exclusion adapter is not configured. Contact Customer Service; the price hold remains active.', createdAt: timestamp(), updatedAt: timestamp() }, { merge: true });
+        throw new HttpError(409, 'Curaleaf line exclusion is not configured. The hold remains active; use the CS fallback.', 'CURALEAF_LINE_EXCLUSION_REQUIRED');
+      }
+    }
 
     // Create refund record via adapter
     const refund = await refundAdapter.createRefundRecord({
@@ -2141,8 +2599,8 @@ app.post('/v1/portal/orders/:id/placement/cancel-line', async (request, response
       lineId,
       pharmacyId,
       amountPence: refundAmountPence,
-      originalPaymentRef: `PAY-${orderId}`,
-      paymentRoute: 'manual',
+      originalPaymentRef: String(order.worldpayPaymentId ?? order.paymentTransactionReference ?? order.paymentId ?? `PAY-${orderId}`),
+      paymentRoute: order.paymentRoute === 'worldpay' ? 'worldpay' : 'manual',
       cause: reason,
       idempotencyKey: `refund--${orderId}--${lineId}`,
     });
@@ -2178,6 +2636,68 @@ app.post('/v1/portal/orders/:id/placement/cancel-line', async (request, response
 
     invalidateCollectionCache('prescriptionPlacements');
     response.json({ success: true, lineId, placementState: 'CANCELLATION_PENDING_REFUND', refund });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/orders/:id/curaleaf-rejections', async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), prescriptionId: idSchema, reason: z.string().trim().min(2).max(1000), rejectedAt: z.iso.datetime().optional() }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    const prescription = Array.isArray(order.prescriptions) ? (order.prescriptions as Array<Record<string, unknown>>).find(candidate => candidate.id === input.prescriptionId || candidate.fileId === input.prescriptionId) : null;
+    if (!prescription) throw new HttpError(404, 'Prescription not found on this order.', 'NOT_FOUND');
+    const rejectedAt = input.rejectedAt ?? timestamp();
+    const id = createHash('sha256').update(`${organisationId}:${orderId}:${input.prescriptionId}:rejection:${rejectedAt}`).digest('hex');
+    const supportCaseId = createHash('sha256').update(`${organisationId}:${orderId}:prescription_exception:${input.prescriptionId}`).digest('hex');
+    await firestore.collection('curaleafRejections').doc(id).create({ id, schemaVersion: 1, organisationId, orderId, prescriptionId: input.prescriptionId, reason: input.reason, rejectedAt, recordedAt: timestamp(), recordedBy: identity(request).uid, supportCaseId });
+    await firestore.collection('curaleafSupportCases').doc(supportCaseId).set({ id: supportCaseId, schemaVersion: 1, organisationId, orderId, prescriptionId: input.prescriptionId, reason: 'prescription_exception', status: 'open', note: input.reason, openedBy: identity(request).uid, openedByRole: identity(request).role, openedAt: timestamp(), createdAt: timestamp(), updatedAt: timestamp() }, { merge: true });
+    const flow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object' ? order.prescriptionFlow as Record<string, Record<string, unknown>> : {};
+    const key = flow[input.prescriptionId] ? input.prescriptionId : String(prescription.id ?? prescription.fileId);
+    await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${key}.rejection`]: { id, reason: input.reason, rejectedAt, recordedBy: identity(request).uid }, [`prescriptionFlow.${key}.state`]: 'HELD_STOCK', integrationStatus: 'attention', updatedAt: timestamp() }, { merge: true });
+    invalidateCollectionCache('orders', orderId);
+    await audit(request, 'curaleaf.rejection_recorded', { organisationId, orderId, prescriptionId: key, rejectionId: id, supportCaseId });
+    response.status(201).json({ id, orderId, prescriptionId: key, reason: input.reason, rejectedAt, supportCaseId });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/orders/:id/prescriptions/:prescriptionId/renewal', externalProviderLimit, async (request, response, next) => {
+  try {
+    const input = z.object({ organisationId: idSchema.optional(), renewedPrescription: orderPrescriptionSchema.extend({ curaleafPrescriptionId: idSchema }) }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const prescriptionId = idSchema.parse(request.params.prescriptionId);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    const prescriptions = Array.isArray(order.prescriptions) ? order.prescriptions as Array<Record<string, unknown>> : [];
+    const index = prescriptions.findIndex(candidate => candidate.id === prescriptionId || candidate.fileId === prescriptionId);
+    if (index < 0) throw new HttpError(404, 'Prescription not found on this order.', 'NOT_FOUND');
+    const original = prescriptions[index]!;
+    const patient = await getTenantRecord('patients', String(order.patientId), organisationId);
+    requireMatchingPatient(input.renewedPrescription.patient, patient);
+    if (!prescriptionIsCurrent(input.renewedPrescription)) throw new HttpError(409, 'The renewed prescription is not inside its 28-day window.', 'PRESCRIPTION_EXPIRED');
+    const formulaSignature = (value: unknown) => JSON.stringify((Array.isArray(value) ? value as Array<Record<string, unknown>> : []).map(item => ({ formulaId: item.formulaId, unitsNeededCount: item.unitsNeededCount })).sort((left, right) => String(left.formulaId).localeCompare(String(right.formulaId))));
+    if (formulaSignature(original.items) !== formulaSignature(input.renewedPrescription.items)) throw new HttpError(409, 'The renewed prescription must match the held formula quantities.', 'RENEWAL_ITEMS_MISMATCH');
+    const flow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object' ? order.prescriptionFlow as Record<string, Record<string, unknown>> : {};
+    const flowKey = flow[prescriptionId] ? prescriptionId : String(original.id ?? original.fileId);
+    const currentFlow = flow[flowKey];
+    if (!currentFlow || currentFlow.state !== 'HELD_FOR_RENEWAL') throw new HttpError(409, 'This prescription is not held for renewal.', 'RENEWAL_HOLD_REQUIRED');
+    await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${flowKey}.renewal.state`]: 'attaching', [`prescriptionFlow.${flowKey}.renewal.updatedAt`]: timestamp(), updatedAt: timestamp() }, { merge: true });
+    const extension = await callCuraleafExtension(organisationId, 'renewal', { purchaseOrderId: String(currentFlow.purchaseOrderId ?? ''), prescriptionId: String(original.curaleafPrescriptionId ?? flowKey), renewedPrescriptionId: input.renewedPrescription.curaleafPrescriptionId }, { orderId });
+    if (!extension.completed) {
+      await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${flowKey}.renewal.state`]: 'manual_resolution', [`prescriptionFlow.${flowKey}.renewal.updatedAt`]: timestamp(), updatedAt: timestamp() }, { merge: true });
+      throw new HttpError(409, 'The Curaleaf renewal adapter is not configured. The hold remains; use the staff/CS fallback.', 'CURALEAF_RENEWAL_ADAPTER_REQUIRED');
+    }
+    const renewed = { ...input.renewedPrescription, id: flowKey, replacesPrescriptionId: original.curaleafPrescriptionId ?? null, expiryDate: calculatePrescriptionExpiry(input.renewedPrescription.issueDate, input.renewedPrescription.expiryDate), payable: true };
+    const nextPrescriptions = [...prescriptions];
+    nextPrescriptions[index] = renewed;
+    await firestore.collection('orders').doc(orderId).set({ prescriptions: nextPrescriptions, [`prescriptionFlow.${flowKey}.state`]: 'PLACED', [`prescriptionFlow.${flowKey}.expiryDate`]: renewed.expiryDate, [`prescriptionFlow.${flowKey}.renewal`]: { state: 'attached', renewedPrescriptionId: renewed.curaleafPrescriptionId, attachedAt: timestamp(), attachedBy: identity(request).uid }, updatedAt: timestamp() }, { merge: true });
+    const tasks = await firestore.collection('staffTasks').where('orderId', '==', orderId).get();
+    for (const task of tasks.docs.filter(task => task.data().prescriptionId === flowKey && String(task.data().type).startsWith('renewal_'))) await task.ref.set({ status: 'completed', completedAt: timestamp(), completedBy: identity(request).uid, updatedAt: timestamp() }, { merge: true });
+    const placement = await firestore.collection('prescriptionPlacements').where('orderId', '==', orderId).where('prescriptionId', '==', flowKey).limit(1).get();
+    if (!placement.empty) await placement.docs[0]!.ref.set({ overallState: 'PLACED', updatedAt: timestamp() }, { merge: true });
+    await recordPlacementLedgerEvent({ pharmacyId: organisationId, orderId, prescriptionId: flowKey, lineId: 'all', eventType: 'renewal_attached', actor: identity(request).uid, details: { renewedPrescriptionId: renewed.curaleafPrescriptionId } });
+    invalidateCollectionCache('orders', orderId);
+    response.json({ orderId, prescriptionId: flowKey, state: 'PLACED', renewal: { state: 'attached', renewedPrescriptionId: renewed.curaleafPrescriptionId } });
   } catch (error) { next(error); }
 });
 
@@ -2308,6 +2828,56 @@ app.get('/v1/portal/prescription-files/:id/download-url', async (request, respon
   } catch (error) { next(error); }
 });
 
+app.delete('/v1/portal/prescription-files/:id', async (request, response, next) => {
+  try {
+    const organisationId = tenantFor(request, request.query.organisationId);
+    const fileId = idSchema.parse(request.params.id);
+    const record = await getTenantRecord('prescriptionFiles', fileId, organisationId);
+    if (record.status === 'removed') return response.status(204).end();
+    if (!prescriptionFileRemovalAllowed(record.status, false)) throw new HttpError(409, 'Only an active uploaded prescription copy can be removed.', 'FILE_UNAVAILABLE');
+
+    const orders = await firestore.collection('orders').where('organisationId', '==', organisationId).limit(2_000).get();
+    const linkedOrder = orders.docs.find(document => {
+      const prescriptions = Array.isArray(document.data().prescriptions) ? document.data().prescriptions as Array<Record<string, unknown>> : [];
+      return prescriptions.some(prescription => prescription.fileId === fileId);
+    });
+    if (!prescriptionFileRemovalAllowed(record.status, Boolean(linkedOrder))) throw new HttpError(409, 'This prescription copy is already part of an order. Use the order cancellation or replacement workflow.', 'FILE_LOCKED');
+
+    const fileRef = firestore.collection('prescriptionFiles').doc(fileId);
+    const removedAt = timestamp();
+    await fileRef.set({ status: 'removal_pending', updatedAt: removedAt }, { merge: true });
+    try {
+      if (typeof record.storagePath === 'string') await storage.bucket().file(record.storagePath).delete({ ignoreNotFound: true });
+    } catch (error) {
+      await fileRef.set({ status: 'uploaded', removalFailedAt: timestamp(), updatedAt: timestamp() }, { merge: true });
+      throw error;
+    }
+
+    const scans = await firestore.collection('curaleafPrescriptionScans').where('fileId', '==', fileId).get();
+    const batch = firestore.batch();
+    batch.set(fileRef, {
+      status: 'removed',
+      storagePath: null,
+      filename: null,
+      originalFilenameHash: createHash('sha256').update(String(record.filename ?? '')).digest('hex'),
+      removedAt,
+      removedBy: identity(request).uid,
+      updatedAt: removedAt,
+    }, { merge: true });
+    scans.docs.filter(document => document.data().organisationId === organisationId).forEach(document => batch.set(document.ref, {
+      status: 'source_removed',
+      result: null,
+      sourceRemovedAt: removedAt,
+      updatedAt: removedAt,
+    }, { merge: true }));
+    await batch.commit();
+    invalidateCollectionCache('prescriptionFiles', fileId);
+    invalidateCollectionCache('curaleafPrescriptionScans');
+    await audit(request, 'prescription_file.removed', { organisationId, recordId: fileId, relatedScanCount: scans.size });
+    response.status(204).end();
+  } catch (error) { next(error); }
+});
+
 app.put('/v1/portal/integrations/:integration/credentials', async (request, response, next) => {
   try {
     ensureFreshAuthentication(request);
@@ -2356,6 +2926,28 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
         updatedAt: timestamp(),
         updatedBy: identity(request).uid,
       }, { merge: true });
+      const environment = config.CURALEAF_BASE_URL.includes('.dev') ? 'test' as const : 'production' as const;
+      const validationRecord = validation.passed ? {
+        environment,
+        validatedAt: validation.checkedAt,
+        actor: identity(request).uid,
+        maskedKey: safeIdentifier,
+        observedCustomerId: validation.observedCustomerId,
+      } : null;
+      if (validationRecord) {
+        if (environment === 'production') {
+          await writeIntegrationSecret(organisationId, 'curaleaf_live', credential as Record<string, string>);
+          await firestore.collection('organisations').doc(organisationId).set({
+            curaleafLiveValidation: validationRecord,
+            curaleafLiveSecretStoredAt: timestamp(),
+            updatedAt: timestamp(),
+          }, { merge: true });
+        } else {
+          await firestore.collection('organisations').doc(organisationId).set({ curaleafTestValidation: validationRecord, updatedAt: timestamp() }, { merge: true });
+        }
+        invalidateCollectionCache('organisations', organisationId);
+        invalidateCache('admin:organisations');
+      }
       // Saving/re-testing keys never completes the setup task — admin must Approve Curaleaf.
       const taskId = `${organisationId}--curaleaf_account`;
       await firestore.collection('setupTasks').doc(taskId).set({
@@ -2427,7 +3019,24 @@ app.post('/v1/portal/admin/organisations/:id/approve-curaleaf', requireRole('hhh
       updatedAt: timestamp(),
     }, { merge: true });
     invalidateCache(`setup:${organisationId}`);
-    const setup = await promoteOrganisationToLiveIfReady(organisationId);
+    const environment = config.CURALEAF_BASE_URL.includes('.dev') ? 'test' as const : 'production' as const;
+    if (environment === 'production') {
+      await readIntegrationSecret<Record<string, string>>(organisationId, 'curaleaf_live');
+      await firestore.collection('organisations').doc(organisationId).set({
+        curaleafLiveValidation: {
+          environment,
+          validatedAt: validation.checkedAt,
+          actor: identity(request).uid,
+          maskedKey: safeIdentifier,
+          observedCustomerId: validation.observedCustomerId,
+        },
+        curaleafLiveSecretStoredAt: timestamp(),
+        updatedAt: timestamp(),
+      }, { merge: true });
+      invalidateCollectionCache('organisations', organisationId);
+      invalidateCache('admin:organisations');
+    }
+    const setup = await setupStatus(organisationId);
     await audit(request, 'integration.curaleaf_approved', { organisationId, maskedIdentifier: safeIdentifier });
     response.json({
       ...(await curaleafConnectionStatus(organisationId)),
@@ -2437,6 +3046,53 @@ app.post('/v1/portal/admin/organisations/:id/approve-curaleaf', requireRole('hhh
       maskedIdentifier: safeIdentifier,
       validation,
     });
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/portal/admin/organisations/:id/go-live-readiness', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    response.json(await goLiveReadiness(idSchema.parse(request.params.id)));
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/organisations/:id/go-live', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    ensureFreshAuthentication(request);
+    const organisationId = idSchema.parse(request.params.id);
+    const readiness = await goLiveReadiness(organisationId);
+    if (!readiness.ready) {
+      throw new HttpError(409, 'Go live requires signed company GDPR evidence and a validated, securely stored LIVE Curaleaf key.', 'GO_LIVE_GATES_INCOMPLETE');
+    }
+    const updatedAt = timestamp();
+    await firestore.collection('organisations').doc(organisationId).set({
+      status: 'live',
+      gdprComplianceFlag: false,
+      wentLiveAt: updatedAt,
+      wentLiveBy: identity(request).uid,
+      updatedAt,
+    }, { merge: true });
+    invalidateCollectionCache('organisations', organisationId);
+    invalidateCache('admin:organisations', 'referral:');
+    await audit(request, 'organisation.went_live', { organisationId, companyId: readiness.companyId, gates: readiness.gates });
+    response.json({ ...(await goLiveReadiness(organisationId)), status: 'live' });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/go-live/audit', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    ensureFreshAuthentication(request);
+    const result = await auditLiveOrganisationGates();
+    await audit(request, 'organisation.go_live_audit', result);
+    response.json(result);
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/migrations/master-flow-v2', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    ensureFreshAuthentication(request);
+    const result = await migrateMasterFlowV2();
+    await audit(request, 'migration.master_flow_v2', result);
+    response.json(result);
   } catch (error) { next(error); }
 });
 
@@ -2469,11 +3125,12 @@ app.post('/v1/portal/integrations/curaleaf/training/quote', curaleafTestEnvironm
       items: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1).max(50),
     }).parse(request.body);
     tenantFor(request, input.organisationId);
-    response.json(await curaleafPlatformRequest('/v1/quotes/', {
+    const raw = await curaleafPlatformRequest('/v1/quotes/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: input.items }),
-    }));
+    });
+    response.json(parsedCuraleafQuote(raw));
   } catch (error) { next(error); }
 });
 
@@ -2496,7 +3153,7 @@ app.get('/v1/portal/integrations/curaleaf/activity', async (request, response, n
 });
 
 app.post('/v1/portal/integrations/curaleaf/quote', async (request, response, next) => {
-  try { const input = z.object({ organisationId: idSchema.optional(), items: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); response.json(await curaleafRequest(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: input.items }) })); } catch (error) { next(error); }
+  try { const input = z.object({ organisationId: idSchema.optional(), items: z.array(z.object({ packId: idSchema, quantity: z.number().int().positive().max(100) })).min(1) }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); const raw = await curaleafRequest(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: input.items }) }); response.json(parsedCuraleafQuote(raw)); } catch (error) { next(error); }
 });
 
 app.post('/v1/portal/orders/:id/curaleaf-quote-review/approve', async (request, response, next) => {
@@ -2700,8 +3357,35 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
 
 app.post('/v1/portal/orders/:id/payments/manual', async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), amountPence: z.number().int().positive(), tender: z.enum(['cash', 'epos', 'bank_transfer', 'other']), reference: z.string().trim().min(1).max(200), notes: z.string().trim().max(1000).optional() }).parse(request.body); const organisationId = tenantFor(request, input.organisationId); await requireSetupComplete(organisationId); const orderId = idSchema.parse(request.params.id); const order = await getTenantRecord('orders', orderId, organisationId); if ((order.paymentRoute ?? 'manual') !== 'manual') throw new HttpError(409, 'This order is locked to Worldpay.', 'PAYMENT_ROUTE_LOCKED'); if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID'); if (input.amountPence !== order.totalPence) throw new HttpError(400, 'Payment amount must match the order total.', 'AMOUNT_MISMATCH');
-    const payment = await createRecord('payments', { organisationId, orderId, route: 'manual', status: 'paid' satisfies PaymentStatus, amountPence: input.amountPence, currency: 'GBP', tender: input.tender, reference: input.reference, notes: input.notes ?? null, confirmedBy: identity(request).uid, confirmedAt: timestamp() }); await firestore.collection('orders').doc(orderId).update({ paymentStatus: 'paid', paymentId: payment.id, updatedAt: timestamp() }); invalidateCollectionCache('orders', orderId); await audit(request, 'payment.manual_confirmed', { organisationId, orderId, paymentId: payment.id, amountPence: input.amountPence });
+    const input = z.object({ organisationId: idSchema.optional(), amountPence: z.number().int().positive(), tender: z.enum(['cash', 'epos', 'bank_transfer', 'other']), reference: z.string().trim().min(1).max(200), notes: z.string().trim().max(1000).optional() }).parse(request.body);
+    const organisationId = tenantFor(request, input.organisationId);
+    await requireSetupComplete(organisationId);
+    const orderId = idSchema.parse(request.params.id);
+    const order = await getTenantRecord('orders', orderId, organisationId);
+    if ((order.paymentRoute ?? 'manual') !== 'manual') throw new HttpError(409, 'This order is locked to Worldpay.', 'PAYMENT_ROUTE_LOCKED');
+    if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID');
+    const savedPrescriptions = Array.isArray(order.prescriptions) ? order.prescriptions as Array<Record<string, unknown>> : [];
+    const payablePrescriptions = savedPrescriptions.filter(prescription => prescription.payable !== false && prescriptionIsCurrent(prescription));
+    if (!payablePrescriptions.length) {
+      await firestore.collection('orders').doc(orderId).set({ paymentStatus: 'expired', totalPence: 0, integrationStatus: 'payment_exception', updatedAt: timestamp() }, { merge: true });
+      throw new HttpError(409, 'No prescription remains payable. The manual payment must not be taken.', 'NOTHING_PAYABLE');
+    }
+    const prices = new Map((Array.isArray(order.lineItems) ? order.lineItems as Array<Record<string, unknown>> : []).map(line => [String(line.packId ?? line.productId ?? ''), Number(line.unitPricePence ?? 0)]));
+    const productTotalPence = payablePrescriptions.flatMap(prescription => Array.isArray(prescription.items) ? prescription.items as Array<Record<string, unknown>> : []).reduce((sum, item) => sum + (prices.get(String(item.packId ?? '')) ?? 0) * Number(item.quantity ?? 0), 0);
+    const payableTotalPence = productTotalPence + Number(order.dispensingFeePence ?? 0);
+    const prescriptionFlow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object' ? order.prescriptionFlow as Record<string, Record<string, unknown>> : {};
+    const payableIds = new Set(payablePrescriptions.map(prescription => String(prescription.id ?? prescription.fileId ?? '')));
+    if (payableTotalPence !== Number(order.totalPence)) {
+      await firestore.collection('orders').doc(orderId).set({ totalPence: payableTotalPence, prescriptions: savedPrescriptions.map(prescription => ({ ...prescription, payable: payableIds.has(String(prescription.id ?? prescription.fileId ?? '')) })), prescriptionFlow: Object.fromEntries(Object.entries(prescriptionFlow).map(([key, value]) => [key, payableIds.has(key) ? value : { ...value, state: 'EXPIRED', payable: false, expiredAt: timestamp() }])), updatedAt: timestamp() }, { merge: true });
+    }
+    if (input.amountPence !== payableTotalPence) throw new HttpError(400, 'Payment amount must match the current payable prescriptions.', 'AMOUNT_MISMATCH');
+    const payment = await createRecord('payments', { organisationId, orderId, route: 'manual', status: 'paid' satisfies PaymentStatus, amountPence: input.amountPence, currency: 'GBP', tender: input.tender, reference: input.reference, notes: input.notes ?? null, confirmedBy: identity(request).uid, confirmedAt: timestamp() });
+    await firestore.collection('orders').doc(orderId).update({ paymentStatus: 'paid', paymentId: payment.id, prescriptionFlow: Object.fromEntries(Object.entries(prescriptionFlow).map(([key, value]) => [key, { ...value, state: payableIds.has(key) && value.state === 'AWAITING_PAYMENT' ? 'PAID' : value.state }])), updatedAt: timestamp() });
+    invalidateCollectionCache('orders', orderId);
+    const patient = await getTenantRecord('patients', String(order.patientId), organisationId);
+    const recipient = typeof patient.email === 'string' ? patient.email : '';
+    if (recipient) await queuePatientMessage({ id: messageId([orderId, payment.id, 'confirmation']), organisationId, orderId, paymentId: payment.id, kind: 'patient_payment_confirmation', recipient, channel: 'email', deliveryOwner: 'platform', templateData: { firstName: String(patient.firstName ?? 'Patient'), amountPence: input.amountPence, reference: input.reference } });
+    await audit(request, 'payment.manual_confirmed', { organisationId, orderId, paymentId: payment.id, amountPence: input.amountPence });
     let curaleafAutomation: Record<string, number> | null = null;
     try {
       curaleafAutomation = await autoSubmitPaidPrescriptions(organisationId, orderId);
@@ -2712,9 +3396,9 @@ app.post('/v1/portal/orders/:id/payments/manual', async (request, response, next
   } catch (error) { next(error); }
 });
 
-app.post('/v1/portal/orders/:id/payments/worldpay-session', externalProviderLimit, async (request, response, next) => {
+app.post(['/v1/portal/orders/:id/payments/worldpay-session', '/v1/portal/orders/:id/payment-links/resend'], externalProviderLimit, async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url() }).parse(request.body);
+    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url(), resend: z.boolean().default(false) }).parse({ ...request.body, ...(request.path.endsWith('/resend') ? { resend: true } : {}) });
     const organisationId = tenantFor(request, input.organisationId);
     await requireSetupComplete(organisationId);
     const orderId = idSchema.parse(request.params.id);
@@ -2723,16 +3407,19 @@ app.post('/v1/portal/orders/:id/payments/worldpay-session', externalProviderLimi
     const connection = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
     if (connection.data()?.status !== 'connected') throw new HttpError(409, 'This pharmacy’s Worldpay connection must be verified before taking payment.', 'WORLDPAY_VERIFICATION_REQUIRED');
     if (order.paymentStatus === 'paid') throw new HttpError(409, 'This order is already paid.', 'ALREADY_PAID');
+    let previousGeneration = 0;
     if (typeof order.paymentId === 'string') {
       const existingSnapshot = await firestore.collection('payments').doc(order.paymentId).get();
       const existing = existingSnapshot.data();
+      previousGeneration = Number(existing?.linkGeneration ?? 0);
       const linkExpiresAt = typeof existing?.linkExpiresAt === 'string' ? existing.linkExpiresAt : '';
       if (existing?.organisationId === organisationId
         && existing?.orderId === orderId
         && existing?.route === 'worldpay'
         && existing?.status === 'pending'
         && typeof existing.providerUrl === 'string'
-        && Date.parse(linkExpiresAt) > Date.now()) {
+        && Date.parse(linkExpiresAt) > Date.now()
+        && !input.resend) {
         await audit(request, 'payment.worldpay_link_reused', { organisationId, orderId, paymentId: existingSnapshot.id });
         return response.status(200).json({
           paymentId: existingSnapshot.id,
@@ -2741,6 +3428,10 @@ app.post('/v1/portal/orders/:id/payments/worldpay-session', externalProviderLimi
           linkExpiresAt,
           reused: true,
         });
+      }
+      if (input.resend && existing?.organisationId === organisationId && existing?.orderId === orderId && existing?.status === 'pending') {
+        await existingSnapshot.ref.set({ status: 'expired', supersededAt: timestamp(), supersededReason: 'staff_resend', updatedAt: timestamp() }, { merge: true });
+        invalidateCollectionCache('payments', existingSnapshot.id);
       }
     }
     const organisation = await getRecord('organisations', organisationId);
@@ -2772,9 +3463,28 @@ app.post('/v1/portal/orders/:id/payments/worldpay-session', externalProviderLimi
       paymentQueryUrl,
       linkExpiresAt,
       providerSession: provider,
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      linkGeneration: previousGeneration + 1,
+      sentAt: timestamp(),
+      reminder24At: null,
+      reminder48At: null,
     });
     await firestore.collection('orders').doc(orderId).update({ paymentId: payment.id, paymentStatus: 'pending', paymentTransactionReference: transactionReference, updatedAt: timestamp() });
     invalidateCollectionCache('orders', orderId);
+    const patient = await getTenantRecord('patients', String(order.patientId), organisationId);
+    const recipient = typeof patient.email === 'string' ? patient.email : '';
+    if (recipient) await queuePatientMessage({
+      id: messageId([orderId, payment.id, 'request']),
+      organisationId,
+      orderId,
+      paymentId: payment.id,
+      kind: 'patient_payment_request',
+      recipient,
+      channel: 'email',
+      deliveryOwner: organisation.paymentMessageOwner === 'platform' ? 'platform' : 'worldpay',
+      templateData: { firstName: String(patient.firstName ?? 'Patient'), amountPence: order.totalPence, paymentUrl: providerUrl, linkExpiresAt },
+    });
     await audit(request, 'payment.worldpay_session_created', { organisationId, orderId, paymentId: payment.id, expirySeconds });
     response.status(201).json({ paymentId: payment.id, transactionReference, provider, linkExpiresAt });
   } catch (error) { next(error); }
@@ -2788,7 +3498,54 @@ async function linkedOrderForShipment(shipment: Record<string, unknown>, organis
   if (!operation) return null;
   const orderId = idSchema.parse(operation.data().orderId);
   const order = await getTenantRecord('orders', orderId, organisationId);
-  return { orderId, order };
+  return { orderId, order, subOrderId: typeof operation.data().subOrderId === 'string' ? operation.data().subOrderId as string : null };
+}
+
+function linkedPrescription(linked: NonNullable<Awaited<ReturnType<typeof linkedOrderForShipment>>>) {
+  const prescriptions = Array.isArray(linked.order.prescriptions) ? linked.order.prescriptions as Array<Record<string, unknown>> : [];
+  return prescriptions.find(prescription => prescription.id === linked.subOrderId || prescription.fileId === linked.subOrderId) ?? null;
+}
+
+function requireCurrentLinkedPrescription(linked: NonNullable<Awaited<ReturnType<typeof linkedOrderForShipment>>>) {
+  const prescription = linkedPrescription(linked);
+  if (!prescription || !prescriptionIsCurrent(prescription)) throw new HttpError(409, 'Cannot dispense — prescription expired.', 'PRESCRIPTION_EXPIRED');
+  return prescription;
+}
+
+async function updatePrescriptionFlowFromReceipt(
+  linked: NonNullable<Awaited<ReturnType<typeof linkedOrderForShipment>>>,
+  shipment: Record<string, unknown>,
+  items: Array<{ productId: string; receivedQuantity: number }>,
+  transition: 'receipt' | 'ready' | 'collection' = 'receipt',
+) {
+  if (!linked.subOrderId) return;
+  const flow = linked.order.prescriptionFlow && typeof linked.order.prescriptionFlow === 'object' ? linked.order.prescriptionFlow as Record<string, Record<string, unknown>> : {};
+  const current = flow[linked.subOrderId];
+  if (!current) return;
+  const updates = new Map(items.map(item => [item.productId, item.receivedQuantity]));
+  const lines = (Array.isArray(current.lines) ? current.lines as Array<Record<string, unknown>> : []).map(line => {
+    const quantity = updates.get(String(line.productId));
+    if (quantity === undefined) return line;
+    return transition === 'collection'
+      ? { ...line, collected: Math.min(Number(line.received ?? 0), Number(line.collected ?? 0) + quantity) }
+      : transition === 'receipt'
+        ? { ...line, received: Math.min(Number(line.shipped ?? line.ordered ?? 0), Number(line.received ?? 0) + quantity) }
+        : line;
+  });
+  const rollup = prescriptionCollectionRollup(lines);
+  const collected = rollup === 'collected';
+  const shipmentIds = [...new Set([...(Array.isArray(current.shipmentIds) ? current.shipmentIds : []), String(shipment.id ?? '')].filter(Boolean))];
+  const shipmentId = String(shipment.id ?? '');
+  const shipmentStates = current.shipmentStates && typeof current.shipmentStates === 'object' ? current.shipmentStates as Record<string, string> : {};
+  const nextShipmentStates = shipmentId
+    ? { ...shipmentStates, [shipmentId]: transition === 'collection' ? 'collected' : transition === 'ready' ? 'ready_for_collection' : String(shipment.status ?? 'received') }
+    : shipmentStates;
+  const nextState = collected ? 'COLLECTED' : transition === 'ready' ? 'READY_FOR_COLLECTION' : current.state;
+  const next = { ...current, lines, shipmentIds, shipmentStates: nextShipmentStates, state: nextState, ...(collected ? { collectedAt: timestamp() } : {}), updatedAt: timestamp() };
+  const nextFlow = { ...flow, [linked.subOrderId]: next };
+  const terminal = Object.values(nextFlow).length > 0 && Object.values(nextFlow).every(value => ['COLLECTED', 'CANCELLED_REFUNDED'].includes(String(value.state)));
+  await firestore.collection('orders').doc(linked.orderId).set({ prescriptionFlow: nextFlow, ...(terminal ? { fulfilmentStatus: 'collected', collectedAt: timestamp() } : {}), updatedAt: timestamp() }, { merge: true });
+  linked.order.prescriptionFlow = nextFlow;
 }
 
 async function updateOrderFromShipment(
@@ -2806,7 +3563,9 @@ async function updateOrderFromShipment(
   ])];
   await firestore.collection('orders').doc(linked.orderId).update({
     curaleaf: { ...curaleaf, shipmentIds },
-    fulfilmentStatus,
+    fulfilmentStatus: linked.subOrderId && ['ready_for_collection', 'collected'].includes(fulfilmentStatus)
+      ? String(linked.order.fulfilmentStatus ?? 'received')
+      : fulfilmentStatus,
     updatedAt: timestamp(),
   });
   invalidateCollectionCache('orders', linked.orderId);
@@ -2851,11 +3610,24 @@ app.post('/v1/portal/shipments/:id/goods-receipts', async (request, response, ne
     const organisationId = tenantFor(request, input.organisationId);
     const shipmentId = idSchema.parse(request.params.id);
     const shipment = await getTenantRecord('shipments', shipmentId, organisationId);
-    const status = shipmentReceiptStatus(input.items);
-    const receipt = await createRecord('goodsReceipts', { organisationId, shipmentId, items: input.items, status, receivedBy: identity(request).uid, receivedAt: timestamp() });
-    await firestore.collection('shipments').doc(shipmentId).update({ status, latestGoodsReceiptId: receipt.id, updatedAt: timestamp() });
     const linked = await linkedOrderForShipment(shipment, organisationId);
+    if (!linked) throw new HttpError(409, 'This shipment is not linked to a customer order.', 'SHIPMENT_ORDER_LINK_REQUIRED');
+    requireCurrentLinkedPrescription(linked);
+    const suppliedByProduct = new Map(input.items.map(item => [item.productId, item]));
+    const supplierItems = Array.isArray(shipment.items) ? shipment.items as Array<Record<string, unknown>> : [];
+    const authoritativeItems = supplierItems.length ? supplierItems.flatMap(item => {
+      const productId = String(item.productId ?? item.packId ?? '');
+      if (!productId) return [];
+      const submitted = suppliedByProduct.get(productId);
+      const expectedQuantity = Math.max(0, Number(item.packCount ?? item.packsShippedCount ?? item.quantity ?? submitted?.expectedQuantity ?? 0));
+      return [{ productId, expectedQuantity, receivedQuantity: Math.min(expectedQuantity, Number(submitted?.receivedQuantity ?? 0)), batchNumber: submitted?.batchNumber, expiryDate: submitted?.expiryDate, issue: submitted?.issue ?? 'none' as const, notes: submitted?.notes }];
+    }) : input.items;
+    if (!receivedLinesHaveBatchDetails(authoritativeItems)) throw new HttpError(400, 'Batch number and batch expiry are required for every received pack.', 'BATCH_DETAILS_REQUIRED');
+    const status = shipmentReceiptStatus(authoritativeItems);
+    const receipt = await createRecord('goodsReceipts', { organisationId, shipmentId, items: authoritativeItems, status, receivedBy: identity(request).uid, receivedAt: timestamp() });
+    await firestore.collection('shipments').doc(shipmentId).update({ status, latestGoodsReceiptId: receipt.id, updatedAt: timestamp() });
     await updateOrderFromShipment(linked, shipmentId, status);
+    await updatePrescriptionFlowFromReceipt(linked, { ...shipment, status }, authoritativeItems);
     invalidateCollectionCache('shipments', shipmentId);
     await audit(request, 'shipment.goods_received', { organisationId, shipmentId, receiptId: receipt.id, status });
     response.status(201).json(receipt);
@@ -2872,6 +3644,7 @@ app.patch('/v1/portal/shipments/:id/status', async (request, response, next) => 
     if (input.status === 'collected' && current.status !== 'ready_for_collection') throw new HttpError(409, 'Only ready medication can be marked collected.', 'INVALID_STATUS_TRANSITION');
     const linked = await linkedOrderForShipment(current, organisationId);
     if (!linked) throw new HttpError(409, 'This shipment is not linked to a customer order. Sync Curaleaf shipments before changing its collection status.', 'SHIPMENT_ORDER_LINK_REQUIRED');
+    if (input.status === 'ready_for_collection') requireCurrentLinkedPrescription(linked);
 
     let notification: { status: 'queued'; outboxId: string; recipient: string } | undefined;
     if (input.status === 'ready_for_collection') {
@@ -2881,35 +3654,20 @@ app.patch('/v1/portal/shipments/:id/status', async (request, response, next) => 
       const recipient = z.email().parse(patient.email);
       const organisation = await getRecord('organisations', organisationId);
       const outboxId = `${shipmentId}--ready-for-collection`;
-      const outboxRef = firestore.collection('notificationOutbox').doc(outboxId);
-      try {
-        await outboxRef.create({
-          id: outboxId,
-          schemaVersion: 1,
-          organisationId,
-          kind: 'patient_ready_for_collection',
-          recipient,
-          templateData: {
-            firstName: String(patient.name ?? 'Patient').trim().split(/\s+/)[0],
-            pharmacyName: String(organisation.tradingName ?? organisation.name ?? 'your pharmacy'),
-            orderId: linked.orderId,
-          },
-          status: 'pending',
-          orderId: linked.orderId,
-          shipmentId,
-          createdAt: timestamp(),
-          updatedAt: timestamp(),
-          createdBy: identity(request).uid,
-        });
-      } catch (error) {
-        const code = (error as { code?: number | string } | null)?.code;
-        if (code !== 6 && code !== 'already-exists') throw error;
-      }
+      await queuePatientMessage({ id: outboxId, organisationId, orderId: linked.orderId, shipmentId, kind: 'patient_ready_for_collection', recipient, channel: 'email', deliveryOwner: 'platform', templateData: { firstName: String(patient.firstName ?? patient.name ?? 'Patient').trim().split(/\s+/)[0], pharmacyName: String(organisation.tradingName ?? organisation.name ?? 'your pharmacy'), orderId: linked.orderId } });
       notification = { status: 'queued', outboxId, recipient };
     }
 
     const result = await updateTenantRecord('shipments', shipmentId, organisationId, { status: input.status });
     await updateOrderFromShipment(linked, shipmentId, input.status);
+    if (input.status === 'ready_for_collection') await updatePrescriptionFlowFromReceipt(linked, current, [], 'ready');
+    if (input.status === 'collected') {
+      const receiptId = typeof current.latestGoodsReceiptId === 'string' ? current.latestGoodsReceiptId : '';
+      const receipt = receiptId ? (await firestore.collection('goodsReceipts').doc(receiptId).get()).data() : null;
+      const collectedItems = Array.isArray(receipt?.items) ? receipt!.items.map((item: Record<string, unknown>) => ({ productId: String(item.productId), receivedQuantity: Number(item.receivedQuantity ?? 0) })) : [];
+      await updatePrescriptionFlowFromReceipt(linked, current, collectedItems, 'collection');
+      await recordCollectedDispense(linked.orderId, identity(request).uid, shipmentId);
+    }
     await audit(request, 'shipment.status_updated', { organisationId, shipmentId, status: input.status, notificationOutboxId: notification?.outboxId ?? null });
     response.json({ ...result, ...(notification ? { notification } : {}) });
   } catch (error) { next(error); }
@@ -2948,6 +3706,7 @@ app.post('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (requ
       modules: tenantModulesSchema.parse({ intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true }),
       worldpayEnabled: false,
       defaultPaymentRoute: 'manual',
+      autoPlacementEnabled: FLOW_CONFIG.autoPlacementEnabled,
       curaleafActivated: false,
       referralToken: rawReferralToken,
     });

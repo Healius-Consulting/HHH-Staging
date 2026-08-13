@@ -37,6 +37,7 @@ import type {
   WorldpayConnectionStatus,
   AdminReferralFinanceReport,
   PatientRegisterExportResult,
+  GoLiveReadiness,
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -211,6 +212,8 @@ export function recordPortalGoodsReceipt(shipmentId: string, input: {
     productId: string;
     expectedQuantity: number;
     receivedQuantity: number;
+    batchNumber?: string | null;
+    expiryDate?: string | null;
     issue?: 'short' | 'damaged' | 'incorrect' | 'none';
     notes?: string;
   }>;
@@ -228,6 +231,13 @@ export function updatePortalShipmentStatus(shipmentId: string, input: {
   return apiRequest<Record<string, unknown> & { notification?: { status: 'queued'; outboxId: string; recipient: string } }>(
     `/v1/portal/shipments/${encodeURIComponent(shipmentId)}/status`,
     { method: 'PATCH', body: JSON.stringify(input) },
+  );
+}
+
+export function handoutPortalOrder(orderId: string, input: { organisationId: string }) {
+  return apiRequest<{ order: PortalOrderRecord; idempotent: boolean }>(
+    `/v1/portal/orders/${encodeURIComponent(orderId)}/handout`,
+    { method: 'POST', body: JSON.stringify(input) },
   );
 }
 
@@ -342,6 +352,25 @@ export function createWorldpaySession(orderId: string, input: {
   });
 }
 
+export function resendWorldpayPaymentLink(orderId: string, input: { organisationId: string; successUrl: string; cancelUrl: string }) {
+  return apiRequest<{ paymentId: string; transactionReference: string; provider: Record<string, unknown>; linkExpiresAt: string }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/payment-links/resend`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function recordCuraleafRejection(orderId: string, input: { organisationId: string; prescriptionId: string; reason: string; rejectedAt?: string; supportCaseId?: string }) {
+  return apiRequest<{ id: string; supportCaseId: string }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/curaleaf-rejections`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function attachPrescriptionRenewal(orderId: string, prescriptionId: string, input: { organisationId: string; renewedPrescription: Record<string, unknown> }) {
+  return apiRequest(`/v1/portal/orders/${encodeURIComponent(orderId)}/prescriptions/${encodeURIComponent(prescriptionId)}/renewal`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function placePrescriptionManually(orderId: string, prescriptionId: string, organisationId: string) {
+  return apiRequest(`/v1/portal/orders/${encodeURIComponent(orderId)}/prescriptions/${encodeURIComponent(prescriptionId)}/place`, { method: 'POST', body: JSON.stringify({ organisationId }) });
+}
+
 export function submitCuraleafManualPrescription(input: CuraleafManualPrescriptionInput) {
   return apiRequest<CuraleafSubmissionResult>('/v1/portal/integrations/curaleaf/prescriptions/manual', {
     method: 'POST',
@@ -375,6 +404,44 @@ export function approveCuraleafPharmacy(organisationId: string) {
     `/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/approve-curaleaf`,
     { method: 'POST', body: JSON.stringify({}) },
   );
+}
+
+export function getGoLiveReadiness(organisationId: string) {
+  return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live-readiness`);
+}
+
+export function goLiveOrganisation(organisationId: string) {
+  return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export function getOrderDrafts(organisationId: string) {
+  return apiRequest<import('./contracts').OrderDraftRecord[]>(`/v1/portal/order-drafts?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+export function createOrderDraft(input: { organisationId: string; patientId?: string | null; payload?: Record<string, unknown> }) {
+  return apiRequest<import('./contracts').OrderDraftRecord>('/v1/portal/order-drafts', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateOrderDraft(id: string, input: { organisationId: string; patientId?: string | null; payload?: Record<string, unknown> }) {
+  return apiRequest<import('./contracts').OrderDraftRecord>(`/v1/portal/order-drafts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function deleteOrderDraft(id: string, organisationId: string) {
+  return apiRequest<void>(`/v1/portal/order-drafts/${encodeURIComponent(id)}?organisationId=${encodeURIComponent(organisationId)}`, { method: 'DELETE' });
+}
+
+export function deletePrescriptionFile(id: string, organisationId: string) {
+  return apiRequest<void>(`/v1/portal/prescription-files/${encodeURIComponent(id)}?organisationId=${encodeURIComponent(organisationId)}`, { method: 'DELETE' });
+}
+
+export function getPrescriberDirectory(organisationId: string, query = '') {
+  const search = new URLSearchParams({ organisationId });
+  if (query.trim()) search.set('query', query.trim());
+  return apiRequest<import('./contracts').PrescriberDirectoryRecord[]>(`/v1/portal/prescribers?${search}`);
+}
+
+export function createPrescriberDirectoryRecord(input: Omit<import('./contracts').PrescriberDirectoryRecord, 'id' | 'active' | 'curaleafIds' | 'createdAt' | 'updatedAt'> & { organisationId: string }) {
+  return apiRequest<import('./contracts').PrescriberDirectoryRecord>('/v1/portal/prescribers', { method: 'POST', body: JSON.stringify(input) });
 }
 
 export function getCuraleafSupportCases(organisationId: string, orderId?: string) {

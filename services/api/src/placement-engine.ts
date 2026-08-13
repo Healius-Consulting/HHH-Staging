@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { firestore } from './firebase.js';
-import { HttpError, nowIso } from './http.js';
-import { createRecord, invalidateCollectionCache } from './repository.js';
-import { curaleafRequest } from './curaleaf.js';
-import type { PlacementLineItem, PrescriptionPlacement, SubstitutionProposal } from './types.js';
+import { nowIso } from './http.js';
+import { invalidateCollectionCache } from './repository.js';
+import type { SubstitutionProposal } from './types.js';
 
 
 
@@ -157,7 +156,7 @@ export async function recordPlacementLedgerEvent(event: {
   orderId: string;
   prescriptionId: string;
   lineId: string;
-  eventType: 'fee_allocated' | 'auto_placed' | 'held_price' | 'held_stock' | 'absorbed_placed' | 'substituted' | 'cancel_requested' | 'refund_confirmed' | 'expired_cancelled';
+  eventType: 'fee_allocated' | 'auto_placed' | 'held_price' | 'held_stock' | 'margin_improved' | 'absorbed_placed' | 'substituted' | 'cancel_requested' | 'refund_confirmed' | 'expired_cancelled' | 'renewal_held' | 'renewal_attached';
   actor: 'system' | string;
   details: Record<string, unknown>;
 }) {

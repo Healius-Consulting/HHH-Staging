@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { CuraleafRequestError, curaleafRequest } from './curaleaf.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
+import { invalidateCache } from './cache.js';
 
 const CURSOR_OVERLAP_MS = 2_000;
 const INITIAL_LOOKBACK_MS = 5 * 60_000;
@@ -64,6 +65,7 @@ async function pollEventKind(organisationId: string, kind: EventKind) {
     newest = Math.max(newest, Date.parse(lastUpdated));
   }
   await cursorDocument.set({ organisationId, kind, cursorAt: new Date(newest).toISOString(), lastPolledAt: nowIso(), schemaVersion: 1 }, { merge: true });
+  if (kind === 'product' && processed > 0) invalidateCache(`curaleaf:catalog:${organisationId}`);
   return { kind, events: page.events.length, processed };
 }
 

@@ -2,16 +2,19 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { getFunctions } from 'firebase-admin/functions';
-import { app } from './app.js';
+import { app, auditLiveOrganisationGates } from './app.js';
 import { config } from './config.js';
 import { eventPollBackoffSeconds, pollCuraleafEvents } from './curaleaf-events.js';
 import { reconcilePendingCuraleafOrders } from './curaleaf-reconciliation.js';
-import { accrueAnnualPatientFees } from './patient-finance.js';
+import { accrueAnnualPatientFees, updatePatientRetentionStates } from './patient-finance.js';
 import { cleanupAbandonedPrescriptionFiles } from './prescription-file-cleanup.js';
 import { reconcilePendingWorldpayPayments } from './worldpay-reconciliation.js';
 import { syncConnectedCuraleafAccounts } from './curaleaf-mirror.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
+import { processPendingPaymentLifecycle } from './payment-lifecycle.js';
+import { maintainPaidOrderFlow } from './order-maintenance.js';
+import { deliverPatientMessages } from './notification-delivery.js';
 
 /** HHH cadence: 1 minute (Curaleaf recommends 10s; we poll slower to stay under ~1 req/s). */
 const EVENT_POLL_INTERVAL_SECONDS = 60;
@@ -53,6 +56,42 @@ export const reconcileWorldpayPaymentsLondon = onSchedule({
 }, async () => {
   const reconciliation = await reconcilePendingWorldpayPayments();
   console.log('Worldpay reconciliation complete', { reconciliation });
+});
+
+export const processPaymentLifecycleLondon = onSchedule({
+  schedule: 'every 15 minutes',
+  timeZone: 'Europe/London',
+  region: 'europe-west2',
+  timeoutSeconds: 180,
+  memory: '256MiB',
+  maxInstances: 1,
+  retryCount: 0,
+}, async () => {
+  console.log('Payment lifecycle complete', await processPendingPaymentLifecycle());
+});
+
+export const maintainOrderFlowLondon = onSchedule({
+  schedule: 'every 15 minutes',
+  timeZone: 'Europe/London',
+  region: 'europe-west2',
+  timeoutSeconds: 300,
+  memory: '256MiB',
+  maxInstances: 1,
+  retryCount: 0,
+}, async () => {
+  console.log('Paid order maintenance complete', await maintainPaidOrderFlow());
+});
+
+export const deliverPatientMessagesLondon = onSchedule({
+  schedule: 'every 1 minutes',
+  timeZone: 'Europe/London',
+  region: 'europe-west2',
+  timeoutSeconds: 120,
+  memory: '256MiB',
+  maxInstances: 1,
+  retryCount: 0,
+}, async () => {
+  console.log('Patient message delivery complete', await deliverPatientMessages());
 });
 
 export const mirrorCuraleafAccountsLondon = onSchedule({
@@ -141,6 +180,30 @@ export const accrueAnnualPatientFeesLondon = onSchedule({
 }, async () => {
   const summary = await accrueAnnualPatientFees();
   console.log('Annual patient fee accrual complete', summary);
+});
+
+export const updatePatientRetentionLondon = onSchedule({
+  schedule: '15 2 * * *',
+  timeZone: 'Europe/London',
+  region: 'europe-west2',
+  timeoutSeconds: 120,
+  memory: '256MiB',
+  maxInstances: 1,
+  retryCount: 1,
+}, async () => {
+  console.log('Patient retention update complete', await updatePatientRetentionStates());
+});
+
+export const auditGoLiveGatesLondon = onSchedule({
+  schedule: '45 1 * * *',
+  timeZone: 'Europe/London',
+  region: 'europe-west2',
+  timeoutSeconds: 180,
+  memory: '256MiB',
+  maxInstances: 1,
+  retryCount: 1,
+}, async () => {
+  console.log('Go-live gate audit complete', await auditLiveOrganisationGates());
 });
 
 export const cleanupPrescriptionFilesLondon = onSchedule({

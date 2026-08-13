@@ -129,6 +129,7 @@ export interface CuraleafQuoteItem {
   packId: string;
   quantity: number;
   inStock: boolean;
+  stockStatus?: 'in_stock' | 'low_stock' | 'out_of_stock';
   wholesalePackPrice: string;
   patientPackPrice: string;
 }
@@ -262,13 +263,16 @@ export interface CuraleafActivity {
 }
 
 export interface PortalOrderInput {
+  draftId?: string;
   organisationId: string;
+  paymentRoute?: 'manual' | 'worldpay';
   patientId: string;
   lineItems: Array<{
     packId: string;
     quantity: number;
   }>;
   prescriptions: Array<{
+    id?: string;
     fileId: string;
     clinicScanId?: string;
     curaleafPrescriptionId?: string;
@@ -373,6 +377,7 @@ export interface PortalOrderRecord {
     unitPricePence: number;
   }>;
   prescriptions?: PortalOrderInput['prescriptions'];
+  prescriptionFlow?: Record<string, PrescriptionFlowRecord>;
   dispensingFeePence: number;
   totalPence: number;
   quotedTotalPence?: number;
@@ -381,6 +386,7 @@ export interface PortalOrderRecord {
   paymentRoute: 'manual' | 'worldpay';
   paymentStatus: string;
   fulfilmentStatus: string;
+  autoPlacementEnabled?: boolean;
   paymentId?: string;
   worldpayPaymentId?: string;
   paymentTransactionReference?: string;
@@ -426,6 +432,74 @@ export interface PortalOrderRecord {
   curaleafSubOrders?: Record<string, PortalCuraleafOrderState>;
   createdAt: string;
   updatedAt: string;
+}
+
+export type PrescriptionFlowState = 'DRAFT' | 'AWAITING_PAYMENT' | 'PAID' | 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'PLACED' | 'HELD_FOR_RENEWAL' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXPIRED' | 'CANCELLED_REFUNDED';
+
+export interface FulfilmentLineRecord {
+  lineId: string;
+  productId: string;
+  ordered: number;
+  allocated: number;
+  shipped: number;
+  returned: number;
+  received: number;
+  collected: number;
+  backordered: boolean;
+}
+
+export interface PrescriptionFlowRecord {
+  id: string;
+  state: PrescriptionFlowState;
+  payable: boolean;
+  expiryDate: string;
+  purchaseOrderId?: string | null;
+  placedAt?: string | null;
+  shipmentIds: string[];
+  shipmentStates?: Record<string, 'dispatched_to_pharmacy' | 'partially_received' | 'received' | 'ready_for_collection' | 'collected' | 'exception' | string>;
+  lines: FulfilmentLineRecord[];
+  renewal?: {
+    state: 'none' | 'boundary_alerted' | 'expired_alerted' | 'attaching' | 'attached' | 'manual_resolution';
+    boundaryAt?: string;
+    renewedPrescriptionId?: string;
+    updatedAt?: string;
+  };
+  collectedAt?: string | null;
+  manualPlaceRequired?: boolean;
+}
+
+export interface OrderDraftRecord {
+  id: string;
+  organisationId: string;
+  patientId: string | null;
+  status: 'draft';
+  payload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrescriberDirectoryRecord {
+  id: string;
+  name: string;
+  initials: string;
+  pin: string;
+  gmcNumber: number | null;
+  gphcNumber: string | null;
+  active: boolean;
+  curaleafIds: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GoLiveReadiness {
+  organisationId: string;
+  companyId: string | null;
+  ready: boolean;
+  status: 'onboarding' | 'live' | 'paused';
+  gates: {
+    gdprEvidence: { passed: boolean; evidenceUrl: string | null };
+    curaleafLive: { passed: boolean; validatedAt: string | null; secretStored: boolean };
+  };
 }
 
 export interface OrderRefundState {
@@ -757,7 +831,7 @@ export interface PlacementLineItem {
   lineMedicineRevenuePence: number;
   linkSendWholesalePence: number;
   latestWholesalePence: number;
-  placementState: 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'CANCELLATION_PENDING_REFUND' | 'PLACED' | 'CANCELLED_REFUNDED';
+  placementState: 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'CANCELLATION_PENDING_REFUND' | 'PLACED' | 'HELD_FOR_RENEWAL' | 'CANCELLED_REFUNDED';
   rejectionReason?: string;
   holdEpisodeStartedAt?: string | null;
   notifiedAt48h?: string | null;
@@ -772,7 +846,7 @@ export interface PrescriptionPlacement {
   orderId: string;
   pharmacyId: string;
   lines: PlacementLineItem[];
-  overallState: 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'CANCELLATION_PENDING_REFUND' | 'PLACED' | 'CANCELLED_REFUNDED';
+  overallState: 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'CANCELLATION_PENDING_REFUND' | 'PLACED' | 'HELD_FOR_RENEWAL' | 'CANCELLED_REFUNDED';
   purchaseOrderId?: string | null;
   placedAt?: string | null;
   createdAt: string;
@@ -837,8 +911,10 @@ export interface PortalOrganisation {
   modules?: OrganisationModules;
   worldpayEnabled?: boolean;
   defaultPaymentRoute?: 'manual' | 'worldpay';
+  autoPlacementEnabled?: boolean;
   curaleafTestValidation?: CuraleafValidationRecord | null;
   curaleafLiveValidation?: CuraleafValidationRecord | null;
+  curaleafLiveSecretStoredAt?: string | null;
 }
 
 export interface OrganisationLogoUploadTarget {

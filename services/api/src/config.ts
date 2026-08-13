@@ -17,6 +17,11 @@ const schema = z.object({
   CURALEAF_EVENT_POLLING_ENABLED: z.enum(['true', 'false']).default('false'),
   WORLDPAY_HPP_BASE_URL: z.url().optional(),
   WORLDPAY_PAYMENT_QUERIES_BASE_URL: z.url().optional(),
+  PATIENT_MESSAGE_PROVIDER_URL: z.url().optional(),
+  PATIENT_MESSAGE_PROVIDER_KEY: z.string().min(8).max(1000).optional(),
+  CURALEAF_HOLD_URL_TEMPLATE: z.string().url().optional(),
+  CURALEAF_RENEWAL_ATTACH_URL_TEMPLATE: z.string().url().optional(),
+  CURALEAF_LINE_EXCLUSION_URL_TEMPLATE: z.string().url().optional(),
   /** @deprecated Use WORLDPAY_PAYMENT_QUERIES_BASE_URL. */
   WORLDPAY_VERIFY_BASE_URL: z.url().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compareQuotes, quoteFingerprint, validPrescriptionSignature } from './app.js';
+import { compareQuotes, draftHasPaymentBoundary, normaliseStockStatus, prescriptionFileRemovalAllowed, quoteFingerprint, resolveOrderPaymentRoute, validPrescriptionSignature } from './app.js';
 import { clinicPrescriptionReadyForPurchaseOrder, CuraleafRequestError } from './curaleaf.js';
 import { eventPollBackoffSeconds } from './curaleaf-events.js';
 
@@ -22,6 +22,30 @@ test('quote comparison separates supplier costs, patient prices and stock', () =
   assert.equal(compareQuotes(baseline, { ...baseline, shippingPrice: '6.00' })[0]?.category, 'supplier_cost');
   assert.equal(compareQuotes(baseline, { ...baseline, items: [{ ...baseline.items[0]!, patientPackPrice: '61.00' }] })[0]?.category, 'patient_price');
   assert.equal(compareQuotes(baseline, { ...baseline, items: [{ ...baseline.items[0]!, inStock: false }] })[0]?.category, 'stock');
+});
+
+test('low stock is advisory while false availability is always out of stock', () => {
+  assert.equal(normaliseStockStatus(true, 'low_stock'), 'low_stock');
+  assert.equal(normaliseStockStatus(true), 'in_stock');
+  assert.equal(normaliseStockStatus(false, 'low_stock'), 'out_of_stock');
+});
+
+test('an explicit order payment route overrides the pharmacy default', () => {
+  assert.equal(resolveOrderPaymentRoute('manual', 'worldpay'), 'manual');
+  assert.equal(resolveOrderPaymentRoute('worldpay', 'manual'), 'worldpay');
+  assert.equal(resolveOrderPaymentRoute(undefined, 'worldpay'), 'worldpay');
+});
+
+test('draft deletion locks at Worldpay generation or manual-payment entry', () => {
+  assert.equal(draftHasPaymentBoundary({ paymentRoute: 'worldpay', paymentStatus: 'pending' }, false), false);
+  assert.equal(draftHasPaymentBoundary({ paymentRoute: 'worldpay', paymentStatus: 'pending', paymentId: 'pay-1' }, false), true);
+  assert.equal(draftHasPaymentBoundary({ paymentRoute: 'manual', paymentStatus: 'awaiting_manual_payment' }, false), true);
+});
+
+test('prescription copies can only be removed while uploaded and unlinked', () => {
+  assert.equal(prescriptionFileRemovalAllowed('uploaded', false), true);
+  assert.equal(prescriptionFileRemovalAllowed('uploaded', true), false);
+  assert.equal(prescriptionFileRemovalAllowed('removed', false), false);
 });
 
 test('quote fingerprints are insensitive to item order', () => {

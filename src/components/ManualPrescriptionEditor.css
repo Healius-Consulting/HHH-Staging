@@ -11,6 +11,8 @@
 .manual-rx-details__header > small { color: var(--text-tertiary); font-size: 9px; text-align: right; }
 .manual-rx-field-group { display: grid; grid-template-columns: 145px minmax(0, 1fr); border-bottom: 1px solid var(--border); }
 .manual-rx-field-group:last-child { border-bottom: 0; }
+.manual-rx-field-group--plain { grid-template-columns: 1fr; }
+.manual-rx-field-group--plain > .manual-rx-fields { border-left: 0; }
 .manual-rx-field-group > header { display: flex; align-items: flex-start; gap: 8px; padding: 15px 14px; color: var(--tenant-primary-strong); background: color-mix(in srgb, var(--bg-elevated) 45%, var(--bg-surface)); }
 .manual-rx-field-group > header span small, .manual-rx-field-group > header span strong, .manual-rx-field-group > header span em { display: block; }
 .manual-rx-field-group > header span small { color: var(--text-tertiary); font-size: 7px; font-weight: 750; letter-spacing: .07em; }
@@ -23,12 +25,16 @@
 .manual-rx-fields label > span { color: var(--text-secondary); font-size: 11px; font-weight: 700; }
 .manual-rx-field-help { color: var(--text-tertiary); font-size: 9px; font-weight: 500; line-height: 1.4; }
 .manual-rx-field-error { color: var(--color-danger); font-size: 9px; font-weight: 650; line-height: 1.4; }
-.manual-rx-date-field { display: grid; grid-template-columns: minmax(34px, .65fr) auto minmax(34px, .65fr) auto minmax(58px, 1fr); min-height: 38px; align-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); }
-.manual-rx-date-field:focus-within { border-color: var(--tenant-primary); box-shadow: 0 0 0 3px var(--tenant-primary-soft); }
-.manual-rx-date-field[aria-invalid='true'] { border-color: var(--color-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger) 10%, transparent); }
-.manual-rx-date-field input { width: 100%; min-width: 0; min-height: 36px; padding: 7px 5px; border: 0; outline: 0; color: var(--text-primary); background: transparent; font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; }
+.manual-rx-date-field { display: grid; grid-template-columns: minmax(34px, .65fr) auto minmax(34px, .65fr) auto minmax(58px, 1fr); min-height: 38px; align-items: center; gap: 5px; background: transparent; }
+.manual-rx-date-field input { width: 100%; min-width: 0; min-height: 36px; padding: 7px 5px; border: 1px solid var(--border); border-radius: 7px; outline: 0; color: var(--text-primary); background: var(--bg-surface); font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; }
+.manual-rx-date-field input:focus { border-color: var(--tenant-primary); box-shadow: 0 0 0 3px var(--tenant-primary-soft); }
+.manual-rx-date-field[aria-invalid='true'] input { border-color: var(--color-danger); }
 .manual-rx-date-field input::placeholder { color: var(--text-tertiary); }
 .manual-rx-date-field i { color: var(--text-tertiary); font-size: 11px; font-style: normal; }
+.manual-rx-expiry { font-size: 10px; font-weight: 750; }
+.manual-rx-expiry--green { color: var(--color-success); }
+.manual-rx-expiry--amber { color: var(--color-warning); }
+.manual-rx-expiry--red { color: var(--color-danger); }
 .manual-rx-fields__wide { grid-column: 1 / -1; }
 .manual-rx-fields--prescriber { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .manual-rx-medicines { display: grid; gap: 16px; }
@@ -74,6 +80,8 @@
 .manual-pack-pricing dd { overflow: hidden; margin: 5px 0 0; color: var(--text-primary); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .manual-pack-pricing__total dd { color: var(--tenant-primary-strong); font-size: 17px; }
 .manual-pack-pricing > div.is-negative dd { color: var(--color-danger); }
+.manual-pack-pricing > div.is-advisory dd,
+.manual-pack-pricing > div.is-advisory small { color: var(--color-warning); }
 .manual-pack-pricing small { overflow: hidden; margin-top: 3px; color: var(--text-tertiary); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .manual-rx-picker { display: grid; }
 .manual-rx-picker__heading > small { flex: 0 0 auto; color: var(--text-secondary); font-size: 9px; font-weight: 700; text-align: right; }
@@ -134,3 +142,7 @@
   .manual-pack-pricing { grid-column: 1; border-top: 0; }
   .manual-pack-pricing > div { min-height: 72px; }
 }
+.manual-prescriber-results{display:grid;gap:4px;margin-top:6px;padding:5px;border:1px solid var(--border);border-radius:8px;background:var(--bg-surface)}
+.manual-prescriber-results button{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 8px;border:0;border-radius:6px;background:transparent;color:var(--text-primary);text-align:left;cursor:pointer}
+.manual-prescriber-results button:hover,.manual-prescriber-results button:focus-visible{background:var(--tenant-primary-soft)}
+.manual-prescriber-results small{color:var(--text-tertiary)}

@@ -3,8 +3,8 @@
 This repository supports three independently configured surfaces:
 
 1. **Staff portal** — Vercel project using `vercel.json`, output `dist`.
-2. **Public eligibility form** — a second Vercel project using `vercel.eligibility.json`, output `dist-eligibility`.
-3. **Authenticated API** — Firebase Functions in `us-central1` for the temporary low-cost staging environment, with Firestore, App Check and Secret Manager. Production must return patient-data processing to an approved UK region before real use.
+2. **Public eligibility form** — currently served by the staff bundle at `?mode=eligibility`; `vercel.eligibility.json` remains available if it is separated into its own Vercel project later.
+3. **Authenticated API** — Firebase Functions in `europe-west2`, with Firestore, App Check and Secret Manager.
 
 For the temporary staging setup, the staff portal and public eligibility form share `https://hhh.thinktimeless.co.uk`. Eligibility links use `?mode=eligibility`, and Vercel proxies `/api/*` to the Firebase Function so the browser sees one public domain.
 
@@ -59,4 +59,7 @@ Firebase Auth, verified ID tokens, role/organisation claims, App Check and tenan
 - Confirm setup-incomplete staff can open Dashboard, Setup and Resources but cannot submit orders, access patient records or configure live payment actions.
 - Complete one manual-payment UAT and one Worldpay HPP sandbox UAT per pharmacy.
 - Complete Curaleaf manual/barcode submission UAT, dispatch reconciliation, partial goods-in, full goods-in and collection-ready checks.
+- Before Go live, confirm the owning company has signed GDPR/data-sharing evidence linked from Google Drive/Docs and validate/store the branch LIVE Curaleaf key. Operational setup tasks and TEST-key validation do not unlock production.
+- Configure `PATIENT_MESSAGE_PROVIDER_URL` and `PATIENT_MESSAGE_PROVIDER_KEY`. Configure the Curaleaf hold, renewal-attach and line-exclusion URL templates only after Curaleaf supplies their contracts; absent templates intentionally leave staff holds open.
+- For this rollout, run `POST /v1/portal/admin/migrations/master-flow-v2` and then `POST /v1/portal/admin/go-live/audit` with a freshly authenticated HHH admin session.
 - Confirm audit logs exist for authentication, setup, secret changes, order submission, goods-in, readiness and collection.

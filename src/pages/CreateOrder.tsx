@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
-import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
 import {
@@ -19,7 +19,7 @@ import {
   type UnresolvedOrderReason,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { confirmPortalOrderRefund, createPortalOrder, createPortalOrderRefund, createWorldpaySession, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, uploadPrescriptionFile } from '../shared/api';
+import { confirmPortalOrderRefund, createOrderDraft, createPortalOrder, createPortalOrderRefund, createWorldpaySession, deleteOrderDraft, deletePrescriptionFile, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, updateOrderDraft, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
@@ -29,9 +29,9 @@ export default function CreateOrder() {
   const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && canCreateOrderForPatient(patient));
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
   const canUseWorldpay = organisation.worldpay.enabled && organisation.worldpay.status === 'connected';
-  const selectedPaymentRoute = organisation.defaultPaymentRoute === 'worldpay' && canUseWorldpay ? 'worldpay' : 'pharmacy';
   const draftOrders = state.orders.filter(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none');
   const activeOrder = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === state.activeOrderId && order.payment.status === 'none');
+  const selectedPaymentRoute = activeOrder?.paymentRoute ?? (canUseWorldpay ? 'worldpay' : 'manual');
   const redoSourceOrder = activeOrder?.redoContext
     ? state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === activeOrder.redoContext!.originalOrderId)
     : null;
@@ -41,7 +41,7 @@ export default function CreateOrder() {
   const [patientQuery, setPatientQuery] = useState('');
   const [patientSearchOpen, setPatientSearchOpen] = useState(false);
   const [patientActiveIndex, setPatientActiveIndex] = useState(0);
-  const [confirmingDraftDelete, setConfirmingDraftDelete] = useState(false);
+  const [confirmingDraftDeleteId, setConfirmingDraftDeleteId] = useState<number | null>(null);
   const [confirmingRxDeleteId, setConfirmingRxDeleteId] = useState<number | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [quoteError, setQuoteError] = useState<{ title: string; detail: string } | null>(null);
@@ -49,7 +49,11 @@ export default function CreateOrder() {
   const [quoteSummary, setQuoteSummary] = useState<{ shippingPrice: number; taxRate: number } | null>(null);
   const [quotedUnavailableProductIds, setQuotedUnavailableProductIds] = useState<string[]>([]);
   const quoteRequestVersion = useRef(0);
+  const draftCreationInFlight = useRef(new Set<number>());
+  const deletedDraftOrderIds = useRef(new Set<number>());
   const [uploadingRxId, setUploadingRxId] = useState<number | null>(null);
+  const [confirmingFileRemoveRxId, setConfirmingFileRemoveRxId] = useState<number | null>(null);
+  const [fileRemovalBusyRxId, setFileRemovalBusyRxId] = useState<number | null>(null);
   const [readingRxId, setReadingRxId] = useState<number | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
@@ -57,6 +61,46 @@ export default function CreateOrder() {
   const [selectedUnresolvedOrderId, setSelectedUnresolvedOrderId] = useState<number | null>(null);
   const [redoRefundReference, setRedoRefundReference] = useState('');
   const [redoRefundBusy, setRedoRefundBusy] = useState(false);
+  const durableDraftEnabled = isApiConfigured && !isLocalPortalPreview && state.workspaceMode === 'live';
+  const durableDraftPayload = useMemo(() => activeOrder ? {
+    localOrderId: activeOrder.id,
+    patientId: activeOrder.patientId,
+    prescriptions: activeOrder.prescriptions,
+    dispensingFeePence: Math.round(activeOrder.dispensingFee * 100),
+    paymentRoute: selectedPaymentRoute,
+    redoContext: activeOrder.redoContext ?? null,
+  } : null, [activeOrder, selectedPaymentRoute]);
+  const durableDraftSignature = durableDraftPayload ? JSON.stringify(durableDraftPayload) : '';
+
+  useEffect(() => {
+    if (activeOrder?.payment.status === 'none' && activeOrder.paymentRoute === 'worldpay' && !canUseWorldpay) {
+      dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'manual' });
+    }
+  }, [activeOrder?.id, activeOrder?.payment.status, activeOrder?.paymentRoute, canUseWorldpay, dispatch]);
+
+  useEffect(() => {
+    if (!durableDraftEnabled || !activeOrder || activeOrder.draftId || draftCreationInFlight.current.has(activeOrder.id)) return;
+    draftCreationInFlight.current.add(activeOrder.id);
+    void createOrderDraft({ organisationId: state.currentOrganisationId, patientId: activeOrder.patientId, payload: durableDraftPayload ?? {} })
+      .then(async record => {
+        if (deletedDraftOrderIds.current.has(activeOrder.id)) {
+          await deleteOrderDraft(record.id, state.currentOrganisationId).catch(() => undefined);
+          return;
+        }
+        dispatch({ type: 'SET_ORDER_DRAFT_ID', orderId: activeOrder.id, draftId: record.id });
+      })
+      .catch(error => dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? `Draft autosave unavailable: ${error.message}` : 'Draft autosave is unavailable.', toastType: 'warning' }))
+      .finally(() => draftCreationInFlight.current.delete(activeOrder.id));
+  }, [activeOrder, dispatch, durableDraftEnabled, durableDraftPayload, state.currentOrganisationId]);
+
+  useEffect(() => {
+    if (!durableDraftEnabled || !activeOrder?.draftId || !durableDraftPayload) return;
+    const timer = window.setTimeout(() => {
+      void updateOrderDraft(activeOrder.draftId!, { organisationId: state.currentOrganisationId, patientId: activeOrder.patientId, payload: durableDraftPayload })
+        .catch(error => dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? `Draft autosave unavailable: ${error.message}` : 'Draft autosave is unavailable.', toastType: 'warning' }));
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [activeOrder?.draftId, activeOrder?.patientId, dispatch, durableDraftEnabled, durableDraftPayload, durableDraftSignature, state.currentOrganisationId]);
 
   useEffect(() => {
     if (!activeOrder?.prescriptions.length) return setSelectedRxId(null);
@@ -69,8 +113,9 @@ export default function CreateOrder() {
     setPatientQuery('');
     setPatientSearchOpen(false);
     setPatientActiveIndex(0);
-    setConfirmingDraftDelete(false);
+    setConfirmingDraftDeleteId(null);
     setConfirmingRxDeleteId(null);
+    setConfirmingFileRemoveRxId(null);
     setQuoteError(null);
     setQuotedSignature(null);
     setQuoteSummary(null);
@@ -156,9 +201,10 @@ export default function CreateOrder() {
   const quoteCurrent = wholesaleKnown && quotedSignature === currentQuoteSignature;
   const currentUnavailableProductIds = quotedSignature === currentQuoteSignature ? quotedUnavailableProductIds : [];
   const quoteAvailable = quoteCurrent && currentUnavailableProductIds.length === 0;
+  const dispensingFeeValid = !activeOrder || activeOrder.dispensingFee === 0 || activeOrder.dispensingFee >= 5 && activeOrder.dispensingFee <= 15;
   const quoteGateComplete = !requiresLiveCuraleafEvidence || quoteAvailable;
   const replacementUsesNewPayment = activeOrder?.redoContext?.priceResolution === 'refund_and_recharge';
-  const paymentRouteReady = Boolean(activeOrder?.redoContext?.isPaidRedo && !replacementUsesNewPayment) || selectedPaymentRoute === 'pharmacy' || canUseWorldpay;
+  const paymentRouteReady = Boolean(activeOrder?.redoContext?.isPaidRedo && !replacementUsesNewPayment) || selectedPaymentRoute === 'manual' || canUseWorldpay;
   const paidRedoAmountDifference = activeOrder?.redoContext?.isPaidRedo && redoSourceOrder
     ? Math.round((orderRevenue(activeOrder) - redoSourceOrder.payment.amount) * 100) / 100
     : 0;
@@ -166,10 +212,11 @@ export default function CreateOrder() {
   const redoPriceResolutionReady = paidRedoAmountMatches
     || activeOrder?.redoContext?.priceResolution === 'absorb' && paidRedoAmountDifference > 0
     || replacementUsesNewPayment && redoSourceOrder?.refund?.status === 'completed';
-  const readyForPayment = prescriptionReady && quoteGateComplete && paymentRouteReady && redoPriceResolutionReady;
+  const readyForPayment = prescriptionReady && quoteGateComplete && paymentRouteReady && redoPriceResolutionReady && dispensingFeeValid;
   const paymentGate = activeOrder ? [
     ...readiness,
     { label: requiresLiveCuraleafEvidence ? 'Live Curaleaf price and stock quote verified' : 'Curaleaf quote optional in training', complete: quoteGateComplete },
+    { label: 'Dispensing charge is £0 or £5–£15', complete: dispensingFeeValid },
     { label: activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Original verified payment route retained' : selectedPaymentRoute === 'worldpay' ? 'Worldpay merchant connection verified' : 'Pharmacy-managed payment route selected', complete: paymentRouteReady },
     ...(activeOrder.redoContext?.isPaidRedo ? [{ label: 'Replacement price decision recorded', complete: redoPriceResolutionReady }] : []),
   ] : [];
@@ -181,6 +228,9 @@ export default function CreateOrder() {
     { label: 'Payment', detail: readyForPayment ? replacementUsesNewPayment ? 'New payment ready' : activeOrder.redoContext?.isPaidRedo ? 'Carry-over ready' : `${selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy route'} ready` : activeOrder.redoContext?.isPaidRedo && !redoPriceResolutionReady ? 'Price decision needed' : `${outstandingPaymentGates.length} blocker${outstandingPaymentGates.length === 1 ? '' : 's'}`, complete: false, active: readyForPayment },
   ] : [];
   const activeOrderRef = activeOrder ? orderReference(activeOrder) : '';
+  const confirmingDraft = confirmingDraftDeleteId === null ? null : draftOrders.find(order => order.id === confirmingDraftDeleteId) ?? null;
+  const confirmingDraftPatient = confirmingDraft?.patientId ? tenantPatients.find(candidate => candidate.id === confirmingDraft.patientId) : null;
+  const confirmingDraftLabel = confirmingDraftPatient?.name ?? (confirmingDraft ? `Unlinked draft #${confirmingDraft.id}` : 'this draft');
 
   const initials = (name: string) => name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2);
   const gmcNumber = (value?: string) => {
@@ -306,7 +356,9 @@ export default function CreateOrder() {
         })));
         const persisted = activeOrder.backendId ? { id: activeOrder.backendId } : await createPortalOrder({
           organisationId: state.currentOrganisationId,
+          draftId: activeOrder.draftId,
           patientId: activeOrder.patientId!,
+          paymentRoute: selectedPaymentRoute,
           lineItems,
           prescriptions: activeOrder.prescriptions.map(rx => ({
             fileId: rx.fileId!,
@@ -395,8 +447,9 @@ export default function CreateOrder() {
   const attachPrescriptionFile = async (rxId: number, file: File) => {
     if (!activeOrder) return;
     const prescription = activeOrder.prescriptions.find(candidate => candidate.id === rxId);
+    if (!prescription) return;
     if (isLocalPortalPreview || state.workspaceMode !== 'live') {
-      if (prescription?.entryMode === 'manual') {
+      if (prescription.entryMode === 'manual') {
         dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: `training-file-${activeOrder.id}-${rxId}` });
         dispatch({ type: 'ADD_TOAST', message: 'Manual prescription attached for training. Nothing was uploaded.', toastType: 'info' });
       } else {
@@ -410,9 +463,17 @@ export default function CreateOrder() {
       if (!['application/pdf', 'image/jpeg', 'image/png'].includes(contentType)) throw new Error('Use a PDF, JPG or PNG prescription file.');
       if (file.size > 16_000_000) throw new Error('Prescription files must be 16 MB or smaller.');
       const uploaded = await uploadPrescriptionFile({ organisationId: state.currentOrganisationId, filename: file.name, contentType, sizeBytes: file.size }, file);
+      if (prescription.fileId) {
+        try {
+          await deletePrescriptionFile(prescription.fileId, state.currentOrganisationId);
+        } catch (error) {
+          await deletePrescriptionFile(uploaded.id, state.currentOrganisationId).catch(() => undefined);
+          throw error;
+        }
+      }
       dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: uploaded.id });
-      if (prescription?.entryMode === 'manual') {
-        dispatch({ type: 'ADD_TOAST', message: 'Manual prescription copy uploaded securely.', toastType: 'success' });
+      if (prescription.entryMode === 'manual') {
+        dispatch({ type: 'ADD_TOAST', message: prescription.fileId ? 'Prescription copy replaced securely.' : 'Manual prescription copy uploaded securely.', toastType: 'success' });
       } else {
         dispatch({ type: 'ADD_TOAST', message: 'Prescription uploaded securely. Curaleaf is reading its barcode now.', toastType: 'success' });
         await readClinicBarcode(rxId, uploaded.id);
@@ -421,6 +482,26 @@ export default function CreateOrder() {
       dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Prescription upload failed.', toastType: 'error' });
     } finally {
       setUploadingRxId(null);
+    }
+  };
+
+  const removePrescriptionFile = async (rxId: number) => {
+    if (!activeOrder) return;
+    const prescription = activeOrder.prescriptions.find(candidate => candidate.id === rxId);
+    if (!prescription?.copyFileName) return;
+    setFileRemovalBusyRxId(rxId);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live' && prescription.fileId) {
+        await deletePrescriptionFile(prescription.fileId, state.currentOrganisationId);
+      }
+      dispatch({ type: 'CLEAR_RX_FILE', orderId: activeOrder.id, rxId });
+      setScanError(null);
+      dispatch({ type: 'ADD_TOAST', message: 'Prescription copy removed. You can upload a replacement.', toastType: 'info' });
+      setConfirmingFileRemoveRxId(null);
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The prescription copy could not be removed.', toastType: 'error' });
+    } finally {
+      setFileRemovalBusyRxId(null);
     }
   };
 
@@ -463,9 +544,10 @@ export default function CreateOrder() {
           wholesalePrice: Number(item.wholesalePackPrice),
           patientPrice: Number(item.patientPackPrice),
           inStock: item.inStock,
+          stockStatus: item.stockStatus ?? (item.inStock ? 'in_stock' : 'out_of_stock'),
         })),
       });
-      const unavailableProductIds = quote.items.filter(item => !item.inStock).map(item => item.packId);
+      const unavailableProductIds = quote.items.filter(item => !item.inStock || item.stockStatus === 'out_of_stock').map(item => item.packId);
       setQuotedSignature(currentQuoteSignature);
       setQuoteSummary({ shippingPrice: Number(quote.shippingPrice) || 0, taxRate: Number(quote.taxRate) || 0 });
       setQuotedUnavailableProductIds(unavailableProductIds);
@@ -654,12 +736,22 @@ export default function CreateOrder() {
     );
   };
 
-  const deleteDraft = () => {
-    if (!activeOrder) return;
-    const deletedOrderId = activeOrder.id;
-    dispatch({ type: 'CLEAR_ORDER', orderId: deletedOrderId });
-    dispatch({ type: 'ADD_TOAST', message: `Draft order ${deletedOrderId} deleted.`, toastType: 'info' });
-    setConfirmingDraftDelete(false);
+  const deleteDraft = async (orderId: number) => {
+    const target = state.orders.find(order => order.id === orderId && order.organisationId === state.currentOrganisationId && order.payment.status === 'none');
+    if (!target) return;
+    deletedDraftOrderIds.current.add(orderId);
+    if (durableDraftEnabled && target.draftId) {
+      try {
+        await deleteOrderDraft(target.draftId, state.currentOrganisationId);
+      } catch (error) {
+        deletedDraftOrderIds.current.delete(orderId);
+        dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The saved draft could not be deleted.', toastType: 'error' });
+        return;
+      }
+    }
+    dispatch({ type: 'CLEAR_ORDER', orderId });
+    dispatch({ type: 'ADD_TOAST', message: `Draft order ${orderId} deleted.`, toastType: 'info' });
+    setConfirmingDraftDeleteId(null);
   };
 
   const renderFormularyEditor = () => {
@@ -691,20 +783,33 @@ export default function CreateOrder() {
             const draftPatient = order.patientId ? tenantPatients.find(candidate => candidate.id === order.patientId) : null;
             const active = order.id === state.activeOrderId;
             return (
-              <button type="button" role="tab" aria-selected={active} key={order.id} className={`rx-draft-tab${active ? ' active' : ''}`} onClick={() => dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id })}>
-                <span className="rx-draft-tab__avatar">{draftPatient ? initials(draftPatient.name) : '—'}</span>
-                <span>
-                  <strong>{draftPatient?.name ?? `Unlinked draft #${order.id}`}</strong>
-                  <small>{order.prescriptions.length} record{order.prescriptions.length === 1 ? '' : 's'}{order.redoContext ? ` · ${orderReference(order)}` : ''}</small>
-                </span>
-              </button>
+              <div className={`rx-draft-tab-wrap${active ? ' active' : ''}`} key={order.id}>
+                <button type="button" role="tab" aria-selected={active} className="rx-draft-tab" onClick={() => dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id })}>
+                  <span className="rx-draft-tab__avatar">{draftPatient ? initials(draftPatient.name) : '—'}</span>
+                  <span>
+                    <strong>{draftPatient?.name ?? `Unlinked draft #${order.id}`}</strong>
+                    <small>{order.prescriptions.length} Rx{order.prescriptions.length === 1 ? '' : 's'}{order.redoContext ? ` · ${orderReference(order)}` : ''}</small>
+                  </span>
+                </button>
+                <button type="button" className="rx-draft-tab-delete" aria-label={`Delete ${draftPatient?.name ?? `unlinked draft ${order.id}`}`} onClick={() => setConfirmingDraftDeleteId(order.id)}><Trash2 size={13} /></button>
+              </div>
             );
           })}
         </div>
         <button type="button" className="btn btn-primary rx-new-draft" onClick={() => dispatch({ type: 'NEW_ORDER' })}>
-          <Plus size={14} /> New prescription
+          + New patient order
         </button>
       </section>
+
+      {confirmingDraft ? (
+        <section className="rx-draft-delete-confirm card" role="alertdialog" aria-modal="true" aria-label={`Delete ${confirmingDraftLabel}`}>
+          <span><Trash2 size={16} /><span><strong>Delete {confirmingDraftLabel}?</strong><small>This removes every unfinished prescription record in this draft. This cannot be undone.</small></span></span>
+          <div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDeleteId(null)}>Keep draft</button>
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => void deleteDraft(confirmingDraft.id)}>Delete draft</button>
+          </div>
+        </section>
+      ) : null}
 
       {!activeOrder ? (
         <div className="empty-state">
@@ -723,6 +828,7 @@ export default function CreateOrder() {
                   <>
                     <span className="avatar">{initials(patient.name)}</span>
                     <span className="rx-patient-identity-copy">
+                      <p className="section-label">STEP 1</p>
                       <p className="section-label rx-patient-approved-label"><CheckCircle size={12} /> Approved patient</p>
                       <strong>{patient.name}</strong>
                       <span className="rx-patient-meta" aria-label="Patient identity details">
@@ -735,7 +841,7 @@ export default function CreateOrder() {
                       {activeOrder.redoContext
                         ? <span className="rx-redo-patient-lock"><ShieldCheck size={12} /> Locked to redo</span>
                         : <button type="button" className="btn btn-secondary btn-sm" onClick={beginPatientChange}><Pencil size={12} /> Change</button>}
-                      <button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDelete(true)}><Trash2 size={14} /></button>
+                      <button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDeleteId(activeOrder.id)}><Trash2 size={14} /></button>
                     </div>
                   </>
                 )
@@ -751,15 +857,6 @@ export default function CreateOrder() {
                 </li>
               ))}
             </ol>
-            {confirmingDraftDelete && (
-              <div className="rx-draft-delete-confirm" role="alert">
-                <span><Trash2 size={16} /><span><strong>Delete this draft?</strong><small>The linked patient and every unfinished prescription record in this draft will be removed.</small></span></span>
-                <div>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDelete(false)}>Keep draft</button>
-                  <button type="button" className="btn btn-sm btn-danger" onClick={deleteDraft}>Delete draft</button>
-                </div>
-              </div>
-            )}
           </section>
 
           {patient && activeOrder.redoContext ? (
@@ -859,7 +956,7 @@ export default function CreateOrder() {
                       <h3><FileText size={17} /> Authenticate each prescription record</h3>
                     </div>
                   </div>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}><Plus size={13} /> Add record</button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}>+Add Rx</button>
                 </header>
                 <div className="rx-record-tabs" role="tablist" aria-label="Prescription records">
                   {activeOrder.prescriptions.map((rx, index) => {
@@ -891,32 +988,45 @@ export default function CreateOrder() {
                       {confirmingRxDeleteId === selectedRx.id ? (
                         <div className="rx-prescription-cancel-confirm" role="alert">
                           <AlertTriangle size={16} />
-                          <span><strong>Cancel prescription {selectedRxIndex + 1}?</strong><small>This removes only this unpaid draft prescription. Once a payment request exists, cancellation is handled from Customer Orders with the payment and Curaleaf safeguards.</small></span>
+                          <span><strong>Cancel prescription {selectedRxIndex + 1}?</strong><small>This removes only this unpaid draft prescription. Once a payment request exists, cancellation is handled from Orders with the payment and Curaleaf safeguards.</small></span>
                           <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingRxDeleteId(null)}>Keep it</button><button type="button" className="btn btn-danger btn-sm" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Cancelled prescription ${selectedRxIndex + 1}.`, toastType: 'info' }); setConfirmingRxDeleteId(null); }}>Cancel prescription</button></div>
                         </div>
                       ) : null}
                       <div className="rx-entry-mode" role="group" aria-label="Prescription entry route">
                         <button type="button" aria-pressed={selectedRx.entryMode === 'clinic'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' }); }}>
-                          <FileScan size={15} /><span><strong>Curaleaf Clinic QR</strong><small>Preferred automatic route</small></span>
+                          <FileScan size={15} /><span><strong>Scan Rx barcode</strong><small>Preferred automatic route</small></span>
                         </button>
                         <button type="button" aria-pressed={selectedRx.entryMode === 'manual'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'manual' }); }}>
-                          <Pencil size={15} /><span><strong>Manual prescription</strong><small>Copy from the signed document</small></span>
+                          <Pencil size={15} /><span><strong>Manually enter Rx details</strong><small>Copy from the signed document</small></span>
                         </button>
                       </div>
                       <div className="rx-clinic-note">
                         <FileScan size={18} aria-hidden="true" />
                         <span>
-                          <strong>{selectedRx.entryMode === 'clinic' ? 'Scan the Curaleaf Clinic barcode' : 'Attach the complete signed prescription'}</strong>
-                          <span>{selectedRx.entryMode === 'clinic' ? 'Attach the complete prescription with a clear barcode. Curaleaf supplies serial, dates, prescriber, patient identity, formula and quantity.' : 'Use this only when the Clinic QR cannot be read. Copy every detail exactly as printed before taking payment.'}</span>
+                          <strong>{selectedRx.entryMode === 'clinic' ? 'Scan the prescription barcode' : 'Attach the prescription copy'}</strong>
+                          <span>{selectedRx.entryMode === 'clinic' ? 'Attach a redacted copy (redact patient details) of the prescription with a clear barcode. (TIP: Apply a blank dispensing label to cover confidential patient details).' : 'Attach a redacted copy (redact patient details) of the prescription with all other prescriptions details clearly visible. (TIP: Apply a blank dispensing label to cover confidential patient details).'}</span>
                         </span>
                       </div>
                       {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
                       </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
-                        <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
+                        <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading its barcode…' : selectedRx.copyFileName ?? (selectedRx.entryMode === 'manual' ? 'Attach signed prescription' : 'Attach barcode prescription')}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded and server-verified' : 'PDF, JPG or PNG · maximum 16 MB'}</small></span>
                       </label>}
                       {selectedRx.entryMode === 'clinic' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
+                      {selectedRx.copyFileName ? (
+                        <div className="rx-document-actions">
+                          <span>Choose the upload control above to replace this copy.</span>
+                          <button type="button" className="btn btn-sm btn-danger" disabled={fileRemovalBusyRxId === selectedRx.id} onClick={() => setConfirmingFileRemoveRxId(selectedRx.id)}><Trash2 size={13} /> Remove copy</button>
+                        </div>
+                      ) : null}
+                      {confirmingFileRemoveRxId === selectedRx.id ? (
+                        <div className="rx-prescription-cancel-confirm" role="alertdialog" aria-modal="true" aria-label={`Remove ${selectedRx.copyFileName}`}>
+                          <AlertTriangle size={16} />
+                          <span><strong>Remove {selectedRx.copyFileName}?</strong><small>The encrypted copy will be removed from this draft. You can then upload a replacement.</small></span>
+                          <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingFileRemoveRxId(null)}>Keep copy</button><button type="button" className="btn btn-danger btn-sm" disabled={fileRemovalBusyRxId === selectedRx.id} onClick={() => void removePrescriptionFile(selectedRx.id)}>{fileRemovalBusyRxId === selectedRx.id ? 'Removing…' : 'Remove copy'}</button></div>
+                        </div>
+                      ) : null}
                       {selectedRx.entryMode === 'clinic' && scanError ? <ProviderStatusNotice title="Barcode not verified" detail={`${scanError} Check that the full Curaleaf Clinic barcode is sharp and visible. If it still fails, use the manual route or contact your HHH administrator.`} /> : null}
                     </div>
 
@@ -955,7 +1065,7 @@ export default function CreateOrder() {
                 <header className="rx-surface__header">
                   <div className="section-heading" style={{ margin: 0 }}>
                     <div>
-                      <p className="section-label">Step 3 · Medicines and pricing</p>
+                      <p className="section-label">Step 3. products and pricing</p>
                       <h3>
                         <ShieldCheck size={17} />
                         {selectedRx?.entryMode === 'manual'
@@ -987,21 +1097,24 @@ export default function CreateOrder() {
                         {selectedRx.items.map((item, index) => {
                           const margin = lineMargin(item);
                           const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
+                          const product = state.catalogue.find(candidate => candidate.id === item.productId);
+                          const stockLabel = product?.availability === 'out' ? 'Out of stock' : product?.availability === 'low' ? 'Low stock' : product?.availability === 'in' ? 'In stock' : 'Stock check required';
+                          const stockPill = product?.availability === 'out' ? 'pill-red' : product?.availability === 'in' ? 'pill-green' : 'pill-amber';
                           return (
                             <article className="rx-prescribed-item" key={item.productId}>
                               <header className="rx-prescribed-item__header">
                                 <span className="rx-prescribed-item__index">Medicine {String(index + 1).padStart(2, '0')}</span>
                                 <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Matched from the Curaleaf prescription</small></span>
-                                <span className={`rx-prescribed-item__margin${margin !== null && margin < 25 ? ' low' : ''}`}><strong>{margin === null ? '—' : `${margin}%`}</strong><small>{margin === null ? 'quote pending' : 'margin'}</small></span>
+                                <span className={`pill ${stockPill}`}>{stockLabel}</span>
                               </header>
                               <div className="rx-prescribed-item__pricing">
                                 <div className="rx-prescribed-item__quantity rx-prescribed-item__quantity--readonly"><small>Curaleaf pack match</small><strong>{item.qty} {item.qty === 1 ? 'pack' : 'packs'}</strong><em>Read-only</em></div>
                                 <div className="rx-prescribed-units"><small>Prescribed quantity</small><strong>{item.unitsNeededCount ?? '—'} {state.catalogue.find(product => product.id === item.productId)?.unit ?? 'units'}</strong><em>From barcode</em></div>
                                 <div className="rx-price-flow rx-price-flow--readonly" aria-label={`Pricing for ${item.name}`}>
-                                  <span className="rx-price-node rx-price-node--px"><small>Patient price</small><strong>{money(item.retail)}</strong><em>Set by Curaleaf · {money(lineRevenue(item))} line</em></span>
+                                  <span className="rx-price-node rx-price-node--px"><small>RRP</small><strong>{money(item.retail)}</strong><em>{money(lineRevenue(item))} line</em></span>
                                   <span className="rx-price-node rx-price-node--wx"><small>Wholesale cost</small><strong>{item.cost === null ? 'Quote required' : money(item.cost)}</strong><em>{item.cost === null ? 'Order-specific' : `${money(lineCost(item))} line`}</em></span>
                                 </div>
-                                <span className={`rx-prescribed-item__contribution${margin !== null && margin < 25 ? ' low' : ''}`}><small>Gross margin</small>{contribution === null ? <><strong>Pending quote</strong><em>Calculated when Curaleaf returns wholesale cost</em></> : <><strong>{contribution >= 0 ? '+' : '−'}{money(Math.abs(contribution))}</strong><em>{item.retail - item.cost! >= 0 ? '+' : '−'}{money(Math.abs(item.retail - item.cost!))} per unit</em></>}</span>
+                                <span className={`rx-prescribed-item__contribution${margin !== null && margin < 25 ? ' low' : ''}`}><small>Gross margin</small><strong>{contribution === null || margin === null ? 'Pending' : `${contribution >= 0 ? '+' : '−'}${money(Math.abs(contribution))} · ${margin}%`}</strong></span>
                               </div>
                             </article>
                           );
@@ -1022,9 +1135,9 @@ export default function CreateOrder() {
                 </header>
                 <dl className="rx-order-totals">
                   <div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div>
-                  <div><dt>Wholesale total</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div>
+                  <div><dt>Wholesale Total (excl VAT)</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div>
                   <div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div>
-                  <div><dt>Product margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${orderMargin}%`}</dd></div>
+                  <div><dt>gross margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${money(orderRevenue(activeOrder) - activeOrder.dispensingFee - orderCost(activeOrder))} · ${orderMargin}%`}</dd></div>
                 </dl>
                 <div className={`rx-checkout-readiness${quoteError ? ' has-error' : ''}`}>
                   <span className="section-label">{state.workspaceMode === 'training' ? 'Curaleaf test quote' : 'Live Curaleaf quote'}</span>
@@ -1037,9 +1150,9 @@ export default function CreateOrder() {
                   </> : null}
                 </div>
                 <div className="rx-dispensing-charge">
-                  <span><strong>Dispensing charge</strong><small>Optional pharmacy charge · patient collection only</small></span>
+                  <span><strong>Dispensing charge</strong><small>optional dispensing fee may be added. please ensure you remain competitive.</small></span>
                   <div className="rx-dispensing-presets" role="group" aria-label="Set dispensing charge">{[5, 10, 15].map(amount => <button type="button" key={amount} aria-pressed={activeOrder.dispensingFee === amount} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount })}>{money(amount)}</button>)}<button type="button" aria-pressed={activeOrder.dispensingFee === 0} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: 0 })}>No charge</button></div>
-                  <label className="rx-dispensing-custom"><span>Custom</span><span className="money-input"><span>£</span><input type="number" min="0" max="100" step="0.01" value={activeOrder.dispensingFee} onFocus={event => event.currentTarget.select()} onChange={event => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: Math.max(0, Math.min(100, Number(event.target.value))) })} aria-label="Custom dispensing charge" /></span></label>
+                  <label className="rx-dispensing-custom"><span>Custom</span><span className="money-input"><span>£</span><input type="number" min="5" max="15" step="0.01" value={activeOrder.dispensingFee || ''} onFocus={event => event.currentTarget.select()} onChange={event => { const amount = Number(event.target.value); dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: event.target.value === '' ? 0 : Math.max(5, Math.min(15, amount)) }); }} aria-label="Custom dispensing charge" /></span></label>
                 </div>
                 <div className="rx-patient-total"><span><small>Patient total</small><em>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)} products + {money(activeOrder.dispensingFee)} dispensing</em></span><strong>{money(orderRevenue(activeOrder))}</strong></div>
                 {activeOrder.redoContext?.isPaidRedo && redoSourceOrder ? (
@@ -1050,7 +1163,7 @@ export default function CreateOrder() {
                     {!paidRedoAmountMatches ? <div className="rx-redo-balance__choices">
                       <button type="button" className={`btn btn-sm ${replacementUsesNewPayment ? 'btn-primary' : 'btn-secondary'}`} disabled={redoRefundBusy} onClick={() => void beginRefundAndRecharge()}><RefreshCw size={12} /> Hold, refund & new link</button>
                       {paidRedoAmountDifference > 0 ? <button type="button" className={`btn btn-sm ${activeOrder.redoContext.priceResolution === 'absorb' ? 'btn-primary' : 'btn-secondary'}`} onClick={chooseAbsorbDifference}><Banknote size={12} /> Absorb {money(paidRedoAmountDifference)}</button> : null}
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDelete(true)}><X size={12} /> Cancel replacement</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDeleteId(activeOrder.id)}><X size={12} /> Cancel replacement</button>
                     </div> : null}
                     {replacementUsesNewPayment && redoSourceOrder.refund?.status === 'pending_confirmation' ? <div className="rx-redo-refund-confirm">
                       <span><small>Refund in Worldpay</small><code>{redoSourceOrder.refund.paymentReference}</code><em>Refund {money(redoSourceOrder.refund.amountPence / 100)}, then enter its confirmation ID.</em></span>
@@ -1070,11 +1183,16 @@ export default function CreateOrder() {
                 </details>
                 <div className="rx-payment-actions">
                   <span className="section-label">Payment route</span>
-                  <div className="rx-payment-route-toggle" aria-label="Pharmacy payment route">
-                    <div className="is-selected">{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? <ShieldCheck size={17} /> : selectedPaymentRoute === 'worldpay' ? <CreditCard size={17} /> : <Banknote size={17} />}<span><strong>{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Verified payment carry-over' : selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy payment'}</strong><small>{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? activeOrder.redoContext.priceResolution === 'absorb' ? 'Original payment retained · pharmacy pays difference' : 'No second charge to the patient' : selectedPaymentRoute === 'worldpay' ? 'Fresh hosted checkout' : 'EPOS, cash or transfer'}</small></span><CheckCircle size={14} /></div>
-                  </div>
-                  <p className="rx-payment-route-note">{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'The original payment remains linked only after the replacement prescription passes every gate.' : 'This route is controlled in Settings & Assets and becomes immutable when the order is saved.'}</p>
-                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? replacementUsesNewPayment ? 'Save & create new Worldpay link' : 'Create Worldpay request' : 'Continue with pharmacy payment'}</button>
+                  {activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? (
+                    <div className="rx-payment-route-toggle"><div className="is-selected"><ShieldCheck size={17} /><span><strong>Verified payment carry-over</strong><small>{activeOrder.redoContext.priceResolution === 'absorb' ? 'Original payment retained · pharmacy pays difference' : 'No second charge to the patient'}</small></span><CheckCircle size={14} /></div></div>
+                  ) : (
+                    <div className="rx-payment-route-toggle" role="radiogroup" aria-label="Pharmacy payment route">
+                      <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'worldpay'} disabled={!canUseWorldpay} className={selectedPaymentRoute === 'worldpay' ? 'is-selected' : ''} onClick={() => dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'worldpay' })}><CreditCard size={17} /><span><strong>Worldpay</strong><small>{canUseWorldpay ? 'Fresh hosted checkout' : 'Not configured'}</small></span>{selectedPaymentRoute === 'worldpay' ? <CheckCircle size={14} /> : null}</button>
+                      <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'manual'} className={selectedPaymentRoute === 'manual' ? 'is-selected' : ''} onClick={() => dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'manual' })}><Banknote size={17} /><span><strong>Manual payment</strong><small>EPOS, cash or transfer</small></span>{selectedPaymentRoute === 'manual' ? <CheckCircle size={14} /> : null}</button>
+                    </div>
+                  )}
+                  <p className="rx-payment-route-note">{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'The original payment remains linked only after the replacement prescription passes every gate.' : 'The selected route becomes immutable when the order enters payment.'}</p>
+                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? replacementUsesNewPayment ? 'Save & create new Worldpay link' : 'send payment link' : 'Continue with manual payment'}</button>
                 </div>
                 {!readyForPayment && <p className="rx-checkout-blocker"><AlertTriangle size={13} /><span><strong>Payment remains locked</strong>{outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}{outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}</span></p>}
               </section>

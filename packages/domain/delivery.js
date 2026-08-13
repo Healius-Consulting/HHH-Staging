@@ -23,7 +23,7 @@ function dateTimeParts(value) {
   };
 }
 
-function addWorkingDays(dateKey, numberOfDays) {
+export function addWorkingDays(dateKey, numberOfDays) {
   const cursor = new Date(`${dateKey}T12:00:00Z`);
   let remaining = numberOfDays;
   while (remaining > 0) {
@@ -34,23 +34,58 @@ function addWorkingDays(dateKey, numberOfDays) {
   return cursor.toISOString().slice(0, 10);
 }
 
-/** Curaleaf's stated delivery aim, calculated in Europe/London local time. */
-export function curaleafDeliveryExpectation(approvedAt) {
-  const approval = dateTimeParts(approvedAt);
-  if (!approval) return null;
+function nextWorkingDay(dateKey) {
+  return addWorkingDays(dateKey, 1);
+}
 
-  const isWorkingDay = approval.weekday !== 'Sat' && approval.weekday !== 'Sun';
-  const beforeCutoff = isWorkingDay && approval.minutes < CUTOFF_MINUTES;
-  const windowStart = addWorkingDays(approval.dateKey, beforeCutoff ? 1 : 2);
-  const windowEnd = beforeCutoff ? windowStart : addWorkingDays(approval.dateKey, 4);
+/**
+ * Staff-facing delivery guidance based on the time a Curaleaf order is (or will
+ * be) placed. All calendar decisions are made in Europe/London.
+ */
+export function curaleafDeliveryGuidance(value) {
+  const placement = dateTimeParts(value);
+  if (!placement) return null;
+
+  const isWeekend = placement.weekday === 'Sat' || placement.weekday === 'Sun';
+  const isFriday = placement.weekday === 'Fri';
+  const beforeCutoff = !isWeekend && placement.minutes < CUTOFF_MINUTES;
+  const scenario = isFriday
+    ? beforeCutoff ? 'DT-3' : 'DT-4'
+    : isWeekend
+      ? 'DT-4'
+      : beforeCutoff ? 'DT-1' : 'DT-2';
+  const effectiveProcessingDate = beforeCutoff
+    ? placement.dateKey
+    : nextWorkingDay(placement.dateKey);
+  const windowStart = addWorkingDays(effectiveProcessingDate, 1);
+  const windowEnd = addWorkingDays(effectiveProcessingDate, 4);
 
   return {
-    approvedDate: approval.dateKey,
-    approvedWeekday: approval.weekday,
+    scenario,
+    placedDate: placement.dateKey,
+    placedWeekday: placement.weekday,
     beforeCutoff,
+    countdownMinutes: beforeCutoff ? CUTOFF_MINUTES - placement.minutes : 0,
+    effectiveProcessingDate,
+    nextDay: windowStart,
     windowStart,
     windowEnd,
-    serviceLevel: beforeCutoff ? 'next-working-day' : 'two-to-four-working-days',
+    serviceLevel: 'next-to-fourth-working-day',
+  };
+}
+
+/** Neutral operational guidance, calculated in Europe/London local time. */
+export function curaleafDeliveryExpectation(approvedAt) {
+  const guidance = curaleafDeliveryGuidance(approvedAt);
+  if (!guidance) return null;
+
+  return {
+    approvedDate: guidance.placedDate,
+    approvedWeekday: guidance.placedWeekday,
+    beforeCutoff: guidance.beforeCutoff,
+    windowStart: guidance.windowStart,
+    windowEnd: guidance.windowEnd,
+    serviceLevel: 'next-to-fourth-working-day',
   };
 }
 

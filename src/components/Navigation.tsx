@@ -25,9 +25,9 @@ export default function Navigation() {
       label: 'Operations',
       items: [
         { key: 'home', label: 'Overview', icon: <Home size={17} /> },
-        { key: 'create', label: 'Prescriptions', shortLabel: 'Rx', icon: <FilePlus size={17} />, count: counts.create },
-        { key: 'orders', label: 'Customer Orders', shortLabel: 'Orders', icon: <Package size={17} />, count: counts.orders },
-        { key: 'patients', label: 'Patients Hub', shortLabel: 'Patients', icon: <Users size={17} />, count: counts.patients },
+        { key: 'create', label: 'Create order', shortLabel: 'Create', icon: <FilePlus size={17} />, count: counts.create },
+        { key: 'orders', label: 'Orders', shortLabel: 'Orders', icon: <Package size={17} />, count: counts.orders },
+        { key: 'patients', label: 'Patients', shortLabel: 'Patients', icon: <Users size={17} />, count: counts.patients },
       ],
     },
     {

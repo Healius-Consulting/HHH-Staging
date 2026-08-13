@@ -23,6 +23,22 @@
         { "fieldPath": "route", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "prescriptionPlacements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orderId", "order": "ASCENDING" },
+        { "fieldPath": "prescriptionId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "referralFeeEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "patientId", "order": "ASCENDING" },
+        { "fieldPath": "kind", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

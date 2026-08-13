@@ -42,8 +42,8 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacySetupStatus, getPharmacyStaff, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
-import type { AdminReferralFinanceReport, CuraleafConnectionStatus, CuraleafValidationReport, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
+import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getGoLiveReadiness, getPharmacySetupStatus, getPharmacyStaff, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import type { AdminReferralFinanceReport, CuraleafConnectionStatus, CuraleafValidationReport, GoLiveReadiness, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -524,6 +524,8 @@ export default function AdminPortal() {
 
   const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
   const [setupByOrganisation, setSetupByOrganisation] = useState<Record<string, PharmacySetupStatus>>({});
+  const [goLiveByOrganisation, setGoLiveByOrganisation] = useState<Record<string, GoLiveReadiness>>({});
+  const [goLiveBusy, setGoLiveBusy] = useState<string | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [curaleafOrganisationId, setCuraleafOrganisationId] = useState(state.organisations[0]?.id ?? '');
   const [curaleafCustomerId, setCuraleafCustomerId] = useState('');
@@ -603,7 +605,7 @@ export default function AdminPortal() {
           emailDelivery: { status: 'queued', queuedAt: now, sentAt: null, failedAt: null },
         } });
       }
-      dispatch({ type: 'ADD_TOAST', message: referralDialog.action === 'records' ? 'Call and records check saved.' : referralDialog.action === 'email' ? 'Patient email queued separately.' : referralDialog.action === 'complete' ? 'Referral completed and £50 fee recorded.' : 'Referral declined.', toastType: referralDialog.action === 'decline' ? 'warning' : 'success' });
+      dispatch({ type: 'ADD_TOAST', message: referralDialog.action === 'records' ? 'Call and records check saved.' : referralDialog.action === 'email' ? 'Patient email queued separately.' : referralDialog.action === 'complete' ? 'Referral completed. The £50 event starts at the patient’s first collected dispense.' : 'Referral declined.', toastType: referralDialog.action === 'decline' ? 'warning' : 'success' });
       setReferralDialog(null);
       setReferralNotes('');
     } catch (error) {
@@ -644,17 +646,36 @@ export default function AdminPortal() {
         };
       });
       setSetupByOrganisation(Object.fromEntries(statuses.map(status => [status.organisationId, status])));
+      setGoLiveByOrganisation(Object.fromEntries(state.organisations.map((organisation, index) => [organisation.id, { organisationId: organisation.id, companyId: null, ready: index === 0, status: organisation.status, gates: { gdprEvidence: { passed: index === 0, evidenceUrl: index === 0 ? 'https://drive.google.com/preview' : null }, curaleafLive: { passed: index === 0, validatedAt: index === 0 ? new Date().toISOString() : null, secretStored: index === 0 } } }])));
       return;
     }
-    void Promise.all(state.organisations.map(organisation => getPharmacySetupStatus(organisation.id)))
-      .then(statuses => {
-        if (!cancelled) setSetupByOrganisation(Object.fromEntries(statuses.map(status => [status.organisationId, status])));
+    void Promise.all(state.organisations.map(async organisation => ({ setup: await getPharmacySetupStatus(organisation.id), goLive: await getGoLiveReadiness(organisation.id) })))
+      .then(results => {
+        if (!cancelled) {
+          setSetupByOrganisation(Object.fromEntries(results.map(result => [result.setup.organisationId, result.setup])));
+          setGoLiveByOrganisation(Object.fromEntries(results.map(result => [result.goLive.organisationId, result.goLive])));
+        }
       })
       .catch(error => {
         if (!cancelled) setSetupError(error instanceof Error ? error.message : 'Pharmacy readiness could not be loaded.');
       });
     return () => { cancelled = true; };
   }, [state.organisations]);
+
+  const activateGoLive = async (organisationId: string) => {
+    setGoLiveBusy(organisationId);
+    setSetupError(null);
+    try {
+      const readiness = await goLiveOrganisation(organisationId);
+      setGoLiveByOrganisation(current => ({ ...current, [organisationId]: readiness }));
+      dispatch({ type: 'UPDATE_ORGANISATION', organisationId, updates: { status: 'live' } });
+      dispatch({ type: 'ADD_TOAST', message: 'Both hard gates passed. The pharmacy is now live.', toastType: 'success' });
+    } catch (error) {
+      setSetupError(error instanceof Error ? error.message : 'The pharmacy could not go live.');
+    } finally {
+      setGoLiveBusy(null);
+    }
+  };
 
   useEffect(() => {
     if (!curaleafOrganisationId || !state.organisations.some(org => org.id === curaleafOrganisationId)) {
@@ -903,7 +924,7 @@ export default function AdminPortal() {
     { label: 'Pharmacies', detail: 'Manage pharmacy organisations', group: 'Navigate', icon: <LayoutDashboard size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); } },
     { label: 'Patient onboarding', detail: 'Record patient calls and decisions', group: 'Navigate', icon: <UserCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('referrals'); } },
     { label: 'Patient register', detail: 'Cross-pharmacy patient ownership', group: 'Navigate', icon: <Users size={16} />, run: () => { setSelectedOrganisationId(null); setView('patients'); } },
-    { label: 'Referral finance', detail: '£50 referrals and £40 annual fees', group: 'Navigate', icon: <PoundSterling size={16} />, run: () => { setSelectedOrganisationId(null); setView('finance'); } },
+    { label: 'Referral finance', detail: '£50 first dispenses and £40 annual fees', group: 'Navigate', icon: <PoundSterling size={16} />, run: () => { setSelectedOrganisationId(null); setView('finance'); } },
     { label: 'Platform readiness', detail: 'Setup progress and Curaleaf activation', group: 'Navigate', icon: <ClipboardCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('setup'); } },
     { label: 'Activate Curaleaf', detail: 'Connect a pharmacy Curaleaf API account', group: 'Actions', icon: <LockKeyhole size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('curaleaf'); } },
     { label: 'Onboard pharmacy', detail: 'Create a new pharmacy workspace', group: 'Actions', icon: <Plus size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); setShowOnboarding(true); } },
@@ -1125,6 +1146,7 @@ export default function AdminPortal() {
               const submissions = submissionsByOrganisation.get(org.id) ?? [];
               const patients = crmByOrganisation.get(org.id) ?? [];
               const readiness = tenantReadiness(org.id);
+              const goLive = goLiveByOrganisation[org.id];
               return (
                 <article className="admin-org-row" key={org.id}>
                   <div className="admin-org-brand">
@@ -1139,12 +1161,14 @@ export default function AdminPortal() {
                     <span>Patients</span>
                   </div>
                   <div className="readiness-cell">
-                    <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} gates</span></div>
+                    <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
                     <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
+                    <div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>GDPR evidence</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>LIVE key</span></div>
                   </div>
                   <div className="admin-org-actions">
                     <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>
                     <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button>
+                    {org.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === org.id} onClick={() => void activateGoLive(org.id)}>{goLiveBusy === org.id ? 'Going live…' : 'Go live'}</button> : null}
                   </div>
                 </article>
               );
@@ -1156,6 +1180,7 @@ export default function AdminPortal() {
                 const submissions = submissionsByOrganisation.get(org.id) ?? [];
                 const patients = crmByOrganisation.get(org.id) ?? [];
                 const readiness = tenantReadiness(org.id);
+                const goLive = goLiveByOrganisation[org.id];
                 // Rollups: earning patients = unique patients with >=1 referral-fee event
                 const earningPatientsCount = new Set([...patients.map(p => p.email)]).size;
                 const accruedCommission = earningPatientsCount * 50;
@@ -1169,7 +1194,7 @@ export default function AdminPortal() {
                         <small>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
                       </div>
                       <div className="company-group-card__meta">
-                        <span className="pill pill-green">GDPR confirmed</span>
+                        <span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.gates.gdprEvidence.passed ? 'GDPR evidence confirmed' : 'GDPR evidence required'}</span>
                         <div>
                           <strong>{earningPatientsCount}</strong> earning patients · <strong>£{accruedCommission}</strong> accrued
                         </div>
@@ -1188,12 +1213,14 @@ export default function AdminPortal() {
                         <span>Attributed patients</span>
                       </div>
                       <div className="readiness-cell">
-                        <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} gates</span></div>
+                        <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
                         <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
+                        <div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>GDPR evidence</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>LIVE key</span></div>
                       </div>
                       <div className="admin-org-actions">
                         <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>
                         <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage branch</button>
+                        {org.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === org.id} onClick={() => void activateGoLive(org.id)}>{goLiveBusy === org.id ? 'Going live…' : 'Go live'}</button> : null}
                       </div>
                     </article>
                   </div>
@@ -1318,7 +1345,7 @@ export default function AdminPortal() {
     return (
       <>
         <div className="admin-page-actions">
-          <span className="pill pill-info"><PoundSterling size={13} /> £50 + £40 model</span>
+          <span className="pill pill-info"><PoundSterling size={13} /> £50 first dispense + £40 annual</span>
           <button type="button" className="btn btn-sm" onClick={() => setAdminFinanceRefresh(value => value + 1)} disabled={adminFinanceLoading}><RefreshCw size={13} className={adminFinanceLoading ? 'spin' : ''} /> Refresh</button>
         </div>
 
@@ -1371,19 +1398,19 @@ export default function AdminPortal() {
 
         <SummaryTiles className="admin-finance-summary" label="Referral finance summary" items={[
           { label: 'Total accrued', value: referralFeeFormatter.format(totalAccrued), detail: `${filteredReferralFeeEvents.length} fee event${filteredReferralFeeEvents.length === 1 ? '' : 's'}` },
-          { label: 'New referrals', value: referralFeeFormatter.format(newReferralEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${newReferralEvents.length} × £50` },
+          { label: 'First dispenses', value: referralFeeFormatter.format(newReferralEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${newReferralEvents.length} × £50` },
           { label: 'Annual fees', value: referralFeeFormatter.format(annualEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${annualEvents.length} × £40` },
           { label: 'Patients', value: patientsWithFees, detail: 'with accrued fees' },
         ]} />
 
         <section className="card admin-patient-table admin-finance-position">
           <div className="admin-directory-head"><div><h2>Pharmacy fee position</h2><p>Referral fees attributed to each pharmacy for the selected reporting period.</p></div><TrendingUp size={20} /></div>
-          {pharmacyPositions.length === 0 ? <div className="empty-state">No referral fees match the selected filters.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Patients</th><th>New referrals</th><th>Annual fees</th><th>Total accrued</th></tr></thead><tbody>{pharmacyPositions.map(position => <tr key={position.organisation.id}><td><button className="table-link" onClick={() => setFinanceOrganisationId(position.organisation.id)}>{position.organisation.tradingName}</button><small>GPhC {position.organisation.gphcNumber}</small></td><td>{position.patients}</td><td><strong>{referralFeeFormatter.format(position.newReferralAmount)}</strong><small>{position.newReferrals} × £50</small></td><td><strong>{referralFeeFormatter.format(position.annualFeeAmount)}</strong><small>{position.annualFees} × £40</small></td><td><strong>{referralFeeFormatter.format(position.total)}</strong></td></tr>)}</tbody></table></div>}
+          {pharmacyPositions.length === 0 ? <div className="empty-state">No referral fees match the selected filters.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Patients</th><th>First dispenses</th><th>Annual fees</th><th>Total accrued</th></tr></thead><tbody>{pharmacyPositions.map(position => <tr key={position.organisation.id}><td><button className="table-link" onClick={() => setFinanceOrganisationId(position.organisation.id)}>{position.organisation.tradingName}</button><small>GPhC {position.organisation.gphcNumber}</small></td><td>{position.patients}</td><td><strong>{referralFeeFormatter.format(position.newReferralAmount)}</strong><small>{position.newReferrals} × £50</small></td><td><strong>{referralFeeFormatter.format(position.annualFeeAmount)}</strong><small>{position.annualFees} × £40</small></td><td><strong>{referralFeeFormatter.format(position.total)}</strong></td></tr>)}</tbody></table></div>}
         </section>
 
         <section className="card admin-patient-table admin-finance-ledger">
           <div className="admin-directory-head"><div><h2>Fee event register</h2><p>Patient-level accrual history. This is an operational ledger, not an invoice or payment-receipt register.</p></div></div>
-          {filteredReferralFeeEvents.length === 0 ? <div className="empty-state">No fee events match the selected filters.</div> : <div className="table-wrap"><table><thead><tr><th>Accrued</th><th>Patient</th><th>Pharmacy</th><th>Fee event</th><th>Amount</th></tr></thead><tbody>{filteredReferralFeeEvents.map(event => <tr key={event.id}><td><strong>{event.occurredAt.toLocaleDateString('en-GB')}</strong><small>{event.occurredAt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</small></td><td><CompactPatientCell name={event.patientName} email={event.patientEmail} /></td><td>{event.pharmacyName}</td><td><span className={`pill ${event.kind === 'new-referral' ? 'pill-green' : 'pill-info'}`}>{event.kind === 'new-referral' ? 'Completed referral' : event.anniversary ? `Annual fee · year ${event.anniversary}` : 'Annual patient fee'}</span></td><td><strong>{referralFeeFormatter.format(event.amount)}</strong></td></tr>)}</tbody></table></div>}
+          {filteredReferralFeeEvents.length === 0 ? <div className="empty-state">No fee events match the selected filters.</div> : <div className="table-wrap"><table><thead><tr><th>Accrued</th><th>Patient</th><th>Pharmacy</th><th>Fee event</th><th>Amount</th></tr></thead><tbody>{filteredReferralFeeEvents.map(event => <tr key={event.id}><td><strong>{event.occurredAt.toLocaleDateString('en-GB')}</strong><small>{event.occurredAt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</small></td><td><CompactPatientCell name={event.patientName} email={event.patientEmail} /></td><td>{event.pharmacyName}</td><td><span className={`pill ${event.kind === 'new-referral' ? 'pill-green' : 'pill-info'}`}>{event.kind === 'new-referral' ? 'First collected dispense' : event.anniversary ? `Annual fee · year ${event.anniversary}` : 'Annual patient fee'}</span></td><td><strong>{referralFeeFormatter.format(event.amount)}</strong></td></tr>)}</tbody></table></div>}
         </section>
       </>
     );
@@ -1406,10 +1433,7 @@ export default function AdminPortal() {
   };
 
   const curaleafValidation: CuraleafValidationReport | undefined = curaleafResult?.validation;
-  const curaleafApproved = Boolean(
-    curaleafResult?.approved
-    || setupByOrganisation[curaleafOrganisationId]?.tasks.find(task => task.id === 'curaleaf_account')?.completed,
-  );
+  const curaleafApproved = Boolean(curaleafResult?.approved || goLiveByOrganisation[curaleafOrganisationId]?.gates.curaleafLive.passed);
 
   const submitCuraleafTestAndSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1454,14 +1478,13 @@ export default function AdminPortal() {
       const pharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
       const updatedSetup = status.setup ?? await getPharmacySetupStatus(curaleafOrganisationId);
       setSetupByOrganisation(current => ({ ...current, [curaleafOrganisationId]: updatedSetup }));
-      if (updatedSetup.completed) {
-        dispatch({ type: 'UPDATE_ORGANISATION', organisationId: curaleafOrganisationId, updates: { status: 'live' } });
-      }
+      const readiness = isLocalPortalPreview ? goLiveByOrganisation[curaleafOrganisationId] : await getGoLiveReadiness(curaleafOrganisationId);
+      if (readiness) setGoLiveByOrganisation(current => ({ ...current, [curaleafOrganisationId]: readiness }));
       dispatch({
         type: 'ADD_TOAST',
-        message: updatedSetup.completed
-          ? `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf approved — all setup complete; pharmacy is live.`
-          : `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf approved. Remaining setup steps still required before live.`,
+        message: readiness?.gates.curaleafLive.passed
+          ? `${pharmacy?.tradingName ?? 'Pharmacy'} LIVE Curaleaf key validated. The Go live button unlocks when company GDPR evidence also passes.`
+          : `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf connection approved for UAT; LIVE validation is still required.`,
         toastType: 'success',
       });
       setShowCuraleafDrawer(false);
@@ -1473,7 +1496,7 @@ export default function AdminPortal() {
   };
 
   const curaleafStatusLabel = (organisationId: string) => {
-    const approved = Boolean(setupByOrganisation[organisationId]?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
+    const approved = Boolean(goLiveByOrganisation[organisationId]?.gates.curaleafLive.passed);
     if (approved) return { label: 'Approved', pill: 'pill-green' as const };
     if (curaleafOrganisationId === organisationId && curaleafValidation?.passed) {
       return { label: 'Validated — pending approval', pill: 'pill-amber' as const };
@@ -1533,9 +1556,9 @@ export default function AdminPortal() {
             </div>
           </section>
           <section className="card admin-patient-table compliance-register">
-            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Open a pharmacy to see its evidence. Pharmacy staff update their own steps; Curaleaf validate & approve remains HHH-admin only. Completing the last required step promotes the pharmacy to live.</p></div></div>
+            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Operational steps remain visible for UAT. Only company GDPR evidence and a validated, securely stored LIVE Curaleaf key unlock the admin Go live action.</p></div></div>
             {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
-            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Setup progress</th><th>Next action</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const status = setupByOrganisation[organisation.id]; const readiness = tenantReadiness(organisation.id); const nextTask = SETUP_TASKS.find(definition => !status?.tasks.find(task => task.id === definition.id)?.completed); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>{readiness.percent}% ready</small></td><td><strong>{nextTask?.title ?? 'No action required'}</strong>{nextTask?.owner === 'hhh_admin' ? <span className="setup-owner-tag setup-owner-tag--admin">HHH admin</span> : <small>{nextTask ? 'Pharmacy team' : 'Setup complete'}</small>}</td><td><span className={`pill ${status?.completed ? 'pill-green' : 'pill-amber'}`}>{status?.completed ? 'Ready' : 'In setup'}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
+            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Operational checklist</th><th>Hard go-live gates</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const readiness = tenantReadiness(organisation.id); const goLive = goLiveByOrganisation[organisation.id]; return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>Useful for UAT; does not unlock live</small></td><td><div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>GDPR evidence</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>LIVE key</span></div></td><td><span className={`pill ${organisation.status === 'live' ? 'pill-green' : organisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{organisation.status}</span></td><td><div className="flex gap-sm"><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button>{organisation.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === organisation.id} onClick={() => void activateGoLive(organisation.id)}>{goLiveBusy === organisation.id ? 'Going live…' : 'Go live'}</button> : null}</div></td></tr>; })}</tbody></table></div>}
           </section>
         </>
       )}
@@ -1545,8 +1568,8 @@ export default function AdminPortal() {
           <section className="integration-boundary card">
             <ShieldCheck size={20} />
             <div>
-              <strong>Curaleaf validate, then approve</strong>
-              <p>Test & save runs API and PHAR-match checks. Approve Curaleaf completes that setup step only — the pharmacy goes live automatically when all six steps are done. Worldpay and payment routes stay in the pharmacy portal.</p>
+              <strong>Validate LIVE Curaleaf access</strong>
+              <p>Test & save runs the read check and stores the key securely. The pharmacy goes live only after this LIVE gate and company GDPR evidence are both confirmed by the server.</p>
             </div>
           </section>
 
@@ -1555,7 +1578,7 @@ export default function AdminPortal() {
               <div>
                 <p className="section-label">Per pharmacy</p>
                 <h2>Curaleaf connection status</h2>
-                <p>Approval completes the Curaleaf setup step. Live workspace unlocks when every required setup step is complete.</p>
+              <p>TEST validation supports UAT. Only a validated, securely stored LIVE key satisfies the technical Go-live gate.</p>
               </div>
             </div>
             {state.organisations.length === 0 ? (
@@ -1567,7 +1590,7 @@ export default function AdminPortal() {
                   <tbody>
                     {state.organisations.map(organisation => {
                       const statusMeta = curaleafStatusLabel(organisation.id);
-                      const approved = Boolean(setupByOrganisation[organisation.id]?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
+                      const approved = Boolean(goLiveByOrganisation[organisation.id]?.gates.curaleafLive.passed);
                       return (
                         <tr key={organisation.id}>
                           <td><strong>{organisation.tradingName}</strong><small>{organisation.name}</small></td>
@@ -1598,7 +1621,7 @@ export default function AdminPortal() {
     overview: { title: 'Pharmacy administration', subtitle: 'Provision pharmacy workspaces, monitor attribution and control each pharmacy’s go-live gate.' },
     referrals: { title: 'Patient onboarding decisions', subtitle: 'Record patient calls and release approved patients to their attributed pharmacy.' },
     patients: { title: 'Patients and pharmacy attribution', subtitle: 'Review the cross-pharmacy patient index and its pharmacy ownership.' },
-    finance: { title: 'HHH referral finance', subtitle: 'Track £50 completed-referral fees and recurring £40 annual patient fees.' },
+    finance: { title: 'HHH referral finance', subtitle: 'Track £50 first-dispense fees and recurring £40 annual patient fees.' },
     platform: { title: 'Platform', subtitle: 'Track pharmacy setup progress and validate each pharmacy’s Curaleaf connection.' },
   };
 

@@ -2,7 +2,7 @@ import { Plus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import WorkspacePageHeader from './WorkspacePageHeader';
 
-const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
+const SCREEN_HEADERS: Record<string, { title: string; subtitle?: string }> = {
   home: {
     title: 'Pharmacy overview',
     subtitle: 'Daily operational position, urgent follow-ups, and active pharmacy workload.',
@@ -16,8 +16,7 @@ const SCREEN_HEADERS: Record<string, { title: string; subtitle: string }> = {
     subtitle: 'Link an approved patient, authenticate the prescription, verify Curaleaf packs and pricing, then request payment.',
   },
   orders: {
-    title: 'Customer orders',
-    subtitle: 'One customer journey from payment through Curaleaf approval, delivery, collection, cancellation, rejection, or archive.',
+    title: 'Orders',
   },
   patients: {
     title: 'Patients hub',

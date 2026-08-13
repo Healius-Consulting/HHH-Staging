@@ -5,6 +5,8 @@ import { invalidateCollectionCache } from './repository.js';
 import { reconcileWorldpayPayment } from './worldpay.js';
 import type { PaymentStatus } from './types.js';
 import { autoSubmitPaidPrescriptions } from './curaleaf-reconciliation.js';
+import { messageId } from './order-flow.js';
+import { queuePatientMessage } from './notification-outbox.js';
 
 const PAYMENT_QUERY_LAG_GRACE_MS = 2 * 60 * 1_000;
 
@@ -83,7 +85,8 @@ export async function reconcileWorldpayPaymentDocument(
   const order = await orderReference.get();
   const orderData = order.data();
   const cancelledOrder = orderData?.status === 'cancelled' || Boolean(orderData?.cancellation);
-  const latePaymentAfterCancellation = cancelledOrder && provider.paymentStatus === 'paid';
+  const supersededPayment = payment.status === 'expired' && Boolean(payment.supersededAt);
+  const latePaymentAfterCancellation = (cancelledOrder || supersededPayment) && provider.paymentStatus === 'paid';
   const effectivePaymentStatus: PaymentStatus = latePaymentAfterCancellation ? 'refund_required' : provider.paymentStatus;
   const batch = firestore.batch();
   batch.update(paymentDocument.ref, {
@@ -99,10 +102,14 @@ export async function reconcileWorldpayPaymentDocument(
   const shouldUpdateOrder = effectivePaymentStatus !== 'pending'
     && (effectivePaymentStatus === 'paid' || effectivePaymentStatus === 'refund_required' || orderData?.paymentId === paymentDocument.id);
   if (shouldUpdateOrder) {
+    const prescriptionFlow = orderData?.prescriptionFlow && typeof orderData.prescriptionFlow === 'object'
+      ? orderData.prescriptionFlow as Record<string, Record<string, unknown>>
+      : {};
     batch.update(orderReference, {
       paymentStatus: effectivePaymentStatus,
       worldpayPaymentId: provider.paymentId,
       paymentTransactionReference: transactionReference,
+      ...(effectivePaymentStatus === 'paid' ? { prescriptionFlow: Object.fromEntries(Object.entries(prescriptionFlow).map(([key, value]) => [key, { ...value, state: value.state === 'AWAITING_PAYMENT' ? 'PAID' : value.state }])) } : {}),
       ...(latePaymentAfterCancellation ? {
         'cancellation.status': 'refund_required',
         'cancellation.paymentLinkStatus': 'late_payment_refund_required',
@@ -120,6 +127,7 @@ export async function reconcileWorldpayPaymentDocument(
       status: 'open',
       title: 'Cancelled order was paid',
       detail: 'Worldpay settled after the order was cancelled. Refund the patient and record the provider reference.',
+      cause: supersededPayment ? 'superseded_payment_link' : 'cancelled_order',
       paymentReference: provider.paymentId ?? transactionReference,
       createdAt: updatedAt,
       updatedAt,
@@ -129,6 +137,28 @@ export async function reconcileWorldpayPaymentDocument(
   invalidateCollectionCache('payments', paymentDocument.id);
   if (shouldUpdateOrder) invalidateCollectionCache('orders', orderId);
   if (effectivePaymentStatus === 'paid' && !latePaymentAfterCancellation) {
+    const patientId = typeof orderData?.patientId === 'string' ? orderData.patientId : '';
+    if (patientId) {
+      const [patientSnapshot, organisationSnapshot] = await Promise.all([
+        firestore.collection('patients').doc(patientId).get(),
+        firestore.collection('organisations').doc(organisationId).get(),
+      ]);
+      const patient = patientSnapshot.data();
+      const organisation = organisationSnapshot.data();
+      if (typeof patient?.email === 'string') {
+        await queuePatientMessage({
+          id: messageId([orderId, paymentDocument.id, 'confirmation']),
+          organisationId,
+          orderId,
+          paymentId: paymentDocument.id,
+          kind: 'patient_payment_confirmation',
+          recipient: patient.email,
+          channel: 'email',
+          deliveryOwner: organisation?.paymentMessageOwner === 'platform' ? 'platform' : 'worldpay',
+          templateData: { firstName: String(patient.firstName ?? 'Patient'), amountPence: payment.amountPence, reference: provider.paymentId ?? transactionReference },
+        });
+      }
+    }
     try {
       await autoSubmitPaidPrescriptions(organisationId, orderId);
     } catch (error) {
@@ -150,11 +180,12 @@ export async function reconcileWorldpayPaymentDocument(
 }
 
 export async function reconcilePendingWorldpayPayments(limit = 200) {
-  const [pendingSnapshot, cancelledSnapshot] = await Promise.all([
+  const [pendingSnapshot, cancelledSnapshot, expiredSnapshot] = await Promise.all([
     firestore.collection('payments').where('route', '==', 'worldpay').where('status', '==', 'pending').limit(limit).get(),
     firestore.collection('payments').where('route', '==', 'worldpay').where('status', '==', 'cancelled').limit(limit).get(),
+    firestore.collection('payments').where('route', '==', 'worldpay').where('status', '==', 'expired').limit(limit).get(),
   ]);
-  const candidates = [...pendingSnapshot.docs, ...cancelledSnapshot.docs].slice(0, limit);
+  const candidates = [...pendingSnapshot.docs, ...cancelledSnapshot.docs, ...expiredSnapshot.docs].slice(0, limit);
   const summary = { checked: candidates.length, reconciled: 0, pending: 0, attention: 0, errors: 0 };
   for (const document of candidates) {
     try {

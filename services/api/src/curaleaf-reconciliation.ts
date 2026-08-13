@@ -17,6 +17,7 @@ import { invalidateCollectionCache } from './repository.js';
 import { activatePatientForOrder } from './patient-finance.js';
 import type { FulfilmentStatus } from './types.js';
 import { loadUploadedPrescriptionFile } from './prescription-file.js';
+import { recordPlacementLedgerEvent, satisfiesMarginFloor } from './placement-engine.js';
 
 type OperationRecord = {
   organisationId?: unknown;
@@ -33,6 +34,8 @@ type OperationRecord = {
   prescriberId?: unknown;
   prescriberPin?: unknown;
   prescriptionItems?: unknown;
+  autoPlacement?: unknown;
+  manualPlacementRequested?: unknown;
 };
 
 type SavedPrescription = {
@@ -65,7 +68,7 @@ function normalisedPlacementQuote(quote: z.infer<typeof placementQuoteSchema>) {
   };
 }
 
-async function reconciliationQuoteGate(organisationId: string, orderId: string, order: Record<string, unknown>, items: Array<{ packId: string; quantity: number }>) {
+async function reconciliationQuoteGate(organisationId: string, orderId: string, order: Record<string, unknown>, items: Array<{ packId: string; quantity: number }>, prescriptionId?: string) {
   const raw = await curaleafRequest<unknown>(organisationId, '/v1/quotes/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
   const latestResult = placementQuoteSchema.safeParse(raw);
   const baselineResult = placementQuoteSchema.safeParse(order.pricingQuote);
@@ -89,6 +92,43 @@ async function reconciliationQuoteGate(organisationId: string, orderId: string, 
   const review = order.quoteReview && typeof order.quoteReview === 'object' ? order.quoteReview as Record<string, unknown> : {};
   const outOfStock = latest.items.some(item => !item.inStock);
   const type = outOfStock ? 'out_of_stock' : differences.some(item => item.category === 'patient_price') ? 'patient_price_changed' : 'supplier_cost_changed';
+  if (!outOfStock && type === 'supplier_cost_changed' && prescriptionId) {
+    const placementSnapshot = await firestore.collection('prescriptionPlacements')
+      .where('orderId', '==', orderId)
+      .where('prescriptionId', '==', prescriptionId)
+      .limit(1)
+      .get();
+    const placementDocument = placementSnapshot.docs[0];
+    if (placementDocument) {
+      const placement = placementDocument.data();
+      const latestByPack = new Map(latest.items.map(item => [item.packId, item]));
+      const ledgerEvents: Array<Parameters<typeof recordPlacementLedgerEvent>[0]> = [];
+      let held = false;
+      const updatedLines = (Array.isArray(placement.lines) ? placement.lines as Array<Record<string, unknown>> : []).map(line => {
+        const latestLine = latestByPack.get(String(line.packId));
+        if (!latestLine) return line;
+        const previousWholesale = Number(line.linkSendWholesalePence ?? line.latestWholesalePence ?? 0);
+        const latestWholesale = latestLine.wholesalePence * latestLine.quantity;
+        if (latestWholesale <= previousWholesale) {
+          ledgerEvents.push({ pharmacyId: organisationId, orderId, prescriptionId, lineId: String(line.id), eventType: 'margin_improved', actor: 'system', details: { decision: latestWholesale < previousWholesale ? 'lower_cost' : 'unchanged_cost', previousWholesalePence: previousWholesale, latestWholesalePence: latestWholesale } });
+          return { ...line, latestWholesalePence: latestWholesale, placementState: 'PENDING_PLACEMENT', updatedAt: nowIso() };
+        }
+        const passes = satisfiesMarginFloor(Number(line.lineMedicineRevenuePence ?? line.fixedPatientPricePence ?? 0), Number(line.allocatedDispensingFeePence ?? 0), latestWholesale);
+        if (!passes) held = true;
+        ledgerEvents.push({ pharmacyId: organisationId, orderId, prescriptionId, lineId: String(line.id), eventType: passes ? 'margin_improved' : 'held_price', actor: 'system', details: { decision: passes ? 'higher_cost_margin_passed' : 'higher_cost_margin_failed', previousWholesalePence: previousWholesale, latestWholesalePence: latestWholesale, marginFloorPercent: 15 } });
+        return { ...line, latestWholesalePence: latestWholesale, placementState: passes ? 'PENDING_PLACEMENT' : 'HELD_PRICE', holdEpisodeStartedAt: passes ? null : String(line.holdEpisodeStartedAt ?? nowIso()), updatedAt: nowIso() };
+      });
+      await Promise.all(ledgerEvents.map(event => recordPlacementLedgerEvent(event)));
+      await placementDocument.ref.set({ lines: updatedLines, overallState: held ? 'HELD_PRICE' : 'PENDING_PLACEMENT', updatedAt: nowIso() }, { merge: true });
+      if (held) {
+        await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${prescriptionId}.state`]: 'HELD_PRICE', [`prescriptionFlow.${prescriptionId}.updatedAt`]: nowIso(), integrationStatus: 'quote_review_required', updatedAt: nowIso() }, { merge: true });
+        await ensureSupportCase(organisationId, orderId, 'supplier_exception', 'A supplier-cost increase fell below the configured 15% line margin floor.', prescriptionId);
+        return false;
+      }
+      await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${prescriptionId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${prescriptionId}.updatedAt`]: nowIso(), updatedAt: nowIso() }, { merge: true });
+      return true;
+    }
+  }
   const approved = differences.length === 0 && !outOfStock || type === 'supplier_cost_changed' && review.status === 'approved' && review.approvedFingerprint === fingerprint;
   if (approved) return true;
   const quoteReview = { status: type === 'patient_price_changed' ? 'recreate_required' : 'required', type, fingerprint, latestQuote: latestResult.data, differences, checkedAt: nowIso() };
@@ -153,6 +193,41 @@ function fulfilmentStatus(purchaseOrder: CuraleafPurchaseOrderRecord, shipments:
   if (purchaseOrder.state === 'FULLY_ALLOCATED') return 'supplier_allocated';
   if (purchaseOrder.state === 'CANCELLED') return 'exception';
   return 'supplier_processing';
+}
+
+function count(value: unknown) {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function normalisedFulfilmentLines(purchaseOrder: CuraleafPurchaseOrderRecord, shipments: CuraleafShipmentRecord[], prior: unknown) {
+  const priorByProduct = new Map((Array.isArray(prior) ? prior as Array<Record<string, unknown>> : []).map(line => [String(line.productId ?? ''), line]));
+  return purchaseOrder.items.flatMap((raw, index) => {
+    const productId = typeof raw.productId === 'string' ? raw.productId : '';
+    if (!productId) return [];
+    const ordered = count(raw.packsOrderedCount ?? raw.count);
+    const allocated = count(raw.packsAllocatedCount);
+    const returnedByPo = count(raw.packsReturnedCount);
+    const shipped = shipments.reduce((total, shipment) => total + shipment.items
+      .filter(item => item.productId === productId)
+      .reduce((sum, item) => sum + count(item.packCount), 0), 0);
+    const returnedByShipments = shipments.reduce((total, shipment) => total + shipment.items
+      .filter(item => item.productId === productId)
+      .reduce((sum, item) => sum + count(item.packsReturnedCount), 0), 0);
+    const existing = priorByProduct.get(productId);
+    const returned = Math.max(returnedByPo, returnedByShipments);
+    return [{
+      lineId: String(existing?.lineId ?? createHash('sha256').update(`${purchaseOrder.id}:${productId}:${index}`).digest('hex').slice(0, 32)),
+      productId,
+      ordered,
+      allocated,
+      shipped,
+      returned,
+      received: count(existing?.received),
+      collected: count(existing?.collected),
+      backordered: Math.max(0, shipped - returned) < ordered,
+    }];
+  });
 }
 
 async function saveShipments(organisationId: string, shipments: CuraleafShipmentRecord[]) {
@@ -330,11 +405,16 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     return 'attention';
   }
   if (reconciliation.status === 'purchase_order_confirmation_pending') {
-    const quoteApproved = await reconciliationQuoteGate(operation.organisationId, operation.orderId, order, input.items);
+    const quoteApproved = await reconciliationQuoteGate(operation.organisationId, operation.orderId, order, input.items, typeof operation.subOrderId === 'string' ? operation.subOrderId : undefined);
     if (!quoteApproved) {
       await document.ref.update({ status: 'quote_review_required', errorCode: 'QUOTE_REVIEW_REQUIRED', lastCheckedAt: nowIso(), updatedAt: nowIso() });
       invalidateCollectionCache('orders', operation.orderId);
       return 'attention';
+    }
+    if (operation.autoPlacement === false && operation.manualPlacementRequested !== true) {
+      await document.ref.update({ status: 'manual_placement_required', errorCode: null, lastCheckedAt: nowIso(), updatedAt: nowIso() });
+      if (typeof operation.subOrderId === 'string') await orderRef.set({ [`prescriptionFlow.${operation.subOrderId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${operation.subOrderId}.manualPlaceRequired`]: true, updatedAt: nowIso() }, { merge: true });
+      return 'manual_placement_required';
     }
     reconciliation = clinicOperation
       ? await reconcileClinicPrescription(operation.organisationId, {
@@ -437,6 +517,31 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     integrationStatus: purchaseOrder.state === 'CANCELLED' ? 'attention' : 'submitted',
     updatedAt: nowIso(),
   });
+  if (subOrderKey) {
+    const flow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object' ? order.prescriptionFlow as Record<string, Record<string, unknown>> : {};
+    const currentFlow = flow[subOrderKey] ?? {};
+    const lines = normalisedFulfilmentLines(purchaseOrder, shipments, currentFlow.lines);
+    const protectedFlowState = ['READY_FOR_COLLECTION', 'COLLECTED', 'HELD_FOR_RENEWAL'].includes(String(currentFlow.state));
+    await orderRef.set({
+      [`prescriptionFlow.${subOrderKey}`]: {
+        ...currentFlow,
+        id: subOrderKey,
+        state: purchaseOrder.state === 'CANCELLED' ? 'HELD_STOCK' : protectedFlowState ? currentFlow.state : 'PLACED',
+        purchaseOrderId: purchaseOrder.id,
+        manualPlaceRequired: false,
+        shipmentIds,
+        lines,
+        placedAt: String(currentFlow.placedAt ?? nowIso()),
+        updatedAt: nowIso(),
+      },
+    }, { merge: true });
+    const placementSnapshot = await firestore.collection('prescriptionPlacements').where('orderId', '==', operation.orderId).where('prescriptionId', '==', subOrderKey).limit(1).get();
+    const placement = placementSnapshot.docs[0];
+    if (placement) {
+      const nextLines = (Array.isArray(placement.data().lines) ? placement.data().lines as Array<Record<string, unknown>> : []).map(line => ({ ...line, placementState: purchaseOrder.state === 'CANCELLED' ? 'HELD_STOCK' : 'PLACED', updatedAt: nowIso() }));
+      await placement.ref.set({ lines: nextLines, overallState: purchaseOrder.state === 'CANCELLED' ? 'HELD_STOCK' : 'PLACED', purchaseOrderId: purchaseOrder.id, placedAt: String(placement.data().placedAt ?? nowIso()), updatedAt: nowIso() }, { merge: true });
+    }
+  }
   if (purchaseOrder.state === 'CANCELLED') {
     await ensureSupportCase(operation.organisationId, operation.orderId, 'supplier_exception', 'Curaleaf confirmed that the purchase order is cancelled. Review the patient payment and next action.', reconciliation.prescriptionId, purchaseOrder.id);
   }
@@ -535,6 +640,14 @@ async function ensureManualOperationRegistered(document: QueryDocumentSnapshot, 
   }
   const file = await loadUploadedPrescriptionFile(operation.organisationId, prescription.fileId);
   const registered = await registerManualPrescription(operation.organisationId, { ...prescription, file });
+  const directoryMatches = await firestore.collection('prescriberDirectory').where('pin', '==', prescription.prescriber.pin).limit(1).get();
+  const directoryDocument = directoryMatches.docs[0];
+  if (directoryDocument) {
+    const existingIds = directoryDocument.data().curaleafIds && typeof directoryDocument.data().curaleafIds === 'object'
+      ? directoryDocument.data().curaleafIds as Record<string, string>
+      : {};
+    await directoryDocument.ref.set({ curaleafIds: { ...existingIds, [operation.organisationId]: registered.prescriberId }, updatedAt: nowIso() }, { merge: true });
+  }
   await document.ref.update({
     prescriptionId: registered.prescriptionId,
     prescriptionState: registered.prescriptionState,
@@ -579,7 +692,7 @@ async function seedManualOrderOperations(orderDocument: QueryDocumentSnapshot | 
         subOrderId: prescription.fileId,
         integration: 'curaleaf',
         kind: 'manual',
-        autoPlacement: true,
+        autoPlacement: order.autoPlacementEnabled !== false,
         trigger: 'manual_prescription_saved',
         customerReference: `HHH-${orderDocument.id.slice(0, 72)}-${referenceHash}`,
         status: 'registering_prescription',
@@ -624,7 +737,7 @@ async function seedPaidClinicOrder(orderDocument: QueryDocumentSnapshot | Docume
         subOrderId: prescription.fileId,
         integration: 'curaleaf',
         kind: 'barcode',
-        autoPlacement: true,
+        autoPlacement: order.autoPlacementEnabled !== false,
         trigger: 'payment_confirmed',
         customerReference,
         status: 'awaiting_clinic_prescription',
@@ -686,7 +799,7 @@ export async function autoSubmitPaidPrescriptions(organisationId: string, orderI
     return data.organisationId === organisationId
       && data.integration === 'curaleaf'
       && ['manual', 'barcode'].includes(String(data.kind))
-      && ['registering_prescription', 'awaiting_payment', 'awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'reconciliation_required'].includes(String(data.status));
+      && ['registering_prescription', 'awaiting_payment', 'awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'reconciliation_required', 'manual_placement_required'].includes(String(data.status));
   });
   const summary: Record<string, number> = { seeded, checked: candidates.length };
   for (const document of candidates) {

@@ -7,7 +7,7 @@ interface WorkspacePageHeaderProps {
   section: string;
   context: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   contextControl?: ReactNode;
   actions?: ReactNode;
   commandLabel?: string;
@@ -26,7 +26,7 @@ export default function WorkspacePageHeader({ section, context, title, subtitle,
           <ChevronRight size={12} />{context}
         </div>
         <h1>{title}</h1>
-        <p>{subtitle}</p>
+        {subtitle ? <p>{subtitle}</p> : null}
       </div>
       <div className="app-header__actions">
         {actions}

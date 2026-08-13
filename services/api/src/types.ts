@@ -19,6 +19,7 @@ export type PlacementState =
   | 'HELD_STOCK'
   | 'CANCELLATION_PENDING_REFUND'
   | 'PLACED'
+  | 'HELD_FOR_RENEWAL'
   | 'CANCELLED_REFUNDED';
 
 export type FulfilmentStatus =
@@ -32,7 +33,7 @@ export type FulfilmentStatus =
   | 'collected'
   | 'exception';
 
-export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'refund_required' | 'refunded' | 'reconciliation_required';
+export type PaymentStatus = 'pending' | 'awaiting_manual_payment' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'refund_required' | 'refunded' | 'reconciliation_required';
 
 export interface PortalOrganisation {
   id: string;
@@ -64,6 +65,7 @@ export interface PortalOrganisation {
   defaultPaymentRoute?: 'manual' | 'worldpay';
   curaleafTestValidation?: CuraleafValidationRecord | null;
   curaleafLiveValidation?: CuraleafValidationRecord | null;
+  curaleafLiveSecretStoredAt?: string | null;
   gdprComplianceFlag?: boolean;
 }
 

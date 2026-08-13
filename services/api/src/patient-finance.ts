@@ -97,10 +97,6 @@ export async function completeReferral(submissionId: string, actorUid: string, n
     const effectiveCompletedAt = typeof current.referral?.completedAt === 'string'
       ? current.referral.completedAt as string
       : completedAt;
-    const feeRef = firestore.collection('referralFeeEvents').doc(
-      feeEventId(patientId, 'new_referral', effectiveCompletedAt.slice(0, 10)),
-    );
-    const feeSnapshot = await transaction.get(feeRef);
     const conditions = Array.isArray(current.conditions)
       ? [...new Set(current.conditions.map(normaliseConditionId).filter((value): value is ConditionId => Boolean(value)))].slice(0, 3)
       : [];
@@ -154,29 +150,69 @@ export async function completeReferral(submissionId: string, actorUid: string, n
       reviewedBy: actorUid,
       updatedAt: completedAt,
     }, { merge: true });
-    if (!feeSnapshot.exists) {
-      transaction.create(feeRef, {
-        id: feeRef.id,
-        schemaVersion: 1,
-        organisationId,
-        patientId,
-        referralSubmissionId: submissionId,
-        kind: 'new_referral',
-        amountPence: REFERRAL_FEE_PENCE,
-        currency: 'GBP',
-        dueDate: effectiveCompletedAt.slice(0, 10),
-        occurredAt: effectiveCompletedAt,
-        createdAt: completedAt,
-        createdBy: actorUid,
-      });
-    }
-    return { patientId, referralCompletedAt: effectiveCompletedAt, feeEventId: feeRef.id };
+    return { patientId, referralCompletedAt: effectiveCompletedAt, feeEventId: null };
   });
 
   invalidateCollectionCache('eligibilitySubmissions', submissionId);
   invalidateCollectionCache('patients', result.patientId);
-  invalidateCollectionCache('referralFeeEvents', result.feeEventId);
   return result;
+}
+
+function addMonthsClamped(value: Date, months: number) {
+  const year = value.getUTCFullYear();
+  const month = value.getUTCMonth() + months;
+  const day = value.getUTCDate();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(year, month, Math.min(day, lastDay), 12, 0, 0, 0));
+}
+
+export async function recordCollectedDispense(orderId: string, actorUid: string, dispenseKey = orderId, collectedAt = nowIso()) {
+  const orderRef = firestore.collection('orders').doc(orderId);
+  const result = await firestore.runTransaction(async transaction => {
+    const orderSnapshot = await transaction.get(orderRef);
+    if (!orderSnapshot.exists) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+    const order = orderSnapshot.data()!;
+    const patientId = String(order.patientId ?? '');
+    if (!patientId) throw new HttpError(409, 'The order has no patient.', 'PATIENT_REQUIRED');
+    const patientRef = firestore.collection('patients').doc(patientId);
+    const feeRef = firestore.collection('referralFeeEvents').doc(feeEventId(patientId, 'new_referral', collectedAt.slice(0, 10)));
+    const dispenseRef = firestore.collection('dispenseEvents').doc(stableId(orderId, dispenseKey));
+    const historicalFeeQuery = firestore.collection('referralFeeEvents').where('patientId', '==', patientId).where('kind', '==', 'new_referral').limit(1);
+    const [patientSnapshot, historicalFeeSnapshot, dispenseSnapshot] = await Promise.all([
+      transaction.get(patientRef),
+      transaction.get(historicalFeeQuery),
+      transaction.get(dispenseRef),
+    ]);
+    if (!patientSnapshot.exists) throw new HttpError(404, 'Patient not found.', 'NOT_FOUND');
+    if (dispenseSnapshot.exists) return { patientId, firstOrder: false, feeCreated: false, idempotent: true };
+    const patient = patientSnapshot.data()!;
+    const firstOrder = !patient.firstDispensedOrderId || patient.firstDispensedOrderId === orderId;
+    const collectionDate = new Date(collectedAt);
+    const nextApptEst = addMonthsClamped(collectionDate, firstOrder ? 1 : 3).toISOString();
+    transaction.create(dispenseRef, { id: dispenseRef.id, schemaVersion: 1, organisationId: order.organisationId, patientId, orderId, dispenseKey, collectedAt, actorUid, firstOrder, createdAt: collectedAt });
+    transaction.set(patientRef, { status: 'active', retentionStatus: 'active', lastDispensedAt: collectedAt, nextApptEst, firstDispensedOrderId: patient.firstDispensedOrderId ?? orderId, updatedAt: collectedAt }, { merge: true });
+    if (historicalFeeSnapshot.empty) transaction.create(feeRef, { id: feeRef.id, schemaVersion: 2, organisationId: order.organisationId, patientId, referralSubmissionId: patient.sourceReferralId ?? null, kind: 'new_referral', trigger: 'first_collected_dispense', orderId, amountPence: REFERRAL_FEE_PENCE, currency: 'GBP', dueDate: collectedAt.slice(0, 10), occurredAt: collectedAt, createdAt: collectedAt, createdBy: actorUid });
+    return { patientId, firstOrder, feeCreated: historicalFeeSnapshot.empty, idempotent: false, nextApptEst };
+  });
+  invalidateCollectionCache('patients', result.patientId);
+  if (result.feeCreated) invalidateCollectionCache('referralFeeEvents');
+  return result;
+}
+
+export async function updatePatientRetentionStates(asOf = new Date()) {
+  const snapshot = await firestore.collection('patients').where('status', '==', 'active').limit(2_000).get();
+  const summary = { checked: snapshot.size, atRisk: 0, inactive: 0 };
+  for (const document of snapshot.docs) {
+    const patient = document.data();
+    const due = Date.parse(String(patient.nextApptEst ?? ''));
+    if (!Number.isFinite(due) || asOf.getTime() <= due) continue;
+    const inactive = asOf.getTime() >= due + 28 * 24 * 60 * 60 * 1_000;
+    await document.ref.set({ status: inactive ? 'inactive' : 'active', retentionStatus: inactive ? 'inactive' : 'at_risk', retentionUpdatedAt: asOf.toISOString(), updatedAt: asOf.toISOString() }, { merge: true });
+    if (inactive) summary.inactive += 1;
+    else summary.atRisk += 1;
+  }
+  if (summary.atRisk || summary.inactive) invalidateCollectionCache('patients');
+  return summary;
 }
 
 export async function activatePatientForOrder(orderId: string) {

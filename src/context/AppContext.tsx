@@ -1,11 +1,12 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
-import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getPortalEligibilitySubmissions, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
-import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
+import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getOrderDrafts, getPortalEligibilitySubmissions, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
+import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderDraftRecord, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
+import { nextDraftIdAfterDeletion, preferredDraftPaymentRoute } from '../utils/createOrderDraft';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -17,7 +18,7 @@ export interface CatalogueItem {
   name: string;
   cost: number | null; // Order-specific wholesale price from a Curaleaf quote.
   retail: number;      // Curaleaf's authoritative patient pack price.
-  availability: 'unknown' | 'in' | 'out';
+  availability: 'unknown' | 'in' | 'low' | 'out';
   type: 'oil' | 'flos' | 'capsule' | 'lozenge' | 'vape' | 'other';
   unit?: string;
   packSize?: number;
@@ -66,8 +67,19 @@ export interface GoodsReceiptLine {
   quantityReceived: number;
 }
 
+export interface PrescriptionFulfilmentLine {
+  productId: string;
+  ordered: number;
+  shipped: number;
+  received: number;
+  collected: number;
+  returned: number;
+  backordered: boolean;
+}
+
 export interface Prescription {
   id: number;
+  backendId?: string;
   entryMode: 'clinic' | 'manual';
   clinicScanId?: string;
   curaleafPrescriptionId?: string;
@@ -86,17 +98,22 @@ export interface Prescription {
   fileId?: string | null;
   items: LineItem[];
   placed: boolean;
+  placedAt?: Date | string | null;
   poRef: string | null;
   status: RxStatus;
   invoiceRef: string | null;
   trackingNumber: string | null;
   carrier: string | null;
   shipmentId?: string;
+  shipmentIds?: string[];
+  shipmentStates?: Record<string, string>;
+  manualPlaceRequired?: boolean;
   receivedItems?: GoodsReceiptLine[];
   goodsInAt?: Date | string | null;
   goodsInBy?: string | null;
   goodsInNote?: string | null;
   readyAt?: Date | string | null;
+  fulfilmentLines?: PrescriptionFulfilmentLine[];
 }
 
 export type PaymentStatus = 'none' | 'sent' | 'paid' | 'cancelled';
@@ -136,10 +153,13 @@ export function orderReference(order: PatientOrder) {
 export interface PatientOrder {
   id: number;
   backendId?: string;
+  draftId?: string;
   organisationId: string;
   patientId: string | null;
   date: Date;
   dispensingFee: number;
+  paymentRoute?: 'manual' | 'worldpay';
+  autoPlacementEnabled?: boolean;
   payment: {
     status: PaymentStatus;
     route: PaymentRoute;
@@ -581,7 +601,7 @@ export type Action =
   | { type: 'SET_CATALOGUE_LOADING' }
   | { type: 'SET_CATALOGUE'; catalogue: CatalogueItem[]; updatedAt: string }
   | { type: 'SET_CATALOGUE_ERROR'; message: string }
-  | { type: 'APPLY_CURALEAF_QUOTE'; items: Array<{ productId: string; wholesalePrice: number; patientPrice: number; inStock: boolean }> }
+  | { type: 'APPLY_CURALEAF_QUOTE'; items: Array<{ productId: string; wholesalePrice: number; patientPrice: number; inStock: boolean; stockStatus?: 'in_stock' | 'low_stock' | 'out_of_stock' }> }
   | { type: 'SYNC_CRM_PATIENTS'; organisationId: string; patients: CRMPatient[] }
   | { type: 'SYNC_PORTAL_ORDERS'; organisationId: string; orders: PatientOrder[] }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
@@ -599,6 +619,7 @@ export type Action =
   | { type: 'SET_ACTIVE_ORDER'; orderId: number }
   | { type: 'SET_ORDER_PATIENT'; orderId: number; patientId: string }
   | { type: 'SET_ORDER_DISPENSING_FEE'; orderId: number; amount: number }
+  | { type: 'SET_ORDER_PAYMENT_ROUTE'; orderId: number; paymentRoute: 'manual' | 'worldpay' }
   | { type: 'ADD_RX'; orderId: number }
   | { type: 'SET_RX_ENTRY_MODE'; orderId: number; rxId: number; mode: 'clinic' | 'manual' }
   | { type: 'SET_RX_PRESCRIBER'; orderId: number; rxId: number; prescriber: string }
@@ -606,6 +627,7 @@ export type Action =
   | { type: 'SET_RX_METADATA'; orderId: number; rxId: number; updates: Partial<Pick<Prescription, 'prescriberPin' | 'prescriberGmcNumber' | 'prescriberGphcNumber' | 'serialNumber' | 'issueDate'>> }
   | { type: 'SET_RX_COPY'; orderId: number; rxId: number; fileName: string }
   | { type: 'SET_RX_FILE'; orderId: number; rxId: number; fileName: string; fileId: string | null }
+  | { type: 'CLEAR_RX_FILE'; orderId: number; rxId: number }
   | {
       type: 'APPLY_CURALEAF_SCAN';
       orderId: number;
@@ -627,6 +649,7 @@ export type Action =
       };
     }
   | { type: 'SET_ORDER_BACKEND_ID'; orderId: number; backendId: string }
+  | { type: 'SET_ORDER_DRAFT_ID'; orderId: number; draftId: string }
   | { type: 'SYNC_ORDER_PATIENT_PRICES'; orderId: number; items: Array<{ productId: string; patientPrice: number }> }
   | { type: 'CONFIRM_CURALEAF_SUBMISSION'; orderId: number; rxId: number; customerReference: string }
   | { type: 'ADD_ITEM_TO_RX'; orderId: number; rxId: number; item: LineItem }
@@ -654,6 +677,7 @@ export type Action =
   | { type: 'RECORD_GOODS_RECEIPT'; orderId: number; rxId: number; lines: GoodsReceiptLine[]; note?: string }
   | { type: 'MARK_READY_FOR_COLLECTION'; orderId: number; rxId: number }
   | { type: 'HANDOVER_TO_PATIENT'; orderId: number; rxId: number }
+  | { type: 'HANDOUT_ORDER'; orderId: number }
   // Toasts
   | { type: 'ADD_TOAST'; message: string; toastType?: 'success' | 'info' | 'warning' | 'error' }
   | { type: 'REMOVE_TOAST'; id: string }
@@ -670,9 +694,9 @@ function blankRx(id: number): Prescription {
   };
 }
 
-function blankOrder(id: number, patientId: string | null, organisationId: string): PatientOrder {
+function blankOrder(id: number, patientId: string | null, organisationId: string, paymentRoute: 'manual' | 'worldpay' = 'manual'): PatientOrder {
   return {
-    id, organisationId, patientId, date: new Date(), dispensingFee: 0,
+    id, organisationId, patientId, date: new Date(), dispensingFee: 0, paymentRoute,
     payment: { status: 'none', route: null, amount: 0, ref: null, sentAt: null, paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions: [blankRx(1)],
   };
@@ -699,8 +723,16 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
   const prescriptions: Prescription[] = record.prescriptions?.length
     ? record.prescriptions.map((prescription, rxIndex) => {
         const curaleaf = record.curaleafSubOrders?.[prescription.fileId] ?? record.curaleaf;
+        const flowKey = prescription.id ?? prescription.fileId;
+        const flow = record.prescriptionFlow?.[flowKey];
+        const flowStatus: RxStatus | null = flow?.state === 'COLLECTED' ? 'collected'
+          : flow?.state === 'READY_FOR_COLLECTION' ? 'ready'
+            : flow?.state === 'PLACED' ? 'approved'
+              : null;
+        const shipmentIds = flow?.shipmentIds?.length ? flow.shipmentIds : curaleaf?.shipmentIds ?? [];
         return {
           id: orderId * 100 + rxIndex + 1,
+          backendId: flowKey,
           entryMode: prescription.clinicScanId ? 'clinic' : 'manual',
           clinicScanId: prescription.clinicScanId,
           curaleafPrescriptionId: prescription.curaleafPrescriptionId,
@@ -716,13 +748,26 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           copyFileName: null,
           fileId: prescription.fileId,
           items: orderItems(prescription.items),
-          placed: curaleaf?.status === 'purchase_order_submitted',
-          poRef: curaleaf?.customerReference ?? null,
-          status: portalPrescriptionStatus({ curaleaf, fulfilmentStatus: record.fulfilmentStatus }),
+          placed: Boolean(flow?.purchaseOrderId) || curaleaf?.status === 'purchase_order_submitted',
+          placedAt: flow?.placedAt ?? null,
+          poRef: flow?.purchaseOrderId ?? curaleaf?.customerReference ?? null,
+          status: flowStatus ?? portalPrescriptionStatus({ curaleaf, fulfilmentStatus: record.fulfilmentStatus }),
           invoiceRef: null,
           trackingNumber: null,
           carrier: curaleaf?.courier ?? null,
-          shipmentId: curaleaf?.shipmentIds?.[0],
+          shipmentId: shipmentIds[0],
+          shipmentIds,
+          shipmentStates: flow?.shipmentStates,
+          manualPlaceRequired: flow?.manualPlaceRequired,
+          fulfilmentLines: flow?.lines?.map(line => ({
+            productId: line.productId,
+            ordered: line.ordered,
+            shipped: line.shipped,
+            received: line.received,
+            collected: line.collected,
+            returned: line.returned,
+            backordered: line.backordered,
+          })),
         };
       })
     : [{
@@ -738,6 +783,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
         trackingNumber: null,
         carrier: record.curaleaf?.courier ?? null,
         shipmentId: record.curaleaf?.shipmentIds?.[0],
+        shipmentIds: record.curaleaf?.shipmentIds ?? [],
       }];
   const paid = ['paid', 'refund_required', 'refunded'].includes(record.paymentStatus);
   const cancelled = record.paymentStatus === 'cancelled';
@@ -760,8 +806,10 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
     backendId: record.id,
     organisationId: record.organisationId,
     patientId: record.patientId,
+    paymentRoute: record.paymentRoute === 'worldpay' ? 'worldpay' : 'manual',
     date: new Date(record.createdAt),
     dispensingFee: record.dispensingFeePence / 100,
+    autoPlacementEnabled: record.autoPlacementEnabled !== false,
     payment: {
       status: paid ? 'paid' : cancelled ? 'cancelled' : 'sent',
       route: record.paymentRoute === 'manual' ? 'pharmacy' : 'worldpay',
@@ -798,6 +846,26 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
       isPaidRedo: Boolean(record.redoContext.isPaidRedo),
       reason: record.redoContext.unresolvedReason ?? 'expired',
     } : undefined,
+  };
+}
+
+function mapPortalDraft(record: OrderDraftRecord, index: number, defaultPaymentRoute: 'manual' | 'worldpay' = 'manual'): PatientOrder {
+  const payload = record.payload as Partial<PatientOrder> & { localOrderId?: number; prescriptions?: Prescription[] };
+  const id = 1_000_000 + index;
+  const prescriptions = Array.isArray(payload.prescriptions) && payload.prescriptions.length
+    ? payload.prescriptions.map((prescription, rxIndex) => ({ ...prescription, id: id * 100 + rxIndex + 1, status: 'draft' as const, placed: false, poRef: null }))
+    : [blankRx(id * 100 + 1)];
+  return {
+    id,
+    draftId: record.id,
+    organisationId: record.organisationId,
+    patientId: record.patientId,
+    date: new Date(record.createdAt),
+    dispensingFee: Number((record.payload.dispensingFeePence ?? 0)) / 100,
+    paymentRoute: record.payload.paymentRoute === 'worldpay' ? 'worldpay' : record.payload.paymentRoute === 'manual' ? 'manual' : defaultPaymentRoute,
+    payment: { status: 'none', route: null, amount: 0, ref: null, sentAt: null, paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
+    prescriptions,
+    redoContext: payload.redoContext,
   };
 }
 
@@ -1147,7 +1215,11 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         catalogue: state.catalogue.map(product => {
           const item = quoted.get(product.id);
-          return item ? { ...product, retail: item.patientPrice, availability: item.inStock ? 'in' : 'out' } : product;
+          return item ? {
+            ...product,
+            retail: item.patientPrice,
+            availability: !item.inStock || item.stockStatus === 'out_of_stock' ? 'out' : item.stockStatus === 'low_stock' ? 'low' : 'in',
+          } : product;
         }),
         orders: state.orders.map(order => order.payment.status !== 'none' ? order : ({
           ...order,
@@ -1170,7 +1242,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, crm: [...byId.values()] };
     }
     case 'SYNC_PORTAL_ORDERS': {
-      const retained = state.orders.filter(order => order.organisationId !== action.organisationId || order.payment.status === 'none');
+      const retained = state.orders.filter(order => order.organisationId !== action.organisationId || order.payment.status === 'none' && !order.draftId);
       const orders = [...retained, ...action.orders];
       const nextOrderId = Math.max(state.nextIds.order, ...orders.map(order => order.id + 1));
       const nextRxId = Math.max(state.nextIds.rx, ...orders.flatMap(order => order.prescriptions.map(rx => rx.id + 1)));
@@ -1368,7 +1440,9 @@ function reducer(state: AppState, action: Action): AppState {
       if (action.patientId && !state.crm.some(patient => patient.id === action.patientId && patient.organisationId === state.currentOrganisationId && canCreateOrderForPatient(patient))) return state;
       const id = state.nextIds.order;
       const rxId = state.nextIds.rx;
-      const newOrder = blankOrder(id, action.patientId || null, state.currentOrganisationId);
+      const organisation = state.organisations.find(item => item.id === state.currentOrganisationId);
+      const defaultRoute = preferredDraftPaymentRoute(Boolean(organisation?.worldpay.enabled), organisation?.worldpay.status ?? 'not-connected');
+      const newOrder = blankOrder(id, action.patientId || null, state.currentOrganisationId, defaultRoute);
       newOrder.prescriptions = [blankRx(rxId)];
       return {
         ...state,
@@ -1392,7 +1466,9 @@ function reducer(state: AppState, action: Action): AppState {
       };
       const id = state.nextIds.order;
       const rxId = state.nextIds.rx;
-      const draft = blankOrder(id, source.patientId, state.currentOrganisationId);
+      const organisation = state.organisations.find(item => item.id === state.currentOrganisationId);
+      const defaultRoute = preferredDraftPaymentRoute(Boolean(organisation?.worldpay.enabled), organisation?.worldpay.status ?? 'not-connected');
+      const draft = blankOrder(id, source.patientId, state.currentOrganisationId, defaultRoute);
       draft.prescriptions = [blankRx(rxId)];
       const redone = applyRedoOntoDraft(draft, source, reason);
       return {
@@ -1441,6 +1517,8 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'SET_ORDER_DISPENSING_FEE':
       return mapOrder(state, action.orderId, order => ({ ...order, dispensingFee: Math.max(0, action.amount) }));
+    case 'SET_ORDER_PAYMENT_ROUTE':
+      return mapOrder(state, action.orderId, order => order.payment.status === 'none' ? { ...order, paymentRoute: action.paymentRoute } : order);
     case 'ADD_RX': {
       const rxId = state.nextIds.rx;
       return {
@@ -1496,6 +1574,28 @@ function reducer(state: AppState, action: Action): AppState {
           items: [],
         } : {}),
       })));
+    case 'CLEAR_RX_FILE':
+      return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
+        ...r,
+        copyFileName: null,
+        fileId: null,
+        ...(r.entryMode === 'clinic' ? {
+          clinicScanId: undefined,
+          curaleafPrescriptionId: undefined,
+          curaleafPrescriptionState: undefined,
+          curaleafPatientName: undefined,
+          curaleafPatientDob: undefined,
+          serialNumber: undefined,
+          issueDate: undefined,
+          expiryDate: undefined,
+          prescriberId: undefined,
+          prescriber: '',
+          prescriberPin: undefined,
+          prescriberGmcNumber: undefined,
+          prescriberGphcNumber: undefined,
+          items: [],
+        } : {}),
+      })));
     case 'APPLY_CURALEAF_SCAN':
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
         ...r,
@@ -1517,6 +1617,8 @@ function reducer(state: AppState, action: Action): AppState {
       })));
     case 'SET_ORDER_BACKEND_ID':
       return mapOrder(state, action.orderId, o => ({ ...o, backendId: action.backendId }));
+    case 'SET_ORDER_DRAFT_ID':
+      return mapOrder(state, action.orderId, o => ({ ...o, draftId: action.draftId }));
     case 'SYNC_ORDER_PATIENT_PRICES': {
       const prices = new Map(action.items.map(item => [item.productId, item.patientPrice]));
       return {
@@ -1534,6 +1636,7 @@ function reducer(state: AppState, action: Action): AppState {
       return mapOrder(state, action.orderId, o => mapRx(o, action.rxId, r => ({
         ...r,
         placed: true,
+        placedAt: new Date(),
         poRef: action.customerReference,
         status: 'awaiting-approval',
       })));
@@ -1559,11 +1662,11 @@ function reducer(state: AppState, action: Action): AppState {
     {
       const removedOrder = state.orders.find(order => order.id === action.orderId);
       const orders = state.orders.filter(order => order.id !== action.orderId);
-      const nextDraft = orders.find(order => order.organisationId === removedOrder?.organisationId && order.payment.status === 'none');
+      const nextDraftId = nextDraftIdAfterDeletion(state.orders, action.orderId, removedOrder?.organisationId ?? state.currentOrganisationId);
       return {
         ...state,
         orders,
-        activeOrderId: state.activeOrderId === action.orderId ? nextDraft?.id ?? null : state.activeOrderId,
+        activeOrderId: state.activeOrderId === action.orderId ? nextDraftId : state.activeOrderId,
       };
     }
 
@@ -1751,6 +1854,7 @@ function reducer(state: AppState, action: Action): AppState {
             return {
               ...r,
               placed: true,
+              placedAt: new Date(),
               // Supplier references are populated only from the Curaleaf response or
               // a later reconciliation. Never invent courier or invoice data.
               poRef: null,
@@ -1826,6 +1930,20 @@ function reducer(state: AppState, action: Action): AppState {
       const newToast = { id: Date.now().toString() + Math.random(), message: msg, type: 'success' as const };
       nextState.toasts = [...nextState.toasts, newToast];
       return nextState;
+    }
+    case 'HANDOUT_ORDER': {
+      const order = state.orders.find(candidate => candidate.id === action.orderId);
+      if (!order || !order.prescriptions.length || order.prescriptions.some(prescription => !['ready', 'collected'].includes(prescription.status))) return state;
+      return mapOrder(state, action.orderId, currentOrder => ({
+        ...currentOrder,
+        prescriptions: currentOrder.prescriptions.map(prescription => ({
+          ...prescription,
+          status: 'collected' as const,
+          shipmentStates: prescription.shipmentStates
+            ? Object.fromEntries(Object.keys(prescription.shipmentStates).map(shipmentId => [shipmentId, 'collected']))
+            : prescription.shipmentStates,
+        })),
+      }));
     }
 
     case 'ADD_TOAST': {
@@ -1938,12 +2056,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cancelled || inFlight) return;
       inFlight = true;
       try {
-        const records = await getPortalOrders(organisationId);
+        const [records, draftRecords] = await Promise.all([getPortalOrders(organisationId), getOrderDrafts(organisationId)]);
         if (cancelled) return;
-        const orders = records
+        const persistedOrders = records
           .slice()
           .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
           .map(mapPortalOrder);
+        const organisation = state.organisations.find(item => item.id === organisationId);
+        const defaultPaymentRoute = preferredDraftPaymentRoute(Boolean(organisation?.worldpay.enabled), organisation?.worldpay.status ?? 'not-connected');
+        const orders = [...persistedOrders, ...draftRecords
+          .slice()
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+          .map((record, index) => mapPortalDraft(record, index, defaultPaymentRoute))];
         dispatch({ type: 'SYNC_PORTAL_ORDERS', organisationId, orders });
       } catch (error) {
         if (!cancelled) console.warn('Order history sync unavailable:', error);
@@ -1964,7 +2088,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', syncVisibleOrders);
       document.removeEventListener('visibilitychange', syncVisibleOrders);
     };
-  }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
+  }, [state.currentOrganisationId, state.organisations, state.staffSession, state.workspaceMode]);
 
   // Cross-domain intake sync. In production, the access token comes from staff authentication.
   useEffect(() => {
