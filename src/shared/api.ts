@@ -497,6 +497,13 @@ export function recordPharmacyGdprEvidenceReceived(organisationId: string) {
   );
 }
 
+export function recordCompanyGdprEvidenceReceived(companyId: string) {
+  return apiRequest<{ success: true; companyId: string; gdprConfirmed: true; evidenceMethod: 'manual_receipt'; receivedAt: string }>(
+    `/v1/portal/admin/companies/${encodeURIComponent(companyId)}/gdpr/record-received`,
+    { method: 'POST', body: JSON.stringify({ received: true }) },
+  );
+}
+
 export function getOrderDrafts(organisationId: string) {
   return apiRequest<import('./contracts').OrderDraftRecord[]>(`/v1/portal/order-drafts?organisationId=${encodeURIComponent(organisationId)}`);
 }
