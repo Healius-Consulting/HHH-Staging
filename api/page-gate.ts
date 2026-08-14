@@ -37,7 +37,7 @@ function wifCredential(request: Request): Credential {
   if (!oidcToken) throw new Error('VERCEL_OIDC_TOKEN_MISSING');
   if (!projectNumber || !poolId || !providerId || !serviceAccountEmail) throw new Error('GCP_WIF_CONFIGURATION_MISSING');
   activeVercelOidcToken = oidcToken;
-  let authClient: ExternalAccountClient | null;
+  let authClient: { getAccessToken(): Promise<{ token?: string | null }> } | null;
   try {
     authClient = ExternalAccountClient.fromJSON({
       type: 'external_account',
