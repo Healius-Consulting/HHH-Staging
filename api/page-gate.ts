@@ -215,7 +215,9 @@ async function gate(request: Request) {
   let gateStage = 'firebase.initialize';
   try {
     const app = firebaseApp(request);
+    gateStage = 'firebase.auth_service';
     const auth = getAuth(app);
+    gateStage = 'firebase.firestore_service';
     const firestore = getFirestore(app);
     gateStage = 'firebase.verify_session';
     const claims = await auth.verifySessionCookie(sessionCookie, true) as DecodedIdToken;
