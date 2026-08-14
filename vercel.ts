@@ -39,7 +39,7 @@ export const config = {
     },
   } : undefined,
   redirects: portalSurface ? [
-    { source: '/', destination: '/pharmacy', permanent: false },
+    { source: '/', destination: '/login', permanent: false },
   ] : undefined,
   rewrites: [
     ...(portalSurface ? [
