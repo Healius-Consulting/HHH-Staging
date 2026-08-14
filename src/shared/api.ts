@@ -490,9 +490,9 @@ export function goLiveOrganisation(organisationId: string) {
   return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-export function recordCompanyGdprEvidenceReceived(companyId: string) {
-  return apiRequest<{ success: true; companyId: string; gdprConfirmed: true; evidenceMethod: 'manual_receipt'; receivedAt: string }>(
-    `/v1/portal/admin/companies/${encodeURIComponent(companyId)}/gdpr/record-received`,
+export function recordPharmacyGdprEvidenceReceived(organisationId: string) {
+  return apiRequest<{ success: true; organisationId: string; companyId: string | null; gdprConfirmed: true; evidenceMethod: 'manual_receipt'; receivedAt: string }>(
+    `/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/gdpr/record-received`,
     { method: 'POST', body: JSON.stringify({ received: true }) },
   );
 }

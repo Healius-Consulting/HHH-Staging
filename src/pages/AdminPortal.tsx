@@ -42,7 +42,7 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getGoLiveReadiness, getPharmacySetupStatus, getPharmacyStaff, goLiveOrganisation, queueReferralPatientEmail, recordCompanyGdprEvidenceReceived, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getGoLiveReadiness, getPharmacySetupStatus, getPharmacyStaff, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordPharmacyGdprEvidenceReceived, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
 import type { AdminReferralFinanceReport, CuraleafConnectionStatus, CuraleafValidationReport, GoLiveReadiness, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
@@ -718,12 +718,8 @@ export default function AdminPortal() {
   };
 
   const recordGdprEvidenceReceived = async (organisationId: string) => {
-    const companyId = goLiveByOrganisation[organisationId]?.companyId;
-    if (!companyId) {
-      setSetupError('This pharmacy is not linked to a legal company record yet. Add the company record before recording GDPR evidence.');
-      return;
-    }
-    setGdprReceiptBusy(companyId);
+    const companyId = goLiveByOrganisation[organisationId]?.companyId ?? organisationId;
+    setGdprReceiptBusy(organisationId);
     setSetupError(null);
     try {
       if (isLocalPortalPreview) {
@@ -731,7 +727,7 @@ export default function AdminPortal() {
           ? { ...readiness, ready: readiness.gates.curaleafLive.passed, gates: { ...readiness.gates, gdprEvidence: { ...readiness.gates.gdprEvidence, passed: true, method: 'manual_receipt', receivedAt: new Date().toISOString(), evidenceUrl: null } } }
           : readiness])));
       } else {
-        await recordCompanyGdprEvidenceReceived(companyId);
+        await recordPharmacyGdprEvidenceReceived(organisationId);
         const results = await Promise.all(state.organisations.map(async organisation => getGoLiveReadiness(organisation.id)));
         setGoLiveByOrganisation(current => ({ ...current, ...Object.fromEntries(results.map(result => [result.organisationId, result])) }));
       }
@@ -1239,7 +1235,7 @@ export default function AdminPortal() {
                   </div>
                   <div className="admin-org-actions">
                     <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>{goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
-                    {!goLive?.testAccount && !goLive?.gates.gdprEvidence.passed && goLive?.companyId ? <button className="btn btn-sm" disabled={gdprReceiptBusy === goLive.companyId} onClick={() => void recordGdprEvidenceReceived(org.id)} title="Records that HHH received the pharmacy's GDPR evidence, which remains stored outside this platform.">{gdprReceiptBusy === goLive.companyId ? 'Recording receipt…' : 'Record GDPR receipt'}</button> : null}
+                    {!goLive?.testAccount && !goLive?.gates.gdprEvidence.passed ? <button className="btn btn-sm" disabled={gdprReceiptBusy === org.id} onClick={() => void recordGdprEvidenceReceived(org.id)} title="Records that HHH received the pharmacy's GDPR evidence, which remains stored outside this platform.">{gdprReceiptBusy === org.id ? 'Recording receipt…' : 'Record GDPR receipt'}</button> : null}
                     <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button>
                     {org.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === org.id} onClick={() => void activateGoLive(org.id)}>{goLiveBusy === org.id ? 'Going live…' : 'Go live'}</button> : null}
                   </div>
@@ -1292,7 +1288,7 @@ export default function AdminPortal() {
                       </div>
                       <div className="admin-org-actions">
                         <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>{goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
-                        {!goLive?.testAccount && !goLive?.gates.gdprEvidence.passed && goLive?.companyId ? <button className="btn btn-sm" disabled={gdprReceiptBusy === goLive.companyId} onClick={() => void recordGdprEvidenceReceived(org.id)} title="Records that HHH received the pharmacy's GDPR evidence, which remains stored outside this platform.">{gdprReceiptBusy === goLive.companyId ? 'Recording receipt…' : 'Record GDPR receipt'}</button> : null}
+                        {!goLive?.testAccount && !goLive?.gates.gdprEvidence.passed ? <button className="btn btn-sm" disabled={gdprReceiptBusy === org.id} onClick={() => void recordGdprEvidenceReceived(org.id)} title="Records that HHH received the pharmacy's GDPR evidence, which remains stored outside this platform.">{gdprReceiptBusy === org.id ? 'Recording receipt…' : 'Record GDPR receipt'}</button> : null}
                         <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage branch</button>
                         {org.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === org.id} onClick={() => void activateGoLive(org.id)}>{goLiveBusy === org.id ? 'Going live…' : 'Go live'}</button> : null}
                       </div>

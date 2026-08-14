@@ -357,9 +357,10 @@ async function goLiveReadiness(organisationId: string) {
     companyForOrganisation(organisationId, organisation),
     firestore.collection('integrationConnections').doc(`${organisationId}--curaleaf`).get(),
   ]);
-  const companyGdprPassed = gdprEvidenceRecorded(company);
+  const gdprRecord = company ?? organisation;
+  const companyGdprPassed = gdprEvidenceRecorded(gdprRecord);
   const gates = goLiveGateState(organisation, companyGdprPassed, connectionSnapshot.exists ? connectionSnapshot.data()! : null);
-  const evidenceMethod = gdprEvidenceMethod(company);
+  const evidenceMethod = gdprEvidenceMethod(gdprRecord);
   return {
     organisationId,
     companyId: company?.id ?? null,
@@ -370,9 +371,9 @@ async function goLiveReadiness(organisationId: string) {
       gdprEvidence: {
         passed: gates.gdprPassed,
         exempt: gates.gdprExempt,
-        evidenceUrl: evidenceMethod === 'document_link' ? String(company!.gdprDocUrl) : null,
+        evidenceUrl: evidenceMethod === 'document_link' ? String(gdprRecord.gdprDocUrl) : null,
         method: evidenceMethod,
-        receivedAt: evidenceMethod === 'manual_receipt' && typeof company?.gdprReceiptRecordedAt === 'string' ? company.gdprReceiptRecordedAt : null,
+        receivedAt: evidenceMethod === 'manual_receipt' && typeof gdprRecord.gdprReceiptRecordedAt === 'string' ? gdprRecord.gdprReceiptRecordedAt : null,
       },
       curaleafLive: { passed: gates.curaleafPassed, environment: gates.curaleafEnvironment, validatedAt: gates.curaleafValidatedAt, secretStored: gates.secretStored },
     },
@@ -1130,6 +1131,42 @@ app.post('/v1/portal/admin/companies/:id/gdpr/record-received', requireRole('hhh
     invalidateCollectionCache('companies', companyId);
     await audit(request, 'company.gdpr_received_recorded', { companyId, evidenceMethod: 'manual_receipt', recordedBy });
     response.json({ success: true, companyId, gdprConfirmed: true, evidenceMethod: 'manual_receipt', receivedAt: recordedAt });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/organisations/:id/gdpr/record-received', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const organisationId = idSchema.parse(request.params.id);
+    z.object({ received: z.literal(true) }).parse(request.body);
+    const organisationRef = firestore.collection('organisations').doc(organisationId);
+    const organisationSnapshot = await organisationRef.get();
+    if (!organisationSnapshot.exists) throw new HttpError(404, 'Pharmacy not found.', 'NOT_FOUND');
+
+    const company = await companyForOrganisation(organisationId, organisationSnapshot.data());
+    const evidenceRef = company ? firestore.collection('companies').doc(company.id) : organisationRef;
+    const recordedAt = nowIso();
+    const recordedBy = identity(request).uid;
+    await evidenceRef.update({
+      gdprConfirmed: true,
+      gdprDocUrl: null,
+      gdprEvidenceMethod: 'manual_receipt',
+      gdprReceiptRecordedAt: recordedAt,
+      gdprReceiptRecordedBy: recordedBy,
+      gdprConfirmedAt: recordedAt,
+      gdprConfirmedBy: recordedBy,
+      gdprComplianceFlag: false,
+      updatedAt: recordedAt,
+    });
+    invalidateCollectionCache('organisations', organisationId);
+    if (company) invalidateCollectionCache('companies', company.id);
+    invalidateCache('admin:organisations', 'referral:');
+    await audit(request, company ? 'company.gdpr_received_recorded' : 'organisation.gdpr_received_recorded', {
+      organisationId,
+      companyId: company?.id ?? null,
+      evidenceMethod: 'manual_receipt',
+      recordedBy,
+    });
+    response.json({ success: true, organisationId, companyId: company?.id ?? null, gdprConfirmed: true, evidenceMethod: 'manual_receipt', receivedAt: recordedAt });
   } catch (error) { next(error); }
 });
 
