@@ -20,6 +20,7 @@ import type { ProtectedSurface, RequestIdentity, StaffRole, StaffSessionRecord }
 
 const sessionInputSchema = z.object({ idToken: z.string().min(100).max(20_000) });
 const allowedRoles = new Set<StaffRole>(['hhh_admin', 'pharmacy_staff']);
+type RequestedSurface = ProtectedSurface | 'auto';
 
 export const sessionCookieName = secureSessionCookies ? '__Host-hhh_session' : 'hhh_session';
 export const csrfCookieName = secureSessionCookies ? '__Host-hhh_csrf' : 'hhh_csrf';
@@ -28,7 +29,7 @@ export function cookieOptions(httpOnly: boolean, maxAge = SESSION_ABSOLUTE_MS) {
   return { httpOnly, secure: secureSessionCookies, sameSite: 'strict' as const, path: '/', maxAge };
 }
 
-function expectedOrigin(request: Request, surface: ProtectedSurface) {
+function expectedOrigin(request: Request, surface: RequestedSurface) {
   if (requestHostname(request) === new URL(config.PORTAL_APP_ORIGIN).hostname) return config.PORTAL_APP_ORIGIN;
   return surface === 'admin' ? config.ADMIN_APP_ORIGIN : config.PHARMACY_APP_ORIGIN;
 }
@@ -38,7 +39,7 @@ export function protectedSurface(request: Request) {
   const portalHost = new URL(config.PORTAL_APP_ORIGIN).hostname;
   if (host === portalHost) {
     const requested = request.query.__hhh_surface;
-    return requested === 'pharmacy' || requested === 'admin' ? requested : null;
+    return requested === 'pharmacy' || requested === 'admin' || requested === 'auto' ? requested : null;
   }
   return surfaceForRequest(request, { pharmacy: config.PHARMACY_APP_ORIGIN, admin: config.ADMIN_APP_ORIGIN }, config.NODE_ENV !== 'production');
 }
@@ -90,7 +91,7 @@ export function issueCsrf(request: Request, response: Response) {
   return token;
 }
 
-function requestOriginAllowed(request: Request, surface: ProtectedSurface) {
+function requestOriginAllowed(request: Request, surface: RequestedSurface) {
   const fetchSite = request.get('sec-fetch-site');
   if (fetchSite === 'cross-site') return false;
   const source = request.get('origin') ?? request.get('referer');
@@ -148,6 +149,13 @@ function validateRole(decoded: DecodedIdToken, surface: ProtectedSurface) {
   return role as StaffRole;
 }
 
+function resolveSurface(decoded: DecodedIdToken, requested: RequestedSurface): ProtectedSurface {
+  if (requested !== 'auto') return requested;
+  if (decoded.role === 'hhh_admin') return 'admin';
+  if (decoded.role === 'pharmacy_staff') return 'pharmacy';
+  throw new HttpError(403, 'The account has no permitted staff role.', 'ROLE_REQUIRED');
+}
+
 async function activeStaff(decoded: DecodedIdToken, activateInvitation = false) {
   const profile = await firestore.collection('staffUsers').doc(decoded.uid).get();
   const data = profile.data();
@@ -165,9 +173,9 @@ async function activeStaff(decoded: DecodedIdToken, activateInvitation = false) 
 }
 
 export async function createStaffSession(request: Request, response: Response) {
-  const surface = protectedSurface(request);
-  if (!surface) throw new HttpError(403, 'The requested application surface is not permitted.', 'SURFACE_DENIED');
-  if (!requestOriginAllowed(request, surface)) throw new HttpError(403, 'The request origin could not be verified.', 'REQUEST_ORIGIN_DENIED');
+  const requestedSurface = protectedSurface(request);
+  if (!requestedSurface) throw new HttpError(403, 'The requested application surface is not permitted.', 'SURFACE_DENIED');
+  if (!requestOriginAllowed(request, requestedSurface)) throw new HttpError(403, 'The request origin could not be verified.', 'REQUEST_ORIGIN_DENIED');
   const cookieCsrf = parseCookies(request)[csrfCookieName];
   const headerCsrf = request.get('x-csrf-token');
   if (!cookieCsrf || !headerCsrf || !constantTimeEqual(cookieCsrf, headerCsrf)) throw new HttpError(403, 'The request origin could not be verified.', 'REQUEST_ORIGIN_DENIED');
@@ -178,6 +186,7 @@ export async function createStaffSession(request: Request, response: Response) {
   if (authAgeMs < 0 || authAgeMs > 5 * 60 * 1000) throw new HttpError(401, 'Sign in again before starting a staff session.', 'RECENT_LOGIN_REQUIRED');
   if (!decoded.email_verified) throw new HttpError(403, 'Verify your email before using the staff portal.', 'EMAIL_NOT_VERIFIED');
   if (secondFactor(decoded) !== 'totp') throw new HttpError(403, 'A TOTP second-factor sign-in is required.', 'MFA_TOTP_REQUIRED');
+  const surface = resolveSurface(decoded, requestedSurface);
   const role = validateRole(decoded, surface);
   const profile = await activeStaff(decoded, true);
 
@@ -223,13 +232,14 @@ export async function createStaffSession(request: Request, response: Response) {
 }
 
 export async function authenticateSession(request: Request) {
-  const surface = protectedSurface(request);
-  if (!surface) throw new HttpError(403, 'The requested application surface is not permitted.', 'SURFACE_DENIED');
+  const requestedSurface = protectedSurface(request);
+  if (!requestedSurface) throw new HttpError(403, 'The requested application surface is not permitted.', 'SURFACE_DENIED');
   const sessionCookie = parseCookies(request)[sessionCookieName];
   if (!sessionCookie) throw new HttpError(401, 'A valid staff session is required.', 'UNAUTHENTICATED');
   let decoded: DecodedIdToken;
   try { decoded = await auth.verifySessionCookie(sessionCookie, true); }
   catch { throw new HttpError(401, 'The staff session is invalid or expired.', 'UNAUTHENTICATED'); }
+  const surface = resolveSurface(decoded, requestedSurface);
   validateRole(decoded, surface);
   await activeStaff(decoded);
   const sessionHash = sha256(sessionCookie);
