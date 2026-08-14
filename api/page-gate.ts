@@ -201,11 +201,14 @@ async function gate(request: Request) {
   }
 
   const sessionHash = hash(sessionCookie);
+  let gateStage = 'firebase.initialize';
   try {
     const app = firebaseApp(request);
     const auth = getAuth(app);
     const firestore = getFirestore(app);
+    gateStage = 'firebase.verify_session';
     const claims = await auth.verifySessionCookie(sessionCookie, true) as DecodedIdToken;
+    gateStage = 'firestore.read_session';
     const [sessionSnapshot, staffSnapshot] = await Promise.all([
       firestore.collection('staffSessions').doc(sessionHash).get(),
       firestore.collection('staffUsers').doc(claims.uid).get(),
@@ -234,6 +237,7 @@ async function gate(request: Request) {
     }
 
     if (record && shouldTouchSession(record.lastActivityAt, now)) {
+      gateStage = 'firestore.touch_session';
       const lastActivityAt = new Date(now).toISOString();
       await sessionSnapshot.ref.set({
         lastActivityAt,
@@ -246,6 +250,7 @@ async function gate(request: Request) {
     await securityEvent(request, 'auth.session_rejected', {
       requestId,
       code: 'INVALID_OR_EXPIRED',
+      gateStage,
       sessionHashPrefix: sessionHash.slice(0, 12),
     });
     return redirectToLogin(protectedSurface, requestedPath, requestId, true);
