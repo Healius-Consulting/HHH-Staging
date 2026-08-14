@@ -40,6 +40,8 @@ export const config = {
   } : undefined,
   redirects: portalSurface ? [
     { source: '/', destination: '/login', permanent: false },
+    { source: '/pharmacy/login', destination: '/login', permanent: true },
+    { source: '/admin/login', destination: '/login', permanent: true },
   ] : undefined,
   rewrites: [
     ...(portalSurface ? [

@@ -35,7 +35,7 @@ import { AuthContext, type AuthContextValue } from './AuthContext';
 import type { AuthState, AuthenticatedStaff, StaffRole } from './types';
 import { isLocalPortalPreview, localPreviewStaff } from '../dev/localPortalPreview';
 import { passwordResetActionSettings } from './passwordReset';
-import { isCurrentSurfacePath, surfacePath } from './surface-path';
+import { appPathPrefix, isCurrentSurfacePath, surfacePath } from './surface-path';
 
 const IDLE_LIMIT_MS = 15 * 60 * 1000;
 const ABSOLUTE_LIMIT_MS = 8 * 60 * 60 * 1000;
@@ -95,7 +95,8 @@ function staffFromSession(session: AuthenticatedSession): AuthenticatedStaff {
 function redirectToLogin(includeReturnTarget: boolean) {
   if (isCurrentSurfacePath('/login')) return;
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  window.location.assign(includeReturnTarget ? surfacePath(`/login?returnTo=${encodeURIComponent(returnTo)}`) : surfacePath('/login'));
+  const loginPath = appPathPrefix ? '/login' : surfacePath('/login');
+  window.location.assign(includeReturnTarget ? `${loginPath}?returnTo=${encodeURIComponent(returnTo)}` : loginPath);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

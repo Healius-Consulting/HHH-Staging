@@ -159,7 +159,7 @@ function logicalPath(pathName: string, surface: ProtectedSurface) {
 
 function redirectToLogin(surface: ProtectedSurface, returnTo: string, requestId: string, clear = false) {
   const headers = new Headers(responseHeaders(requestId));
-  const loginPath = portalDeployment ? `/${surface}/login` : '/login';
+  const loginPath = '/login';
   headers.set('Location', `${loginPath}?returnTo=${encodeURIComponent(safeReturnTo(returnTo))}`);
   if (clear) clearCookies(headers);
   return new Response(null, { status: 303, headers });
