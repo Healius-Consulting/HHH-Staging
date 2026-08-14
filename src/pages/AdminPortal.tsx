@@ -42,7 +42,7 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getGoLiveReadiness, getPharmacySetupStatus, getPharmacyStaff, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getGoLiveReadiness, getPharmacySetupStatus, getPharmacyStaff, goLiveOrganisation, queueReferralPatientEmail, recordCompanyGdprEvidenceReceived, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
 import type { AdminReferralFinanceReport, CuraleafConnectionStatus, CuraleafValidationReport, GoLiveReadiness, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
@@ -61,6 +61,17 @@ import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeE
 type AdminView = 'overview' | 'referrals' | 'patients' | 'finance' | 'platform';
 type PlatformTab = 'setup' | 'curaleaf';
 type PharmacyDetailTab = 'access' | 'config' | 'patients';
+
+const adminViews = new Set<AdminView>(['overview', 'referrals', 'patients', 'finance', 'platform']);
+
+function adminViewFromPath(): AdminView {
+  const segment = window.location.pathname.split('/').filter(Boolean)[1];
+  return segment && adminViews.has(segment as AdminView) ? segment as AdminView : 'overview';
+}
+
+function adminPathForView(view: AdminView) {
+  return view === 'overview' ? '/admin' : `/admin/${view}`;
+}
 
 type AdminFeeEvent = {
   id: string;
@@ -507,7 +518,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
 
 export default function AdminPortal() {
   const { state, dispatch } = useApp();
-  const [view, setView] = useState<AdminView>('overview');
+  const [view, setView] = useState<AdminView>(adminViewFromPath);
   const [platformTab, setPlatformTab] = useState<PlatformTab>('setup');
   const [pharmacyDetailTab, setPharmacyDetailTab] = useState<PharmacyDetailTab>('access');
   const [query, setQuery] = useState('');
@@ -527,6 +538,7 @@ export default function AdminPortal() {
   const [setupByOrganisation, setSetupByOrganisation] = useState<Record<string, PharmacySetupStatus>>({});
   const [goLiveByOrganisation, setGoLiveByOrganisation] = useState<Record<string, GoLiveReadiness>>({});
   const [goLiveBusy, setGoLiveBusy] = useState<string | null>(null);
+  const [gdprReceiptBusy, setGdprReceiptBusy] = useState<string | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [curaleafOrganisationId, setCuraleafOrganisationId] = useState(state.organisations[0]?.id ?? '');
   const [curaleafCustomerId, setCuraleafCustomerId] = useState('');
@@ -640,6 +652,17 @@ export default function AdminPortal() {
   }, [view, selectedOrganisationId, platformTab, pharmacyDetailTab]);
 
   useEffect(() => {
+    const onPopState = () => setView(adminViewFromPath());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    const path = adminPathForView(view);
+    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+  }, [view]);
+
+  useEffect(() => {
     if (selectedOrganisationId) setPharmacyDetailTab('access');
   }, [selectedOrganisationId]);
 
@@ -691,6 +714,32 @@ export default function AdminPortal() {
       setSetupError(error instanceof Error ? error.message : 'The pharmacy could not go live.');
     } finally {
       setGoLiveBusy(null);
+    }
+  };
+
+  const recordGdprEvidenceReceived = async (organisationId: string) => {
+    const companyId = goLiveByOrganisation[organisationId]?.companyId;
+    if (!companyId) {
+      setSetupError('This pharmacy is not linked to a legal company record yet. Add the company record before recording GDPR evidence.');
+      return;
+    }
+    setGdprReceiptBusy(companyId);
+    setSetupError(null);
+    try {
+      if (isLocalPortalPreview) {
+        setGoLiveByOrganisation(current => Object.fromEntries(Object.entries(current).map(([id, readiness]) => [id, readiness.companyId === companyId
+          ? { ...readiness, ready: readiness.gates.curaleafLive.passed, gates: { ...readiness.gates, gdprEvidence: { ...readiness.gates.gdprEvidence, passed: true, method: 'manual_receipt', receivedAt: new Date().toISOString(), evidenceUrl: null } } }
+          : readiness])));
+      } else {
+        await recordCompanyGdprEvidenceReceived(companyId);
+        const results = await Promise.all(state.organisations.map(async organisation => getGoLiveReadiness(organisation.id)));
+        setGoLiveByOrganisation(current => ({ ...current, ...Object.fromEntries(results.map(result => [result.organisationId, result])) }));
+      }
+      dispatch({ type: 'ADD_TOAST', message: 'GDPR evidence received has been recorded. The evidence remains stored outside this platform.', toastType: 'success' });
+    } catch (error) {
+      setSetupError(error instanceof Error ? error.message : 'GDPR evidence receipt could not be recorded.');
+    } finally {
+      setGdprReceiptBusy(null);
     }
   };
 
@@ -975,6 +1024,12 @@ export default function AdminPortal() {
     return { ready, total, percent: total ? Math.round(ready / total * 100) : 0 };
   };
 
+  const gdprEvidenceLabel = (goLive: GoLiveReadiness | undefined) => {
+    if (goLive?.testAccount) return 'GDPR test exemption';
+    if (!goLive?.gates.gdprEvidence.passed) return 'GDPR evidence required';
+    return goLive.gates.gdprEvidence.method === 'manual_receipt' ? 'GDPR evidence received' : 'GDPR evidence confirmed';
+  };
+
   useEffect(() => {
     if (!showCuraleafDrawer || !curaleafOrganisationId) return;
     let cancelled = false;
@@ -1184,6 +1239,7 @@ export default function AdminPortal() {
                   </div>
                   <div className="admin-org-actions">
                     <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>{goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
+                    {!goLive?.testAccount && !goLive?.gates.gdprEvidence.passed && goLive?.companyId ? <button className="btn btn-sm" disabled={gdprReceiptBusy === goLive.companyId} onClick={() => void recordGdprEvidenceReceived(org.id)} title="Records that HHH received the pharmacy's GDPR evidence, which remains stored outside this platform.">{gdprReceiptBusy === goLive.companyId ? 'Recording receipt…' : 'Record GDPR receipt'}</button> : null}
                     <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button>
                     {org.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === org.id} onClick={() => void activateGoLive(org.id)}>{goLiveBusy === org.id ? 'Going live…' : 'Go live'}</button> : null}
                   </div>
@@ -1211,7 +1267,7 @@ export default function AdminPortal() {
                         <small>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
                       </div>
                       <div className="company-group-card__meta">
-                        <span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.testAccount ? 'Test only · public intake disabled' : goLive?.gates.gdprEvidence.passed ? 'GDPR evidence confirmed' : 'GDPR evidence required'}</span>
+                        <span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.testAccount ? 'Test only · public intake disabled' : gdprEvidenceLabel(goLive)}</span>
                         <div>
                           <strong>{earningPatientsCount}</strong> earning patients · <strong>£{accruedCommission}</strong> accrued
                         </div>
@@ -1236,6 +1292,7 @@ export default function AdminPortal() {
                       </div>
                       <div className="admin-org-actions">
                         <span className={`pill ${org.status === 'live' ? 'pill-green' : org.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>{org.status}</span>{goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
+                        {!goLive?.testAccount && !goLive?.gates.gdprEvidence.passed && goLive?.companyId ? <button className="btn btn-sm" disabled={gdprReceiptBusy === goLive.companyId} onClick={() => void recordGdprEvidenceReceived(org.id)} title="Records that HHH received the pharmacy's GDPR evidence, which remains stored outside this platform.">{gdprReceiptBusy === goLive.companyId ? 'Recording receipt…' : 'Record GDPR receipt'}</button> : null}
                         <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage branch</button>
                         {org.status !== 'live' ? <button className="btn btn-primary btn-sm" disabled={!goLive?.ready || goLiveBusy === org.id} onClick={() => void activateGoLive(org.id)}>{goLiveBusy === org.id ? 'Going live…' : 'Go live'}</button> : null}
                       </div>

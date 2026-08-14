@@ -109,6 +109,9 @@ export interface Company {
   };
   gdprConfirmed: boolean;
   gdprDocUrl: string | null;
+  gdprEvidenceMethod?: 'document_link' | 'manual_receipt' | null;
+  gdprReceiptRecordedAt?: string | null;
+  gdprReceiptRecordedBy?: string | null;
   gdprConfirmedAt: string | null;
   gdprConfirmedBy: string | null;
   gdprComplianceFlag?: boolean;

@@ -316,6 +316,24 @@ function validGdprEvidenceUrl(value: unknown) {
   return typeof value === 'string' && (value.startsWith('https://drive.google.com/') || value.startsWith('https://docs.google.com/'));
 }
 
+type GdprCompanyRecord = {
+  gdprConfirmed?: unknown;
+  gdprDocUrl?: unknown;
+  gdprEvidenceMethod?: unknown;
+  gdprReceiptRecordedAt?: unknown;
+};
+
+function gdprEvidenceRecorded(company: (GdprCompanyRecord | Record<string, unknown>) | null) {
+  if (!company?.gdprConfirmed) return false;
+  return validGdprEvidenceUrl(company.gdprDocUrl) || company.gdprEvidenceMethod === 'manual_receipt';
+}
+
+function gdprEvidenceMethod(company: (GdprCompanyRecord | Record<string, unknown>) | null): 'document_link' | 'manual_receipt' | null {
+  if (!company?.gdprConfirmed) return null;
+  if (company.gdprEvidenceMethod === 'manual_receipt') return 'manual_receipt';
+  return validGdprEvidenceUrl(company.gdprDocUrl) ? 'document_link' : null;
+}
+
 async function companyForOrganisation(organisationId: string, organisation?: Record<string, unknown>): Promise<(Record<string, unknown> & { id: string }) | null> {
   const branch = organisation ?? await getRecord('organisations', organisationId);
   const declaredId = typeof branch.orgId === 'string' ? branch.orgId : '';
@@ -339,8 +357,9 @@ async function goLiveReadiness(organisationId: string) {
     companyForOrganisation(organisationId, organisation),
     firestore.collection('integrationConnections').doc(`${organisationId}--curaleaf`).get(),
   ]);
-  const companyGdprPassed = Boolean(company?.gdprConfirmed) && validGdprEvidenceUrl(company?.gdprDocUrl);
+  const companyGdprPassed = gdprEvidenceRecorded(company);
   const gates = goLiveGateState(organisation, companyGdprPassed, connectionSnapshot.exists ? connectionSnapshot.data()! : null);
+  const evidenceMethod = gdprEvidenceMethod(company);
   return {
     organisationId,
     companyId: company?.id ?? null,
@@ -348,7 +367,13 @@ async function goLiveReadiness(organisationId: string) {
     ready: gates.gdprPassed && gates.curaleafPassed,
     status: String(organisation.status ?? 'onboarding') as 'onboarding' | 'live' | 'paused',
     gates: {
-      gdprEvidence: { passed: gates.gdprPassed, exempt: gates.gdprExempt, evidenceUrl: validGdprEvidenceUrl(company?.gdprDocUrl) ? String(company!.gdprDocUrl) : null },
+      gdprEvidence: {
+        passed: gates.gdprPassed,
+        exempt: gates.gdprExempt,
+        evidenceUrl: evidenceMethod === 'document_link' ? String(company!.gdprDocUrl) : null,
+        method: evidenceMethod,
+        receivedAt: evidenceMethod === 'manual_receipt' && typeof company?.gdprReceiptRecordedAt === 'string' ? company.gdprReceiptRecordedAt : null,
+      },
       curaleafLive: { passed: gates.curaleafPassed, environment: gates.curaleafEnvironment, validatedAt: gates.curaleafValidatedAt, secretStored: gates.secretStored },
     },
   };
@@ -373,7 +398,7 @@ async function requireSetupComplete(organisationId: string) {
   if (!readiness.ready || readiness.status !== 'live') {
     throw new HttpError(409, readiness.testAccount
       ? 'This TEST account is inactive. Confirm its explicit test exemption and validated TEST Curaleaf key.'
-      : 'This pharmacy is not live. Confirm company GDPR evidence and the validated LIVE Curaleaf key.', 'PHARMACY_NOT_LIVE');
+      : 'This pharmacy is not live. Record company GDPR evidence and validate the LIVE Curaleaf key.', 'PHARMACY_NOT_LIVE');
   }
 }
 
@@ -1013,6 +1038,9 @@ app.post('/v1/portal/admin/companies', requireRole('hhh_admin'), async (request,
       ...input,
       gdprConfirmed: false,
       gdprDocUrl: null,
+      gdprEvidenceMethod: null,
+      gdprReceiptRecordedAt: null,
+      gdprReceiptRecordedBy: null,
       gdprConfirmedAt: null,
       gdprConfirmedBy: null,
       gdprComplianceFlag: false,
@@ -1063,14 +1091,45 @@ app.post('/v1/portal/admin/companies/:id/gdpr/confirm', requireRole('hhh_admin')
     await companyRef.update({
       gdprConfirmed: true,
       gdprDocUrl,
+      gdprEvidenceMethod: 'document_link',
+      gdprReceiptRecordedAt: null,
+      gdprReceiptRecordedBy: null,
       gdprConfirmedAt: confirmedAt,
       gdprConfirmedBy: confirmedBy,
       gdprComplianceFlag: false,
       updatedAt: confirmedAt,
     });
     invalidateCollectionCache('companies', companyId);
-    await audit(request, 'company.gdpr_confirmed', { companyId, gdprDocUrl, confirmedBy });
-    response.json({ success: true, companyId, gdprConfirmed: true, gdprDocUrl });
+    await audit(request, 'company.gdpr_confirmed', { companyId, evidenceMethod: 'document_link', confirmedBy });
+    response.json({ success: true, companyId, gdprConfirmed: true, gdprDocUrl, evidenceMethod: 'document_link' });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/portal/admin/companies/:id/gdpr/record-received', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const companyId = idSchema.parse(request.params.id);
+    z.object({ received: z.literal(true) }).parse(request.body);
+
+    const companyRef = firestore.collection('companies').doc(companyId);
+    const snap = await companyRef.get();
+    if (!snap.exists) throw new HttpError(404, 'Company not found.', 'NOT_FOUND');
+
+    const recordedAt = nowIso();
+    const recordedBy = identity(request).uid;
+    await companyRef.update({
+      gdprConfirmed: true,
+      gdprDocUrl: null,
+      gdprEvidenceMethod: 'manual_receipt',
+      gdprReceiptRecordedAt: recordedAt,
+      gdprReceiptRecordedBy: recordedBy,
+      gdprConfirmedAt: recordedAt,
+      gdprConfirmedBy: recordedBy,
+      gdprComplianceFlag: false,
+      updatedAt: recordedAt,
+    });
+    invalidateCollectionCache('companies', companyId);
+    await audit(request, 'company.gdpr_received_recorded', { companyId, evidenceMethod: 'manual_receipt', recordedBy });
+    response.json({ success: true, companyId, gdprConfirmed: true, evidenceMethod: 'manual_receipt', receivedAt: recordedAt });
   } catch (error) { next(error); }
 });
 
@@ -1088,6 +1147,12 @@ app.post('/v1/portal/admin/companies/:id/gdpr/clear', requireRole('hhh_admin'), 
     await companyRef.update({
       gdprConfirmed: false,
       gdprDocUrl: null,
+      gdprEvidenceMethod: null,
+      gdprReceiptRecordedAt: null,
+      gdprReceiptRecordedBy: null,
+      gdprConfirmedAt: null,
+      gdprConfirmedBy: null,
+      gdprComplianceFlag: true,
       updatedAt: clearedAt,
     });
 
@@ -1108,7 +1173,7 @@ app.post('/v1/portal/admin/companies/:id/gdpr/clear', requireRole('hhh_admin'), 
 
     invalidateCollectionCache('companies', companyId);
     invalidateCache('admin:organisations', 'referral:');
-    await audit(request, 'company.gdpr_cleared', { companyId, priorDocUrl: company.gdprDocUrl });
+    await audit(request, 'company.gdpr_cleared', { companyId, priorEvidenceMethod: gdprEvidenceMethod(company) });
     response.json({ success: true, companyId, gdprConfirmed: false });
   } catch (error) { next(error); }
 });

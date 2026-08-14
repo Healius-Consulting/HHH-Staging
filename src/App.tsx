@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
-import { AppProvider, useApp, type PharmacyTenant, type StaffSession } from './context/AppContext';
+import { AppProvider, useApp, type PharmacyTenant, type Screen, type StaffSession } from './context/AppContext';
 import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
@@ -75,6 +75,17 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
       lastSyncedAt: null,
     },
   };
+}
+
+const pharmacyScreens = new Set<Screen>(['home', 'create', 'orders', 'patients', 'formulary', 'finance', 'settings']);
+
+function pharmacyScreenFromPath(): Screen {
+  const segment = window.location.pathname.split('/').filter(Boolean)[1];
+  return segment && pharmacyScreens.has(segment as Screen) ? segment as Screen : 'home';
+}
+
+function pharmacyPathForScreen(screen: Screen) {
+  return screen === 'home' ? '/pharmacy' : `/pharmacy/${screen}`;
 }
 
 function ToastItem({ toast }: { toast: { id: string; message: string; type: 'success' | 'info' | 'warning' | 'error' } }) {
@@ -188,6 +199,28 @@ function StaffWorkspace() {
   const curaleafActivated = Boolean(setup.status?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
   // Leave training only when all six setup steps are complete (including Curaleaf).
   const liveWorkspaceReady = Boolean(setup.status?.completed);
+  const initialPathHandled = useRef(false);
+
+  useEffect(() => {
+    if (authState.staff?.role !== 'pharmacy_staff') return;
+    const onPopState = () => dispatch({ type: 'SET_SCREEN', screen: pharmacyScreenFromPath() });
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [authState.staff?.role, dispatch]);
+
+  useEffect(() => {
+    if (authState.staff?.role !== 'pharmacy_staff') return;
+    if (!initialPathHandled.current) {
+      initialPathHandled.current = true;
+      const requestedScreen = pharmacyScreenFromPath();
+      if (requestedScreen !== state.screen) {
+        dispatch({ type: 'SET_SCREEN', screen: requestedScreen });
+        return;
+      }
+    }
+    const path = pharmacyPathForScreen(state.screen);
+    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+  }, [authState.staff?.role, dispatch, state.screen]);
 
   useEffect(() => {
     if (state.screen === 'patients') return;

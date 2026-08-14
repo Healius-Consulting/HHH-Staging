@@ -520,7 +520,13 @@ export interface GoLiveReadiness {
   ready: boolean;
   status: 'onboarding' | 'live' | 'paused';
   gates: {
-    gdprEvidence: { passed: boolean; exempt?: boolean; evidenceUrl: string | null };
+    gdprEvidence: {
+      passed: boolean;
+      exempt?: boolean;
+      evidenceUrl: string | null;
+      method?: 'document_link' | 'manual_receipt' | null;
+      receivedAt?: string | null;
+    };
     curaleafLive: { passed: boolean; environment?: 'test' | 'production'; validatedAt: string | null; secretStored: boolean };
   };
 }
@@ -878,6 +884,9 @@ export interface Company {
   };
   gdprConfirmed: boolean;
   gdprDocUrl: string | null;
+  gdprEvidenceMethod?: 'document_link' | 'manual_receipt' | null;
+  gdprReceiptRecordedAt?: string | null;
+  gdprReceiptRecordedBy?: string | null;
   gdprConfirmedAt: string | null;
   gdprConfirmedBy: string | null;
   gdprComplianceFlag?: boolean;
