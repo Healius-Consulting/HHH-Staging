@@ -2,7 +2,7 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
-import { applicationDefault, cert, getApps, initializeApp, type Credential } from 'firebase-admin/app';
+import { applicationDefault, getApps, initializeApp, type Credential } from 'firebase-admin/app';
 import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { ExternalAccountClient } from 'google-auth-library';
@@ -71,13 +71,10 @@ function firebaseApp(request: Request) {
   const oidcToken = request.headers.get('x-vercel-oidc-token');
   if (oidcToken) activeVercelOidcToken = oidcToken;
   if (getApps().length) return getApps()[0]!;
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   const projectId = process.env.FIREBASE_PROJECT_ID ?? process.env.GOOGLE_CLOUD_PROJECT;
-  const credential = serviceAccount
-    ? cert(JSON.parse(serviceAccount))
-    : process.env.GCP_WORKLOAD_IDENTITY_POOL_ID
-      ? wifCredential(request)
-      : applicationDefault();
+  const credential = process.env.GCP_WORKLOAD_IDENTITY_POOL_ID
+    ? wifCredential(request)
+    : applicationDefault();
   try {
     return initializeApp({ credential, projectId });
   } catch {
