@@ -73,6 +73,15 @@ function adminPathForView(view: AdminView) {
   return view === 'overview' ? '/admin' : `/admin/${view}`;
 }
 
+function organisationIdFromPath() {
+  const match = /^\/admin\/pharmacy\/([A-Za-z0-9_-]+)$/.exec(window.location.pathname);
+  return match?.[1] ?? null;
+}
+
+function adminPathForOrganisation(organisationId: string) {
+  return `/admin/pharmacy/${encodeURIComponent(organisationId)}`;
+}
+
 type AdminFeeEvent = {
   id: string;
   kind: 'new-referral' | 'annual-patient';
@@ -530,7 +539,7 @@ export default function AdminPortal() {
   const [patientExportError, setPatientExportError] = useState<string | null>(null);
   const [serverPatientRegister, setServerPatientRegister] = useState<PatientRegisterExportResult | null>(null);
   const [patientRegisterLoading, setPatientRegisterLoading] = useState(false);
-  const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null);
+  const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(organisationIdFromPath);
   const [directoryMode, setDirectoryMode] = useState<'flat' | 'by-company'>('flat');
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -652,15 +661,23 @@ export default function AdminPortal() {
   }, [view, selectedOrganisationId, platformTab, pharmacyDetailTab]);
 
   useEffect(() => {
-    const onPopState = () => setView(adminViewFromPath());
+    const onPopState = () => {
+      setView(adminViewFromPath());
+      setSelectedOrganisationId(organisationIdFromPath());
+    };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   useEffect(() => {
-    const path = adminPathForView(view);
+    const path = selectedOrganisationId ? adminPathForOrganisation(selectedOrganisationId) : adminPathForView(view);
     if (window.location.pathname !== path) window.history.pushState(null, '', path);
-  }, [view]);
+  }, [selectedOrganisationId, view]);
+
+  useEffect(() => {
+    const requestedOrganisationId = organisationIdFromPath();
+    if (requestedOrganisationId && requestedOrganisationId !== selectedOrganisationId) setSelectedOrganisationId(requestedOrganisationId);
+  }, [selectedOrganisationId]);
 
   useEffect(() => {
     if (selectedOrganisationId) setPharmacyDetailTab('access');
