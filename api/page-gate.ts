@@ -5,6 +5,7 @@ import process from 'node:process';
 import { applicationDefault, getApps, initializeApp, type Credential } from 'firebase-admin/app';
 import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { Firestore } from '@google-cloud/firestore';
 import { ExternalAccountClient } from 'google-auth-library';
 import {
   allowedHosts,
@@ -27,6 +28,9 @@ const sessionCookieName = '__Host-hhh_session';
 const csrfCookieName = '__Host-hhh_csrf';
 
 let activeVercelOidcToken: string | null = null;
+type ExternalAccessTokenClient = { getAccessToken(): Promise<{ token?: string | null }> };
+let externalAccountClient: ExternalAccessTokenClient | null = null;
+let federatedFirestore: Firestore | null = null;
 
 function wifCredential(request: Request): Credential {
   const oidcToken = request.headers.get('x-vercel-oidc-token');
@@ -37,7 +41,7 @@ function wifCredential(request: Request): Credential {
   if (!oidcToken) throw new Error('VERCEL_OIDC_TOKEN_MISSING');
   if (!projectNumber || !poolId || !providerId || !serviceAccountEmail) throw new Error('GCP_WIF_CONFIGURATION_MISSING');
   activeVercelOidcToken = oidcToken;
-  let authClient: { getAccessToken(): Promise<{ token?: string | null }> } | null;
+  let authClient: ExternalAccessTokenClient | null;
   try {
     authClient = ExternalAccountClient.fromJSON({
       type: 'external_account',
@@ -56,6 +60,7 @@ function wifCredential(request: Request): Credential {
     throw new Error('GCP_WIF_CLIENT_INITIALIZATION_FAILED');
   }
   if (!authClient) throw new Error('GCP_WIF_CLIENT_INITIALIZATION_FAILED');
+  externalAccountClient = authClient;
   return {
     async getAccessToken() {
       const accessToken = await authClient.getAccessToken();
@@ -63,6 +68,20 @@ function wifCredential(request: Request): Credential {
       return { access_token: accessToken.token, expires_in: 3_600 };
     },
   };
+}
+
+function firestoreForRequest(request: Request, app: ReturnType<typeof firebaseApp>) {
+  if (!process.env.GCP_WORKLOAD_IDENTITY_POOL_ID) return getFirestore(app);
+  if (!externalAccountClient) {
+    firebaseApp(request);
+    if (!externalAccountClient) throw new Error('GCP_WIF_CLIENT_INITIALIZATION_FAILED');
+  }
+  if (!federatedFirestore) {
+    const projectId = process.env.GCP_PROJECT_ID;
+    if (!projectId) throw new Error('GCP_WIF_CONFIGURATION_MISSING');
+    federatedFirestore = new Firestore({ projectId, authClient: externalAccountClient as never });
+  }
+  return federatedFirestore;
 }
 
 function firebaseApp(request: Request) {
@@ -218,7 +237,7 @@ async function gate(request: Request) {
     gateStage = 'firebase.auth_service';
     const auth = getAuth(app);
     gateStage = 'firebase.firestore_service';
-    const firestore = getFirestore(app);
+    const firestore = firestoreForRequest(request, app);
     gateStage = 'firebase.verify_session';
     const claims = await auth.verifySessionCookie(sessionCookie, true) as DecodedIdToken;
     gateStage = 'firestore.read_session';
