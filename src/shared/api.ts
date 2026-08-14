@@ -43,9 +43,18 @@ import type {
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-const API_BASE_URL = import.meta.env.DEV && configuredApiUrl?.trim()
+const API_BASE_URL = configuredApiUrl?.trim().startsWith('/')
   ? configuredApiUrl.replace(/\/$/, '')
-  : '';
+  : import.meta.env.DEV && configuredApiUrl?.trim()
+    ? configuredApiUrl.replace(/\/$/, '')
+    : '';
+
+function apiBaseUrl() {
+  // The portal root login is a neutral entry point. Its auth requests are
+  // explicitly routed server-side to the role-derived surface.
+  if (typeof window !== 'undefined' && window.location.pathname === '/login') return '';
+  return API_BASE_URL;
+}
 
 export const isApiConfigured = true;
 
@@ -88,7 +97,7 @@ export class ApiRequestError extends Error {
 async function performApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const securityHeaders = securityTokenProvider ? await securityTokenProvider() : {};
   const method = (init?.method || 'GET').toUpperCase();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
     ...init,
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...securityHeaders, ...(!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}), ...init?.headers },

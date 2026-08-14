@@ -35,6 +35,7 @@ import { AuthContext, type AuthContextValue } from './AuthContext';
 import type { AuthState, AuthenticatedStaff, StaffRole } from './types';
 import { isLocalPortalPreview, localPreviewStaff } from '../dev/localPortalPreview';
 import { passwordResetActionSettings } from './passwordReset';
+import { isCurrentSurfacePath, surfacePath } from './surface-path';
 
 const IDLE_LIMIT_MS = 15 * 60 * 1000;
 const ABSOLUTE_LIMIT_MS = 8 * 60 * 60 * 1000;
@@ -92,9 +93,9 @@ function staffFromSession(session: AuthenticatedSession): AuthenticatedStaff {
 }
 
 function redirectToLogin(includeReturnTarget: boolean) {
-  if (window.location.pathname === '/login') return;
+  if (isCurrentSurfacePath('/login')) return;
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  window.location.assign(includeReturnTarget ? `/login?returnTo=${encodeURIComponent(returnTo)}` : '/login');
+  window.location.assign(includeReturnTarget ? surfacePath(`/login?returnTo=${encodeURIComponent(returnTo)}`) : surfacePath('/login'));
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -134,12 +135,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setAuthenticatedSession = useCallback((session: AuthenticatedSession) => {
     setApiCsrfToken(session.csrfToken);
     setState({ phase: 'authenticated', staff: staffFromSession(session), error: null, notice: null, sessionWarning: false });
-    if (window.location.pathname === '/login') {
+    if (isCurrentSurfacePath('/login')) {
       const candidate = new URLSearchParams(window.location.search).get('returnTo') ?? '/';
       let decoded = '';
       try { decoded = decodeURIComponent(decodeURIComponent(candidate)); } catch { decoded = '//'; }
       const hasControlCharacter = [...decoded].some(character => character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127);
       const safe = candidate.startsWith('/') && !decoded.startsWith('//') && !decoded.includes('\\') && !hasControlCharacter ? candidate : '/';
+      if (window.location.pathname === '/login') {
+        const workspace = `/${session.surface}`;
+        const destination = safe === workspace || safe.startsWith(`${workspace}/`) ? safe : workspace;
+        window.location.replace(destination);
+        return;
+      }
       window.location.replace(safe);
     }
   }, []);

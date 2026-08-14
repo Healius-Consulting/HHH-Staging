@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "workspaces": [
     "services/api",
     "services/web",
@@ -21,6 +24,10 @@
     "build:public": "vite build --config vite.public.config.ts",
     "build:pharmacy": "vite build --config vite.pharmacy.config.ts",
     "build:admin": "vite build --config vite.admin.config.ts",
+    "build:vercel": "node scripts/build-vercel-surface.mjs",
+    "build:vercel:public": "node scripts/build-vercel-surface.mjs public",
+    "build:vercel:pharmacy": "node scripts/build-vercel-surface.mjs pharmacy",
+    "build:vercel:admin": "node scripts/build-vercel-surface.mjs admin",
     "build:api": "npm run build --workspace @hhh/api",
     "build:all": "npm run build --workspace @hhh/ui && npm run build:public && npm run build:pharmacy && npm run build:admin && npm run build:api",
     "lint": "oxlint",
@@ -30,6 +37,8 @@
     "@hhh/domain": "0.1.0",
     "@hhh/ui": "0.1.0",
     "firebase": "^12.16.0",
+    "firebase-admin": "^14.2.0",
+    "google-auth-library": "^10.9.1",
     "jszip": "^3.10.1",
     "lucide-react": "^1.22.0",
     "qrcode": "^1.5.4",
@@ -48,6 +57,7 @@
     "vite": "^8.1.0"
   },
   "overrides": {
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "jose": "5.10.0"
   }
 }

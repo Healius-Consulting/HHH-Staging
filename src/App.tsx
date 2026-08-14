@@ -34,6 +34,7 @@ import { isLocalPortalPreview } from './dev/localPortalPreview';
 import LocalPortalSwitcher from './dev/LocalPortalSwitcher';
 import CommandPalette from './components/CommandPalette';
 import { serverSessionAuth } from './auth/firebase';
+import { isCurrentSurfacePath } from './auth/surface-path';
 
 function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
   return {
@@ -259,7 +260,7 @@ function StaffWorkspace() {
 
 function AppContent() {
   const { state: authState } = useAuth();
-  if (window.location.pathname === '/reset-password') return <PasswordResetScreen />;
+  if (isCurrentSurfacePath('/reset-password')) return <PasswordResetScreen />;
 
   return (
     <>
