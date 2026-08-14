@@ -180,7 +180,8 @@ async function securityEvent(request: Request, event: string, details: Record<st
   };
   console.warn(JSON.stringify(payload));
   try {
-    await getFirestore(firebaseApp(request)).collection('auditLogs').add(payload);
+    const app = firebaseApp(request);
+    await firestoreForRequest(request, app).collection('auditLogs').add(payload);
   } catch {
     console.error(JSON.stringify({ event: 'security.audit_write_failed', requestId, originalEvent: event }));
   }
