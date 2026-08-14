@@ -1,6 +1,6 @@
 import type { ActionCodeSettings } from 'firebase/auth';
 
-const FALLBACK_APP_URL = 'https://pharmacy.hhh.thinktimeless.co.uk';
+const FALLBACK_APP_URL = 'https://portal.hhh.thinktimeless.co.uk/pharmacy';
 
 export function appBaseUrl() {
   const configured = import.meta.env.VITE_APP_URL?.trim().replace(/\/$/, '');
