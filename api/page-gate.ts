@@ -34,9 +34,8 @@ function wifCredential(request: Request): Credential {
   const poolId = process.env.GCP_WORKLOAD_IDENTITY_POOL_ID;
   const providerId = process.env.GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID;
   const serviceAccountEmail = process.env.GCP_SERVICE_ACCOUNT_EMAIL;
-  if (!oidcToken || !projectNumber || !poolId || !providerId || !serviceAccountEmail) {
-    throw new Error('Keyless Google authentication is not fully configured.');
-  }
+  if (!oidcToken) throw new Error('VERCEL_OIDC_TOKEN_MISSING');
+  if (!projectNumber || !poolId || !providerId || !serviceAccountEmail) throw new Error('GCP_WIF_CONFIGURATION_MISSING');
   activeVercelOidcToken = oidcToken;
   const authClient = ExternalAccountClient.fromJSON({
     type: 'external_account',
@@ -82,6 +81,13 @@ function firebaseApp(request: Request) {
 
 function hash(value: string) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function safeGateFailure(error: unknown) {
+  if (!(error instanceof Error)) return 'CREDENTIAL_INITIALIZATION_FAILED';
+  if (error.message === 'VERCEL_OIDC_TOKEN_MISSING') return error.message;
+  if (error.message === 'GCP_WIF_CONFIGURATION_MISSING') return error.message;
+  return 'CREDENTIAL_INITIALIZATION_FAILED';
 }
 
 function requestPath(request: Request) {
@@ -246,10 +252,10 @@ async function gate(request: Request) {
       }, { merge: true });
     }
     return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers: responseHeaders(requestId, 'text/html; charset=utf-8') });
-  } catch {
+  } catch (error) {
     await securityEvent(request, 'auth.session_rejected', {
       requestId,
-      code: 'INVALID_OR_EXPIRED',
+      code: gateStage === 'firebase.initialize' ? safeGateFailure(error) : 'INVALID_OR_EXPIRED',
       gateStage,
       sessionHashPrefix: sessionHash.slice(0, 12),
     });
