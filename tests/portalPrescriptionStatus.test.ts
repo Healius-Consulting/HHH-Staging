@@ -33,5 +33,24 @@ test('a submitted Curaleaf purchase order follows its fulfilment state', () => {
       status: 'purchase_order_submitted',
       customerReference: 'HHH-order-rx',
     },
-  }), 'approved');
+  }), 'processing');
+  assert.equal(portalPrescriptionStatus({
+    fulfilmentStatus: 'partially_dispatched_to_pharmacy',
+    curaleaf: {
+      status: 'purchase_order_submitted',
+      customerReference: 'HHH-order-rx',
+      purchaseOrderState: 'PROCESSING',
+    },
+  }), 'dispatched');
+});
+
+test('a supplier-cancelled purchase order has an explicit cancelled status', () => {
+  assert.equal(portalPrescriptionStatus({
+    fulfilmentStatus: 'exception',
+    curaleaf: {
+      status: 'purchase_order_submitted',
+      customerReference: 'HHH-order-rx',
+      purchaseOrderState: 'CANCELLED',
+    },
+  }), 'cancelled');
 });

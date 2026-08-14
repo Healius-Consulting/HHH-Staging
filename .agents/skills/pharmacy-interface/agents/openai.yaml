@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pharmacy Interface"
+  short_description: "Design secure pharmacy workspace interfaces"
+  default_prompt: "Use $pharmacy-interface to design or review a secure pharmacy workspace surface."

@@ -366,6 +366,16 @@ export interface PortalCuraleafOrderState {
   purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
   courier?: string;
   shipmentIds?: string[];
+  dispatchStatus?: 'not_dispatched' | 'partial' | 'complete';
+  quantityMismatch?: boolean;
+  requestedItems?: Array<{ packId: string; quantity: number }>;
+  placementRequest?: {
+    endpoint: string;
+    disposition: 'sent' | 'existing_not_replayed';
+    items?: Array<{ productId: string; count: number }> | null;
+    prescriptionIds?: string[] | null;
+  } | null;
+  supplierItems?: Array<{ productId: string | null; packsOrderedCount: number; packsAllocatedCount: number; packsReturnedCount: number }>;
   quote?: CuraleafQuote;
 }
 
@@ -439,18 +449,23 @@ export interface PortalOrderRecord {
   updatedAt: string;
 }
 
-export type PrescriptionFlowState = 'DRAFT' | 'AWAITING_PAYMENT' | 'PAID' | 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'PLACED' | 'HELD_FOR_RENEWAL' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXPIRED' | 'CANCELLED_REFUNDED';
+export type PrescriptionFlowState = 'DRAFT' | 'AWAITING_PAYMENT' | 'PAID' | 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'PLACED' | 'HELD_FOR_RENEWAL' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXPIRED' | 'CANCELLED_PURCHASE_ORDER' | 'CANCELLED_REFUNDED';
 
 export interface FulfilmentLineRecord {
   lineId: string;
   productId: string;
   ordered: number;
+  requested: number;
+  sent: number | null;
+  supplierReportedOrdered: number;
   allocated: number;
   shipped: number;
   returned: number;
+  remaining: number;
   received: number;
   collected: number;
   backordered: boolean;
+  quantityMismatch: boolean;
 }
 
 export interface PrescriptionFlowRecord {
@@ -461,8 +476,10 @@ export interface PrescriptionFlowRecord {
   purchaseOrderId?: string | null;
   placedAt?: string | null;
   shipmentIds: string[];
-  shipmentStates?: Record<string, 'dispatched_to_pharmacy' | 'partially_received' | 'received' | 'ready_for_collection' | 'collected' | 'exception' | string>;
+  shipmentStates?: Record<string, 'partially_dispatched_to_pharmacy' | 'dispatched_to_pharmacy' | 'partially_received' | 'received' | 'ready_for_collection' | 'collected' | 'exception' | string>;
   lines: FulfilmentLineRecord[];
+  dispatchStatus?: 'not_dispatched' | 'partial' | 'complete';
+  quantityMismatch?: boolean;
   renewal?: {
     state: 'none' | 'boundary_alerted' | 'expired_alerted' | 'attaching' | 'attached' | 'manual_resolution';
     boundaryAt?: string;
@@ -787,6 +804,62 @@ export interface StaffAccessibilityPreferences {
   reduceMotion: boolean;
   enhancedFocus: boolean;
   underlineLinks: boolean;
+  overviewView?: 'operations' | 'pipeline' | 'handover';
+}
+
+export interface AuthenticatedSession {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: 'hhh_admin' | 'pharmacy_staff';
+  organisationId: string | null;
+  surface: 'pharmacy' | 'admin';
+  idleExpiresAt: string;
+  absoluteExpiresAt: string;
+  csrfToken: string;
+}
+
+export interface PharmacyOverview {
+  asOf: string;
+  organisation: {
+    id: string;
+    tradingName: string;
+    status: 'onboarding' | 'live' | 'paused';
+    trainingMode: boolean;
+  };
+  summary: {
+    patientReview: number;
+    awaitingPayment: number;
+    supplierFulfilment: number;
+    readyForCollection: number;
+    urgentTotal: number;
+  };
+  priorityItems: Array<{
+    id: string;
+    kind: 'eligibility' | 'payment' | 'supplier' | 'collection' | 'repeat' | 'cancellation';
+    ageDays: number;
+    maskedPatientLabel: string;
+    recordTarget: { kind: 'patient' | 'order' | 'submission'; id: string };
+    summary: string;
+  }>;
+  recentSessions: Array<{
+    orderId: string;
+    maskedPatientLabel: string;
+    occurredAt: string;
+    prescriptionCount: number;
+    status: string;
+  }>;
+  handover: {
+    onboardingWaiting: number;
+    activePaymentLinks: number;
+    supplierOrdersInProgress: number;
+    agedCollections: number;
+  };
+  integrations: Array<{
+    integration: 'curaleaf' | 'worldpay';
+    state: 'connected' | 'degraded' | 'unavailable' | 'not-configured';
+    checkedAt: string | null;
+  }>;
 }
 
 export interface Company {

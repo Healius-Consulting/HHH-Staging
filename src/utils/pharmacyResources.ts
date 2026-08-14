@@ -4,9 +4,9 @@ import type { PharmacyTenant } from '../context/AppContext';
 import { deriveTenantTheme } from './tenantTheme';
 
 export function eligibilityUrl(org: PharmacyTenant) {
-  const configuredBase = (import.meta.env.VITE_ELIGIBILITY_FORM_URL as string | undefined) || (import.meta.env.DEV ? 'http://localhost:5174' : undefined);
-  const url = new URL(configuredBase || window.location.origin + window.location.pathname);
-  url.searchParams.set('mode', 'eligibility');
+  const configuredBase = (import.meta.env.VITE_ELIGIBILITY_FORM_URL as string | undefined)
+    || (import.meta.env.DEV ? 'http://localhost:5174/eligibility' : 'https://www.hhh.thinktimeless.co.uk/eligibility');
+  const url = new URL(configuredBase);
   url.searchParams.set('token', org.referralToken);
   return url.toString();
 }

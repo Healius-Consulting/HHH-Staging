@@ -1,0 +1,30 @@
+:root {
+  --hhh-colour-ink: #17241c;
+  --hhh-colour-muted: #526157;
+  --hhh-colour-surface: #ffffff;
+  --hhh-colour-surface-subtle: #f3f6f3;
+  --hhh-colour-border: #d9e0da;
+  --hhh-colour-focus: #146c43;
+  --hhh-status-success-text: #075b37;
+  --hhh-status-success-surface: #e5f7ed;
+  --hhh-status-warning-text: #684012;
+  --hhh-status-warning-surface: #fff8e8;
+  --hhh-status-danger-text: #7f2925;
+  --hhh-status-danger-surface: #fff1f0;
+  --hhh-space-1: 0.25rem;
+  --hhh-space-2: 0.5rem;
+  --hhh-space-3: 0.75rem;
+  --hhh-space-4: 1rem;
+  --hhh-space-6: 1.5rem;
+  --hhh-space-8: 2rem;
+  --hhh-radius-sm: 0.5rem;
+  --hhh-radius-md: 0.75rem;
+  --hhh-elevation-1: 0 2px 8px rgb(20 38 27 / 8%);
+}
+
+.hhh-focusable:focus-visible { outline: 3px solid var(--hhh-colour-focus); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { scroll-behavior: auto; }
+  .hhh-motion { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}

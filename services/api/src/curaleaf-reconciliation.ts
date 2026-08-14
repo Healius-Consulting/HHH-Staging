@@ -121,11 +121,11 @@ async function reconciliationQuoteGate(organisationId: string, orderId: string, 
       await Promise.all(ledgerEvents.map(event => recordPlacementLedgerEvent(event)));
       await placementDocument.ref.set({ lines: updatedLines, overallState: held ? 'HELD_PRICE' : 'PENDING_PLACEMENT', updatedAt: nowIso() }, { merge: true });
       if (held) {
-        await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${prescriptionId}.state`]: 'HELD_PRICE', [`prescriptionFlow.${prescriptionId}.updatedAt`]: nowIso(), integrationStatus: 'quote_review_required', updatedAt: nowIso() }, { merge: true });
+        await firestore.collection('orders').doc(orderId).update({ [`prescriptionFlow.${prescriptionId}.state`]: 'HELD_PRICE', [`prescriptionFlow.${prescriptionId}.updatedAt`]: nowIso(), integrationStatus: 'quote_review_required', updatedAt: nowIso() });
         await ensureSupportCase(organisationId, orderId, 'supplier_exception', 'A supplier-cost increase fell below the configured 15% line margin floor.', prescriptionId);
         return false;
       }
-      await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${prescriptionId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${prescriptionId}.updatedAt`]: nowIso(), updatedAt: nowIso() }, { merge: true });
+      await firestore.collection('orders').doc(orderId).update({ [`prescriptionFlow.${prescriptionId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${prescriptionId}.updatedAt`]: nowIso(), updatedAt: nowIso() });
       return true;
     }
   }
@@ -188,10 +188,14 @@ function operationInput(operation: OperationRecord, order: Record<string, unknow
   };
 }
 
-function fulfilmentStatus(purchaseOrder: CuraleafPurchaseOrderRecord, shipments: CuraleafShipmentRecord[]): FulfilmentStatus {
-  if (shipments.length) return 'dispatched_to_pharmacy';
-  if (purchaseOrder.state === 'FULLY_ALLOCATED') return 'supplier_allocated';
+function fulfilmentStatus(
+  purchaseOrder: CuraleafPurchaseOrderRecord,
+  shipments: CuraleafShipmentRecord[],
+  lines: Array<{ remaining: number }>,
+): FulfilmentStatus {
   if (purchaseOrder.state === 'CANCELLED') return 'exception';
+  if (shipments.length) return lines.some(line => line.remaining > 0) ? 'partially_dispatched_to_pharmacy' : 'dispatched_to_pharmacy';
+  if (purchaseOrder.state === 'FULLY_ALLOCATED') return 'supplier_allocated';
   return 'supplier_processing';
 }
 
@@ -200,12 +204,26 @@ function count(value: unknown) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
 }
 
-function normalisedFulfilmentLines(purchaseOrder: CuraleafPurchaseOrderRecord, shipments: CuraleafShipmentRecord[], prior: unknown) {
+export function normalisedFulfilmentLines(
+  purchaseOrder: CuraleafPurchaseOrderRecord,
+  shipments: CuraleafShipmentRecord[],
+  prior: unknown,
+  requestedItems: Array<{ packId: string; quantity: number }> = [],
+  sentItems: Array<{ productId: string; count: number }> | null = null,
+) {
   const priorByProduct = new Map((Array.isArray(prior) ? prior as Array<Record<string, unknown>> : []).map(line => [String(line.productId ?? ''), line]));
-  return purchaseOrder.items.flatMap((raw, index) => {
-    const productId = typeof raw.productId === 'string' ? raw.productId : '';
+  const requestedByProduct = new Map(requestedItems.map(item => [item.packId, item.quantity]));
+  const sentByProduct = sentItems ? new Map(sentItems.map(item => [item.productId, item.count])) : null;
+  const supplierByProduct = new Map(purchaseOrder.items.flatMap(raw => typeof raw.productId === 'string' ? [[raw.productId, raw] as const] : []));
+  const productIds = [...new Set([...requestedByProduct.keys(), ...supplierByProduct.keys()])];
+  return productIds.flatMap((requestedProductId, index) => {
+    const raw = supplierByProduct.get(requestedProductId) ?? {};
+    const productId = typeof raw.productId === 'string' ? raw.productId : requestedProductId;
     if (!productId) return [];
-    const ordered = count(raw.packsOrderedCount ?? raw.count);
+    const supplierReportedOrdered = count(raw.packsOrderedCount ?? raw.count);
+    const requested = count(requestedByProduct.get(productId));
+    const ordered = requested || supplierReportedOrdered;
+    const sent = sentByProduct ? count(sentByProduct.get(productId)) : null;
     const allocated = count(raw.packsAllocatedCount);
     const returnedByPo = count(raw.packsReturnedCount);
     const shipped = shipments.reduce((total, shipment) => total + shipment.items
@@ -216,16 +234,22 @@ function normalisedFulfilmentLines(purchaseOrder: CuraleafPurchaseOrderRecord, s
       .reduce((sum, item) => sum + count(item.packsReturnedCount), 0), 0);
     const existing = priorByProduct.get(productId);
     const returned = Math.max(returnedByPo, returnedByShipments);
+    const remaining = Math.max(0, ordered - Math.max(0, shipped - returned));
     return [{
       lineId: String(existing?.lineId ?? createHash('sha256').update(`${purchaseOrder.id}:${productId}:${index}`).digest('hex').slice(0, 32)),
       productId,
       ordered,
+      requested,
+      sent,
+      supplierReportedOrdered,
       allocated,
       shipped,
       returned,
+      remaining,
       received: count(existing?.received),
       collected: count(existing?.collected),
-      backordered: Math.max(0, shipped - returned) < ordered,
+      backordered: shipments.length > 0 && remaining > 0,
+      quantityMismatch: requested > 0 && supplierReportedOrdered > 0 && requested !== supplierReportedOrdered,
     }];
   });
 }
@@ -256,7 +280,7 @@ async function saveShipments(organisationId: string, shipments: CuraleafShipment
 async function ensureSupportCase(organisationId: string, orderId: string, reason: 'prescription_exception' | 'supplier_exception', note: string, prescriptionId?: string, purchaseOrderId?: string) {
   const id = createHash('sha256').update(`${organisationId}:${orderId}:${reason}:${prescriptionId ?? ''}:${purchaseOrderId ?? ''}`).digest('hex');
   const document = firestore.collection('curaleafSupportCases').doc(id);
-  if ((await document.get()).exists) return;
+  if ((await document.get()).exists) return id;
   await document.create({
     id,
     schemaVersion: 1,
@@ -273,6 +297,162 @@ async function ensureSupportCase(organisationId: string, orderId: string, reason
     createdAt: nowIso(),
     updatedAt: nowIso(),
   });
+  invalidateCollectionCache('curaleafSupportCases', id);
+  return id;
+}
+
+/**
+ * Applies an authoritative Curaleaf cancellation discovered by event polling
+ * or the hourly repair mirror. The supplier state is reflected in the portal,
+ * while a paid order remains refund-required rather than silently refunded.
+ */
+export async function ingestCancelledCuraleafPurchaseOrder(
+  organisationId: string,
+  purchaseOrder: CuraleafPurchaseOrderRecord,
+) {
+  if (purchaseOrder.state !== 'CANCELLED') return { matchedOperations: 0, updatedOrders: 0 };
+  const snapshots = await Promise.all([
+    firestore.collection('integrationOperations').where('purchaseOrderId', '==', purchaseOrder.id).limit(100).get(),
+    ...(typeof purchaseOrder.customerReference === 'string' && purchaseOrder.customerReference
+      ? [firestore.collection('integrationOperations').where('customerReference', '==', purchaseOrder.customerReference).limit(100).get()]
+      : []),
+  ]);
+  const operations = [...new Map(snapshots.flatMap(snapshot => snapshot.docs)
+    .filter(document => document.data().organisationId === organisationId)
+    .map(document => [document.id, document])).values()];
+  const updatedOrderIds = new Set<string>();
+  const supplierCancelledAt = nowIso();
+
+  for (const operationDocument of operations) {
+    const operation = operationDocument.data() as OperationRecord;
+    if (typeof operation.orderId !== 'string') continue;
+    const priorResult = operation.result && typeof operation.result === 'object' ? operation.result as Record<string, unknown> : {};
+    const result = {
+      ...priorResult,
+      status: 'purchase_order_submitted',
+      customerReference: purchaseOrder.customerReference ?? operation.customerReference ?? null,
+      ...(typeof operation.prescriptionId === 'string' ? { prescriptionId: operation.prescriptionId } : {}),
+      ...(typeof operation.prescriptionState === 'string' ? { prescriptionState: operation.prescriptionState } : {}),
+      purchaseOrderId: purchaseOrder.id,
+      purchaseOrderState: 'CANCELLED',
+      supplierStatusLabel: 'Cancelled purchase order',
+    };
+    await operationDocument.ref.set({
+      status: 'failed',
+      errorCode: 'PURCHASE_ORDER_CANCELLED',
+      result,
+      purchaseOrderId: purchaseOrder.id,
+      purchaseOrderState: 'CANCELLED',
+      lastError: null,
+      lastCheckedAt: supplierCancelledAt,
+      updatedAt: supplierCancelledAt,
+    }, { merge: true });
+
+    const orderRef = firestore.collection('orders').doc(operation.orderId);
+    const orderSnapshot = await orderRef.get();
+    if (!orderSnapshot.exists || orderSnapshot.data()?.organisationId !== organisationId) continue;
+    const order = orderSnapshot.data()!;
+    const paymentStatus = String(order.paymentStatus ?? '');
+    const refundRequired = ['paid', 'refund_required'].includes(paymentStatus);
+    const nextPaymentStatus = refundRequired ? 'refund_required' : paymentStatus === 'refunded' ? 'refunded' : 'cancelled';
+    const existingCancellation = order.cancellation && typeof order.cancellation === 'object' ? order.cancellation as Record<string, unknown> : {};
+    const existingCuraleafCancellation = order.curaleafCancellation && typeof order.curaleafCancellation === 'object' ? order.curaleafCancellation as Record<string, unknown> : {};
+    const prescriptionId = typeof operation.prescriptionId === 'string' ? operation.prescriptionId : undefined;
+    const supportCaseId = await ensureSupportCase(
+      organisationId,
+      operation.orderId,
+      'supplier_exception',
+      'Curaleaf reported the purchase order as cancelled. Review the patient payment and complete any required refund.',
+      prescriptionId,
+      purchaseOrder.id,
+    );
+    const subOrderId = typeof operation.subOrderId === 'string' ? operation.subOrderId : null;
+    const currentCuraleaf = order.curaleaf && typeof order.curaleaf === 'object' ? order.curaleaf as Record<string, unknown> : {};
+    const ownsLegacyResult = currentCuraleaf.customerReference === result.customerReference || !currentCuraleaf.customerReference;
+    const currentFlow = subOrderId && order.prescriptionFlow && typeof order.prescriptionFlow === 'object'
+      ? (order.prescriptionFlow as Record<string, Record<string, unknown>>)[subOrderId] ?? {}
+      : {};
+    const curaleafSubOrders = order.curaleafSubOrders && typeof order.curaleafSubOrders === 'object'
+      ? order.curaleafSubOrders as Record<string, unknown>
+      : {};
+    const prescriptionFlow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object'
+      ? order.prescriptionFlow as Record<string, unknown>
+      : {};
+    const nextCuraleafSubOrders = subOrderId ? { ...curaleafSubOrders, [subOrderId]: result } : curaleafSubOrders;
+    const prescriptionKeys = Array.isArray(order.prescriptions)
+      ? (order.prescriptions as Array<Record<string, unknown>>).flatMap(item => {
+        const key = typeof item.id === 'string' ? item.id : typeof item.fileId === 'string' ? item.fileId : null;
+        return key ? [key] : [];
+      })
+      : Object.keys(prescriptionFlow);
+    const wholeOrderCancelled = prescriptionKeys.length <= 1 || prescriptionKeys.every(key => {
+      const state = nextCuraleafSubOrders[key];
+      return state && typeof state === 'object' && (state as Record<string, unknown>).purchaseOrderState === 'CANCELLED';
+    });
+    await orderRef.set({
+      ...(ownsLegacyResult ? { curaleaf: result } : {}),
+      ...(subOrderId ? { curaleafSubOrders: nextCuraleafSubOrders } : {}),
+      ...(subOrderId ? {
+        prescriptionFlow: {
+          ...prescriptionFlow,
+          [subOrderId]: {
+            ...currentFlow,
+            state: 'CANCELLED_PURCHASE_ORDER',
+            purchaseOrderId: purchaseOrder.id,
+            supplierCancelledAt,
+            updatedAt: supplierCancelledAt,
+          },
+        },
+      } : {}),
+      ...(wholeOrderCancelled ? {
+        status: 'cancelled',
+        cancelledAt: String(order.cancelledAt ?? supplierCancelledAt),
+        paymentStatus: nextPaymentStatus,
+        fulfilmentStatus: 'exception' satisfies FulfilmentStatus,
+      } : {}),
+      integrationStatus: 'attention',
+      ...(wholeOrderCancelled ? { cancellation: {
+        reason: 'other',
+        note: 'Curaleaf reported this purchase order as cancelled. Review the pharmacy’s Curaleaf call or case notes for the supplier reason.',
+        requestedAt: supplierCancelledAt,
+        requestedBy: 'system',
+        paymentLinkStatus: 'not_applicable',
+        paymentReference: order.worldpayPaymentId ?? order.paymentTransactionReference ?? order.paymentId ?? null,
+        ...existingCancellation,
+        status: refundRequired ? 'refund_required' : 'cancelled',
+      } } : {}),
+      ...(wholeOrderCancelled ? { curaleafCancellation: {
+        requestedAt: supplierCancelledAt,
+        requestedBy: 'system',
+        ...existingCuraleafCancellation,
+        status: 'confirmed',
+        purchaseOrderId: purchaseOrder.id,
+        prescriptionId: prescriptionId ?? existingCuraleafCancellation.prescriptionId ?? null,
+        supportCaseId: existingCuraleafCancellation.supportCaseId ?? supportCaseId,
+        confirmedAt: supplierCancelledAt,
+        confirmedBy: 'system',
+        confirmationReference: `Curaleaf state: CANCELLED (${purchaseOrder.id})`,
+      } } : {}),
+      updatedAt: supplierCancelledAt,
+    }, { merge: true });
+
+    if (subOrderId) {
+      const placementSnapshot = await firestore.collection('prescriptionPlacements')
+        .where('orderId', '==', operation.orderId)
+        .where('prescriptionId', '==', subOrderId)
+        .limit(1)
+        .get();
+      const placement = placementSnapshot.docs[0];
+      if (placement) {
+        const lines = (Array.isArray(placement.data().lines) ? placement.data().lines as Array<Record<string, unknown>> : [])
+          .map(line => ({ ...line, placementState: 'CANCELLATION_PENDING_REFUND', supplierCancelledAt, updatedAt: supplierCancelledAt }));
+        await placement.ref.set({ lines, overallState: 'CANCELLATION_PENDING_REFUND', supplierCancelledAt, updatedAt: supplierCancelledAt }, { merge: true });
+      }
+    }
+    invalidateCollectionCache('orders', operation.orderId);
+    updatedOrderIds.add(operation.orderId);
+  }
+  return { matchedOperations: operations.length, updatedOrders: updatedOrderIds.size };
 }
 
 async function reconcileOperation(document: QueryDocumentSnapshot) {
@@ -328,6 +508,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
         serialNumber: input.serialNumber,
         customerReference: operation.customerReference,
         items: input.items,
+        expectedPrescriberId: input.prescriberId || undefined,
         allowPurchaseOrderCreate: false,
       });
   if (reconciliation.status === 'prescription_processing') {
@@ -413,7 +594,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     }
     if (operation.autoPlacement === false && operation.manualPlacementRequested !== true) {
       await document.ref.update({ status: 'manual_placement_required', errorCode: null, lastCheckedAt: nowIso(), updatedAt: nowIso() });
-      if (typeof operation.subOrderId === 'string') await orderRef.set({ [`prescriptionFlow.${operation.subOrderId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${operation.subOrderId}.manualPlaceRequired`]: true, updatedAt: nowIso() }, { merge: true });
+      if (typeof operation.subOrderId === 'string') await orderRef.update({ [`prescriptionFlow.${operation.subOrderId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${operation.subOrderId}.manualPlaceRequired`]: true, updatedAt: nowIso() });
       return 'manual_placement_required';
     }
     reconciliation = clinicOperation
@@ -431,6 +612,7 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
         serialNumber: input.serialNumber,
         customerReference: operation.customerReference,
         items: input.items,
+        expectedPrescriberId: input.prescriberId || undefined,
         allowPurchaseOrderCreate: true,
       });
     if (reconciliation.status === 'purchase_order_confirmation_pending') {
@@ -439,11 +621,23 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     }
   }
 
+  const priorResult = operation.result && typeof operation.result === 'object' ? operation.result as Record<string, unknown> : {};
+  const reconciliationPlacementRequest = 'placementRequest' in reconciliation
+    && reconciliation.placementRequest
+    && typeof reconciliation.placementRequest === 'object'
+    ? reconciliation.placementRequest as Record<string, unknown>
+    : null;
+  const placementRequest = reconciliationPlacementRequest ?? (
+    priorResult.placementRequest && typeof priorResult.placementRequest === 'object'
+      ? priorResult.placementRequest as Record<string, unknown>
+      : null
+  );
   const purchaseOrder = reconciliation.purchaseOrderId
     ? await findCuraleafPurchaseOrder(operation.organisationId, operation.customerReference)
     : null;
   if (!purchaseOrder) {
     const submittedResult = {
+      ...priorResult,
       status: 'purchase_order_submitted',
       customerReference: operation.customerReference,
       prescriptionId: reconciliation.prescriptionId,
@@ -452,6 +646,8 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
       ...('prescriberName' in reconciliation ? { prescriberName: reconciliation.prescriberName } : {}),
       purchaseOrderId: null,
       purchaseOrderState: null,
+      requestedItems: input.items,
+      placementRequest,
     };
     await document.ref.update({
       status: 'purchase_order_submitted',
@@ -477,11 +673,23 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
 
   const shipments = await findCuraleafShipments(operation.organisationId, purchaseOrder.id);
   const shipmentIds = await saveShipments(operation.organisationId, shipments);
-  const nextFulfilmentStatus = fulfilmentStatus(purchaseOrder, shipments);
+  const subOrderKey = typeof operation.subOrderId === 'string' ? operation.subOrderId : null;
+  const flow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object' ? order.prescriptionFlow as Record<string, Record<string, unknown>> : {};
+  const currentFlow = subOrderKey ? flow[subOrderKey] ?? {} : {};
+  const sentItems = placementRequest && Array.isArray(placementRequest.items)
+    ? (placementRequest.items as Array<Record<string, unknown>>).flatMap(item =>
+      typeof item.productId === 'string' && Number.isInteger(item.count) && Number(item.count) > 0
+        ? [{ productId: item.productId, count: Number(item.count) }]
+        : [])
+    : null;
+  const lines = normalisedFulfilmentLines(purchaseOrder, shipments, currentFlow.lines, input.items, sentItems);
+  const nextFulfilmentStatus = fulfilmentStatus(purchaseOrder, shipments, lines);
+  const partialDispatch = shipments.length > 0 && lines.some(line => line.remaining > 0);
+  const fullyDispatched = shipments.length > 0 && lines.length > 0 && lines.every(line => line.remaining === 0);
+  const quantityMismatch = lines.some(line => line.quantityMismatch);
   const curaleafApprovedAt = purchaseOrder.state === 'CANCELLED'
     ? typeof order.curaleafApprovedAt === 'string' ? order.curaleafApprovedAt : undefined
     : typeof order.curaleafApprovedAt === 'string' ? order.curaleafApprovedAt : nowIso();
-  const priorResult = operation.result && typeof operation.result === 'object' ? operation.result as Record<string, unknown> : {};
   const result = {
     ...priorResult,
     status: 'purchase_order_submitted',
@@ -494,9 +702,27 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     purchaseOrderState: purchaseOrder.state,
     courier: purchaseOrder.courier,
     shipmentIds,
+    requestedItems: input.items,
+    placementRequest,
+    supplierItems: purchaseOrder.items.map(item => ({
+      productId: item.productId ?? null,
+      packsOrderedCount: count(item.packsOrderedCount ?? item.count),
+      packsAllocatedCount: count(item.packsAllocatedCount),
+      packsReturnedCount: count(item.packsReturnedCount),
+    })),
+    dispatchStatus: partialDispatch ? 'partial' : fullyDispatched ? 'complete' : 'not_dispatched',
+    quantityMismatch,
   };
+  const operationStatus = purchaseOrder.state === 'CANCELLED'
+    ? 'failed'
+    : fullyDispatched
+      ? 'fully_dispatched'
+      : partialDispatch
+        ? 'partially_dispatched'
+        : 'purchase_order_submitted';
   await document.ref.update({
-    status: shipments.length ? 'shipment_created' : purchaseOrder.state === 'CANCELLED' ? 'failed' : 'purchase_order_submitted',
+    status: operationStatus,
+    errorCode: purchaseOrder.state === 'CANCELLED' ? 'PURCHASE_ORDER_CANCELLED' : quantityMismatch ? 'SUPPLIER_QUANTITY_MISMATCH' : null,
     result,
     prescriptionId: reconciliation.prescriptionId,
     prescriptionState: reconciliation.prescriptionState,
@@ -508,21 +734,17 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
   });
   const currentCuraleaf = order.curaleaf && typeof order.curaleaf === 'object' ? order.curaleaf as Record<string, unknown> : {};
   const ownsLegacyResult = currentCuraleaf.customerReference === operation.customerReference || !currentCuraleaf.customerReference;
-  const subOrderKey = typeof operation.subOrderId === 'string' ? operation.subOrderId : null;
   await orderRef.update({
     ...(ownsLegacyResult ? { curaleaf: result } : {}),
     ...(subOrderKey ? { [`curaleafSubOrders.${subOrderKey}`]: result } : {}),
     ...(curaleafApprovedAt ? { curaleafApprovedAt } : {}),
     fulfilmentStatus: nextFulfilmentStatus,
-    integrationStatus: purchaseOrder.state === 'CANCELLED' ? 'attention' : 'submitted',
+    integrationStatus: purchaseOrder.state === 'CANCELLED' || quantityMismatch ? 'attention' : 'submitted',
     updatedAt: nowIso(),
   });
   if (subOrderKey) {
-    const flow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object' ? order.prescriptionFlow as Record<string, Record<string, unknown>> : {};
-    const currentFlow = flow[subOrderKey] ?? {};
-    const lines = normalisedFulfilmentLines(purchaseOrder, shipments, currentFlow.lines);
     const protectedFlowState = ['READY_FOR_COLLECTION', 'COLLECTED', 'HELD_FOR_RENEWAL'].includes(String(currentFlow.state));
-    await orderRef.set({
+    await orderRef.update({
       [`prescriptionFlow.${subOrderKey}`]: {
         ...currentFlow,
         id: subOrderKey,
@@ -531,10 +753,12 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
         manualPlaceRequired: false,
         shipmentIds,
         lines,
+        dispatchStatus: partialDispatch ? 'partial' : fullyDispatched ? 'complete' : 'not_dispatched',
+        quantityMismatch,
         placedAt: String(currentFlow.placedAt ?? nowIso()),
         updatedAt: nowIso(),
       },
-    }, { merge: true });
+    });
     const placementSnapshot = await firestore.collection('prescriptionPlacements').where('orderId', '==', operation.orderId).where('prescriptionId', '==', subOrderKey).limit(1).get();
     const placement = placementSnapshot.docs[0];
     if (placement) {
@@ -543,11 +767,20 @@ async function reconcileOperation(document: QueryDocumentSnapshot) {
     }
   }
   if (purchaseOrder.state === 'CANCELLED') {
-    await ensureSupportCase(operation.organisationId, operation.orderId, 'supplier_exception', 'Curaleaf confirmed that the purchase order is cancelled. Review the patient payment and next action.', reconciliation.prescriptionId, purchaseOrder.id);
+    await ingestCancelledCuraleafPurchaseOrder(operation.organisationId, purchaseOrder);
+  } else if (quantityMismatch) {
+    await ensureSupportCase(
+      operation.organisationId,
+      operation.orderId,
+      'supplier_exception',
+      'The HHH requested pack quantity differs from Curaleaf’s purchase-order quantity. Contact Curaleaf before further supply is dispatched.',
+      reconciliation.prescriptionId,
+      purchaseOrder.id,
+    );
   }
   invalidateCollectionCache('orders', operation.orderId);
   if (purchaseOrder.state !== 'CANCELLED') await activatePatientForOrder(operation.orderId);
-  return shipments.length ? 'dispatched' : 'processing';
+  return purchaseOrder.state === 'CANCELLED' ? 'cancelled' : fullyDispatched ? 'dispatched' : partialDispatch ? 'partially_dispatched' : 'processing';
 }
 
 function savedClinicPrescriptions(order: Record<string, unknown>) {
@@ -652,6 +885,8 @@ async function ensureManualOperationRegistered(document: QueryDocumentSnapshot, 
     prescriptionId: registered.prescriptionId,
     prescriptionState: registered.prescriptionState,
     prescriberId: registered.prescriberId,
+    formulaMatchMode: registered.formulaMatchMode,
+    formulaAliases: registered.formulaAliases,
     status: order.paymentStatus === 'paid' ? 'awaiting_prescription_approval' : 'awaiting_payment',
     errorCode: null,
     lastError: null,
@@ -799,7 +1034,7 @@ export async function autoSubmitPaidPrescriptions(organisationId: string, orderI
     return data.organisationId === organisationId
       && data.integration === 'curaleaf'
       && ['manual', 'barcode'].includes(String(data.kind))
-      && ['registering_prescription', 'awaiting_payment', 'awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'reconciliation_required', 'manual_placement_required'].includes(String(data.status));
+      && ['registering_prescription', 'awaiting_payment', 'awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'shipment_created', 'partially_dispatched', 'reconciliation_required', 'manual_placement_required'].includes(String(data.status));
   });
   const summary: Record<string, number> = { seeded, checked: candidates.length };
   for (const document of candidates) {
@@ -821,7 +1056,7 @@ export async function reconcilePendingCuraleafOrders(organisationId?: string) {
     if (organisationId && order.data().organisationId !== organisationId) continue;
     seeded += await seedPaidClinicOrder(order) + await seedManualOrderOperations(order);
   }
-  const statuses = ['registering_prescription', 'awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'reconciliation_required'];
+  const statuses = ['registering_prescription', 'awaiting_prescription_approval', 'awaiting_clinic_prescription', 'purchase_order_submitted', 'shipment_created', 'partially_dispatched', 'reconciliation_required'];
   const snapshots = organisationId
     ? [await firestore.collection('integrationOperations').where('organisationId', '==', organisationId).limit(500).get()]
     : await Promise.all(statuses.map(status => firestore.collection('integrationOperations').where('status', '==', status).limit(100).get()));

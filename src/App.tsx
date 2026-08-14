@@ -4,6 +4,7 @@ import { AppProvider, useApp, type PharmacyTenant, type StaffSession } from './c
 import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
+import PharmacyOverview from './pages/PharmacyOverview';
 import CreateOrder from './pages/CreateOrder';
 import Orders from './pages/Orders';
 import FormularyPricing from './pages/FormularyPricing';
@@ -32,6 +33,7 @@ import type { PortalOrganisation } from './shared/contracts';
 import { isLocalPortalPreview } from './dev/localPortalPreview';
 import LocalPortalSwitcher from './dev/LocalPortalSwitcher';
 import CommandPalette from './components/CommandPalette';
+import { serverSessionAuth } from './auth/firebase';
 
 function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
   return {
@@ -100,6 +102,23 @@ function ToastItem({ toast }: { toast: { id: string; message: string; type: 'suc
 function ToastContainer() {
   const { state } = useApp();
   return <div className="toast-container" aria-live="polite">{state.toasts.map(toast => <ToastItem key={toast.id} toast={toast} />)}</div>;
+}
+
+function SessionExpiryNotice() {
+  const { state, continueSession, signOutStaff } = useAuth();
+  const stayButton = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { if (state.phase === 'authenticated' && state.sessionWarning) stayButton.current?.focus(); }, [state.phase, state.sessionWarning]);
+  if (state.phase !== 'authenticated' || !state.sessionWarning) return null;
+  return (
+    <section className="session-expiry-notice" role="alertdialog" aria-labelledby="session-expiry-title" aria-describedby="session-expiry-description">
+      <div>
+        <strong id="session-expiry-title">Your secure session is about to lock</strong>
+        <span id="session-expiry-description">Continue only if you are still actively using this pharmacy workspace.</span>
+      </div>
+      <button ref={stayButton} type="button" className="btn btn-primary btn-sm" onClick={() => void continueSession()}>Stay signed in</button>
+      <button type="button" className="btn btn-sm" onClick={() => void signOutStaff()}>Sign out</button>
+    </section>
+  );
 }
 
 /** Keeps the legacy prototype store aligned with the authoritative Firebase session. */
@@ -205,14 +224,14 @@ function StaffWorkspace() {
   const renderScreen = () => {
     if (isRestricted) return <SetupRequired onOpenSetup={() => dispatch({ type: 'SET_SCREEN', screen: 'settings' })} />;
     switch (state.screen) {
-      case 'home': return <Dashboard />;
+      case 'home': return serverSessionAuth ? <PharmacyOverview /> : <Dashboard />;
       case 'formulary': return <FormularyPricing />;
       case 'create': return <CreateOrder />;
       case 'orders': return <Orders />;
       case 'patients': return <Patients />;
       case 'finance': return <PharmacyFinance />;
       case 'settings': return setupComplete ? <PharmacySettings /> : <PharmacySetupWizard organisation={organisation} setup={setup} />;
-      default: return <Dashboard />;
+      default: return serverSessionAuth ? <PharmacyOverview /> : <Dashboard />;
     }
   };
 
@@ -240,13 +259,12 @@ function StaffWorkspace() {
 
 function AppContent() {
   const { state: authState } = useAuth();
-  const urlMode = new URLSearchParams(window.location.search).get('mode');
-
-  if (urlMode === 'resetPassword' || urlMode === 'reset-password') return <PasswordResetScreen />;
+  if (window.location.pathname === '/reset-password') return <PasswordResetScreen />;
 
   return (
     <>
       <AuthSessionBridge />
+      <SessionExpiryNotice />
       {authState.phase === 'unconfigured' && <ConfigurationRequired />}
       {authState.phase === 'loading' && <AuthLoading />}
       {authState.phase === 'anonymous' && <StaffLogin />}

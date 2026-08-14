@@ -3,12 +3,14 @@ import type { PortalOrderRecord } from '../shared/contracts';
 export type PortalPrescriptionStatus =
   | 'draft'
   | 'awaiting-approval'
+  | 'processing'
   | 'approved'
   | 'dispatched'
   | 'partially-received'
   | 'received'
   | 'ready'
-  | 'collected';
+  | 'collected'
+  | 'cancelled';
 
 /**
  * A newly-created order starts at `supplier_pending`, before anything has been
@@ -19,12 +21,14 @@ export function portalPrescriptionStatus(
   record: Pick<PortalOrderRecord, 'curaleaf' | 'fulfilmentStatus'>,
 ): PortalPrescriptionStatus {
   if (!record.curaleaf) return 'draft';
+  if (record.curaleaf.purchaseOrderState === 'CANCELLED') return 'cancelled';
   if (record.curaleaf.status !== 'purchase_order_submitted') return 'awaiting-approval';
 
   return ({
     supplier_pending: 'awaiting-approval',
-    supplier_processing: 'approved',
-    supplier_allocated: 'approved',
+    supplier_processing: 'processing',
+    supplier_allocated: 'processing',
+    partially_dispatched_to_pharmacy: 'dispatched',
     dispatched_to_pharmacy: 'dispatched',
     partially_received: 'partially-received',
     received: 'received',

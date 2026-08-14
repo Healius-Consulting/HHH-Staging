@@ -5,28 +5,37 @@
   "type": "module",
   "workspaces": [
     "services/api",
-    "packages/domain"
+    "services/web",
+    "packages/domain",
+    "packages/ui"
   ],
   "scripts": {
     "dev": "vite",
     "dev:eligibility": "vite --config vite.eligibility.config.ts",
+    "dev:public": "vite --config vite.public.config.ts",
+    "dev:pharmacy": "vite --config vite.pharmacy.config.ts",
+    "dev:admin": "vite --config vite.admin.config.ts",
     "dev:api": "npm run dev --workspace @hhh/api",
     "build": "tsc -b && vite build",
     "build:eligibility": "vite build --config vite.eligibility.config.ts",
+    "build:public": "vite build --config vite.public.config.ts",
+    "build:pharmacy": "vite build --config vite.pharmacy.config.ts",
+    "build:admin": "vite build --config vite.admin.config.ts",
     "build:api": "npm run build --workspace @hhh/api",
-    "build:all": "npm run build && npm run build:eligibility && npm run build:api",
+    "build:all": "npm run build --workspace @hhh/ui && npm run build:public && npm run build:pharmacy && npm run build:admin && npm run build:api",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
     "@hhh/domain": "0.1.0",
+    "@hhh/ui": "0.1.0",
     "firebase": "^12.16.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.22.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
@@ -37,5 +46,8 @@
     "oxlint": "^1.69.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

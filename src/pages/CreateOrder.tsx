@@ -410,11 +410,8 @@ export default function CreateOrder() {
           dispatch({ type: 'ADD_TOAST', message: 'The verified payment was carried over. No second patient payment was requested.', toastType: 'success' });
         } else if (selectedPaymentRoute === 'worldpay') {
           if (!canUseWorldpay) throw new Error('This pharmacy’s Worldpay connection is not verified. Change the default route in Settings.');
-          const origin = window.location.origin;
           const session = await createWorldpaySession(persisted.id, {
             organisationId: state.currentOrganisationId,
-            successUrl: `${origin}/payment-complete`,
-            cancelUrl: `${origin}/payment-cancelled`,
           });
           const provider = session.provider as { url?: string; _links?: { redirect?: { href?: string } } };
           const paymentUrl = provider.url ?? provider._links?.redirect?.href;

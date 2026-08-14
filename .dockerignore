@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+dist
+dist-*
+**/dist
+.git
+**/.terraform
+*.tfstate*
+.env
+**/.env
+**/.env.*
+!**/.env.example
+coverage
+logs
+tmp

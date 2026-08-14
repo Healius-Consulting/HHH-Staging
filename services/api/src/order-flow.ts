@@ -20,6 +20,7 @@ export type PrescriptionFlowState =
   | 'READY_FOR_COLLECTION'
   | 'COLLECTED'
   | 'EXPIRED'
+  | 'CANCELLED_PURCHASE_ORDER'
   | 'CANCELLED_REFUNDED';
 
 export function deterministicSubOrderId(orderId: string, seed: string, index: number) {

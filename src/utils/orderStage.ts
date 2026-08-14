@@ -17,6 +17,10 @@ export type StageFilter = 'current' | 'all' | 'awaiting-payment' | 'awaiting-ful
 
 export type CancellationResolution = 'none' | 'needs-action' | 'resolved' | 'refunded';
 
+export function hasDispatchedRemainder(line: { ordered: number; shipped: number }) {
+  return line.shipped > 0 && line.shipped < line.ordered;
+}
+
 /**
  * Cancellation is an order outcome, not a patient status. Keep unfinished
  * supplier/refund work operational while demoting closed cancellations.
@@ -60,11 +64,12 @@ export function orderStage(order: PatientOrder, now = new Date()): { stage: Orde
   if (order.payment.status === 'sent') return { stage: 'awaiting-payment', unresolvedReason };
 
   const statuses = order.prescriptions.map(prescription => prescription.status);
+  if (statuses.length && statuses.every(status => status === 'cancelled')) return { stage: 'cancelled', unresolvedReason };
   if (statuses.length && statuses.every(status => status === 'collected')) return { stage: 'collected', unresolvedReason };
   if (statuses.length && statuses.every(status => ['ready', 'collected'].includes(status)) && statuses.some(status => status === 'ready')) return { stage: 'ready', unresolvedReason };
   if (statuses.some(status => status === 'received' || status === 'partially-received')) return { stage: 'delivered', unresolvedReason };
   if (statuses.some(status => status === 'dispatched')) return { stage: 'dispatched', unresolvedReason };
-  if (statuses.length && statuses.every(status => ['approved', 'dispatched', 'partially-received', 'received', 'ready', 'collected'].includes(status))) return { stage: 'curaleaf-approved', unresolvedReason };
+  if (statuses.length && statuses.every(status => ['processing', 'approved', 'dispatched', 'partially-received', 'received', 'ready', 'collected', 'cancelled'].includes(status))) return { stage: 'curaleaf-approved', unresolvedReason };
   if (order.prescriptions.some(prescription => prescription.placed || prescription.status === 'awaiting-approval')) return { stage: 'curaleaf-pending', unresolvedReason };
   return { stage: 'paid', unresolvedReason };
 }

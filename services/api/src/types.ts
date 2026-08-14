@@ -1,6 +1,22 @@
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export type StaffRole = 'hhh_admin' | 'pharmacy_staff';
+export type ProtectedSurface = 'pharmacy' | 'admin';
+
+export type StaffSessionRecord = {
+  sessionHash: string;
+  uid: string;
+  surface: ProtectedSurface;
+  role: StaffRole;
+  organisationId: string | null;
+  createdAt: string;
+  lastActivityAt: string;
+  idleExpiresAt: string;
+  absoluteExpiresAt: string;
+  revokedAt: string | null;
+  userAgentHash: string;
+  expiresAt: Date;
+};
 
 export type RequestIdentity = {
   uid: string;
@@ -9,6 +25,10 @@ export type RequestIdentity = {
   pharmacyId: string | null;
   organisationId: string | null; // Compatibility fallback during migration
   token: DecodedIdToken;
+  surface?: ProtectedSurface;
+  sessionHash?: string;
+  idleExpiresAt?: string;
+  absoluteExpiresAt?: string;
 };
 
 export type IntegrationName = 'curaleaf' | 'worldpay' | 'curaleaf_test' | 'curaleaf_live';
@@ -26,6 +46,7 @@ export type FulfilmentStatus =
   | 'supplier_pending'
   | 'supplier_processing'
   | 'supplier_allocated'
+  | 'partially_dispatched_to_pharmacy'
   | 'dispatched_to_pharmacy'
   | 'partially_received'
   | 'received'
@@ -179,6 +200,7 @@ declare global {
     interface Request {
       identity?: RequestIdentity;
       rawBody?: Buffer;
+      authMethod?: 'bearer' | 'session';
     }
   }
 }

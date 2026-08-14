@@ -1,8 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import { config } from './config.js';
+import { authMode, config } from './config.js';
 import { appCheck, auth } from './firebase.js';
 import { HttpError } from './http.js';
+import { authenticateSession, clearSessionCookies, registerActivityOnSuccess, securityEvent, sessionCookieName } from './session-auth.js';
+import { parseCookies } from './session-utils.js';
 import type { RequestIdentity, StaffRole } from './types.js';
 
 const roleSchema = z.enum(['hhh_admin', 'pharmacy_staff']);
@@ -14,12 +16,20 @@ function bearer(request: Request) {
   return match[1];
 }
 
-export async function requireStaff(request: Request, _response: Response, next: NextFunction) {
+export async function requireStaff(request: Request, response: Response, next: NextFunction) {
   try {
     if (config.REQUIRE_APP_CHECK === 'true') {
       const appCheckToken = request.get('x-firebase-appcheck');
       if (!appCheckToken) throw new HttpError(401, 'App attestation is required.', 'APP_CHECK_REQUIRED');
       await appCheck.verifyToken(appCheckToken);
+    }
+
+    const hasSessionCookie = Boolean(parseCookies(request)[sessionCookieName]);
+    if (authMode === 'cookie-enforced' || authMode === 'cookie-dual' && hasSessionCookie) {
+      await authenticateSession(request);
+      registerActivityOnSuccess(request, response);
+      next();
+      return;
     }
 
     const decoded = await auth.verifyIdToken(bearer(request), true);
@@ -35,15 +45,28 @@ export async function requireStaff(request: Request, _response: Response, next: 
     if (decoded.auth_time * 1000 < Date.now() - 8 * 60 * 60 * 1000) throw new HttpError(401, 'Your staff session has expired. Sign in again.', 'SESSION_EXPIRED');
 
     request.identity = { uid: decoded.uid, email: decoded.email ?? null, role: role.data, pharmacyId, organisationId, token: decoded };
+    request.authMethod = 'bearer';
     next();
   } catch (error) {
-    next(error instanceof HttpError ? error : new HttpError(401, 'The staff session is invalid or expired.', 'UNAUTHENTICATED'));
+    const failure = error instanceof HttpError ? error : new HttpError(401, 'The staff session is invalid or expired.', 'UNAUTHENTICATED');
+    if (failure.status === 401 && failure.code !== 'APP_CHECK_REQUIRED') clearSessionCookies(response);
+    const event = failure.code === 'APP_CHECK_REQUIRED' ? 'auth.app_check_denied'
+      : failure.code === 'TENANT_MISMATCH' || failure.code === 'TENANT_REQUIRED' ? 'auth.tenant_mismatch'
+        : failure.code === 'FORBIDDEN' || failure.code === 'ROLE_REQUIRED' ? 'auth.role_denied'
+          : failure.code === 'SESSION_IDLE_EXPIRED' ? 'auth.session_expired_idle'
+            : failure.code === 'SESSION_EXPIRED' ? 'auth.session_expired_absolute'
+              : 'auth.session_rejected';
+    void securityEvent(request, event, { code: failure.code });
+    next(failure);
   }
 }
 
 export function requireRole(...roles: StaffRole[]) {
   return (request: Request, _response: Response, next: NextFunction) => {
-    if (!request.identity || !roles.includes(request.identity.role)) return next(new HttpError(403, 'You do not have access to this action.', 'FORBIDDEN'));
+    if (!request.identity || !roles.includes(request.identity.role)) {
+      void securityEvent(request, 'auth.role_denied', { requiredRoles: roles });
+      return next(new HttpError(403, 'You do not have access to this action.', 'FORBIDDEN'));
+    }
     next();
   };
 }
@@ -57,7 +80,10 @@ export function tenantFor(request: Request, requested?: unknown): string {
   const actor = identity(request);
   const activePharmacyId = actor.pharmacyId ?? actor.organisationId;
   if (actor.role === 'pharmacy_staff') {
-    if (requested !== undefined && requested !== activePharmacyId) throw new HttpError(403, 'Cross-pharmacy access is not permitted.', 'TENANT_MISMATCH');
+    if (requested !== undefined && requested !== activePharmacyId) {
+      Object.assign(request, { securityDenial: 'tenant_mismatch' });
+      throw new HttpError(404, 'The requested record was not found.', 'NOT_FOUND');
+    }
     return activePharmacyId!;
   }
   const parsed = organisationIdSchema.safeParse(requested);

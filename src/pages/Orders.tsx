@@ -41,7 +41,7 @@ import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { confirmPortalOrderRefund, createPortalOrderRefund, handoutPortalOrder, placePrescriptionManually, recordCuraleafRejection, recordPortalCuraleafCancellation, recordPortalGoodsReceipt, recordPortalManualPayment, requestPortalOrderCancellation, resendWorldpayPaymentLink, updatePortalShipmentStatus } from '../shared/api';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
-import { orderCancellationResolution, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../utils/orderStage';
+import { hasDispatchedRemainder, orderCancellationResolution, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../utils/orderStage';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
 type GoodsReceiptDraft = { quantities: Record<string, number>; batches: Record<string, string>; expiries: Record<string, string>; note: string };
 
@@ -58,7 +58,7 @@ const STAGE_META: Record<OrderStage, { label: string; description: string; tone:
   'awaiting-payment': { label: 'Awaiting payment', description: 'Payment request sent to patient', tone: 'warning', icon: Clock3 },
   paid: { label: 'Paid', description: 'Payment received; awaiting supplier update', tone: 'success', icon: CreditCard },
   'curaleaf-pending': { label: 'With Curaleaf', description: 'Awaiting supplier decision', tone: 'info', icon: CircleDot },
-  'curaleaf-approved': { label: 'Curaleaf approved', description: 'Supplier accepted the prescription', tone: 'success', icon: CheckCircle2 },
+  'curaleaf-approved': { label: 'Processing', description: 'Curaleaf is picking the order', tone: 'info', icon: CircleDot },
   dispatched: { label: 'In delivery', description: 'Dispatched to the pharmacy', tone: 'info', icon: Truck },
   delivered: { label: 'Delivered', description: 'Received by the pharmacy', tone: 'success', icon: PackageCheck },
   ready: { label: 'Ready to collect', description: 'Patient can collect from pharmacy', tone: 'success', icon: Package },
@@ -104,6 +104,16 @@ function recordMatchesFilter(record: OrderRecord, filter: StageFilter) {
 
 function recordStageMeta(record: OrderRecord) {
   const resolution = orderCancellationResolution(record.order);
+  if (record.stage === 'cancelled' && record.order.prescriptions.some(prescription => prescription.purchaseOrderState === 'CANCELLED' || prescription.status === 'cancelled')) {
+    return {
+      label: 'Cancelled purchase order',
+      description: resolution === 'needs-action'
+        ? 'Curaleaf cancelled the supplier purchase order. Review the pharmacy call or case notes and complete the refund follow-up.'
+        : 'Curaleaf cancelled the supplier purchase order; its pharmacy call or case context remains in the audit trail.',
+      tone: resolution === 'needs-action' ? 'warning' : 'neutral',
+      icon: XCircle,
+    };
+  }
   if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'warning', icon: AlertTriangle };
   if (resolution === 'refunded') return { label: 'Refunded', description: 'Cancellation closed and patient refund completed', tone: 'refunded', icon: Banknote };
   if (resolution === 'resolved') return { label: 'Resolved', description: 'Cancellation closed with no action outstanding', tone: 'resolved', icon: CheckCircle2 };
@@ -472,8 +482,7 @@ export default function Orders() {
     if (!order.backendId || paymentLinkBusyOrderId) return;
     setPaymentLinkBusyOrderId(order.id);
     try {
-      const origin = window.location.origin;
-      const session = await resendWorldpayPaymentLink(order.backendId, { organisationId: state.currentOrganisationId, successUrl: `${origin}/payment-complete`, cancelUrl: `${origin}/payment-cancelled` });
+      const session = await resendWorldpayPaymentLink(order.backendId, { organisationId: state.currentOrganisationId });
       const provider = session.provider as { url?: string; _links?: { redirect?: { href?: string } } };
       const paymentUrl = provider.url ?? provider._links?.redirect?.href;
       if (paymentUrl) await navigator.clipboard.writeText(paymentUrl).catch(() => undefined);
@@ -901,7 +910,7 @@ function PrePlacementDeliveryGuidance({ now }: { now: Date }) {
 
 function backorderedProducts(order: PatientOrder) {
   return order.prescriptions.flatMap(prescription => prescription.fulfilmentLines?.flatMap(line => {
-    if (line.shipped >= line.ordered) return [];
+    if (!hasDispatchedRemainder(line)) return [];
     const product = prescription.items.find(item => item.productId === line.productId);
     return product ? [product.name] : [];
   }) ?? []);
@@ -913,7 +922,7 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
   const range = deliveryRange(guidance);
   const delayed = [...new Set(backorderedProducts(order))];
   if (delayed.length) {
-    return <div className="order-delivery-warning order-delivery-warning--due"><AlertTriangle size={17} /><span><strong>In stock items: expected {range}.</strong><small>{delayed.map(product => `${product}: temporarily out of stock — Curaleaf will send it separately as soon as it's available, at no extra delivery cost.`).join(' ')}</small></span></div>;
+    return <div className="order-delivery-warning order-delivery-warning--due"><AlertTriangle size={17} /><span><strong>Partially dispatched · current shipment expected {range}.</strong><small>{delayed.map(product => `${product}: the remaining quantity is still open with Curaleaf and can be sent in a later shipment.`).join(' ')}</small></span></div>;
   }
   const dispatched = order.prescriptions.some(prescription => prescription.status === 'dispatched');
   const overdue = londonDateKey(now) > guidance.windowEnd;
@@ -1115,8 +1124,8 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
     if (!selectedShipmentId || !shipmentIds.includes(selectedShipmentId)) setSelectedShipmentId(shipmentIds.find(id => prescription.shipmentStates?.[id] !== 'collected') ?? shipmentIds[0] ?? '');
   }, [prescription.shipmentStates, selectedShipmentId, shipmentIds]);
   const selectedShipmentState = selectedShipmentId ? prescription.shipmentStates?.[selectedShipmentId] : undefined;
-  const statusLabel = ({ draft: 'Draft', 'awaiting-approval': 'Curaleaf review', approved: 'Approved', dispatched: 'Dispatched', 'partially-received': 'Part delivered', received: 'Delivered', ready: 'Ready to collect', collected: 'Collected' } as const)[prescription.status];
-  const receiving = ['dispatched_to_pharmacy', 'partially_received'].includes(selectedShipmentState ?? '') || !selectedShipmentState && (shipmentIds.length > 1 || prescription.status === 'dispatched' || prescription.status === 'partially-received');
+  const statusLabel = ({ draft: 'Draft', 'awaiting-approval': 'Curaleaf review', processing: 'Processing', approved: 'Approved', dispatched: prescription.dispatchStatus === 'partial' ? 'Partially dispatched' : 'Dispatched', 'partially-received': 'Part delivered', received: 'Delivered', ready: 'Ready to collect', collected: 'Collected', cancelled: 'Cancelled purchase order' } as const)[prescription.status];
+  const receiving = ['partially_dispatched_to_pharmacy', 'dispatched_to_pharmacy', 'partially_received'].includes(selectedShipmentState ?? '') || !selectedShipmentState && (shipmentIds.length > 1 || prescription.status === 'dispatched' || prescription.status === 'partially-received');
   const readyControl = selectedShipmentState === 'received' || !selectedShipmentState && prescription.status === 'received';
   const collectionControl = selectedShipmentState === 'ready_for_collection' || !selectedShipmentState && prescription.status === 'ready';
   return (
@@ -1126,6 +1135,14 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
       {prescription.manualPlaceRequired ? <div className="order-ready-control"><span><Clock3 size={16} /><span><strong>Manual placement required</strong><small>Automatic placement is disabled for this pharmacy. The final quote will be rechecked when you continue.</small></span></span><button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={onManualPlace}>{busy ? 'Placing…' : 'Place prescription'}</button></div> : null}
       {shipmentIds.length ? <label className="order-shipment-selector"><span>Shipment</span><select className="input select" value={selectedShipmentId} onChange={event => setSelectedShipmentId(event.target.value)}>{shipmentIds.map((id, shipmentIndex) => <option key={id} value={id}>Shipment {shipmentIndex + 1} · {prescription.shipmentStates?.[id]?.replaceAll('_', ' ') ?? 'supplier synced'}</option>)}</select></label> : null}
       <div className="order-rx-lines">{prescription.items.map(item => <div key={item.productId}><span><strong>{item.name}</strong><small>{item.qty} pack{item.qty === 1 ? '' : 's'}</small></span></div>)}</div>
+      {prescription.purchaseOrderState === 'CANCELLED' ? <div className="order-cancellation-warning"><XCircle size={16} /><span><strong>Cancelled purchase order</strong><small>Curaleaf cancelled this PO. Review the pharmacy’s Curaleaf call or case reference for the reason before refunding or replacing it.</small></span></div> : null}
+      {prescription.fulfilmentLines?.length ? <div className="order-supplier-fulfilment">
+        <header><span><small>Supplier quantities</small><strong>{prescription.dispatchStatus === 'partial' ? 'Partial dispatch — remainder stays open' : prescription.purchaseOrderState === 'PROCESSING' ? 'Processing while Curaleaf picks' : 'Purchase-order response'}</strong></span></header>
+        {prescription.fulfilmentLines.map(line => {
+          const product = prescription.items.find(item => item.productId === line.productId);
+          return <div key={line.productId} className={line.quantityMismatch ? 'has-mismatch' : ''}><span><strong>{product?.name ?? line.productId}</strong><small>{line.quantityMismatch ? 'Supplier quantity differs from the pharmacy request' : line.remaining > 0 && line.shipped > 0 ? 'Remainder remains open for a later shipment' : 'Live Curaleaf quantities'}</small></span><dl><div><dt>Ordered</dt><dd>{line.requested || line.ordered}</dd></div><div><dt>Sent</dt><dd>{line.sent ?? 'Legacy'}</dd></div><div><dt>PO reports</dt><dd>{line.supplierReportedOrdered}</dd></div><div><dt>Allocated</dt><dd>{line.allocated}</dd></div><div><dt>Dispatched</dt><dd>{line.shipped}</dd></div><div><dt>Remaining</dt><dd>{line.remaining}</dd></div></dl></div>;
+        })}
+      </div> : null}
       {receiving ? (
         <div className="order-goods-in">
           <header><span><small>Pharmacy delivery check</small><strong>{prescription.status === 'partially-received' ? 'Update the partial receipt' : 'Confirm what arrived from Curaleaf'}</strong></span><PackageCheck size={15} /></header>

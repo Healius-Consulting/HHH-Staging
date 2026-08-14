@@ -1,0 +1,44 @@
+FROM node:22-alpine AS build
+WORKDIR /workspace
+COPY package.json package-lock.json ./
+COPY services/api/package.json services/api/package.json
+COPY services/web/package.json services/web/package.json
+COPY packages/domain/package.json packages/domain/package.json
+COPY packages/ui/package.json packages/ui/package.json
+RUN npm ci
+COPY . .
+ARG SURFACE
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_AUTH_DOMAIN
+ARG VITE_FIREBASE_PROJECT_ID
+ARG VITE_FIREBASE_STORAGE_BUCKET
+ARG VITE_FIREBASE_MESSAGING_SENDER_ID
+ARG VITE_FIREBASE_APP_ID
+ARG VITE_FIREBASE_APP_CHECK_SITE_KEY
+ARG VITE_ELIGIBILITY_FORM_URL=https://www.hhh.thinktimeless.co.uk/eligibility
+ENV VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}
+ENV VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}
+ENV VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}
+ENV VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}
+ENV VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}
+ENV VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}
+ENV VITE_FIREBASE_APP_CHECK_SITE_KEY=${VITE_FIREBASE_APP_CHECK_SITE_KEY}
+ENV VITE_ELIGIBILITY_FORM_URL=${VITE_ELIGIBILITY_FORM_URL}
+RUN npm run build:${SURFACE} && npm run build --workspace @hhh/web-gateway
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ARG SURFACE
+ENV SURFACE=${SURFACE}
+COPY package.json package-lock.json ./
+COPY services/api/package.json services/api/package.json
+COPY services/web/package.json services/web/package.json
+COPY packages/domain/package.json packages/domain/package.json
+COPY packages/ui/package.json packages/ui/package.json
+RUN npm ci --omit=dev --workspace @hhh/web-gateway && npm cache clean --force
+COPY --from=build /workspace/services/web/dist ./gateway
+COPY --from=build /workspace/dist-${SURFACE} ./static
+ENV STATIC_DIR=/app/static
+USER node
+CMD ["node", "gateway/server.js"]

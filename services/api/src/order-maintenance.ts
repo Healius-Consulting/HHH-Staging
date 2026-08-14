@@ -31,7 +31,7 @@ export async function maintainPaidOrderFlow(now = new Date()) {
       const nextFlow = { ...flow };
       let changed = false;
       for (const [prescriptionId, prescription] of Object.entries(flow)) {
-        if (['COLLECTED', 'CANCELLED_REFUNDED'].includes(String(prescription.state))) continue;
+        if (['COLLECTED', 'CANCELLED_PURCHASE_ORDER', 'CANCELLED_REFUNDED'].includes(String(prescription.state))) continue;
         const lines = Array.isArray(prescription.lines) ? prescription.lines as Array<Record<string, unknown>> : [];
         const unfulfilled = lines.some(line => Math.max(0, count(line.shipped) - count(line.returned)) < count(line.ordered));
         const currentEpisode = prescription.delayEpisode && typeof prescription.delayEpisode === 'object' ? prescription.delayEpisode as Record<string, unknown> : {};

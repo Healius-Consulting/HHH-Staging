@@ -38,19 +38,20 @@ import type {
   AdminReferralFinanceReport,
   PatientRegisterExportResult,
   GoLiveReadiness,
+  AuthenticatedSession,
+  PharmacyOverview,
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-const API_BASE_URL = configuredApiUrl?.trim()
+const API_BASE_URL = import.meta.env.DEV && configuredApiUrl?.trim()
   ? configuredApiUrl.replace(/\/$/, '')
-  : import.meta.env.DEV
-    ? ''
-    : undefined;
+  : '';
 
-export const isApiConfigured = API_BASE_URL !== undefined;
+export const isApiConfigured = true;
 
 type ApiSecurityTokenProvider = () => Promise<Record<string, string>>;
 let securityTokenProvider: ApiSecurityTokenProvider | null = null;
+let csrfToken: string | null = null;
 const GET_CACHE_TTL_MS = 10_000;
 const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
 const inFlightGets = new Map<string, { generation: number; request: Promise<unknown> }>();
@@ -67,21 +68,41 @@ export function setApiSecurityTokenProvider(provider: ApiSecurityTokenProvider |
   invalidateResponseCache();
 }
 
+export function setApiCsrfToken(token: string | null) {
+  csrfToken = token;
+  invalidateResponseCache();
+}
+
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.name = 'ApiRequestError';
+  }
+}
+
 async function performApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  if (API_BASE_URL === undefined) throw new Error('VITE_API_BASE_URL is not configured.');
   const securityHeaders = securityTokenProvider ? await securityTokenProvider() : {};
+  const method = (init?.method || 'GET').toUpperCase();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...securityHeaders, ...init?.headers },
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...securityHeaders, ...(!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}), ...init?.headers },
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { message?: string } | null;
+    const body = await response.json().catch(() => null) as { code?: string; message?: string } | null;
     const retryAfter = response.headers.get('retry-after');
     const rateMessage = response.status === 429
       ? `Too many requests. Try again${retryAfter ? ` in ${retryAfter} seconds` : ' shortly'}.`
       : null;
-    throw new Error(body?.message || rateMessage || `Request failed with status ${response.status}.`);
+    if (response.status === 401) window.dispatchEvent(new CustomEvent('hhh:session-ended', { detail: { code: body?.code ?? 'UNAUTHENTICATED' } }));
+    throw new ApiRequestError(response.status, body?.code ?? 'REQUEST_FAILED', body?.message || rateMessage || `Request failed with status ${response.status}.`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -116,6 +137,40 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getPublicPharmacy(referralToken: string) {
   return apiRequest<PublicPharmacy>(`/v1/public/pharmacies/by-token/${encodeURIComponent(referralToken)}`);
+}
+
+export async function getAuthCsrf() {
+  const result = await performApiRequest<{ csrfToken: string }>('/v1/auth/csrf');
+  setApiCsrfToken(result.csrfToken);
+  return result.csrfToken;
+}
+
+export async function createAuthenticatedSession(idToken: string) {
+  if (!csrfToken) await getAuthCsrf();
+  const session = await performApiRequest<AuthenticatedSession>('/v1/auth/session', { method: 'POST', body: JSON.stringify({ idToken }) });
+  setApiCsrfToken(session.csrfToken);
+  return session;
+}
+
+export async function getAuthenticatedSession() {
+  const session = await performApiRequest<AuthenticatedSession>('/v1/auth/session');
+  setApiCsrfToken(session.csrfToken);
+  return session;
+}
+
+export async function continueAuthenticatedSession() {
+  const session = await performApiRequest<AuthenticatedSession>('/v1/auth/activity', { method: 'POST', body: JSON.stringify({}) });
+  setApiCsrfToken(session.csrfToken);
+  return session;
+}
+
+export async function deleteAuthenticatedSession() {
+  await performApiRequest<void>('/v1/auth/session', { method: 'DELETE' });
+  setApiCsrfToken(null);
+}
+
+export function getPharmacyOverview() {
+  return apiRequest<PharmacyOverview>('/v1/portal/overview');
 }
 
 export function createEligibilitySubmission(input: EligibilitySubmissionInput) {
@@ -353,8 +408,6 @@ export function recordPortalManualPayment(orderId: string, input: {
 
 export function createWorldpaySession(orderId: string, input: {
   organisationId: string;
-  successUrl: string;
-  cancelUrl: string;
 }) {
   return apiRequest<{ paymentId: string; transactionReference: string; provider: Record<string, unknown>; linkExpiresAt: string; reused?: boolean }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/payments/worldpay-session`, {
     method: 'POST',
@@ -362,11 +415,15 @@ export function createWorldpaySession(orderId: string, input: {
   });
 }
 
-export function resendWorldpayPaymentLink(orderId: string, input: { organisationId: string; successUrl: string; cancelUrl: string }) {
+export function resendWorldpayPaymentLink(orderId: string, input: { organisationId: string }) {
   return apiRequest<{ paymentId: string; transactionReference: string; provider: Record<string, unknown>; linkExpiresAt: string }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/payment-links/resend`, {
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export function getPublicPaymentReceipt(token: string) {
+  return apiRequest<{ status: 'pending' | 'paid' | 'failed' | 'expired'; message: string }>(`/v1/public/payment-receipts/${encodeURIComponent(token)}`);
 }
 
 export function recordCuraleafRejection(orderId: string, input: { organisationId: string; prescriptionId: string; reason: string; rejectedAt?: string; supportCaseId?: string }) {

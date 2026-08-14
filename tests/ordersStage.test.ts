@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { orderCancellationResolution, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
+import { hasDispatchedRemainder, orderCancellationResolution, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
 import type { PatientOrder } from '../src/context/AppContext.tsx';
 
 const taxonomy: Array<[OrderStage, StageFilter]> = [
@@ -53,6 +53,26 @@ test('mixed ready and in-flight prescriptions do not classify the order as ready
     prescriptions: [{ status: 'ready' }, { status: 'dispatched' }],
   } as PatientOrder;
   assert.equal(orderStage(order).stage, 'dispatched');
+});
+
+test('processing prescriptions stay in the supplier-processing stage until a shipment exists', () => {
+  const processing = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{ status: 'processing', placed: true }],
+  } as PatientOrder;
+  const dispatched = {
+    ...processing,
+    prescriptions: [{ status: 'dispatched', placed: true }],
+  } as PatientOrder;
+  assert.equal(orderStage(processing).stage, 'curaleaf-approved');
+  assert.equal(orderStage(dispatched).stage, 'dispatched');
+});
+
+test('a remaining quantity is partial only after at least one pack has actually shipped', () => {
+  assert.equal(hasDispatchedRemainder({ ordered: 1, shipped: 0 }), false);
+  assert.equal(hasDispatchedRemainder({ ordered: 2, shipped: 1 }), true);
+  assert.equal(hasDispatchedRemainder({ ordered: 1, shipped: 1 }), false);
 });
 
 test('ready and already-collected prescriptions classify the remaining order as ready', () => {

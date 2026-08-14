@@ -23,7 +23,7 @@ test('pharmacy staff remain fixed to their authenticated tenant', () => {
   assert.equal(tenantFor(request, 'pharmacy-a'), 'pharmacy-a');
   assert.throws(
     () => tenantFor(request, 'pharmacy-b'),
-    (error: unknown) => error instanceof HttpError && error.status === 403 && error.code === 'TENANT_MISMATCH',
+    (error: unknown) => error instanceof HttpError && error.status === 404 && error.code === 'NOT_FOUND',
   );
 });
 

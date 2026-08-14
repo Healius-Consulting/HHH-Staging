@@ -1,9 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { config } from './config.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
 import { messageId, paymentLinkExpiryAt, prescriptionIsCurrent } from './order-flow.js';
 import { queuePatientMessage } from './notification-outbox.js';
 import { createHostedPaymentSession } from './worldpay.js';
+import { randomToken } from './session-utils.js';
 
 function orderPayableTotal(order: Record<string, unknown>, prescriptions: Array<Record<string, unknown>>) {
   const lines = Array.isArray(order.lineItems) ? order.lineItems as Array<Record<string, unknown>> : [];
@@ -16,23 +18,29 @@ function orderPayableTotal(order: Record<string, unknown>, prescriptions: Array<
 async function replacementWorldpayLink(paymentId: string, payment: Record<string, unknown>, orderId: string, order: Record<string, unknown>, amountPence: number, prescriptions: Array<Record<string, unknown>>) {
   const organisationId = String(payment.organisationId);
   const organisation = (await firestore.collection('organisations').doc(organisationId).get()).data()!;
-  const successUrl = typeof payment.successUrl === 'string' ? payment.successUrl : '';
-  const cancelUrl = typeof payment.cancelUrl === 'string' ? payment.cancelUrl : '';
-  if (!successUrl || !cancelUrl) throw new Error('The prior Worldpay link does not contain replacement return URLs.');
   const transactionReference = `HHH-${orderId}-${randomUUID().slice(0, 8)}`;
   const linkExpiresAt = paymentLinkExpiryAt(prescriptions);
   const expirySeconds = Math.max(300, Math.floor((Date.parse(linkExpiresAt) - Date.now()) / 1_000));
+  const receiptToken = randomToken();
+  const receiptHash = createHash('sha256').update(receiptToken).digest('hex');
+  const successUrl = new URL('/payments/complete', config.PUBLIC_APP_ORIGIN);
+  const cancelUrl = new URL('/payments/cancelled', config.PUBLIC_APP_ORIGIN);
+  successUrl.searchParams.set('receipt', receiptToken);
+  cancelUrl.searchParams.set('receipt', receiptToken);
+  await firestore.collection('paymentReceipts').doc(receiptHash).set({ tokenHash: receiptHash, organisationId, orderId, paymentId: null, createdAt: nowIso(), expiresAt: linkExpiresAt });
   const provider = await createHostedPaymentSession(organisationId, {
     transactionReference,
     amountPence,
     currency: 'GBP',
-    successUrl,
-    cancelUrl,
+    successUrl: successUrl.toString(),
+    cancelUrl: cancelUrl.toString(),
     statementNarrative: String(organisation.tradingName ?? organisation.name ?? 'HHH Pharmacy'),
     expirySeconds,
   });
   const links = provider._links && typeof provider._links === 'object' ? provider._links as Record<string, unknown> : {};
   const self = links.self && typeof links.self === 'object' ? links.self as Record<string, unknown> : {};
+  const redirect = links.redirect && typeof links.redirect === 'object' ? links.redirect as Record<string, unknown> : {};
+  const providerUrl = typeof provider.url === 'string' ? provider.url : typeof redirect.href === 'string' ? redirect.href : null;
   const nextRef = firestore.collection('payments').doc();
   const sentAt = nowIso();
   await nextRef.set({
@@ -45,12 +53,11 @@ async function replacementWorldpayLink(paymentId: string, payment: Record<string
     amountPence,
     currency: 'GBP',
     transactionReference,
-    providerUrl: typeof provider.url === 'string' ? provider.url : null,
+    providerUrl,
     paymentQueryUrl: typeof self.href === 'string' ? self.href : null,
     linkExpiresAt,
-    providerSession: provider,
-    successUrl,
-    cancelUrl,
+    providerSession: { url: providerUrl },
+    receiptHash,
     linkGeneration: Number(payment.linkGeneration ?? 1) + 1,
     sentAt,
     reminder24At: null,
@@ -59,6 +66,7 @@ async function replacementWorldpayLink(paymentId: string, payment: Record<string
     createdAt: sentAt,
     updatedAt: sentAt,
   });
+  await firestore.collection('paymentReceipts').doc(receiptHash).set({ paymentId: nextRef.id, updatedAt: sentAt }, { merge: true });
   await firestore.collection('orders').doc(orderId).set({ paymentId: nextRef.id, paymentStatus: 'pending', paymentTransactionReference: transactionReference, totalPence: amountPence, updatedAt: sentAt }, { merge: true });
   const patient = typeof order.patientId === 'string' ? (await firestore.collection('patients').doc(order.patientId).get()).data() : null;
   if (typeof patient?.email === 'string') await queuePatientMessage({
@@ -70,7 +78,7 @@ async function replacementWorldpayLink(paymentId: string, payment: Record<string
     recipient: patient.email,
     channel: 'email',
     deliveryOwner: organisation.paymentMessageOwner === 'platform' ? 'platform' : 'worldpay',
-    templateData: { firstName: String(patient.firstName ?? 'Patient'), amountPence, paymentUrl: provider.url ?? null, linkExpiresAt },
+    templateData: { firstName: String(patient.firstName ?? 'Patient'), amountPence, paymentUrl: providerUrl, linkExpiresAt },
   });
   return nextRef.id;
 }

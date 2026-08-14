@@ -1,0 +1,83 @@
+name: Security and verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run lint
+      - run: npm run build:all
+      - run: npm run build --workspace @hhh/web-gateway
+      - run: npm test --workspace @hhh/api
+      - run: npx tsx --test tests/**/*.test.ts
+      - name: Assert production surface separation
+        run: |
+          ! grep -R -q "HHH administration" dist-pharmacy dist-public
+          ! grep -R -q "Secure handover" dist-admin dist-public
+          ! grep -R -q "Staff sign in" dist-public
+          ! grep -R -q "devPortal" dist-public dist-pharmacy dist-admin
+          ! grep -R -q "mode=eligibility" dist-public dist-pharmacy dist-admin
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=infra/terraform fmt -check -recursive
+      - run: terraform -chdir=infra/terraform init -backend=false
+      - run: terraform -chdir=infra/terraform validate
+
+  containers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            command: docker build -f services/api/Dockerfile -t hhh-api:ci .
+            image: hhh-api:ci
+          - name: public
+            command: docker build -f Dockerfile.web --build-arg SURFACE=public -t hhh-public:ci .
+            image: hhh-public:ci
+          - name: pharmacy
+            command: docker build -f Dockerfile.web --build-arg SURFACE=pharmacy -t hhh-pharmacy:ci .
+            image: hhh-pharmacy:ci
+          - name: admin
+            command: docker build -f Dockerfile.web --build-arg SURFACE=admin -t hhh-admin:ci .
+            image: hhh-admin:ci
+    steps:
+      - uses: actions/checkout@v4
+      - run: ${{ matrix.command }}
+      - uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ matrix.image }}
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+      - uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.name }}.sarif
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2

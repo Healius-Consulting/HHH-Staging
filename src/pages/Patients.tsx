@@ -28,6 +28,7 @@ const TRACK_STEPS = ['Submitted', 'Approved', 'Dispatched', 'Received', 'Ready',
 function stepsCompleted(status: string): number {
   switch (status) {
     case 'awaiting-approval': return 0;
+    case 'processing': return 1;
     case 'approved': return 1;
     case 'dispatched': return 2;
     case 'partially-received': return 3;

@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { createHash } from 'node:crypto';
-import { curaleafList } from './curaleaf.js';
+import { curaleafList, type CuraleafPurchaseOrderRecord } from './curaleaf.js';
+import { ingestCancelledCuraleafPurchaseOrder } from './curaleaf-reconciliation.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
 
@@ -95,6 +96,11 @@ export async function fetchCuraleafAccountSnapshot(
     shipmentTotal: shipmentPage.totalRecordCount,
   };
   await persistCuraleafAccountSnapshot(organisationId, snapshot);
+  for (const purchaseOrder of snapshot.purchaseOrders) {
+    if (purchaseOrder.state === 'CANCELLED') {
+      await ingestCancelledCuraleafPurchaseOrder(organisationId, purchaseOrder as CuraleafPurchaseOrderRecord);
+    }
+  }
   return snapshot;
 }
 

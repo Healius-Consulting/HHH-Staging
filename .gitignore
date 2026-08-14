@@ -10,7 +10,13 @@ lerna-debug.log*
 node_modules
 dist
 dist-eligibility
+dist-public
+dist-pharmacy
+dist-admin
 dist-ssr
+**/.terraform/
+*.tfstate
+*.tfstate.*
 *.local
 .env
 .env.*
@@ -30,4 +36,3 @@ dist-ssr
 .env*
 output/
 tmp/
-

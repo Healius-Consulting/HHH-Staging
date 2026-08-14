@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { rateLimit } from 'express-rate-limit';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import { z } from 'zod';
 import { prescriptionDateWindowStatus } from './prescription-date.js';
@@ -38,6 +38,9 @@ import { migrateMasterFlowV2 } from './flow-migration.js';
 import { planOrderHandout, shipmentsReadyForHandout } from './order-handout.js';
 import { eligibilityReviewProjection, negativeEligibilityStatus, pharmacyDecisionReasonSchema, pharmacyReasonAuditDetails } from './eligibility-view.js';
 import { goLiveGateState, isExplicitCuraleafTestAccount } from './go-live.js';
+import { createStaffSession, issueCsrf, requestSurfaceHost, requireCsrf, revokeCurrentSession, revokeUserSessions, securityEvent, sessionPayload, touchCurrentSession } from './session-auth.js';
+import { buildPharmacyOverview } from './pharmacy-overview.js';
+import { randomToken } from './session-utils.js';
 
 
 
@@ -58,10 +61,9 @@ const firebaseAuthErrorCode = (error: unknown) => {
   return typeof candidate.code === 'string' ? candidate.code : typeof candidate.errorInfo?.code === 'string' ? candidate.errorInfo.code : null;
 };
 
-const firstPartyPasswordResetLink = (firebaseLink: string) => {
+const firstPartyPasswordResetLink = (firebaseLink: string, appOrigin: string) => {
   const source = new URL(firebaseLink);
-  const destination = new URL(config.APP_BASE_URL);
-  destination.searchParams.set('mode', 'resetPassword');
+  const destination = new URL('/reset-password', appOrigin);
   for (const key of ['oobCode', 'apiKey', 'lang']) {
     const value = source.searchParams.get(key);
     if (value) destination.searchParams.set(key, value);
@@ -167,6 +169,7 @@ const preferencesSchema = z.object({
   reduceMotion: z.boolean().default(false),
   enhancedFocus: z.boolean().default(false),
   underlineLinks: z.boolean().default(false),
+  overviewView: z.enum(['operations', 'pipeline', 'handover']).default('operations'),
 });
 
 const financeRangeSchema = z.object({
@@ -178,7 +181,24 @@ const financeRangeSchema = z.object({
 
 const limitResponse = { code: 'RATE_LIMITED', message: 'Too many requests. Wait briefly before trying again.' };
 const publicReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
-const publicSubmissionLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false, message: { ...limitResponse, message: 'Too many form submissions from this connection. Try again later.' } });
+const keyedPublicLimit = (selector: (request: Request) => string, limit: number, windowMs: number) => rateLimit({
+  windowMs,
+  limit,
+  keyGenerator: request => `${ipKeyGenerator(request.ip ?? 'unknown')}:${tokenHash(selector(request)).slice(0, 24)}`,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: limitResponse,
+});
+const sessionExchangeLimit = keyedPublicLimit(request => {
+  try {
+    const payload = String(request.body?.idToken ?? '').split('.')[1];
+    const decoded = payload ? JSON.parse(Buffer.from(payload, 'base64url').toString()) as { sub?: unknown } : {};
+    return typeof decoded.sub === 'string' ? decoded.sub : 'unknown-account';
+  } catch { return 'invalid-account'; }
+}, 10, 15 * 60 * 1000);
+const eligibilitySubmissionLimit = keyedPublicLimit(request => String(request.body?.referralToken ?? 'unknown-referral'), 5, 60 * 60 * 1000);
+const eligibilityResolutionLimit = keyedPublicLimit(request => String(request.params.token ?? 'unknown-referral'), 60, 15 * 60 * 1000);
+const paymentReceiptLimit = keyedPublicLimit(request => String(request.params.token ?? 'unknown-receipt'), 60, 15 * 60 * 1000);
 const webhookLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const healthLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false, message: limitResponse });
 const portalKey = (request: Request) => identity(request).uid;
@@ -262,6 +282,7 @@ async function requirePublicAppCheck(request: Request, _response: Response, next
     await appCheck.verifyToken(token);
     next();
   } catch {
+    void securityEvent(request, 'auth.app_check_denied');
     next(new HttpError(401, 'App attestation is required.', 'APP_CHECK_REQUIRED'));
   }
 }
@@ -391,9 +412,21 @@ async function startOperation(organisationId: string, orderId: string, kind: 'ma
 export const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
-app.use(helmet());
+app.use((request, response, next) => {
+  const incoming = request.get('x-request-id');
+  const requestId = incoming && /^[A-Za-z0-9_-]{8,80}$/.test(incoming) ? incoming : randomUUID();
+  request.headers['x-request-id'] = requestId;
+  response.setHeader('X-Request-Id', requestId);
+  next();
+});
+app.use(helmet({ strictTransportSecurity: false }));
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.has(origin)) return callback(null, true); callback(new HttpError(403, 'Origin is not permitted.', 'ORIGIN_DENIED')); }, methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'] }));
 app.use(express.json({ limit: '256kb', verify(request, _response, buffer) { (request as Request).rawBody = Buffer.from(buffer); } }));
+app.use(['/v1/auth', '/v1/portal', '/v1/public'], (_request, response, next) => {
+  response.setHeader('Cache-Control', 'no-store');
+  response.setHeader('Pragma', 'no-cache');
+  next();
+});
 
 app.get('/health', healthLimit, async (_request, response, next) => {
   try {
@@ -403,6 +436,13 @@ app.get('/health', healthLimit, async (_request, response, next) => {
     });
     response.json({ status: 'ok', storage: 'firestore', region: 'europe-west2', checkedAt: timestamp() });
   } catch (error) { next(error); }
+});
+
+app.use('/v1/public', (request, _response, next) => {
+  const host = requestSurfaceHost(request);
+  const localDevelopment = config.NODE_ENV !== 'production' && ['localhost', '127.0.0.1', '::1'].includes(host);
+  if (!localDevelopment && host !== new URL(config.PUBLIC_APP_ORIGIN).hostname) return next(new HttpError(404, 'Not found.', 'NOT_FOUND'));
+  next();
 });
 
 app.get('/v1/dev/curaleaf/catalog', publicReadLimit, localDevelopmentOnly, async (_request, response, next) => {
@@ -448,14 +488,14 @@ app.get('/v1/dev/curaleaf/activity', publicReadLimit, localDevelopmentOnly, asyn
   } catch (error) { next(error); }
 });
 
-app.get('/v1/public/pharmacies/by-token/:token', publicReadLimit, requirePublicAppCheck, async (request, response, next) => {
+app.get('/v1/public/pharmacies/by-token/:token', eligibilityResolutionLimit, requirePublicAppCheck, async (request, response, next) => {
   try {
     const { organisation } = await resolveReferralToken(tokenSchema.parse(request.params.token));
     response.json({ id: organisation.id, name: organisation.name, tradingName: organisation.tradingName, logoText: organisation.logoText, gphcNumber: organisation.gphcNumber, superintendent: organisation.superintendent, address: organisation.address, primaryColour: organisation.primaryColour });
   } catch (error) { next(error); }
 });
 
-app.post('/v1/public/eligibility-submissions', publicSubmissionLimit, requirePublicAppCheck, async (request, response, next) => {
+app.post('/v1/public/eligibility-submissions', eligibilitySubmissionLimit, requirePublicAppCheck, async (request, response, next) => {
   try {
     const input = eligibilitySchema.parse(request.body);
     const { token, organisation } = await resolveReferralToken(input.referralToken);
@@ -498,6 +538,27 @@ app.post('/v1/public/eligibility-submissions', publicSubmissionLimit, requirePub
     });
     await audit(request, existing ? 'eligibility.resubmitted' : 'eligibility.submitted', { organisationId: organisation.id, recordId: record.id });
     response.status(existing ? 200 : 201).json({ id: record.id, organisationId: organisation.id, pharmacyName: organisation.name, submittedAt: record.updatedAt ?? record.createdAt });
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/public/payment-receipts/:token', paymentReceiptLimit, requirePublicAppCheck, async (request, response, next) => {
+  try {
+    response.setHeader('Cache-Control', 'no-store');
+    const parsedToken = tokenSchema.safeParse(request.params.token);
+    if (!parsedToken.success) return response.json({ status: 'expired', message: 'This payment confirmation link has expired.' });
+    const hash = tokenHash(parsedToken.data);
+    const receipt = (await firestore.collection('paymentReceipts').doc(hash).get()).data();
+    if (!receipt || Date.parse(String(receipt.expiresAt ?? '')) <= Date.now()) {
+      return response.json({ status: 'expired', message: 'This payment confirmation link has expired.' });
+    }
+    const payment = typeof receipt.paymentId === 'string' ? (await firestore.collection('payments').doc(receipt.paymentId).get()).data() : null;
+    const status = payment?.status === 'paid' ? 'paid' : ['failed', 'cancelled', 'expired'].includes(String(payment?.status)) ? 'failed' : 'pending';
+    const message = status === 'paid'
+      ? 'Payment has been confirmed. You can safely close this page.'
+      : status === 'failed'
+        ? 'Payment was not completed. Use the original payment link to try again.'
+        : 'Payment confirmation is still being processed. This page may be refreshed.';
+    return response.json({ status, message });
   } catch (error) { next(error); }
 });
 
@@ -549,7 +610,37 @@ app.post('/v1/public/worldpay/webhooks/:organisationId', webhookLimit, async (re
   } catch (error) { next(error); }
 });
 
+app.get('/v1/auth/csrf', publicReadLimit, (request, response, next) => {
+  try { response.json({ csrfToken: issueCsrf(request, response) }); }
+  catch (error) { next(error); }
+});
+
+app.post('/v1/auth/session', sessionExchangeLimit, requirePublicAppCheck, async (request, response, next) => {
+  try { response.status(201).json(await createStaffSession(request, response)); }
+  catch (error) {
+    const code = error instanceof HttpError ? error.code : 'UNAUTHENTICATED';
+    void securityEvent(request, code === 'REQUEST_ORIGIN_DENIED' ? 'auth.origin_denied' : code === 'FORBIDDEN' || code === 'ROLE_REQUIRED' ? 'auth.role_denied' : 'auth.session_rejected', { code });
+    next(error);
+  }
+});
+
+app.get('/v1/auth/session', requireStaff, async (request, response, next) => {
+  try { response.json(await sessionPayload(request, response)); }
+  catch (error) { next(error); }
+});
+
+app.post('/v1/auth/activity', requireStaff, requireCsrf, async (request, response, next) => {
+  try { await touchCurrentSession(request); response.json(await sessionPayload(request, response)); }
+  catch (error) { next(error); }
+});
+
+app.delete('/v1/auth/session', requireStaff, requireCsrf, async (request, response, next) => {
+  try { await revokeCurrentSession(request, response); response.status(204).send(); }
+  catch (error) { next(error); }
+});
+
 app.use('/v1/portal', requireStaff);
+app.use('/v1/portal', requireCsrf);
 app.use('/v1/portal', portalReadLimit, portalWriteLimit);
 app.use('/v1/portal/integrations', externalProviderLimit);
 
@@ -568,6 +659,11 @@ app.get('/v1/portal/session', async (request, response, next) => {
     }
     response.json({ uid: actor.uid, email: actor.email, role: actor.role, organisationId: actor.organisationId, profile, organisation });
   } catch (error) { next(error); }
+});
+
+app.get('/v1/portal/overview', async (request, response, next) => {
+  try { response.json(await buildPharmacyOverview(tenantFor(request))); }
+  catch (error) { next(error); }
 });
 
 app.get('/v1/portal/preferences', async (request, response, next) => {
@@ -2525,7 +2621,7 @@ app.post('/v1/portal/orders/:id/placement/absorb', async (request, response, nex
     });
 
     if (allReleased) {
-      await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${targetPlacement.prescriptionId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${targetPlacement.prescriptionId}.updatedAt`]: timestamp(), updatedAt: timestamp() }, { merge: true });
+      await firestore.collection('orders').doc(orderId).update({ [`prescriptionFlow.${targetPlacement.prescriptionId}.state`]: 'PENDING_PLACEMENT', [`prescriptionFlow.${targetPlacement.prescriptionId}.updatedAt`]: timestamp(), updatedAt: timestamp() });
       const operations = await firestore.collection('integrationOperations').where('orderId', '==', orderId).get();
       for (const operation of operations.docs.filter(document => document.data().subOrderId === targetPlacement!.prescriptionId)) await operation.ref.set({ status: 'reconciliation_required', updatedAt: timestamp() }, { merge: true });
       await autoSubmitPaidPrescriptions(pharmacyId, orderId);
@@ -2704,7 +2800,7 @@ app.post('/v1/portal/orders/:id/curaleaf-rejections', async (request, response, 
     await firestore.collection('curaleafSupportCases').doc(supportCaseId).set({ id: supportCaseId, schemaVersion: 1, organisationId, orderId, prescriptionId: input.prescriptionId, reason: 'prescription_exception', status: 'open', note: input.reason, openedBy: identity(request).uid, openedByRole: identity(request).role, openedAt: timestamp(), createdAt: timestamp(), updatedAt: timestamp() }, { merge: true });
     const flow = order.prescriptionFlow && typeof order.prescriptionFlow === 'object' ? order.prescriptionFlow as Record<string, Record<string, unknown>> : {};
     const key = flow[input.prescriptionId] ? input.prescriptionId : String(prescription.id ?? prescription.fileId);
-    await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${key}.rejection`]: { id, reason: input.reason, rejectedAt, recordedBy: identity(request).uid }, [`prescriptionFlow.${key}.state`]: 'HELD_STOCK', integrationStatus: 'attention', updatedAt: timestamp() }, { merge: true });
+    await firestore.collection('orders').doc(orderId).update({ [`prescriptionFlow.${key}.rejection`]: { id, reason: input.reason, rejectedAt, recordedBy: identity(request).uid }, [`prescriptionFlow.${key}.state`]: 'HELD_STOCK', integrationStatus: 'attention', updatedAt: timestamp() });
     invalidateCollectionCache('orders', orderId);
     await audit(request, 'curaleaf.rejection_recorded', { organisationId, orderId, prescriptionId: key, rejectionId: id, supportCaseId });
     response.status(201).json({ id, orderId, prescriptionId: key, reason: input.reason, rejectedAt, supportCaseId });
@@ -2731,16 +2827,16 @@ app.post('/v1/portal/orders/:id/prescriptions/:prescriptionId/renewal', external
     const flowKey = flow[prescriptionId] ? prescriptionId : String(original.id ?? original.fileId);
     const currentFlow = flow[flowKey];
     if (!currentFlow || currentFlow.state !== 'HELD_FOR_RENEWAL') throw new HttpError(409, 'This prescription is not held for renewal.', 'RENEWAL_HOLD_REQUIRED');
-    await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${flowKey}.renewal.state`]: 'attaching', [`prescriptionFlow.${flowKey}.renewal.updatedAt`]: timestamp(), updatedAt: timestamp() }, { merge: true });
+    await firestore.collection('orders').doc(orderId).update({ [`prescriptionFlow.${flowKey}.renewal.state`]: 'attaching', [`prescriptionFlow.${flowKey}.renewal.updatedAt`]: timestamp(), updatedAt: timestamp() });
     const extension = await callCuraleafExtension(organisationId, 'renewal', { purchaseOrderId: String(currentFlow.purchaseOrderId ?? ''), prescriptionId: String(original.curaleafPrescriptionId ?? flowKey), renewedPrescriptionId: input.renewedPrescription.curaleafPrescriptionId }, { orderId });
     if (!extension.completed) {
-      await firestore.collection('orders').doc(orderId).set({ [`prescriptionFlow.${flowKey}.renewal.state`]: 'manual_resolution', [`prescriptionFlow.${flowKey}.renewal.updatedAt`]: timestamp(), updatedAt: timestamp() }, { merge: true });
+      await firestore.collection('orders').doc(orderId).update({ [`prescriptionFlow.${flowKey}.renewal.state`]: 'manual_resolution', [`prescriptionFlow.${flowKey}.renewal.updatedAt`]: timestamp(), updatedAt: timestamp() });
       throw new HttpError(409, 'The Curaleaf renewal adapter is not configured. The hold remains; use the staff/CS fallback.', 'CURALEAF_RENEWAL_ADAPTER_REQUIRED');
     }
     const renewed = { ...input.renewedPrescription, id: flowKey, replacesPrescriptionId: original.curaleafPrescriptionId ?? null, expiryDate: calculatePrescriptionExpiry(input.renewedPrescription.issueDate, input.renewedPrescription.expiryDate), payable: true };
     const nextPrescriptions = [...prescriptions];
     nextPrescriptions[index] = renewed;
-    await firestore.collection('orders').doc(orderId).set({ prescriptions: nextPrescriptions, [`prescriptionFlow.${flowKey}.state`]: 'PLACED', [`prescriptionFlow.${flowKey}.expiryDate`]: renewed.expiryDate, [`prescriptionFlow.${flowKey}.renewal`]: { state: 'attached', renewedPrescriptionId: renewed.curaleafPrescriptionId, attachedAt: timestamp(), attachedBy: identity(request).uid }, updatedAt: timestamp() }, { merge: true });
+    await firestore.collection('orders').doc(orderId).update({ prescriptions: nextPrescriptions, [`prescriptionFlow.${flowKey}.state`]: 'PLACED', [`prescriptionFlow.${flowKey}.expiryDate`]: renewed.expiryDate, [`prescriptionFlow.${flowKey}.renewal`]: { state: 'attached', renewedPrescriptionId: renewed.curaleafPrescriptionId, attachedAt: timestamp(), attachedBy: identity(request).uid }, updatedAt: timestamp() });
     const tasks = await firestore.collection('staffTasks').where('orderId', '==', orderId).get();
     for (const task of tasks.docs.filter(task => task.data().prescriptionId === flowKey && String(task.data().type).startsWith('renewal_'))) await task.ref.set({ status: 'completed', completedAt: timestamp(), completedBy: identity(request).uid, updatedAt: timestamp() }, { merge: true });
     const placement = await firestore.collection('prescriptionPlacements').where('orderId', '==', orderId).where('prescriptionId', '==', flowKey).limit(1).get();
@@ -3336,22 +3432,45 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/manual', async (request
     operation = await startOperation(organisationId, input.orderId, 'manual', authoritativeInput.fileId);
     const file = await loadUploadedPrescriptionFile(organisationId, authoritativeInput.fileId);
     const result = await submitManualPrescription(organisationId, { ...authoritativeInput, customerReference: operation.reference, file, quote });
-    const fulfilmentStatus: FulfilmentStatus = result.status === 'prescription_pending' ? 'supplier_pending' : 'supplier_processing';
-    const operationStatus = result.status === 'prescription_pending' ? 'awaiting_prescription_approval' : 'purchase_order_submitted';
+    const awaitingPurchaseOrderLink = result.status === 'purchase_order_confirmation_pending';
+    const fulfilmentStatus: FulfilmentStatus = result.status === 'prescription_pending' || awaitingPurchaseOrderLink ? 'supplier_pending' : 'supplier_processing';
+    const operationStatus = result.status === 'prescription_pending'
+      ? 'awaiting_prescription_approval'
+      : awaitingPurchaseOrderLink
+        ? 'reconciliation_required'
+        : 'purchase_order_submitted';
     await operation.document.update({
       status: operationStatus,
       result,
       prescriptionId: result.prescriptionId,
       prescriptionState: result.prescriptionState,
       prescriptionSerialNumber: authoritativeInput.serialNumber,
+      prescriberId: result.prescriberId,
+      prescriptionItems: authoritativeInput.items.map(({ formulaId, unitsNeededCount }) => ({ formulaId, unitsNeededCount })),
       items: authoritativeInput.items.map(({ packId, quantity }) => ({ packId, quantity })),
       updatedAt: timestamp(),
     });
-    await firestore.collection('orders').doc(input.orderId).update({ curaleaf: result, integrationStatus: operationStatus, fulfilmentStatus, updatedAt: timestamp() });
+    const subOrderKey = input.subOrderId ?? authoritativeInput.fileId;
+    const linkedPurchaseOrder = result.status === 'purchase_order_submitted' && typeof result.purchaseOrderId === 'string';
+    const orderUpdatedAt = timestamp();
+    await firestore.collection('orders').doc(input.orderId).update({
+      curaleaf: result,
+      [`curaleafSubOrders.${subOrderKey}`]: result,
+      ...(linkedPurchaseOrder ? {
+        [`prescriptionFlow.${subOrderKey}.state`]: 'PLACED',
+        [`prescriptionFlow.${subOrderKey}.purchaseOrderId`]: result.purchaseOrderId,
+        [`prescriptionFlow.${subOrderKey}.shipmentIds`]: [],
+        [`prescriptionFlow.${subOrderKey}.placedAt`]: orderUpdatedAt,
+        [`prescriptionFlow.${subOrderKey}.updatedAt`]: orderUpdatedAt,
+      } : {}),
+      integrationStatus: operationStatus,
+      fulfilmentStatus,
+      updatedAt: orderUpdatedAt,
+    });
     invalidateCollectionCache('orders', input.orderId);
     if (result.status === 'purchase_order_submitted') await activatePatientForOrder(input.orderId);
     await audit(request, 'curaleaf.manual_submitted', { organisationId, orderId: input.orderId, operationId: operation.id });
-    response.status(201).json(result);
+    response.status(result.status === 'purchase_order_submitted' ? 201 : 202).json(result);
   } catch (error) { if (operation) await operation.document.update({ status: error instanceof CuraleafRequestError && error.ambiguousWrite ? 'reconciliation_required' : 'failed', errorCode: error instanceof HttpError ? error.code : 'UNKNOWN', updatedAt: timestamp() }); next(error); }
 });
 
@@ -3380,9 +3499,10 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
       quote,
       file,
     });
+    const awaitingPurchaseOrderLink = result.status === 'purchase_order_confirmation_pending';
     const needsAttention = ['prescription_mismatch', 'reconciliation_required', 'prescription_closed'].includes(result.status);
     const awaitingSupplier = ['prescription_processing', 'prescription_pending'].includes(result.status);
-    const operationStatus = needsAttention ? 'reconciliation_required' : awaitingSupplier ? 'awaiting_clinic_prescription' : 'purchase_order_submitted';
+    const operationStatus = needsAttention || awaitingPurchaseOrderLink ? 'reconciliation_required' : awaitingSupplier ? 'awaiting_clinic_prescription' : 'purchase_order_submitted';
     await operation.document.update({
       status: operationStatus,
       result,
@@ -3394,11 +3514,22 @@ app.post('/v1/portal/integrations/curaleaf/prescriptions/barcode', async (reques
       items: storedPrescription.items.map(({ packId, quantity }) => ({ packId, quantity })),
       updatedAt: timestamp(),
     });
+    const subOrderKey = input.subOrderId ?? storedPrescription.id ?? storedPrescription.fileId;
+    const linkedPurchaseOrder = result.status === 'purchase_order_submitted' && typeof result.purchaseOrderId === 'string';
+    const orderUpdatedAt = timestamp();
     await firestore.collection('orders').doc(input.orderId).update({
       curaleaf: result,
+      [`curaleafSubOrders.${subOrderKey}`]: result,
+      ...(linkedPurchaseOrder ? {
+        [`prescriptionFlow.${subOrderKey}.state`]: 'PLACED',
+        [`prescriptionFlow.${subOrderKey}.purchaseOrderId`]: result.purchaseOrderId,
+        [`prescriptionFlow.${subOrderKey}.shipmentIds`]: [],
+        [`prescriptionFlow.${subOrderKey}.placedAt`]: orderUpdatedAt,
+        [`prescriptionFlow.${subOrderKey}.updatedAt`]: orderUpdatedAt,
+      } : {}),
       integrationStatus: operationStatus,
-      fulfilmentStatus: needsAttention ? 'exception' satisfies FulfilmentStatus : awaitingSupplier ? 'supplier_pending' satisfies FulfilmentStatus : 'supplier_processing' satisfies FulfilmentStatus,
-      updatedAt: timestamp(),
+      fulfilmentStatus: needsAttention ? 'exception' satisfies FulfilmentStatus : awaitingSupplier || awaitingPurchaseOrderLink ? 'supplier_pending' satisfies FulfilmentStatus : 'supplier_processing' satisfies FulfilmentStatus,
+      updatedAt: orderUpdatedAt,
     });
     invalidateCollectionCache('orders', input.orderId);
     if (result.status === 'purchase_order_submitted') await activatePatientForOrder(input.orderId);
@@ -3450,7 +3581,7 @@ app.post('/v1/portal/orders/:id/payments/manual', async (request, response, next
 
 app.post(['/v1/portal/orders/:id/payments/worldpay-session', '/v1/portal/orders/:id/payment-links/resend'], externalProviderLimit, async (request, response, next) => {
   try {
-    const input = z.object({ organisationId: idSchema.optional(), successUrl: z.url(), cancelUrl: z.url(), resend: z.boolean().default(false) }).parse({ ...request.body, ...(request.path.endsWith('/resend') ? { resend: true } : {}) });
+    const input = z.object({ organisationId: idSchema.optional(), resend: z.boolean().default(false) }).parse({ ...request.body, ...(request.path.endsWith('/resend') ? { resend: true } : {}) });
     const organisationId = tenantFor(request, input.organisationId);
     await requireSetupComplete(organisationId);
     const orderId = idSchema.parse(request.params.id);
@@ -3476,7 +3607,7 @@ app.post(['/v1/portal/orders/:id/payments/worldpay-session', '/v1/portal/orders/
         return response.status(200).json({
           paymentId: existingSnapshot.id,
           transactionReference: existing.transactionReference,
-          provider: existing.providerSession,
+          provider: { url: existing.providerUrl },
           linkExpiresAt,
           reused: true,
         });
@@ -3489,18 +3620,34 @@ app.post(['/v1/portal/orders/:id/payments/worldpay-session', '/v1/portal/orders/
     const organisation = await getRecord('organisations', organisationId);
     const transactionReference = `HHH-${orderId}-${randomUUID().slice(0, 8)}`;
     const expirySeconds = worldpayLinkExpirySeconds(order as Record<string, unknown>);
+    const receiptToken = randomToken();
+    const receiptHash = tokenHash(receiptToken);
+    const receiptExpiresAt = new Date(Date.now() + expirySeconds * 1_000).toISOString();
+    await firestore.collection('paymentReceipts').doc(receiptHash).set({
+      tokenHash: receiptHash,
+      organisationId,
+      orderId,
+      paymentId: null,
+      createdAt: timestamp(),
+      expiresAt: receiptExpiresAt,
+    });
+    const successUrl = new URL('/payments/complete', config.PUBLIC_APP_ORIGIN);
+    const cancelUrl = new URL('/payments/cancelled', config.PUBLIC_APP_ORIGIN);
+    successUrl.searchParams.set('receipt', receiptToken);
+    cancelUrl.searchParams.set('receipt', receiptToken);
     const provider = await createHostedPaymentSession(organisationId, {
       transactionReference,
       amountPence: order.totalPence as number,
       currency: 'GBP',
-      successUrl: input.successUrl,
-      cancelUrl: input.cancelUrl,
+      successUrl: successUrl.toString(),
+      cancelUrl: cancelUrl.toString(),
       statementNarrative: String(organisation.tradingName ?? organisation.name ?? 'HHH Pharmacy'),
       expirySeconds,
     });
     const providerLinks = provider._links && typeof provider._links === 'object' ? provider._links as Record<string, unknown> : {};
     const providerSelf = providerLinks.self && typeof providerLinks.self === 'object' ? providerLinks.self as Record<string, unknown> : {};
-    const providerUrl = typeof provider.url === 'string' ? provider.url : null;
+    const providerRedirect = providerLinks.redirect && typeof providerLinks.redirect === 'object' ? providerLinks.redirect as Record<string, unknown> : {};
+    const providerUrl = typeof provider.url === 'string' ? provider.url : typeof providerRedirect.href === 'string' ? providerRedirect.href : null;
     const paymentQueryUrl = typeof providerSelf.href === 'string' ? providerSelf.href : null;
     const linkExpiresAt = new Date(Date.now() + expirySeconds * 1_000).toISOString();
     const payment = await createRecord('payments', {
@@ -3514,14 +3661,14 @@ app.post(['/v1/portal/orders/:id/payments/worldpay-session', '/v1/portal/orders/
       providerUrl,
       paymentQueryUrl,
       linkExpiresAt,
-      providerSession: provider,
-      successUrl: input.successUrl,
-      cancelUrl: input.cancelUrl,
+      providerSession: { url: providerUrl },
+      receiptHash,
       linkGeneration: previousGeneration + 1,
       sentAt: timestamp(),
       reminder24At: null,
       reminder48At: null,
     });
+    await firestore.collection('paymentReceipts').doc(receiptHash).set({ paymentId: payment.id, updatedAt: timestamp() }, { merge: true });
     await firestore.collection('orders').doc(orderId).update({ paymentId: payment.id, paymentStatus: 'pending', paymentTransactionReference: transactionReference, updatedAt: timestamp() });
     invalidateCollectionCache('orders', orderId);
     const patient = await getTenantRecord('patients', String(order.patientId), organisationId);
@@ -3538,7 +3685,7 @@ app.post(['/v1/portal/orders/:id/payments/worldpay-session', '/v1/portal/orders/
       templateData: { firstName: String(patient.firstName ?? 'Patient'), amountPence: order.totalPence, paymentUrl: providerUrl, linkExpiresAt },
     });
     await audit(request, 'payment.worldpay_session_created', { organisationId, orderId, paymentId: payment.id, expirySeconds });
-    response.status(201).json({ paymentId: payment.id, transactionReference, provider, linkExpiresAt });
+    response.status(201).json({ paymentId: payment.id, transactionReference, provider: { url: providerUrl }, linkExpiresAt });
   } catch (error) { next(error); }
 });
 
@@ -3595,7 +3742,7 @@ async function updatePrescriptionFlowFromReceipt(
   const nextState = collected ? 'COLLECTED' : transition === 'ready' ? 'READY_FOR_COLLECTION' : current.state;
   const next = { ...current, lines, shipmentIds, shipmentStates: nextShipmentStates, state: nextState, ...(collected ? { collectedAt: timestamp() } : {}), updatedAt: timestamp() };
   const nextFlow = { ...flow, [linked.subOrderId]: next };
-  const terminal = Object.values(nextFlow).length > 0 && Object.values(nextFlow).every(value => ['COLLECTED', 'CANCELLED_REFUNDED'].includes(String(value.state)));
+  const terminal = Object.values(nextFlow).length > 0 && Object.values(nextFlow).every(value => ['COLLECTED', 'CANCELLED_PURCHASE_ORDER', 'CANCELLED_REFUNDED'].includes(String(value.state)));
   await firestore.collection('orders').doc(linked.orderId).set({ prescriptionFlow: nextFlow, ...(terminal ? { fulfilmentStatus: 'collected', collectedAt: timestamp() } : {}), updatedAt: timestamp() }, { merge: true });
   linked.order.prescriptionFlow = nextFlow;
 }
@@ -4103,10 +4250,10 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
     }
 
     const firebaseLink = await auth.generatePasswordResetLink(input.email, {
-      url: `${config.APP_BASE_URL.replace(/\/$/, '')}/?mode=reset-password`,
+      url: new URL('/reset-password', input.role === 'hhh_admin' ? config.ADMIN_APP_ORIGIN : config.PHARMACY_APP_ORIGIN).toString(),
       handleCodeInApp: true,
     });
-    const actionLink = firstPartyPasswordResetLink(firebaseLink);
+    const actionLink = firstPartyPasswordResetLink(firebaseLink, input.role === 'hhh_admin' ? config.ADMIN_APP_ORIGIN : config.PHARMACY_APP_ORIGIN);
     await audit(request, 'staff.invited', { organisationId: input.organisationId, staffUid: user.uid, role: input.role, contactRole, deliveryMode: 'firebase_client' });
     response.status(201).json({ uid: user.uid, email: input.email, displayName: input.displayName, role: input.role, organisationId: input.organisationId, contactRole, status: 'invited', createdAt, invitationQueued: false, actionLink });
   } catch (error) { next(error); }
@@ -4134,6 +4281,8 @@ app.delete('/v1/portal/admin/staff/:uid', requireRole('hhh_admin'), async (reque
       ?? activeStaff[0]?.id;
     if (profile.contactRole === 'owner' || canonicalOwnerUid === uid) throw new HttpError(409, 'The pharmacy owner account cannot be removed.', 'OWNER_ACCOUNT_PROTECTED');
     await auth.updateUser(uid, { disabled: true });
+    await auth.revokeRefreshTokens(uid);
+    await revokeUserSessions(uid, 'staff_disabled');
     await profileRef.update({ status: 'disabled', deletedAt: timestamp(), deletedBy: identity(request).uid, updatedAt: timestamp() });
     invalidateCache(`admin:staff:${profile.organisationId}`);
     await audit(request, 'staff.removed', { organisationId: profile.organisationId, staffUid: uid, retainedForAudit: true });
@@ -4141,7 +4290,25 @@ app.delete('/v1/portal/admin/staff/:uid', requireRole('hhh_admin'), async (reque
   } catch (error) { next(error); }
 });
 
-app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
+app.post('/v1/portal/admin/staff/:uid/mfa-reset', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    const uid = idSchema.parse(request.params.uid);
+    const input = z.object({ verifiedIdentity: z.literal(true), reason: z.string().trim().min(20).max(500) }).parse(request.body);
+    const profileRef = firestore.collection('staffUsers').doc(uid);
+    const profile = await profileRef.get();
+    if (!profile.exists || profile.data()?.status !== 'active') throw new HttpError(404, 'Active staff account not found.', 'STAFF_NOT_FOUND');
+    await auth.updateUser(uid, { multiFactor: { enrolledFactors: [] } });
+    await auth.revokeRefreshTokens(uid);
+    await revokeUserSessions(uid, 'mfa_reset');
+    const resetAt = timestamp();
+    await profileRef.set({ mfaResetAt: resetAt, mfaResetBy: identity(request).uid, updatedAt: resetAt }, { merge: true });
+    await audit(request, 'staff.mfa_reset', { organisationId: profile.data()?.organisationId ?? null, staffUid: uid, identityVerificationRecorded: input.verifiedIdentity, reasonLength: input.reason.length });
+    response.status(204).send();
+  } catch (error) { next(error); }
+});
+
+app.use((error: unknown, request: Request, response: Response, _next: NextFunction) => {
+  if ((request as Request & { securityDenial?: string }).securityDenial === 'tenant_mismatch') void securityEvent(request, 'auth.tenant_mismatch');
   if (error instanceof z.ZodError) return response.status(400).json({ code: 'VALIDATION_ERROR', message: 'The request data is invalid.', issues: error.issues });
   if (error instanceof HttpError) {
     if (error instanceof CuraleafRequestError) {
@@ -4150,6 +4317,6 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
     }
     return response.status(error.status).json({ code: error.code, message: error.message, reconciliationRequired: error instanceof CuraleafRequestError ? error.ambiguousWrite : undefined });
   }
-  console.error(error);
+  console.error('Unhandled API error', { requestId: request.get('x-request-id') ?? null, errorType: error instanceof Error ? error.name : 'unknown' });
   response.status(500).json({ code: 'INTERNAL_ERROR', message: 'Internal server error.' });
 });

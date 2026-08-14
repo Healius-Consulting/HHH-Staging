@@ -56,12 +56,14 @@ export interface LineItem {
 export type RxStatus =
   | 'draft'
   | 'awaiting-approval'
+  | 'processing'
   | 'approved'
   | 'dispatched'
   | 'partially-received'
   | 'received'
   | 'ready'
-  | 'collected';
+  | 'collected'
+  | 'cancelled';
 
 export interface GoodsReceiptLine {
   productId: string;
@@ -71,11 +73,17 @@ export interface GoodsReceiptLine {
 export interface PrescriptionFulfilmentLine {
   productId: string;
   ordered: number;
+  requested: number;
+  sent: number | null;
+  supplierReportedOrdered: number;
+  allocated: number;
   shipped: number;
+  remaining: number;
   received: number;
   collected: number;
   returned: number;
   backordered: boolean;
+  quantityMismatch: boolean;
 }
 
 export interface Prescription {
@@ -85,6 +93,9 @@ export interface Prescription {
   clinicScanId?: string;
   curaleafPrescriptionId?: string;
   curaleafPrescriptionState?: 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
+  purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
+  dispatchStatus?: 'not_dispatched' | 'partial' | 'complete';
+  quantityMismatch?: boolean;
   curaleafPatientName?: string;
   curaleafPatientDob?: string;
   prescriber: string;
@@ -564,12 +575,14 @@ function mapCuraleafCatalogue(catalogue: CuraleafCatalogue): CatalogueItem[] {
 export const RX_STATUS_LABELS: Record<RxStatus, string> = {
   draft: 'Draft',
   'awaiting-approval': 'Awaiting supplier approval',
+  processing: 'Processing — Curaleaf picking',
   approved: 'Approved',
   dispatched: 'Dispatched to pharmacy',
   'partially-received': 'Partially received',
   received: 'Received — checks required',
   ready: 'Ready for collection',
   collected: 'Collected by patient',
+  cancelled: 'Cancelled purchase order',
 };
 
 const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
@@ -581,7 +594,7 @@ export const PHARMACY = {
   name: urlOrganisation.name,
   initials: urlOrganisation.logoText,
   logoText: urlOrganisation.logoText,
-  formUrl: `?mode=eligibility&token=${urlOrganisation.referralToken}`,
+  formUrl: `/eligibility?token=${urlOrganisation.referralToken}`,
   brandName: `${urlOrganisation.tradingName} × Curaleaf`,
   collectionPlace: urlOrganisation.tradingName,
 };
@@ -733,9 +746,12 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
         const curaleaf = record.curaleafSubOrders?.[prescription.fileId] ?? record.curaleaf;
         const flowKey = prescription.id ?? prescription.fileId;
         const flow = record.prescriptionFlow?.[flowKey];
-        const flowStatus: RxStatus | null = flow?.state === 'COLLECTED' ? 'collected'
+        const flowStatus: RxStatus | null = flow?.state === 'CANCELLED_PURCHASE_ORDER' ? 'cancelled'
+          : flow?.state === 'COLLECTED' ? 'collected'
           : flow?.state === 'READY_FOR_COLLECTION' ? 'ready'
-            : flow?.state === 'PLACED' ? 'approved'
+            : flow?.state === 'PLACED' && curaleaf?.purchaseOrderState === 'CANCELLED' ? 'cancelled'
+              : flow?.state === 'PLACED' && (flow?.shipmentIds?.length || curaleaf?.shipmentIds?.length) ? 'dispatched'
+                : flow?.state === 'PLACED' ? 'processing'
               : null;
         const shipmentIds = flow?.shipmentIds?.length ? flow.shipmentIds : curaleaf?.shipmentIds ?? [];
         return {
@@ -745,6 +761,9 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           clinicScanId: prescription.clinicScanId,
           curaleafPrescriptionId: prescription.curaleafPrescriptionId,
           curaleafPrescriptionState: curaleaf?.prescriptionState,
+          purchaseOrderState: curaleaf?.purchaseOrderState,
+          dispatchStatus: flow?.dispatchStatus ?? curaleaf?.dispatchStatus,
+          quantityMismatch: flow?.quantityMismatch ?? curaleaf?.quantityMismatch,
           prescriber: curaleaf?.prescriberName ?? prescription.prescriber.name,
           prescriberId: prescription.prescriber.id,
           prescriberPin: prescription.prescriber.pin,
@@ -756,7 +775,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           copyFileName: null,
           fileId: prescription.fileId,
           items: orderItems(prescription.items),
-          placed: Boolean(flow?.purchaseOrderId) || curaleaf?.status === 'purchase_order_submitted',
+          placed: Boolean(flow?.purchaseOrderId || curaleaf?.purchaseOrderId),
           placedAt: flow?.placedAt ?? null,
           poRef: flow?.purchaseOrderId ?? curaleaf?.customerReference ?? null,
           status: flowStatus ?? portalPrescriptionStatus({ curaleaf, fulfilmentStatus: record.fulfilmentStatus }),
@@ -770,11 +789,17 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           fulfilmentLines: flow?.lines?.map(line => ({
             productId: line.productId,
             ordered: line.ordered,
+            requested: line.requested,
+            sent: line.sent,
+            supplierReportedOrdered: line.supplierReportedOrdered,
+            allocated: line.allocated,
             shipped: line.shipped,
+            remaining: line.remaining,
             received: line.received,
             collected: line.collected,
             returned: line.returned,
             backordered: line.backordered,
+            quantityMismatch: line.quantityMismatch,
           })),
         };
       })
@@ -784,7 +809,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
         prescriber: 'Curaleaf prescription',
         copyFileName: null,
         items: orderItems(record.lineItems.map(item => ({ packId: item.packId, formulaId: item.formulaId, quantity: item.quantity }))),
-        placed: record.curaleaf?.status === 'purchase_order_submitted',
+        placed: Boolean(record.curaleaf?.purchaseOrderId),
         poRef: record.curaleaf?.customerReference ?? null,
         status: rxStatus,
         invoiceRef: null,

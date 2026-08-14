@@ -1,7 +1,7 @@
 export type HandoutFlow = Record<string, Record<string, unknown>>;
 
 export function planOrderHandout(flow: HandoutFlow) {
-  const activeFlows = Object.entries(flow).filter(([, prescription]) => !['CANCELLED_REFUNDED', 'EXPIRED'].includes(String(prescription.state)));
+  const activeFlows = Object.entries(flow).filter(([, prescription]) => !['CANCELLED_PURCHASE_ORDER', 'CANCELLED_REFUNDED', 'EXPIRED'].includes(String(prescription.state)));
   if (!activeFlows.length) return { ready: false as const, code: 'NO_ACTIVE_PRESCRIPTIONS', activeFlows, shipmentIds: [] as string[] };
   if (activeFlows.some(([, prescription]) => !['READY_FOR_COLLECTION', 'COLLECTED'].includes(String(prescription.state)))) {
     return { ready: false as const, code: 'ORDER_NOT_READY_FOR_HANDOUT', activeFlows, shipmentIds: [] as string[] };

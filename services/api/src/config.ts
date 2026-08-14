@@ -9,6 +9,12 @@ const schema = z.object({
   FIREBASE_STORAGE_BUCKET: z.string().min(1).optional(),
   REQUIRE_APP_CHECK: z.enum(['true', 'false']).default('false'),
   REQUIRE_MFA: z.enum(['true', 'false']).default('false'),
+  AUTH_MODE: z.enum(['bearer-observe', 'cookie-dual', 'cookie-enforced']).optional(),
+  SESSION_COOKIE_SECURE: z.enum(['true', 'false']).optional(),
+  PHARMACY_APP_ORIGIN: z.url().default('https://pharmacy.hhh.thinktimeless.co.uk'),
+  ADMIN_APP_ORIGIN: z.url().default('https://admin.hhh.thinktimeless.co.uk'),
+  PUBLIC_APP_ORIGIN: z.url().default('https://www.hhh.thinktimeless.co.uk'),
+  IP_HASH_SECRET: z.string().min(32).optional(),
   CURALEAF_BASE_URL: z.url().default('https://api.curaleaflaboratories.dev'),
   CURALEAF_READ_API_KEY: z.string().min(16).max(500).optional(),
   CURALEAF_WRITE_API_KEY: z.string().min(16).max(500).optional(),
@@ -29,3 +35,7 @@ const schema = z.object({
 
 export const config = schema.parse(process.env);
 export const allowedOrigins = new Set(config.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean));
+export const authMode = config.AUTH_MODE ?? (config.NODE_ENV === 'production' ? 'cookie-enforced' : 'bearer-observe');
+export const secureSessionCookies = config.SESSION_COOKIE_SECURE
+  ? config.SESSION_COOKIE_SECURE === 'true'
+  : config.NODE_ENV === 'production';

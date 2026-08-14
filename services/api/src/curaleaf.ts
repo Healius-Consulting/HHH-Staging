@@ -459,6 +459,20 @@ export type CuraleafShipmentRecord = {
   [key: string]: unknown;
 };
 
+type CuraleafProductFormulaRecord = {
+  id?: unknown;
+  formulaId?: unknown;
+  formulaName?: unknown;
+  formulaUnit?: unknown;
+  state?: unknown;
+};
+
+export type PrescriptionFormulaMatch = {
+  matches: boolean;
+  mode: 'exact' | 'retired_supplier_alias' | 'none';
+  aliases: Array<{ expectedFormulaId: string; supplierFormulaId: string }>;
+};
+
 async function prescriptionBySerial(organisationId: string, serialNumber: string) {
   const lookup = await curaleafRequest<{ prescription: Record<string, unknown> }>(organisationId, `/v1/prescriptions/${encodeURIComponent(serialNumber)}/`);
   const prescription = lookup.prescription;
@@ -610,14 +624,18 @@ export async function uploadClinicPrescriptionImage(
 }
 
 export async function findCuraleafPurchaseOrder(organisationId: string, customerReference: string) {
-  const query = new URLSearchParams({ searchQuery: customerReference, pageNumber: '0', pageSize: '200' });
-  const page = await curaleafRequest<{ purchaseOrders: CuraleafPurchaseOrderRecord[] }>(organisationId, `/v1/purchase-orders/?${query}`);
-  if (!Array.isArray(page.purchaseOrders)) throw new CuraleafRequestError(502, 'Curaleaf returned an invalid purchase-order page.');
-  const purchaseOrder = page.purchaseOrders.find(order => order.customerReference === customerReference) ?? null;
-  if (purchaseOrder && (typeof purchaseOrder.id !== 'string' || !purchaseOrderStates.has(purchaseOrder.state))) {
+  // Read the complete supplier history rather than relying on searchQuery.
+  // Curaleaf retains CANCELLED purchase orders and they can fall outside the
+  // first page or a provider-side default search filter.
+  const page = await curaleafList<CuraleafPurchaseOrderRecord>(organisationId, '/v1/purchase-orders/', 'purchaseOrders');
+  const matches = page.records.filter(order => order.customerReference === customerReference);
+  if (matches.some(order => typeof order.id !== 'string' || !purchaseOrderStates.has(order.state))) {
     throw new CuraleafRequestError(502, 'Curaleaf returned an invalid purchase-order response.');
   }
-  return purchaseOrder;
+  if (matches.length > 1) {
+    throw new CuraleafRequestError(502, 'Curaleaf returned multiple purchase orders for the same customer reference.');
+  }
+  return matches[0] ?? null;
 }
 
 export async function findCuraleafShipments(organisationId: string, purchaseOrderId: string) {
@@ -633,13 +651,39 @@ export async function findCuraleafShipments(organisationId: string, purchaseOrde
 
 async function ensureClinicPurchaseOrder(organisationId: string, customerReference: string, prescriptionId: string) {
   const existing = await findCuraleafPurchaseOrder(organisationId, customerReference);
-  if (existing) return existing;
+  if (existing) return { purchaseOrder: existing, created: false };
   await curaleafRequest(organisationId, '/v1/purchase-order-from-prescriptions/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ customerReference, prescriptionIds: [prescriptionId] }),
   });
-  return findCuraleafPurchaseOrder(organisationId, customerReference);
+  return { purchaseOrder: await findCuraleafPurchaseOrder(organisationId, customerReference), created: true };
+}
+
+export function manualPurchaseOrderPayload(
+  customerReference: string,
+  items: Array<{ packId: string; quantity: number }>,
+) {
+  return {
+    customerReference,
+    items: items.map(item => ({ productId: item.packId, count: item.quantity })),
+  };
+}
+
+async function ensureManualPurchaseOrder(
+  organisationId: string,
+  customerReference: string,
+  items: Array<{ packId: string; quantity: number }>,
+) {
+  const existing = await findCuraleafPurchaseOrder(organisationId, customerReference);
+  if (existing) return { purchaseOrder: existing, created: false };
+  const payload = manualPurchaseOrderPayload(customerReference, items);
+  await curaleafRequest(organisationId, '/v1/purchase-orders/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return { purchaseOrder: await findCuraleafPurchaseOrder(organisationId, customerReference), created: true };
 }
 
 export async function submitManualPrescription(organisationId: string, input: ManualPrescriptionInput) {
@@ -647,15 +691,69 @@ export async function submitManualPrescription(organisationId: string, input: Ma
   if (registered.prescriptionState !== 'ACTIVE') {
     return { status: 'prescription_pending' as const, ...registered, customerReference: input.customerReference, quote: input.quote };
   }
-  const purchaseOrder = await ensureClinicPurchaseOrder(organisationId, input.customerReference, registered.prescriptionId);
+  if (!await configuredCuraleafPrescriberExists(organisationId, registered.prescriberId)) {
+    throw new HttpError(409, 'The prescriber must be configured and verified before a Curaleaf purchase order can be sent.', 'PRESCRIBER_NOT_CONFIGURED');
+  }
+  const placement = await ensureManualPurchaseOrder(organisationId, input.customerReference, input.items);
+  if (!placement.purchaseOrder) {
+    return {
+      status: 'purchase_order_confirmation_pending' as const,
+      ...registered,
+      customerReference: input.customerReference,
+      purchaseOrderId: null,
+      purchaseOrderState: null,
+      placementRequest: {
+        endpoint: '/v1/purchase-orders/',
+        disposition: placement.created ? 'sent' as const : 'existing_not_replayed' as const,
+        items: placement.created ? manualPurchaseOrderPayload(input.customerReference, input.items).items : null,
+      },
+      quote: input.quote,
+    };
+  }
   return {
     status: 'purchase_order_submitted' as const,
     ...registered,
     customerReference: input.customerReference,
-    purchaseOrderId: purchaseOrder?.id ?? null,
-    purchaseOrderState: purchaseOrder?.state ?? null,
+    purchaseOrderId: placement.purchaseOrder?.id ?? null,
+    purchaseOrderState: placement.purchaseOrder?.state ?? null,
+    placementRequest: {
+      endpoint: '/v1/purchase-orders/',
+      disposition: placement.created ? 'sent' : 'existing_not_replayed',
+      items: manualPurchaseOrderPayload(input.customerReference, input.items).items,
+    },
     quote: input.quote,
   };
+}
+
+type PrescriberIdentity = {
+  pin: string;
+  gmcNumber: number | null;
+  gphcNumber: string | null;
+  name: string;
+};
+
+function normalIdentity(value: unknown) {
+  return String(value ?? '').trim().toLocaleLowerCase('en-GB');
+}
+
+export function prescriberDirectoryMatch(record: Record<string, unknown>, input: PrescriberIdentity) {
+  if (record.active !== true || normalIdentity(record.name) !== normalIdentity(input.name)) return false;
+  return normalIdentity(record.pin) === normalIdentity(input.pin)
+    || Boolean(input.gphcNumber && normalIdentity(record.gphcNumber) === normalIdentity(input.gphcNumber))
+    || Boolean(input.gmcNumber && Number(record.gmcNumber) === input.gmcNumber);
+}
+
+async function configuredPrescriberDocument(input: PrescriberIdentity) {
+  const directory = await firestore.collection('prescriberDirectory').where('active', '==', true).limit(500).get();
+  return directory.docs.find(document => prescriberDirectoryMatch(document.data(), input)) ?? null;
+}
+
+async function configuredCuraleafPrescriberExists(organisationId: string, prescriberId: string) {
+  const directory = await firestore.collection('prescriberDirectory').where('active', '==', true).limit(500).get();
+  return directory.docs.some(document => {
+    const ids = document.data().curaleafIds;
+    return ids && typeof ids === 'object' && (ids as Record<string, unknown>)[organisationId] === prescriberId;
+  });
 }
 
 /** Registers a manual prescription and its prescriber without creating stock. */
@@ -663,6 +761,10 @@ export async function registerManualPrescription(
   organisationId: string,
   input: Pick<ManualPrescriptionInput, 'serialNumber' | 'issueDate' | 'prescriber' | 'items' | 'file'>,
 ) {
+  const configuredPrescriber = await configuredPrescriberDocument(input.prescriber);
+  if (!configuredPrescriber) {
+    throw new HttpError(409, 'Add and select this prescriber from the active prescriber directory before submitting the prescription.', 'PRESCRIBER_NOT_CONFIGURED');
+  }
   const matchesPrescriber = (item: Record<string, unknown>) => item.pin === input.prescriber.pin
     || Boolean(input.prescriber.gphcNumber && item.gphcNumber === input.prescriber.gphcNumber)
     || Boolean(input.prescriber.gmcNumber && item.gmcNumber === input.prescriber.gmcNumber);
@@ -675,6 +777,13 @@ export async function registerManualPrescription(
     prescriber = prescribers.prescribers.find(matchesPrescriber);
   }
   if (!prescriber || typeof prescriber.id !== 'string') throw new CuraleafRequestError(502, 'Curaleaf did not return the prescriber created for this prescription.', true);
+  const existingIds = configuredPrescriber.data().curaleafIds && typeof configuredPrescriber.data().curaleafIds === 'object'
+    ? configuredPrescriber.data().curaleafIds as Record<string, string>
+    : {};
+  await configuredPrescriber.ref.set({
+    curaleafIds: { ...existingIds, [organisationId]: prescriber.id },
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
 
   let prescription: Awaited<ReturnType<typeof prescriptionBySerial>>;
   try {
@@ -688,7 +797,12 @@ export async function registerManualPrescription(
     prescription = await prescriptionBySerial(organisationId, input.serialNumber);
   }
   const prescriptionDetails = await prescriptionById(organisationId, prescription.id);
-  if (prescriptionDetails.prescriberId !== prescriber.id || !exactFormulaQuantities(input.items, prescriptionDetails.items)) {
+  let formulaMatch = prescriptionFormulaMatch(input.items, prescriptionDetails.items);
+  if (prescriptionDetails.prescriberId === prescriber.id && !formulaMatch.matches) {
+    const productPage = await curaleafList<CuraleafProductFormulaRecord>(organisationId, '/v1/products/', 'products');
+    formulaMatch = prescriptionFormulaMatch(input.items, prescriptionDetails.items, productPage.records);
+  }
+  if (prescriptionDetails.prescriberId !== prescriber.id || !formulaMatch.matches) {
     throw new HttpError(409, 'The existing Curaleaf prescription does not match the saved prescriber and medicine lines.', 'PRESCRIPTION_MISMATCH');
   }
   await uploadCuraleafFile(organisationId, `/v1/prescriptions/${prescription.id}/file/`, input.file.bytes, input.file.contentType, input.file.filename);
@@ -696,12 +810,14 @@ export async function registerManualPrescription(
     prescriptionState: prescriptionDetails.state,
     prescriptionId: prescriptionDetails.id,
     prescriberId: prescriber.id,
+    formulaMatchMode: formulaMatch.mode,
+    formulaAliases: formulaMatch.aliases,
   };
 }
 
 export async function reconcileManualPrescription(
   organisationId: string,
-  input: { serialNumber: string; customerReference: string; items: Array<{ packId: string; quantity: number }>; allowPurchaseOrderCreate?: boolean },
+  input: { serialNumber: string; customerReference: string; items: Array<{ packId: string; quantity: number }>; expectedPrescriberId?: string; allowPurchaseOrderCreate?: boolean },
 ) {
   const [prescription, existingPurchaseOrder] = await Promise.all([
     prescriptionBySerial(organisationId, input.serialNumber),
@@ -714,7 +830,20 @@ export async function reconcileManualPrescription(
       prescriptionId: prescription.id,
       purchaseOrderId: existingPurchaseOrder.id,
       purchaseOrderState: existingPurchaseOrder.state,
+      placementRequest: {
+        endpoint: '/v1/purchase-orders/',
+        disposition: 'existing_not_replayed' as const,
+        items: null,
+      },
     };
+  }
+  const prescriptionDetails = await prescriptionById(organisationId, prescription.id);
+  const prescriber = await prescriberById(organisationId, prescriptionDetails.prescriberId);
+  if (!input.expectedPrescriberId || prescriptionDetails.prescriberId !== input.expectedPrescriberId) {
+    return { status: 'prescription_mismatch' as const, reason: 'PRESCRIBER_MISMATCH', prescriptionState: prescription.state, prescriptionId: prescription.id, prescriberId: prescriber.id, prescriberName: prescriber.name };
+  }
+  if (!await configuredCuraleafPrescriberExists(organisationId, input.expectedPrescriberId)) {
+    return { status: 'prescription_mismatch' as const, reason: 'PRESCRIBER_NOT_CONFIGURED', prescriptionState: prescription.state, prescriptionId: prescription.id, prescriberId: prescriber.id, prescriberName: prescriber.name };
   }
   if (prescription.state === 'PENDING') {
     return { status: 'prescription_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id };
@@ -728,13 +857,21 @@ export async function reconcileManualPrescription(
   if (input.allowPurchaseOrderCreate === false) {
     return { status: 'purchase_order_confirmation_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id };
   }
-  const purchaseOrder = await ensureClinicPurchaseOrder(organisationId, input.customerReference, prescription.id);
+  const placement = await ensureManualPurchaseOrder(organisationId, input.customerReference, input.items);
+  if (!placement.purchaseOrder) {
+    return { status: 'purchase_order_confirmation_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id, prescriberId: prescriber.id, prescriberName: prescriber.name };
+  }
   return {
     status: 'purchase_order_submitted' as const,
     prescriptionState: prescription.state,
     prescriptionId: prescription.id,
-    purchaseOrderId: purchaseOrder?.id ?? null,
-    purchaseOrderState: purchaseOrder?.state ?? null,
+    purchaseOrderId: placement.purchaseOrder?.id ?? null,
+    purchaseOrderState: placement.purchaseOrder?.state ?? null,
+    placementRequest: {
+      endpoint: '/v1/purchase-orders/',
+      disposition: placement.created ? 'sent' as const : 'existing_not_replayed' as const,
+      items: placement.created ? manualPurchaseOrderPayload(input.customerReference, input.items).items : null,
+    },
   };
 }
 
@@ -763,6 +900,74 @@ function exactFormulaQuantities(expected: Array<{ formulaId: string; unitsNeeded
   const left = formulaQuantities(expected);
   const right = formulaQuantities(actualItems);
   return actualItems.length === actual.length && left.size === right.size && [...left].every(([formulaId, quantity]) => right.get(formulaId) === quantity);
+}
+
+function medicineIdentity(name: unknown, unit: unknown) {
+  if (typeof name !== 'string' || typeof unit !== 'string') return null;
+  const normalisedName = name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-GB');
+  const normalisedUnit = unit.trim().toLocaleLowerCase('en-GB');
+  return normalisedName && normalisedUnit ? `${normalisedName}\u0000${normalisedUnit}` : null;
+}
+
+/**
+ * Curaleaf can retain an old formula id on an existing prescription after the
+ * same medicine has been re-keyed in the active product catalogue. Accept that
+ * narrow case only when pack linkage, medicine name, unit and prescribed
+ * quantity all still agree, and the supplier id is no longer used by an active
+ * product. A live id for a different formula remains a hard mismatch.
+ */
+export function prescriptionFormulaMatch(
+  expected: Array<{ formulaId: string; unitsNeededCount: number; packId?: string }>,
+  actual: Array<Record<string, unknown>>,
+  products: CuraleafProductFormulaRecord[] = [],
+): PrescriptionFormulaMatch {
+  if (exactFormulaQuantities(expected, actual)) return { matches: true, mode: 'exact', aliases: [] };
+  if (!expected.length || !products.length || expected.some(item => !item.packId)) return { matches: false, mode: 'none', aliases: [] };
+
+  const activeProducts = products.filter(product => product.state === 'ACTIVE');
+  const productById = new Map(activeProducts.flatMap(product => typeof product.id === 'string' ? [[product.id, product] as const] : []));
+  const activeFormulaIds = new Set(activeProducts.flatMap(product => typeof product.formulaId === 'string' ? [product.formulaId] : []));
+  const expectedByIdentity = new Map<string, { quantity: number; formulaIds: Set<string> }>();
+
+  for (const item of expected) {
+    const product = productById.get(item.packId!);
+    if (!product || product.formulaId !== item.formulaId) return { matches: false, mode: 'none', aliases: [] };
+    const identity = medicineIdentity(product.formulaName, product.formulaUnit);
+    if (!identity || !Number.isInteger(item.unitsNeededCount) || item.unitsNeededCount <= 0) return { matches: false, mode: 'none', aliases: [] };
+    const aggregate = expectedByIdentity.get(identity) ?? { quantity: 0, formulaIds: new Set<string>() };
+    aggregate.quantity += item.unitsNeededCount;
+    aggregate.formulaIds.add(item.formulaId);
+    expectedByIdentity.set(identity, aggregate);
+  }
+
+  const actualByIdentity = new Map<string, { quantity: number; formulaIds: Set<string> }>();
+  for (const item of actual) {
+    const identity = medicineIdentity(item.formulaName, item.unit);
+    if (!identity || typeof item.formulaId !== 'string' || !Number.isInteger(item.unitsNeededCount) || Number(item.unitsNeededCount) <= 0) {
+      return { matches: false, mode: 'none', aliases: [] };
+    }
+    const aggregate = actualByIdentity.get(identity) ?? { quantity: 0, formulaIds: new Set<string>() };
+    aggregate.quantity += Number(item.unitsNeededCount);
+    aggregate.formulaIds.add(item.formulaId);
+    actualByIdentity.set(identity, aggregate);
+  }
+
+  if (expectedByIdentity.size !== actualByIdentity.size) return { matches: false, mode: 'none', aliases: [] };
+  const aliases: PrescriptionFormulaMatch['aliases'] = [];
+  for (const [identity, expectedItem] of expectedByIdentity) {
+    const actualItem = actualByIdentity.get(identity);
+    if (!actualItem || expectedItem.quantity !== actualItem.quantity || expectedItem.formulaIds.size !== 1 || actualItem.formulaIds.size !== 1) {
+      return { matches: false, mode: 'none', aliases: [] };
+    }
+    const expectedFormulaId = [...expectedItem.formulaIds][0]!;
+    const supplierFormulaId = [...actualItem.formulaIds][0]!;
+    if (expectedFormulaId === supplierFormulaId) continue;
+    if (activeFormulaIds.has(supplierFormulaId)) return { matches: false, mode: 'none', aliases: [] };
+    aliases.push({ expectedFormulaId, supplierFormulaId });
+  }
+  return aliases.length
+    ? { matches: true, mode: 'retired_supplier_alias', aliases }
+    : { matches: false, mode: 'none', aliases: [] };
 }
 
 export async function reconcileClinicPrescription(
@@ -827,15 +1032,30 @@ export async function reconcileClinicPrescription(
   if (input.allowPurchaseOrderCreate === false) {
     return { status: 'purchase_order_confirmation_pending' as const, prescriptionId: prescription.id, prescriptionState: prescription.state, prescriberId: prescriber.id, prescriberName: prescriber.name };
   }
-  const purchaseOrder = await ensureClinicPurchaseOrder(organisationId, input.customerReference, prescription.id);
+  const placement = await ensureClinicPurchaseOrder(organisationId, input.customerReference, prescription.id);
+  if (!placement.purchaseOrder) {
+    return {
+      status: 'purchase_order_confirmation_pending' as const,
+      prescriptionId: prescription.id,
+      prescriptionState: prescription.state,
+      prescriberId: prescriber.id,
+      prescriberName: prescriber.name,
+    };
+  }
   return {
     status: 'purchase_order_submitted' as const,
     prescriptionId: prescription.id,
     prescriptionState: prescription.state,
     prescriberId: prescriber.id,
     prescriberName: prescriber.name,
-    purchaseOrderId: purchaseOrder?.id ?? null,
-    purchaseOrderState: purchaseOrder?.state ?? null,
+    purchaseOrderId: placement.purchaseOrder?.id ?? null,
+    purchaseOrderState: placement.purchaseOrder?.state ?? null,
+    placementRequest: {
+      endpoint: '/v1/purchase-order-from-prescriptions/',
+      disposition: placement.created ? 'sent' as const : 'existing_not_replayed' as const,
+      prescriptionIds: placement.created ? [prescription.id] : null,
+      items: null,
+    },
   };
 }
 

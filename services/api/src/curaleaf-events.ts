@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { CuraleafRequestError, curaleafRequest } from './curaleaf.js';
+import { CuraleafRequestError, curaleafRequest, type CuraleafPurchaseOrderRecord } from './curaleaf.js';
+import { ingestCancelledCuraleafPurchaseOrder } from './curaleaf-reconciliation.js';
 import { firestore } from './firebase.js';
 import { nowIso } from './http.js';
 import { invalidateCache } from './cache.js';
@@ -59,6 +60,9 @@ async function pollEventKind(organisationId: string, kind: EventKind) {
         syncedAt: nowIso(),
         schemaVersion: 1,
       }, { merge: true });
+      if (kind === 'purchaseOrder' && record.state === 'CANCELLED') {
+        await ingestCancelledCuraleafPurchaseOrder(organisationId, record as CuraleafPurchaseOrderRecord);
+      }
       await eventDocument.create({ organisationId, kind, entityId, lastUpdated, processedAt: nowIso(), schemaVersion: 1 });
       processed += 1;
     }

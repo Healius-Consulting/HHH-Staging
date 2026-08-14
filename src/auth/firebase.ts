@@ -31,7 +31,8 @@ export const firebaseConfiguration = {
 // Keep MFA available in the application without forcing it in early staging.
 // Set VITE_REQUIRE_MFA=true alongside REQUIRE_MFA=true on the API when HHH is
 // ready to make TOTP enrolment a mandatory access control.
-export const mfaRequired = import.meta.env.VITE_REQUIRE_MFA === 'true';
+export const serverSessionAuth = import.meta.env.VITE_AUTH_MODE === 'cookie' || (!import.meta.env.DEV && import.meta.env.VITE_AUTH_MODE !== 'bearer');
+export const mfaRequired = import.meta.env.VITE_REQUIRE_MFA === 'true' || serverSessionAuth;
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;

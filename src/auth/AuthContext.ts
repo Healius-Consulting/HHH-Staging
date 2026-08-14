@@ -16,6 +16,7 @@ export interface AuthContextValue {
   beginTotpEnrollment: () => Promise<TotpEnrollmentDetails>;
   completeTotpEnrollment: (code: string) => Promise<void>;
   completeMfaChallenge: (code: string) => Promise<void>;
+  continueSession: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
