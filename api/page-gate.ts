@@ -71,7 +71,7 @@ function firebaseApp(request: Request) {
   const oidcToken = request.headers.get('x-vercel-oidc-token');
   if (oidcToken) activeVercelOidcToken = oidcToken;
   if (getApps().length) return getApps()[0]!;
-  const projectId = process.env.FIREBASE_PROJECT_ID ?? process.env.GOOGLE_CLOUD_PROJECT;
+  const projectId = process.env.GCP_PROJECT_ID ?? process.env.FIREBASE_PROJECT_ID ?? process.env.GOOGLE_CLOUD_PROJECT;
   const credential = process.env.GCP_WORKLOAD_IDENTITY_POOL_ID
     ? wifCredential(request)
     : applicationDefault();
