@@ -28,11 +28,18 @@ export function cookieOptions(httpOnly: boolean, maxAge = SESSION_ABSOLUTE_MS) {
   return { httpOnly, secure: secureSessionCookies, sameSite: 'strict' as const, path: '/', maxAge };
 }
 
-function expectedOrigin(surface: ProtectedSurface) {
+function expectedOrigin(request: Request, surface: ProtectedSurface) {
+  if (requestHostname(request) === new URL(config.PORTAL_APP_ORIGIN).hostname) return config.PORTAL_APP_ORIGIN;
   return surface === 'admin' ? config.ADMIN_APP_ORIGIN : config.PHARMACY_APP_ORIGIN;
 }
 
 export function protectedSurface(request: Request) {
+  const host = requestHostname(request);
+  const portalHost = new URL(config.PORTAL_APP_ORIGIN).hostname;
+  if (host === portalHost) {
+    const requested = request.query.__hhh_surface;
+    return requested === 'pharmacy' || requested === 'admin' ? requested : null;
+  }
   return surfaceForRequest(request, { pharmacy: config.PHARMACY_APP_ORIGIN, admin: config.ADMIN_APP_ORIGIN }, config.NODE_ENV !== 'production');
 }
 
@@ -90,7 +97,7 @@ function requestOriginAllowed(request: Request, surface: ProtectedSurface) {
   if (!source) return config.NODE_ENV !== 'production';
   try {
     const origin = new URL(source).origin;
-    if (origin === expectedOrigin(surface)) return true;
+    if (origin === expectedOrigin(request, surface)) return true;
     if (config.NODE_ENV !== 'production' && ['http://localhost:5173', 'http://127.0.0.1:5173'].includes(origin)) return true;
     return false;
   } catch { return false; }

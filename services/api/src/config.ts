@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
-  ALLOWED_ORIGINS: z.string().default('https://hhh.thinktimeless.co.uk,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174'),
+  ALLOWED_ORIGINS: z.string().default('https://hhh.thinktimeless.co.uk,https://portal.hhh.thinktimeless.co.uk,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174'),
   APP_BASE_URL: z.url().default('https://hhh.thinktimeless.co.uk'),
   FIREBASE_PROJECT_ID: z.string().min(1).optional(),
   FIREBASE_STORAGE_BUCKET: z.string().min(1).optional(),
@@ -11,9 +11,10 @@ const schema = z.object({
   REQUIRE_MFA: z.enum(['true', 'false']).default('false'),
   AUTH_MODE: z.enum(['bearer-observe', 'cookie-dual', 'cookie-enforced']).optional(),
   SESSION_COOKIE_SECURE: z.enum(['true', 'false']).optional(),
-  PHARMACY_APP_ORIGIN: z.url().default('https://pharmacy.hhh.thinktimeless.co.uk'),
-  ADMIN_APP_ORIGIN: z.url().default('https://admin.hhh.thinktimeless.co.uk'),
-  PUBLIC_APP_ORIGIN: z.url().default('https://www.hhh.thinktimeless.co.uk'),
+  PHARMACY_APP_ORIGIN: z.url().default('https://portal.hhh.thinktimeless.co.uk'),
+  ADMIN_APP_ORIGIN: z.url().default('https://portal.hhh.thinktimeless.co.uk'),
+  PUBLIC_APP_ORIGIN: z.url().default('https://hhh.thinktimeless.co.uk'),
+  PORTAL_APP_ORIGIN: z.url().default('https://portal.hhh.thinktimeless.co.uk'),
   IP_HASH_SECRET: z.string().min(32).optional(),
   CURALEAF_BASE_URL: z.url().default('https://api.curaleaflaboratories.dev'),
   CURALEAF_READ_API_KEY: z.string().min(16).max(500).optional(),
