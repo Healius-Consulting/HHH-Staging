@@ -37,20 +37,25 @@ function wifCredential(request: Request): Credential {
   if (!oidcToken) throw new Error('VERCEL_OIDC_TOKEN_MISSING');
   if (!projectNumber || !poolId || !providerId || !serviceAccountEmail) throw new Error('GCP_WIF_CONFIGURATION_MISSING');
   activeVercelOidcToken = oidcToken;
-  const authClient = ExternalAccountClient.fromJSON({
-    type: 'external_account',
-    audience: `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`,
-    subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
-    token_url: 'https://sts.googleapis.com/v1/token',
-    service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${serviceAccountEmail}:generateAccessToken`,
-    subject_token_supplier: {
-      getSubjectToken: async () => {
-        if (!activeVercelOidcToken) throw new Error('Vercel OIDC token is unavailable.');
-        return activeVercelOidcToken;
+  let authClient: ExternalAccountClient | null;
+  try {
+    authClient = ExternalAccountClient.fromJSON({
+      type: 'external_account',
+      audience: `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`,
+      subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
+      token_url: 'https://sts.googleapis.com/v1/token',
+      service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${serviceAccountEmail}:generateAccessToken`,
+      subject_token_supplier: {
+        getSubjectToken: async () => {
+          if (!activeVercelOidcToken) throw new Error('Vercel OIDC token is unavailable.');
+          return activeVercelOidcToken;
+        },
       },
-    },
-  });
-  if (!authClient) throw new Error('Could not create the Google workload identity client.');
+    });
+  } catch {
+    throw new Error('GCP_WIF_CLIENT_INITIALIZATION_FAILED');
+  }
+  if (!authClient) throw new Error('GCP_WIF_CLIENT_INITIALIZATION_FAILED');
   return {
     async getAccessToken() {
       const accessToken = await authClient.getAccessToken();
@@ -73,10 +78,11 @@ function firebaseApp(request: Request) {
     : process.env.GCP_WORKLOAD_IDENTITY_POOL_ID
       ? wifCredential(request)
       : applicationDefault();
-  return initializeApp({
-    credential,
-    projectId,
-  });
+  try {
+    return initializeApp({ credential, projectId });
+  } catch {
+    throw new Error('FIREBASE_APP_INITIALIZATION_FAILED');
+  }
 }
 
 function hash(value: string) {
@@ -87,6 +93,8 @@ function safeGateFailure(error: unknown) {
   if (!(error instanceof Error)) return 'CREDENTIAL_INITIALIZATION_FAILED';
   if (error.message === 'VERCEL_OIDC_TOKEN_MISSING') return error.message;
   if (error.message === 'GCP_WIF_CONFIGURATION_MISSING') return error.message;
+  if (error.message === 'GCP_WIF_CLIENT_INITIALIZATION_FAILED') return error.message;
+  if (error.message === 'FIREBASE_APP_INITIALIZATION_FAILED') return error.message;
   return 'CREDENTIAL_INITIALIZATION_FAILED';
 }
 
