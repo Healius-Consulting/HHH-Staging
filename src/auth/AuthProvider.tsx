@@ -134,8 +134,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setAuthenticatedSession = useCallback((session: AuthenticatedSession) => {
-    setApiCsrfToken(session.csrfToken);
-    setState({ phase: 'authenticated', staff: staffFromSession(session), error: null, notice: null, sessionWarning: false });
     if (isCurrentSurfacePath('/login')) {
       const candidate = new URLSearchParams(window.location.search).get('returnTo') ?? '/';
       let decoded = '';
@@ -149,7 +147,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       window.location.replace(safe);
+      return;
     }
+    setApiCsrfToken(session.csrfToken);
+    setState({ phase: 'authenticated', staff: staffFromSession(session), error: null, notice: null, sessionWarning: false });
   }, []);
 
   const establishServerSession = useCallback(async (user: User) => {
