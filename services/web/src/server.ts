@@ -5,19 +5,29 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { isSupportedPortalRelativePath } from '@hhh/domain/portal-route';
 
-type Surface = 'public' | 'pharmacy' | 'admin';
+type Surface = 'public' | 'portal';
+type ProtectedSurface = 'pharmacy' | 'admin';
 
 const surface = (process.env.SURFACE ?? 'public') as Surface;
-if (!['public', 'pharmacy', 'admin'].includes(surface)) throw new Error('SURFACE must be public, pharmacy, or admin.');
+if (!['public', 'portal'].includes(surface)) throw new Error('SURFACE must be public or portal.');
 
 const staticDirectory = path.resolve(process.env.STATIC_DIR ?? '/app/static');
 const indexFile = path.join(staticDirectory, 'index.html');
-if (!existsSync(indexFile)) throw new Error(`Static entry point was not found at ${indexFile}.`);
+const privateDirectory = path.resolve(process.env.PRIVATE_DIR ?? '/app/private');
+const protectedIndexes: Record<ProtectedSurface, string> = {
+  pharmacy: path.join(privateDirectory, 'pharmacy', 'index.html'),
+  admin: path.join(privateDirectory, 'admin', 'index.html'),
+};
+if (surface === 'public' && !existsSync(indexFile)) throw new Error(`Static entry point was not found at ${indexFile}.`);
+if (surface === 'portal' && Object.values(protectedIndexes).some(file => !existsSync(file))) {
+  throw new Error('Both protected portal entry points are required.');
+}
 
-if (!getApps().length) initializeApp({ credential: applicationDefault(), projectId: process.env.GOOGLE_CLOUD_PROJECT });
-const auth = getAuth();
-const firestore = getFirestore();
+if (surface === 'portal' && !getApps().length) initializeApp({ credential: applicationDefault(), projectId: process.env.GOOGLE_CLOUD_PROJECT });
+const auth = surface === 'portal' ? getAuth() : null;
+const firestore = surface === 'portal' ? getFirestore() : null;
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
 const expectedHost = process.env.EXPECTED_HOST?.toLowerCase();
@@ -36,20 +46,26 @@ function sessionHash(value: string) {
   return createHash('sha256').update(value).digest('hex');
 }
 
-async function securityEvent(request: Request, event: string, details: Record<string, unknown> = {}) {
+function protectedSurface(request: Request): ProtectedSurface | null {
+  if (request.path === '/pharmacy' || request.path.startsWith('/pharmacy/')) return 'pharmacy';
+  if (request.path === '/admin' || request.path.startsWith('/admin/')) return 'admin';
+  return null;
+}
+
+async function securityEvent(request: Request, requestedSurface: ProtectedSurface | null, event: string, details: Record<string, unknown> = {}) {
   const address = request.ip || request.socket.remoteAddress || 'unknown';
   const secret = process.env.IP_HASH_SECRET ?? 'missing-runtime-secret';
   const payload = {
     schemaVersion: 1,
     event,
-    surface,
+    surface: requestedSurface,
     requestId: request.get('x-request-id') ?? null,
     ipHash: createHmac('sha256', secret).update(address).digest('hex'),
     occurredAt: new Date().toISOString(),
     ...details,
   };
   console.warn(JSON.stringify(payload));
-  await firestore.collection('auditLogs').add(payload).catch(() => undefined);
+  await firestore?.collection('auditLogs').add(payload).catch(() => undefined);
 }
 
 function safeReturnTo(value: string) {
@@ -64,7 +80,7 @@ function safeReturnTo(value: string) {
 
 function securityHeaders(_request: Request, response: Response, next: NextFunction) {
   response.set({
-    'Content-Security-Policy': "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://storage.googleapis.com; font-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseappcheck.googleapis.com https://recaptchaenterprise.googleapis.com; frame-src https://www.google.com; worker-src 'self'; upgrade-insecure-requests",
+    'Content-Security-Policy': "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://storage.googleapis.com; font-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseappcheck.googleapis.com https://storage.googleapis.com https://www.google.com/recaptcha/; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; worker-src 'self'; upgrade-insecure-requests",
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Cross-Origin-Resource-Policy': 'same-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
@@ -77,10 +93,14 @@ function securityHeaders(_request: Request, response: Response, next: NextFuncti
 }
 
 async function verifyProtectedPage(request: Request, response: Response, next: NextFunction) {
-  if (surface === 'public') return next();
+  const requestedSurface = protectedSurface(request);
+  if (surface !== 'portal' || !requestedSurface || !auth || !firestore) return response.status(404).send('Not found');
+  const prefix = `/${requestedSurface}`;
+  const relativePath = request.path === prefix ? '/' : request.path.slice(prefix.length);
+  if (!isSupportedPortalRelativePath(requestedSurface, relativePath)) return response.status(404).send('Not found');
   const sessionCookie = cookies(request)['__Host-hhh_session'];
   if (!sessionCookie) {
-    void securityEvent(request, 'auth.session_rejected', { code: 'UNAUTHENTICATED' });
+    void securityEvent(request, requestedSurface, 'auth.session_rejected', { code: 'UNAUTHENTICATED' });
     return rejectPage(request, response);
   }
 
@@ -90,11 +110,11 @@ async function verifyProtectedPage(request: Request, response: Response, next: N
     const hash = sessionHash(sessionCookie);
     const record = (await firestore.collection('staffSessions').doc(hash).get()).data();
     const now = Date.now();
-    const expectedRole = surface === 'pharmacy' ? 'pharmacy_staff' : 'hhh_admin';
+    const expectedRole = requestedSurface === 'pharmacy' ? 'pharmacy_staff' : 'hhh_admin';
     const hashBuffer = Buffer.from(hash);
     const storedHash = Buffer.from(String(record?.sessionHash ?? ''));
     if (!record || hashBuffer.length !== storedHash.length || !timingSafeEqual(hashBuffer, storedHash)) throw new Error('Session record mismatch');
-    if (record.uid !== decoded.uid || record.surface !== surface || record.role !== expectedRole || decoded.role !== expectedRole) {
+    if (record.uid !== decoded.uid || record.surface !== requestedSurface || record.role !== expectedRole || decoded.role !== expectedRole) {
       accessDenied = true;
       throw new Error('Session scope mismatch');
     }
@@ -107,7 +127,7 @@ async function verifyProtectedPage(request: Request, response: Response, next: N
       accessDenied = true;
       throw new Error('Staff scope mismatch');
     }
-    if (surface === 'pharmacy' && (!record.organisationId || record.organisationId !== organisationId)) {
+    if (requestedSurface === 'pharmacy' && (!record.organisationId || record.organisationId !== organisationId)) {
       accessDenied = true;
       throw new Error('Tenant required');
     }
@@ -119,11 +139,11 @@ async function verifyProtectedPage(request: Request, response: Response, next: N
     return next();
   } catch {
     if (accessDenied) {
-      void securityEvent(request, 'auth.role_denied', { code: 'SURFACE_FORBIDDEN' });
+      void securityEvent(request, requestedSurface, 'auth.role_denied', { code: 'SURFACE_FORBIDDEN' });
       response.set('Cache-Control', 'no-store');
       return response.status(403).send('This account cannot access this workspace.');
     }
-    void securityEvent(request, 'auth.session_rejected', { code: 'INVALID_OR_EXPIRED' });
+    void securityEvent(request, requestedSurface, 'auth.session_rejected', { code: 'INVALID_OR_EXPIRED' });
     response.clearCookie('__Host-hhh_session', { secure: true, httpOnly: true, sameSite: 'strict', path: '/' });
     return rejectPage(request, response);
   }
@@ -153,8 +173,14 @@ app.all('/v1/*splat', (_request, response) => response.status(404).json({ code: 
 if (surface === 'public') {
   app.get('*splat', (_request, response) => { response.set('Cache-Control', 'no-store'); response.sendFile(indexFile); });
 } else {
-  app.get(['/login', '/reset-password'], (_request, response) => { response.set('Cache-Control', 'no-store'); response.sendFile(indexFile); });
-  app.get('*splat', verifyProtectedPage, (_request, response) => { response.set('Cache-Control', 'no-store, private'); response.sendFile(indexFile); });
+  app.get(['/login', '/reset-password'], (_request, response) => { response.set('Cache-Control', 'no-store'); response.sendFile(protectedIndexes.pharmacy); });
+  app.get(['/pharmacy', '/pharmacy/*splat', '/admin', '/admin/*splat'], verifyProtectedPage, (request, response) => {
+    const requestedSurface = protectedSurface(request);
+    if (!requestedSurface) return response.status(404).send('Not found');
+    response.set('Cache-Control', 'no-store, private');
+    return response.sendFile(protectedIndexes[requestedSurface]);
+  });
+  app.get('*splat', (_request, response) => response.status(404).send('Not found'));
 }
 
 app.use((_error: unknown, _request: Request, response: Response, _next: NextFunction) => response.status(500).send('The service is temporarily unavailable.'));

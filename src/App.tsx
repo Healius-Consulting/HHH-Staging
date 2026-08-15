@@ -25,7 +25,6 @@ import {
   PasswordResetScreen,
   StaffLogin,
 } from './auth/AuthScreens';
-import { PharmacySetupWizard } from './onboarding/PharmacySetupWizard';
 import { SetupRequired } from './onboarding/SetupRequired';
 import { usePharmacySetup } from './onboarding/usePharmacySetup';
 import { getAdminOrganisations, getPortalSession } from './shared/api';
@@ -34,7 +33,8 @@ import { isLocalPortalPreview } from './dev/localPortalPreview';
 import LocalPortalSwitcher from './dev/LocalPortalSwitcher';
 import CommandPalette from './components/CommandPalette';
 import { serverSessionAuth } from './auth/firebase';
-import { isCurrentSurfacePath } from './auth/surface-path';
+import { appPathPrefix, isCurrentSurfacePath } from './auth/surface-path';
+import { surfaceRelativePath, surfaceRoutePath } from './routing/surfaceRoute';
 
 function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
   return {
@@ -80,12 +80,12 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
 const pharmacyScreens = new Set<Screen>(['home', 'create', 'orders', 'patients', 'formulary', 'finance', 'settings']);
 
 function pharmacyScreenFromPath(): Screen {
-  const segment = window.location.pathname.split('/').filter(Boolean)[1];
+  const segment = surfaceRelativePath(window.location.pathname, appPathPrefix)?.split('/').filter(Boolean)[0];
   return segment && pharmacyScreens.has(segment as Screen) ? segment as Screen : 'home';
 }
 
 function pharmacyPathForScreen(screen: Screen) {
-  return screen === 'home' ? '/pharmacy' : `/pharmacy/${screen}`;
+  return surfaceRoutePath(screen === 'home' ? '/' : `/${screen}`, appPathPrefix);
 }
 
 function ToastItem({ toast }: { toast: { id: string; message: string; type: 'success' | 'info' | 'warning' | 'error' } }) {
@@ -264,7 +264,7 @@ function StaffWorkspace() {
       case 'orders': return <Orders />;
       case 'patients': return <Patients />;
       case 'finance': return <PharmacyFinance />;
-      case 'settings': return setupComplete ? <PharmacySettings /> : <PharmacySetupWizard organisation={organisation} setup={setup} />;
+      case 'settings': return <PharmacySettings setup={setup} />;
       default: return serverSessionAuth ? <PharmacyOverview /> : <Dashboard />;
     }
   };

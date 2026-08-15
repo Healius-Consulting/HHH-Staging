@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Building2,
   CheckCircle2,
+  ClipboardCheck,
   Copy,
   CreditCard,
   Download,
@@ -17,6 +18,9 @@ import { brandSwatchStyle } from '../utils/tenantTheme';
 import { isApiConfigured, updatePaymentSettings } from '../shared/api';
 import WorldpayConnectionPanel from '../components/WorldpayConnectionPanel';
 import { downloadContentPack, downloadDataUrl, eligibilityUrl, qrDataUrl } from '../utils/pharmacyResources';
+import { PharmacySetupWizard } from '../onboarding/PharmacySetupWizard';
+import type { usePharmacySetup } from '../onboarding/usePharmacySetup';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
 
 const MODULE_LABELS: Record<TenantModule, { name: string; description: string }> = {
   intake: { name: 'Patient onboarding', description: 'Pharmacy-attributed eligibility submissions and HHH decisions' },
@@ -27,9 +31,13 @@ const MODULE_LABELS: Record<TenantModule, { name: string; description: string }>
   resources: { name: 'Form and content pack', description: 'Pharmacy link, QR code and developer assets' },
 };
 
-export default function PharmacySettings() {
+interface PharmacySettingsProps {
+  setup: ReturnType<typeof usePharmacySetup>;
+}
+
+export default function PharmacySettings({ setup }: PharmacySettingsProps) {
   const { state, dispatch } = useApp();
-  const [activeTab, setActiveTab] = useState<'settings' | 'assets'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'assets' | 'activation'>('settings');
   const [savingRoute, setSavingRoute] = useState(false);
   const [qr, setQr] = useState('');
   const organisation = useMemo(() => state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0], [state]);
@@ -51,7 +59,7 @@ export default function PharmacySettings() {
     dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: route } });
     dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled: route === 'worldpay' } });
     try {
-      if (state.workspaceMode === 'live' && isApiConfigured) await updatePaymentSettings(organisation.id, route);
+      if (!isLocalPortalPreview && isApiConfigured) await updatePaymentSettings(organisation.id, route);
       dispatch({ type: 'ADD_TOAST', message: `${route === 'worldpay' ? 'Worldpay' : 'Pharmacy payment'} will be used for new orders. Existing orders are unchanged.`, toastType: 'success' });
     } catch (error) {
       dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: previousRoute } });
@@ -83,10 +91,23 @@ export default function PharmacySettings() {
           <div className="filter-card__head"><span>Assets</span><QrCode size={14} className={activeTab === 'assets' ? 'text-primary' : 'text-muted'} /></div>
           <span className="filter-card__value filter-card__value--text">Intake link, QR & content pack</span>
         </button>
+        <button type="button" aria-pressed={activeTab === 'activation'} className={`filter-card ${activeTab === 'activation' ? 'active' : ''}`} onClick={() => setActiveTab('activation')}>
+          <div className="filter-card__head"><span>Activation</span><ClipboardCheck size={14} className={activeTab === 'activation' ? 'text-primary' : 'text-muted'} /></div>
+          <span className="filter-card__value filter-card__value--text">
+            {setup.loading ? 'Loading readiness…' : `${setup.status?.completedCount ?? 0} of ${setup.status?.requiredCount ?? 0} steps complete`}
+          </span>
+        </button>
       </div>
 
       {activeTab === 'settings' ? (
         <div className="settings-stack">
+          {!setup.loading && !setup.status?.completed ? (
+            <div className="banner banner-amber" role="status">
+              <ClipboardCheck size={16} />
+              <span><strong>Pharmacy activation is incomplete.</strong> Organisation settings remain available. Review the activation tab before requesting go-live.</span>
+              <button type="button" className="btn btn-sm" onClick={() => setActiveTab('activation')}>Review activation</button>
+            </div>
+          ) : null}
           <section className="card settings-panel">
             <div className="section-heading">
               <div>
@@ -184,7 +205,7 @@ export default function PharmacySettings() {
             </div>
           </section>
         </div>
-      ) : (
+      ) : activeTab === 'assets' ? (
         <div className="settings-stack">
           <div className="alert-success settings-assets-banner">
             <Link2 size={18} />
@@ -251,6 +272,8 @@ export default function PharmacySettings() {
             </button>
           </section>
         </div>
+      ) : (
+        <PharmacySetupWizard organisation={organisation} setup={setup} embedded />
       )}
     </div>
   );

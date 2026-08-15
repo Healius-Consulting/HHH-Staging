@@ -18,11 +18,12 @@ import {
   type SessionRecord,
   type StaffRecord,
 } from '../platform/vercel/page-gate-utils.js';
+import { CONTENT_SECURITY_POLICY } from '../platform/vercel/security-headers.js';
+import { isSupportedPortalRelativePath } from '@hhh/domain/portal-route';
 
 type ProtectedSurface = 'pharmacy' | 'admin';
 
 const deploymentSurface = process.env.HHH_SURFACE;
-const configuredSurface = deploymentSurface === 'pharmacy' || deploymentSurface === 'admin' ? deploymentSurface : null;
 const portalDeployment = deploymentSurface === 'portal';
 const sessionCookieName = '__Host-hhh_session';
 const csrfCookieName = '__Host-hhh_csrf';
@@ -125,7 +126,7 @@ function requestPath(request: Request) {
 function responseHeaders(requestId: string, contentType = 'text/plain; charset=utf-8') {
   return {
     'Cache-Control': 'private, no-store',
-    'Content-Security-Policy': "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://storage.googleapis.com; font-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseappcheck.googleapis.com https://recaptchaenterprise.googleapis.com; frame-src https://www.google.com; worker-src 'self'; upgrade-insecure-requests",
+    'Content-Security-Policy': CONTENT_SECURITY_POLICY,
     'Content-Type': contentType,
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Cross-Origin-Resource-Policy': 'same-origin',
@@ -143,16 +144,18 @@ function clearCookies(headers: Headers) {
 }
 
 function surfaceForRequest(request: Request): ProtectedSurface | null {
-  if (configuredSurface) return configuredSurface;
   if (!portalDeployment) return null;
-  const requested = new URL(request.url).searchParams.get('__hhh_surface');
-  return requested === 'pharmacy' || requested === 'admin' ? requested : null;
+  const requestedPath = requestPath(request);
+  if (requestedPath === '/login' || requestedPath === '/reset-password') return 'pharmacy';
+  if (requestedPath === '/pharmacy' || requestedPath?.startsWith('/pharmacy/')) return 'pharmacy';
+  if (requestedPath === '/admin' || requestedPath?.startsWith('/admin/')) return 'admin';
+  return null;
 }
 
 function logicalPath(pathName: string, surface: ProtectedSurface) {
   const prefix = `/${surface}`;
-  if (!portalDeployment) return pathName;
   if (pathName === '/login') return '/login';
+  if (pathName === '/reset-password') return '/reset-password';
   if (pathName === prefix) return '/';
   return pathName.startsWith(`${prefix}/`) ? pathName.slice(prefix.length) : null;
 }
@@ -188,9 +191,7 @@ async function securityEvent(request: Request, event: string, details: Record<st
 }
 
 async function protectedHtml(surface: ProtectedSurface) {
-  const file = portalDeployment
-    ? path.join(process.cwd(), '.vercel-private', surface, 'index.html')
-    : path.join(process.cwd(), '.vercel-private', 'index.html');
+  const file = path.join(process.cwd(), '.vercel-private', surface, 'index.html');
   return readFile(file, 'utf8');
 }
 
@@ -223,6 +224,10 @@ async function gate(request: Request) {
 
   if (pathName === '/login' || pathName === '/reset-password') {
     return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers: responseHeaders(requestId, 'text/html; charset=utf-8') });
+  }
+
+  if (!isSupportedPortalRelativePath(protectedSurface, pathName)) {
+    return new Response('Not found', { status: 404, headers: responseHeaders(requestId) });
   }
 
   const sessionCookie = parseCookieHeader(request.headers.get('cookie'))[sessionCookieName];

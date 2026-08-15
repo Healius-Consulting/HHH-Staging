@@ -57,29 +57,31 @@ import { formatPatientDob } from '../utils/patientDob';
 import ConditionList from '../components/ConditionList';
 import { EMAIL_LOGO_SPEC, normalisePharmacyLogo } from '../utils/pharmacyLogo';
 import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeEligibilityStatus, pharmacyDecisionReason } from '../utils/eligibilityPresentation';
+import { appPathPrefix } from '../auth/surface-path';
+import { surfaceRelativePath, surfaceRoutePath } from '../routing/surfaceRoute';
+import { ADMIN_VIEW_PATHS, parseAdminRelativePath, type AdminView } from '@hhh/domain/portal-route';
 
-type AdminView = 'overview' | 'referrals' | 'patients' | 'finance' | 'platform';
 type PlatformTab = 'setup' | 'curaleaf';
 type PharmacyDetailTab = 'access' | 'config' | 'patients';
 
-const adminViews = new Set<AdminView>(['overview', 'referrals', 'patients', 'finance', 'platform']);
-
 function adminViewFromPath(): AdminView {
-  const segment = window.location.pathname.split('/').filter(Boolean)[1];
-  return segment && adminViews.has(segment as AdminView) ? segment as AdminView : 'overview';
+  const relativePath = surfaceRelativePath(window.location.pathname, appPathPrefix);
+  const route = relativePath ? parseAdminRelativePath(relativePath) : null;
+  return route?.kind === 'view' ? route.view : 'overview';
 }
 
 function adminPathForView(view: AdminView) {
-  return view === 'overview' ? '/admin' : `/admin/${view}`;
+  return surfaceRoutePath(ADMIN_VIEW_PATHS[view], appPathPrefix);
 }
 
 function organisationIdFromPath() {
-  const match = /^\/admin\/pharmacy\/([A-Za-z0-9_-]+)$/.exec(window.location.pathname);
-  return match?.[1] ?? null;
+  const relativePath = surfaceRelativePath(window.location.pathname, appPathPrefix);
+  const route = relativePath ? parseAdminRelativePath(relativePath) : null;
+  return route?.kind === 'organisation' ? route.organisationId : null;
 }
 
 function adminPathForOrganisation(organisationId: string) {
-  return `/admin/pharmacy/${encodeURIComponent(organisationId)}`;
+  return surfaceRoutePath(`/pharmacy/${encodeURIComponent(organisationId)}`, appPathPrefix);
 }
 
 type AdminFeeEvent = {

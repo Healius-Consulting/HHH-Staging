@@ -6,9 +6,9 @@ Patient and prescription data, payment state, pharmacy tenant data, staff identi
 
 ## Trust boundaries
 
-1. Untrusted browser to global load balancer and Cloud Armor.
-2. Load balancer to Cloud Run ingress through serverless NEGs.
-3. Protected web gateway to Firebase Authentication and `staffSessions`.
+1. Untrusted browser to Vercel edge, Firewall, and TLS.
+2. Vercel London page gate to Firebase Authentication and `staffSessions`.
+3. Vercel same-origin external rewrite to the Firebase API in `europe-west2`.
 4. Browser to same-origin API using host-only cookies, App Check, CSRF, Origin, and Fetch Metadata.
 5. API service to tenant-scoped repositories, Firestore, Storage, Worldpay, and Curaleaf.
 6. Webhooks and scheduled reconciliation to authoritative payment/supplier state.
@@ -18,7 +18,7 @@ Patient and prescription data, payment state, pharmacy tenant data, staff identi
 | Abuse case | Preventive control | Detection / acceptance evidence |
 |---|---|---|
 | Request protected URL without using the UI | Gateway checks session before `index.html`; API independently checks session | Anonymous route matrix; synthetic redirect check |
-| Call a `run.app` origin directly | Cloud Run LB-only ingress and disabled default URI | Infrastructure test from an external network |
+| Call a generated Vercel URL or wrong hostname | Exact host allow-list plus the same application page/API checks on every deployment URL | Host-matrix and anonymous route tests |
 | Reuse or alter a session | Signed/revocation-checked cookie plus hashed server registry, idle and absolute expiry | Tampered, expired, revoked, disabled-user tests |
 | Cross-surface role use | Host-derived surface, exact role check, host-only cookie | Pharmacy-on-admin and admin-on-pharmacy tests |
 | Cross-tenant record probing | Tenant derives from session; repositories require tenant; mismatch is `404` | Contract tests for every protected collection |

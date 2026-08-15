@@ -1,4 +1,6 @@
-# Separately hosted eligibility form
+# Separately hosted eligibility form (superseded topology reference)
+
+> The active public-site plus combined-portal Vercel topology is defined in `specs/firebase-vercel-runbook.md`. This document is retained for historical eligibility-form requirements; do not use its hostnames, build outputs, or API-origin example for a new deployment.
 
 The repository now produces three independently deployable services:
 

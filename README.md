@@ -8,8 +8,7 @@ React/TypeScript staff portal, public eligibility application and Firebase backe
 
 ## Prototype surfaces
 
-- **HHH admin portal** — pharmacy onboarding, tenant branding/modules, cross-pharmacy patient attribution, platform integrations and a master compliance/evidence register.
-- **Client / clinic portal** — tenant-isolated referral processing, patient CRM, prescription building, dual payment routing, supplier tracking and goods-in/collection.
+- **Combined staff portal** — one authenticated origin with HHH administration under `/admin/...` and tenant-isolated pharmacy workspaces under `/pharmacy/...`.
 - **Tokenised eligibility form** — a unique URL per pharmacy links every submission to the correct client.
 - **Pharmacy resources** — copy the patient link, save a print-ready QR code, and generate a developer content-pack ZIP.
 - **No patient account surface** — patients use the public eligibility form only; all authenticated access is staff-only.
@@ -22,13 +21,13 @@ npm install
 npm run dev
 ```
 
-To run the complete local flow, configure `.env` from `.env.example`, configure the API from `services/api/.env.example`, then use three terminals:
+To run the combined portal locally against its configured API, link the repository to the portal Vercel project, configure `.env` from `.env.example`, then run:
 
 ```bash
-npm run dev:api
-npm run dev:eligibility
 npm run dev
 ```
+
+The internal `dev:pharmacy` and `dev:admin` commands exist only for isolated bundle development; they still use `/pharmacy/...` and `/admin/...` and are not separate deployment surfaces. Run `dev:api` and `dev:eligibility` separately only when working on those services.
 
 When the Firebase web configuration is absent, the staff portal stays locked instead of exposing a demo password. Production builds never include seeded patients or orders.
 
@@ -46,7 +45,7 @@ Use the gateway shown at `http://localhost:5173`. The separately hosted pharmacy
 http://localhost:5174/?token=<pharmacy-referral-token>
 ```
 
-Staff accounts are invite-only Firebase Authentication users. Assign either the `hhh_admin` role or the `pharmacy_staff` role with an `organisationId` custom claim and verify the email address before workspace access. TOTP support remains implemented but is disabled for staging by default; enable it later with `VITE_REQUIRE_MFA=true` on Vercel and `REQUIRE_MFA=true` on the API.
+Staff accounts are invite-only Firebase Authentication users. Assign either the `hhh_admin` role or the `pharmacy_staff` role with an `organisationId` custom claim and verify the email address before workspace access. Cookie-mode pharmacy and admin builds require TOTP and the deployed API must set `REQUIRE_MFA=true`; there is no shared staging bypass.
 
 ## Documentation
 

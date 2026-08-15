@@ -445,6 +445,14 @@ app.use((request, response, next) => {
   response.setHeader('X-Request-Id', requestId);
   next();
 });
+// The Cloud Run load balancer preserves the portal namespace while Vercel
+// rewrites it externally. Keep originalUrl for surface derivation and expose
+// the canonical /v1 path to the route handlers in either deployment.
+app.use((request, _response, next) => {
+  const match = request.url.match(/^\/(?:pharmacy|admin)(\/v1(?:\/|\?|$).*)/);
+  if (match?.[1]) request.url = match[1];
+  next();
+});
 app.use(helmet({ strictTransportSecurity: false }));
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.has(origin)) return callback(null, true); callback(new HttpError(403, 'Origin is not permitted.', 'ORIGIN_DENIED')); }, methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'] }));
 app.use(express.json({ limit: '256kb', verify(request, _response, buffer) { (request as Request).rawBody = Buffer.from(buffer); } }));
@@ -4352,10 +4360,10 @@ app.post('/v1/portal/admin/staff/invitations', requireRole('hhh_admin'), async (
     }
 
     const firebaseLink = await auth.generatePasswordResetLink(input.email, {
-      url: new URL('/reset-password', input.role === 'hhh_admin' ? config.ADMIN_APP_ORIGIN : config.PHARMACY_APP_ORIGIN).toString(),
+      url: new URL('/reset-password', config.PORTAL_APP_ORIGIN).toString(),
       handleCodeInApp: true,
     });
-    const actionLink = firstPartyPasswordResetLink(firebaseLink, input.role === 'hhh_admin' ? config.ADMIN_APP_ORIGIN : config.PHARMACY_APP_ORIGIN);
+    const actionLink = firstPartyPasswordResetLink(firebaseLink, config.PORTAL_APP_ORIGIN);
     await audit(request, 'staff.invited', { organisationId: input.organisationId, staffUid: user.uid, role: input.role, contactRole, deliveryMode: 'firebase_client' });
     response.status(201).json({ uid: user.uid, email: input.email, displayName: input.displayName, role: input.role, organisationId: input.organisationId, contactRole, status: 'invited', createdAt, invitationQueued: false, actionLink });
   } catch (error) { next(error); }

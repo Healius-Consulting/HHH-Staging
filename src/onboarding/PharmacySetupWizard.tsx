@@ -9,10 +9,11 @@ import { isLocalPortalPreview } from '../dev/localPortalPreview';
 interface PharmacySetupWizardProps {
   organisation: PharmacyTenant;
   setup: ReturnType<typeof usePharmacySetup>;
+  embedded?: boolean;
 }
 
-export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizardProps) {
-  const { state, dispatch } = useApp();
+export function PharmacySetupWizard({ organisation, setup, embedded = false }: PharmacySetupWizardProps) {
+  const { dispatch } = useApp();
   const { status, loading, savingTask, error, updateTask } = setup;
   const [activeIndex, setActiveIndex] = useState(0);
   const [evidence, setEvidence] = useState<Record<string, string>>({});
@@ -31,7 +32,7 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
   const percent = useMemo(() => status ? Math.round(status.completedCount / status.requiredCount * 100) : 0, [status]);
 
   if (loading || !status) {
-    return <div className="page-body setup-page"><section className="card setup-loading" aria-live="polite">Loading pharmacy setup…</section></div>;
+    return <div className={`${embedded ? '' : 'page-body '}setup-page`}><section className="card setup-loading" aria-live="polite">Loading pharmacy setup…</section></div>;
   }
 
   const currentEvidence = evidence[activeDefinition.id] || '';
@@ -42,7 +43,7 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
     dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: enabled ? 'worldpay' : 'manual' } });
     dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled } });
     try {
-      if (!isLocalPortalPreview && isApiConfigured && state.workspaceMode === 'live') await updatePaymentSettings(organisation.id, enabled ? 'worldpay' : 'manual');
+      if (!isLocalPortalPreview && isApiConfigured) await updatePaymentSettings(organisation.id, enabled ? 'worldpay' : 'manual');
     } catch (saveError) {
       setEvidence(current => ({ ...current, payment_route: enabled ? 'pharmacy-only' : 'worldpay-enabled' }));
       dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: enabled ? 'manual' : 'worldpay' } });
@@ -52,7 +53,7 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
   };
 
   return (
-    <div className="page-body setup-page">
+    <div className={`${embedded ? '' : 'page-body '}setup-page`}>
       <section className="card setup-hero">
         <div>
           <p className="section-label">Pharmacy activation & go-live gates</p>

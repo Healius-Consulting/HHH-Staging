@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Request } from 'express';
-import { constantTimeEqual, parseCookies, safeReturnTo, surfaceForRequest } from './session-utils.js';
+import { constantTimeEqual, parseCookies, safeReturnTo, surfaceForRequest, surfaceFromPortalApiPath } from './session-utils.js';
 import { cookieOptions } from './session-auth.js';
 
 test('safeReturnTo accepts only same-origin relative paths', () => {
@@ -31,4 +31,11 @@ test('surface derives from configured host and ignores production override heade
     hostname: 'admin.example.test',
   } as unknown as Pick<Request, 'get' | 'hostname'>;
   assert.equal(surfaceForRequest(request, { pharmacy: 'https://pharmacy.example.test', admin: 'https://admin.example.test' }), 'admin');
+});
+
+test('combined portal API namespaces select exactly one protected surface', () => {
+  assert.equal(surfaceFromPortalApiPath('/pharmacy/v1/portal/orders'), 'pharmacy');
+  assert.equal(surfaceFromPortalApiPath('/admin/v1/portal/admin/organisations'), 'admin');
+  assert.equal(surfaceFromPortalApiPath('/pharamcy/v1/portal/orders'), null);
+  assert.equal(surfaceFromPortalApiPath('/v1/portal/orders'), null);
 });

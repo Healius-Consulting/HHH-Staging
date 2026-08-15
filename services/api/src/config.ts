@@ -11,8 +11,6 @@ const schema = z.object({
   REQUIRE_MFA: z.enum(['true', 'false']).default('false'),
   AUTH_MODE: z.enum(['bearer-observe', 'cookie-dual', 'cookie-enforced']).optional(),
   SESSION_COOKIE_SECURE: z.enum(['true', 'false']).optional(),
-  PHARMACY_APP_ORIGIN: z.url().default('https://portal.hhh.thinktimeless.co.uk'),
-  ADMIN_APP_ORIGIN: z.url().default('https://portal.hhh.thinktimeless.co.uk'),
   PUBLIC_APP_ORIGIN: z.url().default('https://hhh.thinktimeless.co.uk'),
   PORTAL_APP_ORIGIN: z.url().default('https://portal.hhh.thinktimeless.co.uk'),
   IP_HASH_SECRET: z.string().min(32).optional(),

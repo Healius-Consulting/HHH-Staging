@@ -42,12 +42,11 @@ export function ConfigurationRequired() {
   return (
     <AuthShell>
       <section className="card staff-login-card auth-configuration-required" role="status">
-        <div className="staff-login-heading"><div className="resource-icon"><LockKeyhole size={20} /></div><div><p className="section-label">Configuration required</p><h2>Connect Firebase Authentication</h2></div></div>
-        <p>This deployment is intentionally locked because Firebase staff authentication has not been configured.</p>
+        <div className="staff-login-heading"><div className="resource-icon"><LockKeyhole size={20} /></div><div><p className="section-label">Configuration required</p><h2>Connect Firebase security services</h2></div></div>
+        <p>This deployment is intentionally locked because Firebase Authentication or App Check has not been configured.</p>
         <div className="banner banner-amber"><AlertCircle size={16} /><span>Add the following Vercel environment variables, then redeploy.</span></div>
         <ul className="auth-config-list">
           {firebaseConfiguration.missingKeys.map(key => <li key={key}><code>{key}</code></li>)}
-          <li><code>VITE_FIREBASE_APP_CHECK_SITE_KEY</code> <small>recommended for deployed environments</small></li>
           <li><code>VITE_API_BASE_URL</code> <small>required for backend operations</small></li>
         </ul>
         <p className="staff-login-note">No demo password or bypass is enabled. Configure invited staff users with role claims in Firebase before testing.</p>
@@ -142,8 +141,8 @@ export function PasswordResetScreen() {
       <section className="card staff-login-card password-reset-card">
         <div className="staff-login-heading"><div className="resource-icon"><KeyRound size={20} /></div><div><p className="section-label">Secure account</p><h2>{phase === 'complete' ? 'Password updated' : 'Choose a new password'}</h2></div></div>
         {phase === 'checking' && <div className="auth-reset-status" role="status"><LoaderCircle className="spin" size={20} /> Checking your secure reset link…</div>}
-        {phase === 'invalid' && <><div className="banner banner-red" role="alert"><AlertCircle size={16} /> This reset link is invalid or has expired.</div><a className="btn btn-primary" href="/">Request a new reset email</a></>}
-        {phase === 'complete' && <><div className="auth-reset-success"><CheckCircle2 size={30} /><div><strong>Your password is ready</strong><span>You can now sign in to the HHH staff portal.</span></div></div><a className="btn btn-primary staff-login-submit" href="/">Continue to staff sign in</a></>}
+        {phase === 'invalid' && <><div className="banner banner-red" role="alert"><AlertCircle size={16} /> This reset link is invalid or has expired.</div><a className="btn btn-primary" href="/login">Request a new reset email</a></>}
+        {phase === 'complete' && <><div className="auth-reset-success"><CheckCircle2 size={30} /><div><strong>Your password is ready</strong><span>You can now sign in to the HHH staff portal.</span></div></div><a className="btn btn-primary staff-login-submit" href="/login">Continue to staff sign in</a></>}
         {(phase === 'ready' || phase === 'saving') && <form onSubmit={submit}>
           <p className="staff-login-note">Updating the password for <strong>{email}</strong>.</p>
           <label className="staff-login-field">New password<div className="staff-login-input"><LockKeyhole size={16} /><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" minLength={8} required /><button className="auth-password-toggle" type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide passwords' : 'Show passwords'} aria-pressed={showPassword}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>

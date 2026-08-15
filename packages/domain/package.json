@@ -15,6 +15,10 @@
     "./prescription-date": {
       "types": "./prescription-date.d.ts",
       "default": "./prescription-date.js"
+    },
+    "./portal-route": {
+      "types": "./portal-route.d.ts",
+      "default": "./portal-route.js"
     }
   }
 }

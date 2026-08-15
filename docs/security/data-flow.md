@@ -2,13 +2,11 @@
 
 ```mermaid
 flowchart LR
-  Browser["Browser"] -->|"HTTPS: www / pharmacy / admin"| Armor["Global load balancer + Cloud Armor"]
-  Armor -->|"public pages and immutable assets"| Public["public-web"]
-  Armor -->|"session checked before HTML"| Pharmacy["pharmacy-web gateway"]
-  Armor -->|"session checked before HTML"| Admin["admin-web gateway"]
-  Armor -->|"same-origin /v1/*"| API["API: auth + policy boundary"]
-  Pharmacy --> Auth["Firebase Auth + staffSessions"]
-  Admin --> Auth
+  Browser["Browser"] -->|"HTTPS: public or portal"| Vercel["Vercel edge + Firewall"]
+  Vercel -->|"public pages and immutable assets"| Public["public Vercel project"]
+  Vercel -->|"/pharmacy/* or /admin/*; London gate checks session before HTML"| Portal["combined staff portal"]
+  Vercel -->|"namespaced same-origin API rewrite"| API["Firebase API: auth + policy boundary<br/>europe-west2"]
+  Portal --> Auth["Firebase Auth + staffSessions"]
   API --> Auth
   API -->|"server-derived tenant"| Store["Firestore / Storage deny browser access"]
   API -->|"outbound integration"| Partners["Worldpay / Curaleaf"]

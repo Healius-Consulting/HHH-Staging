@@ -1,15 +1,13 @@
 locals {
   hosts = {
-    public   = "www.${var.base_domain}"
-    pharmacy = "pharmacy.${var.base_domain}"
-    admin    = "admin.${var.base_domain}"
+    public = "www.${var.base_domain}"
+    portal = "portal.${var.base_domain}"
   }
   escaped_base_domain = replace(var.base_domain, ".", "\\.")
   services = {
-    public   = { image = var.images.public, account = "public-web", host = local.hosts.public }
-    pharmacy = { image = var.images.pharmacy, account = "pharmacy-web", host = local.hosts.pharmacy }
-    admin    = { image = var.images.admin, account = "admin-web", host = local.hosts.admin }
-    api      = { image = var.images.api, account = "platform-api", host = "" }
+    public = { image = var.images.public, account = "public-web", host = local.hosts.public }
+    portal = { image = var.images.portal, account = "portal-web", host = local.hosts.portal }
+    api    = { image = var.images.api, account = "platform-api", host = "" }
   }
   apis = toset([
     "artifactregistry.googleapis.com", "compute.googleapis.com", "firestore.googleapis.com",
@@ -75,14 +73,14 @@ resource "google_secret_manager_secret" "ip_hash" {
 }
 
 resource "google_secret_manager_secret_iam_member" "api_ip_hash" {
-  for_each  = toset(["api", "pharmacy", "admin"])
+  for_each  = toset(["api", "portal"])
   secret_id = google_secret_manager_secret.ip_hash.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.runtime[each.key].email}"
 }
 
 resource "google_project_iam_member" "datastore" {
-  for_each = toset(["pharmacy", "admin", "api"])
+  for_each = toset(["portal", "api"])
   project  = var.project_id
   role     = "roles/datastore.user"
   member   = "serviceAccount:${google_service_account.runtime[each.key].email}"
@@ -95,10 +93,9 @@ resource "google_project_iam_member" "firebase_auth_api" {
 }
 
 resource "google_project_iam_member" "firebase_auth_gateway" {
-  for_each = toset(["pharmacy", "admin"])
-  project  = var.project_id
-  role     = "roles/firebaseauth.viewer"
-  member   = "serviceAccount:${google_service_account.runtime[each.key].email}"
+  project = var.project_id
+  role    = "roles/firebaseauth.viewer"
+  member  = "serviceAccount:${google_service_account.runtime["portal"].email}"
 }
 
 resource "google_project_iam_member" "integration_secret_admin" {
@@ -139,11 +136,10 @@ resource "google_cloud_run_v2_service" "service" {
       dynamic "env" {
         for_each = each.key == "api" ? {
           AUTH_MODE             = "cookie-enforced"
-          PHARMACY_APP_ORIGIN   = "https://${local.hosts.pharmacy}"
-          ADMIN_APP_ORIGIN      = "https://${local.hosts.admin}"
+          PORTAL_APP_ORIGIN     = "https://${local.hosts.portal}"
           PUBLIC_APP_ORIGIN     = "https://${local.hosts.public}"
-          APP_BASE_URL          = "https://${local.hosts.pharmacy}"
-          ALLOWED_ORIGINS       = "https://${local.hosts.public},https://${local.hosts.pharmacy},https://${local.hosts.admin}"
+          APP_BASE_URL          = "https://${local.hosts.portal}"
+          ALLOWED_ORIGINS       = "https://${local.hosts.public},https://${local.hosts.portal}"
           SESSION_COOKIE_SECURE = "true"
           REQUIRE_APP_CHECK     = "true"
           REQUIRE_MFA           = "true"
@@ -158,7 +154,7 @@ resource "google_cloud_run_v2_service" "service" {
         }
       }
       dynamic "env" {
-        for_each = contains(["api", "pharmacy", "admin"], each.key) ? [1] : []
+        for_each = contains(["api", "portal"], each.key) ? [1] : []
         content {
           name = "IP_HASH_SECRET"
           value_source {
@@ -202,9 +198,9 @@ resource "google_compute_security_policy" "edge" {
   rule {
     action      = "deny(404)"
     priority    = 100
-    description = "Reject hostnames outside the three published application surfaces."
+    description = "Reject hostnames outside the public site and combined portal."
     match {
-      expr { expression = "!request.headers['host'].matches('^(www|pharmacy|admin)\\.${local.escaped_base_domain}(:[0-9]+)?$')" }
+      expr { expression = "!request.headers['host'].matches('^(www|portal)\\.${local.escaped_base_domain}(:[0-9]+)?$')" }
     }
   }
   rule {
@@ -291,12 +287,8 @@ resource "google_compute_url_map" "https" {
     path_matcher = "public"
   }
   host_rule {
-    hosts        = [local.hosts.pharmacy]
-    path_matcher = "pharmacy"
-  }
-  host_rule {
-    hosts        = [local.hosts.admin]
-    path_matcher = "admin"
+    hosts        = [local.hosts.portal]
+    path_matcher = "portal"
   }
 
   path_matcher {
@@ -312,18 +304,10 @@ resource "google_compute_url_map" "https" {
     }
   }
   path_matcher {
-    name            = "pharmacy"
-    default_service = google_compute_backend_service.service["pharmacy"].id
+    name            = "portal"
+    default_service = google_compute_backend_service.service["portal"].id
     path_rule {
-      paths   = ["/v1/*"]
-      service = google_compute_backend_service.service["api"].id
-    }
-  }
-  path_matcher {
-    name            = "admin"
-    default_service = google_compute_backend_service.service["admin"].id
-    path_rule {
-      paths   = ["/v1/*"]
+      paths   = ["/v1/*", "/pharmacy/v1/*", "/admin/v1/*"]
       service = google_compute_backend_service.service["api"].id
     }
   }

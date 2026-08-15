@@ -11,9 +11,15 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_APP_SURFACE': JSON.stringify('pharmacy'),
     'import.meta.env.VITE_AUTH_MODE': JSON.stringify('cookie'),
-    'import.meta.env.VITE_APP_PATH_PREFIX': JSON.stringify(process.env.HHH_SURFACE === 'portal' ? '/pharmacy' : ''),
-    'import.meta.env.VITE_API_BASE_URL': JSON.stringify(process.env.HHH_SURFACE === 'portal' ? '/pharmacy' : ''),
+    'import.meta.env.VITE_APP_PATH_PREFIX': JSON.stringify('/pharmacy'),
+    'import.meta.env.VITE_API_BASE_URL': JSON.stringify('/pharmacy'),
   },
-  server: { port: 5173, proxy: { '/v1': 'http://127.0.0.1:8080', '/health': 'http://127.0.0.1:8080' } },
+  server: {
+    port: 5173,
+    proxy: {
+      '/pharmacy/v1': { target: 'http://127.0.0.1:8080', rewrite: path => path.replace(/^\/pharmacy/, '') },
+      '/health': 'http://127.0.0.1:8080',
+    },
+  },
   build: { outDir: resolve(__dirname, 'dist-pharmacy'), emptyOutDir: true, sourcemap: false },
 });

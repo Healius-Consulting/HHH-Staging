@@ -13,9 +13,15 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_APP_SURFACE': JSON.stringify('admin'),
     'import.meta.env.VITE_AUTH_MODE': JSON.stringify('cookie'),
-    'import.meta.env.VITE_APP_PATH_PREFIX': JSON.stringify(process.env.HHH_SURFACE === 'portal' ? '/admin' : ''),
-    'import.meta.env.VITE_API_BASE_URL': JSON.stringify(process.env.HHH_SURFACE === 'portal' ? '/admin' : ''),
+    'import.meta.env.VITE_APP_PATH_PREFIX': JSON.stringify('/admin'),
+    'import.meta.env.VITE_API_BASE_URL': JSON.stringify('/admin'),
   },
-  server: { port: 5175, proxy: { '/v1': 'http://127.0.0.1:8080', '/health': 'http://127.0.0.1:8080' } },
+  server: {
+    port: 5175,
+    proxy: {
+      '/admin/v1': { target: 'http://127.0.0.1:8080', rewrite: path => path.replace(/^\/admin/, '') },
+      '/health': 'http://127.0.0.1:8080',
+    },
+  },
   build: { outDir: resolve(__dirname, 'dist-admin'), emptyOutDir: true, sourcemap: false },
 });

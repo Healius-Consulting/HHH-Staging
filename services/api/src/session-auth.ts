@@ -14,7 +14,7 @@ import {
   SESSION_IDLE_MS,
   SESSION_TOUCH_INTERVAL_MS,
   sha256,
-  surfaceForRequest,
+  surfaceFromPortalApiPath,
 } from './session-utils.js';
 import type { ProtectedSurface, RequestIdentity, StaffRole, StaffSessionRecord } from './types.js';
 
@@ -29,19 +29,24 @@ export function cookieOptions(httpOnly: boolean, maxAge = SESSION_ABSOLUTE_MS) {
   return { httpOnly, secure: secureSessionCookies, sameSite: 'strict' as const, path: '/', maxAge };
 }
 
-function expectedOrigin(request: Request, surface: RequestedSurface) {
-  if (requestHostname(request) === new URL(config.PORTAL_APP_ORIGIN).hostname) return config.PORTAL_APP_ORIGIN;
-  return surface === 'admin' ? config.ADMIN_APP_ORIGIN : config.PHARMACY_APP_ORIGIN;
+function expectedOrigin() {
+  return config.PORTAL_APP_ORIGIN;
 }
 
 export function protectedSurface(request: Request) {
   const host = requestHostname(request);
   const portalHost = new URL(config.PORTAL_APP_ORIGIN).hostname;
   if (host === portalHost) {
+    const pathSurface = surfaceFromPortalApiPath(request.originalUrl);
+    if (pathSurface) return pathSurface;
     const requested = request.query.__hhh_surface;
     return requested === 'pharmacy' || requested === 'admin' || requested === 'auto' ? requested : null;
   }
-  return surfaceForRequest(request, { pharmacy: config.PHARMACY_APP_ORIGIN, admin: config.ADMIN_APP_ORIGIN }, config.NODE_ENV !== 'production');
+  if (config.NODE_ENV !== 'production') {
+    const requested = request.get('x-hhh-surface');
+    return requested === 'pharmacy' || requested === 'admin' ? requested : null;
+  }
+  return null;
 }
 
 function secondFactor(decoded: DecodedIdToken) {
@@ -91,14 +96,14 @@ export function issueCsrf(request: Request, response: Response) {
   return token;
 }
 
-function requestOriginAllowed(request: Request, surface: RequestedSurface) {
+function requestOriginAllowed(request: Request) {
   const fetchSite = request.get('sec-fetch-site');
   if (fetchSite === 'cross-site') return false;
   const source = request.get('origin') ?? request.get('referer');
   if (!source) return config.NODE_ENV !== 'production';
   try {
     const origin = new URL(source).origin;
-    if (origin === expectedOrigin(request, surface)) return true;
+    if (origin === expectedOrigin()) return true;
     if (config.NODE_ENV !== 'production' && ['http://localhost:5173', 'http://127.0.0.1:5173'].includes(origin)) return true;
     return false;
   } catch { return false; }
@@ -110,8 +115,8 @@ export async function requireCsrf(request: Request, _response: Response, next: N
   const surface = protectedSurface(request);
   const cookie = parseCookies(request)[csrfCookieName];
   const header = request.get('x-csrf-token');
-  if (!surface || !requestOriginAllowed(request, surface) || !cookie || !header || !constantTimeEqual(cookie, header)) {
-    void securityEvent(request, !surface || !requestOriginAllowed(request, surface) ? 'auth.origin_denied' : 'auth.csrf_denied');
+  if (!surface || !requestOriginAllowed(request) || !cookie || !header || !constantTimeEqual(cookie, header)) {
+    void securityEvent(request, !surface || !requestOriginAllowed(request) ? 'auth.origin_denied' : 'auth.csrf_denied');
     return next(new HttpError(403, 'The request origin could not be verified.', 'REQUEST_ORIGIN_DENIED'));
   }
   next();
@@ -175,7 +180,7 @@ async function activeStaff(decoded: DecodedIdToken, activateInvitation = false) 
 export async function createStaffSession(request: Request, response: Response) {
   const requestedSurface = protectedSurface(request);
   if (!requestedSurface) throw new HttpError(403, 'The requested application surface is not permitted.', 'SURFACE_DENIED');
-  if (!requestOriginAllowed(request, requestedSurface)) throw new HttpError(403, 'The request origin could not be verified.', 'REQUEST_ORIGIN_DENIED');
+  if (!requestOriginAllowed(request)) throw new HttpError(403, 'The request origin could not be verified.', 'REQUEST_ORIGIN_DENIED');
   const cookieCsrf = parseCookies(request)[csrfCookieName];
   const headerCsrf = request.get('x-csrf-token');
   if (!cookieCsrf || !headerCsrf || !constantTimeEqual(cookieCsrf, headerCsrf)) throw new HttpError(403, 'The request origin could not be verified.', 'REQUEST_ORIGIN_DENIED');

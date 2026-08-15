@@ -5,7 +5,7 @@ variable "region" {
 }
 variable "base_domain" { type = string }
 variable "images" {
-  type        = object({ public = string, pharmacy = string, admin = string, api = string })
+  type        = object({ public = string, portal = string, api = string })
   description = "Immutable Artifact Registry image references, preferably pinned by digest."
 }
 variable "additional_auth_domains" {

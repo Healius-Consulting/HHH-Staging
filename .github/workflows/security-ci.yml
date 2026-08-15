@@ -12,6 +12,13 @@ permissions:
 jobs:
   application:
     runs-on: ubuntu-latest
+    env:
+      VITE_FIREBASE_API_KEY: ci-firebase-api-key
+      VITE_FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
+      VITE_FIREBASE_PROJECT_ID: ci-project
+      VITE_FIREBASE_APP_ID: ci-app-id
+      VITE_FIREBASE_APP_CHECK_SITE_KEY: ci-app-check-site-key
+      VITE_REQUIRE_APP_CHECK: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,16 +29,33 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run build:all
+      - name: Build Vercel public surface
+        run: |
+          npm run build:vercel:public
+          test -f dist-public/index.html
+          test ! -e .vercel-private/index.html
+      - name: Build combined Vercel portal
+        run: |
+          npm run build:vercel:portal
+          test ! -f dist-pharmacy/index.html
+          test ! -f dist-admin/index.html
+          test ! -f dist-portal/index.html
+          grep -q "Pharmacy workspace" .vercel-private/pharmacy/index.html
+          grep -q "Administration" .vercel-private/admin/index.html
       - run: npm run build --workspace @hhh/web-gateway
       - run: npm test --workspace @hhh/api
       - run: npx tsx --test tests/**/*.test.ts
-      - name: Assert production surface separation
+      - name: Assert production portal boundaries
         run: |
+          test ! -f dist-pharmacy/index.html
+          test ! -f dist-admin/index.html
+          test ! -f dist-portal/index.html
           ! grep -R -q "HHH administration" dist-pharmacy dist-public
           ! grep -R -q "Secure handover" dist-admin dist-public
           ! grep -R -q "Staff sign in" dist-public
-          ! grep -R -q "devPortal" dist-public dist-pharmacy dist-admin
-          ! grep -R -q "mode=eligibility" dist-public dist-pharmacy dist-admin
+          ! grep -R -q "devPortal" dist-public dist-portal
+          ! grep -R -q "mode=eligibility" dist-public dist-portal
+          ! grep -R -q "FIREBASE_SERVICE_ACCOUNT_JSON" dist-public dist-portal
 
   infrastructure:
     runs-on: ubuntu-latest
@@ -44,6 +68,13 @@ jobs:
 
   containers:
     runs-on: ubuntu-latest
+    env:
+      VITE_FIREBASE_API_KEY: ci-firebase-api-key
+      VITE_FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
+      VITE_FIREBASE_PROJECT_ID: ci-project
+      VITE_FIREBASE_APP_ID: ci-app-id
+      VITE_FIREBASE_APP_CHECK_SITE_KEY: ci-app-check-site-key
+      VITE_REQUIRE_APP_CHECK: "true"
     strategy:
       matrix:
         include:
@@ -51,14 +82,27 @@ jobs:
             command: docker build -f services/api/Dockerfile -t hhh-api:ci .
             image: hhh-api:ci
           - name: public
-            command: docker build -f Dockerfile.web --build-arg SURFACE=public -t hhh-public:ci .
+            command: >-
+              docker build -f Dockerfile.web --build-arg SURFACE=public
+              --build-arg VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY
+              --build-arg VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN
+              --build-arg VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
+              --build-arg VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
+              --build-arg VITE_FIREBASE_APP_CHECK_SITE_KEY=$VITE_FIREBASE_APP_CHECK_SITE_KEY
+              --build-arg VITE_REQUIRE_APP_CHECK=$VITE_REQUIRE_APP_CHECK
+              -t hhh-public:ci .
             image: hhh-public:ci
-          - name: pharmacy
-            command: docker build -f Dockerfile.web --build-arg SURFACE=pharmacy -t hhh-pharmacy:ci .
-            image: hhh-pharmacy:ci
-          - name: admin
-            command: docker build -f Dockerfile.web --build-arg SURFACE=admin -t hhh-admin:ci .
-            image: hhh-admin:ci
+          - name: portal
+            command: >-
+              docker build -f Dockerfile.web --build-arg SURFACE=portal
+              --build-arg VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY
+              --build-arg VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN
+              --build-arg VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
+              --build-arg VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
+              --build-arg VITE_FIREBASE_APP_CHECK_SITE_KEY=$VITE_FIREBASE_APP_CHECK_SITE_KEY
+              --build-arg VITE_REQUIRE_APP_CHECK=$VITE_REQUIRE_APP_CHECK
+              -t hhh-portal:ci .
+            image: hhh-portal:ci
     steps:
       - uses: actions/checkout@v4
       - run: ${{ matrix.command }}

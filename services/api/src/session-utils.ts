@@ -67,3 +67,12 @@ export function surfaceForRequest(
   if (allowDevelopmentHeader && ['localhost', '127.0.0.1', '::1'].includes(host)) return 'pharmacy';
   return null;
 }
+
+export function surfaceFromPortalApiPath(value: string) {
+  let pathname: string;
+  try { pathname = new URL(value, 'https://portal.invalid').pathname; }
+  catch { return null; }
+  if (pathname === '/pharmacy/v1' || pathname.startsWith('/pharmacy/v1/')) return 'pharmacy' as const;
+  if (pathname === '/admin/v1' || pathname.startsWith('/admin/v1/')) return 'admin' as const;
+  return null;
+}

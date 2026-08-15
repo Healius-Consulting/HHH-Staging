@@ -2,16 +2,20 @@ import { access, cp, mkdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { build } from 'vite';
+import { build, loadEnv } from 'vite';
+import { assertSurfaceBuildEnvironment } from '../platform/vercel/surface-build-environment.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const surface = process.argv[2] ?? process.env.HHH_SURFACE;
-const supportedSurfaces = new Set(['public', 'pharmacy', 'admin', 'portal']);
+const supportedSurfaces = new Set(['public', 'portal']);
 const privateDirectory = path.join(repositoryRoot, '.vercel-private');
 
 if (!surface || !supportedSurfaces.has(surface)) {
-  throw new Error('HHH_SURFACE must be public, pharmacy, admin, or portal.');
+  throw new Error('HHH_SURFACE must be public or portal. Standalone admin and pharmacy deployments are not supported.');
 }
+
+const loadedEnvironment = loadEnv(process.env.NODE_ENV ?? 'production', repositoryRoot, '');
+assertSurfaceBuildEnvironment(surface, { ...loadedEnvironment, ...process.env });
 
 await rm(privateDirectory, { recursive: true, force: true });
 await rm(path.join(repositoryRoot, 'dist-portal'), { recursive: true, force: true });
@@ -34,11 +38,4 @@ if (surface === 'portal') {
   await buildProtectedSurface('admin', path.join(repositoryRoot, 'dist-portal'));
 } else if (surface === 'public') {
   await build({ configFile: path.join(repositoryRoot, 'vite.public.config.ts') });
-} else {
-  await buildProtectedSurface(surface);
-  const surfaceIndex = path.join(privateDirectory, surface, 'index.html');
-  const legacyIndex = path.join(privateDirectory, 'index.html');
-
-  await rename(surfaceIndex, legacyIndex);
-  await access(legacyIndex);
 }
