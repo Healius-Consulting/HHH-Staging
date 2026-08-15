@@ -4,6 +4,7 @@ import { CONTENT_SECURITY_POLICY } from '../platform/vercel/security-headers.ts'
 import {
   REQUIRED_FIREBASE_CLIENT_VARIABLES,
   assertSurfaceBuildEnvironment,
+  invalidSurfaceBuildVariables,
   missingSurfaceBuildVariables,
 } from '../platform/vercel/surface-build-environment.mjs';
 
@@ -25,6 +26,16 @@ test('only the public site and combined portal are deployable surfaces', () => {
   assert.deepEqual(missingSurfaceBuildVariables('admin', {}), []);
   assert.deepEqual(missingSurfaceBuildVariables('pharmacy', {}), []);
   assert.deepEqual(missingSurfaceBuildVariables('portal', {}), REQUIRED_FIREBASE_CLIENT_VARIABLES);
+});
+
+test('portal builds reject malformed eligibility form URLs before Settings can render', () => {
+  assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'not-a-url' }), ['VITE_ELIGIBILITY_FORM_URL']);
+  assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'http://example.test/eligibility' }), ['VITE_ELIGIBILITY_FORM_URL']);
+  assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'https://hhh.thinktimeless.co.uk/eligibility' }), []);
+  assert.throws(
+    () => assertSurfaceBuildEnvironment('portal', { ...configuredEnvironment, VITE_ELIGIBILITY_FORM_URL: 'broken-url' }),
+    /VITE_ELIGIBILITY_FORM_URL/,
+  );
 });
 
 test('the protected CSP permits only the signed Storage origin needed for uploads', () => {

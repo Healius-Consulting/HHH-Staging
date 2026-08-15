@@ -45,7 +45,7 @@ if (firebaseConfiguration.configured) {
   app = getApps().length ? getApp() : initializeApp(options);
   auth = getAuth(app);
 
-  if (appCheckSiteKey && typeof window !== 'undefined') {
+  if (appCheckRequired && appCheckSiteKey && typeof window !== 'undefined') {
     try {
       appCheck = initializeAppCheck(app, {
         provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),

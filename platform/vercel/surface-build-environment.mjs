@@ -13,10 +13,23 @@ export function missingSurfaceBuildVariables(surface, environment) {
   return required.filter(name => !environment[name]?.trim());
 }
 
+export function invalidSurfaceBuildVariables(surface, environment) {
+  if (surface !== 'portal' || !environment.VITE_ELIGIBILITY_FORM_URL?.trim()) return [];
+  try {
+    const url = new URL(environment.VITE_ELIGIBILITY_FORM_URL);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.hash ? [] : ['VITE_ELIGIBILITY_FORM_URL'];
+  } catch {
+    return ['VITE_ELIGIBILITY_FORM_URL'];
+  }
+}
+
 export function assertSurfaceBuildEnvironment(surface, environment) {
   const missing = missingSurfaceBuildVariables(surface, environment);
-  if (!missing.length) return;
-  throw new Error(
-    `Refusing to build the ${surface} surface without its Firebase client security configuration. Missing: ${missing.join(', ')}.`,
-  );
+  if (missing.length) {
+    throw new Error(
+      `Refusing to build the ${surface} surface without its Firebase client security configuration. Missing: ${missing.join(', ')}.`,
+    );
+  }
+  const invalid = invalidSurfaceBuildVariables(surface, environment);
+  if (invalid.length) throw new Error(`Refusing to build the ${surface} surface with invalid public URLs: ${invalid.join(', ')}.`);
 }

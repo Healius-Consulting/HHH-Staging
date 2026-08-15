@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
 import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
@@ -49,7 +49,7 @@ export default function CreateOrder() {
   const [quoteSummary, setQuoteSummary] = useState<{ shippingPrice: number; taxRate: number } | null>(null);
   const [quotedUnavailableProductIds, setQuotedUnavailableProductIds] = useState<string[]>([]);
   const quoteRequestVersion = useRef(0);
-  const draftCreationInFlight = useRef(new Set<number>());
+  const draftCreationInFlight = useRef(new Map<number, Promise<string>>());
   const deletedDraftOrderIds = useRef(new Set<number>());
   const [uploadingRxId, setUploadingRxId] = useState<number | null>(null);
   const [confirmingFileRemoveRxId, setConfirmingFileRemoveRxId] = useState<number | null>(null);
@@ -72,6 +72,24 @@ export default function CreateOrder() {
   } : null, [activeOrder, selectedPaymentRoute]);
   const durableDraftSignature = durableDraftPayload ? JSON.stringify(durableDraftPayload) : '';
 
+  const ensureDurableDraft = useCallback((order: PatientOrder, payload: Record<string, unknown>) => {
+    if (order.draftId) return Promise.resolve(order.draftId);
+    const existing = draftCreationInFlight.current.get(order.id);
+    if (existing) return existing;
+    const creation = createOrderDraft({ organisationId: state.currentOrganisationId, patientId: order.patientId, payload })
+      .then(async record => {
+        if (deletedDraftOrderIds.current.has(order.id)) {
+          await deleteOrderDraft(record.id, state.currentOrganisationId).catch(() => undefined);
+          throw new Error('This draft was removed before it finished saving.');
+        }
+        dispatch({ type: 'SET_ORDER_DRAFT_ID', orderId: order.id, draftId: record.id });
+        return record.id;
+      })
+      .finally(() => draftCreationInFlight.current.delete(order.id));
+    draftCreationInFlight.current.set(order.id, creation);
+    return creation;
+  }, [dispatch, state.currentOrganisationId]);
+
   useEffect(() => {
     if (activeOrder?.payment.status === 'none' && activeOrder.paymentRoute === 'worldpay' && !canUseWorldpay) {
       dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'manual' });
@@ -79,28 +97,19 @@ export default function CreateOrder() {
   }, [activeOrder?.id, activeOrder?.payment.status, activeOrder?.paymentRoute, canUseWorldpay, dispatch]);
 
   useEffect(() => {
-    if (!durableDraftEnabled || !activeOrder || activeOrder.draftId || draftCreationInFlight.current.has(activeOrder.id)) return;
-    draftCreationInFlight.current.add(activeOrder.id);
-    void createOrderDraft({ organisationId: state.currentOrganisationId, patientId: activeOrder.patientId, payload: durableDraftPayload ?? {} })
-      .then(async record => {
-        if (deletedDraftOrderIds.current.has(activeOrder.id)) {
-          await deleteOrderDraft(record.id, state.currentOrganisationId).catch(() => undefined);
-          return;
-        }
-        dispatch({ type: 'SET_ORDER_DRAFT_ID', orderId: activeOrder.id, draftId: record.id });
-      })
+    if (!durableDraftEnabled || !activeOrder || activeOrder.draftId) return;
+    void ensureDurableDraft(activeOrder, durableDraftPayload ?? {})
       .catch(error => dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? `Draft autosave unavailable: ${error.message}` : 'Draft autosave is unavailable.', toastType: 'warning' }))
-      .finally(() => draftCreationInFlight.current.delete(activeOrder.id));
-  }, [activeOrder, dispatch, durableDraftEnabled, durableDraftPayload, state.currentOrganisationId]);
+  }, [activeOrder, dispatch, durableDraftEnabled, durableDraftPayload, ensureDurableDraft]);
 
   useEffect(() => {
-    if (!durableDraftEnabled || !activeOrder?.draftId || !durableDraftPayload) return;
+    if (!durableDraftEnabled || !activeOrder?.draftId || !durableDraftPayload || uploadingRxId !== null || fileRemovalBusyRxId !== null) return;
     const timer = window.setTimeout(() => {
       void updateOrderDraft(activeOrder.draftId!, { organisationId: state.currentOrganisationId, patientId: activeOrder.patientId, payload: durableDraftPayload })
         .catch(error => dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? `Draft autosave unavailable: ${error.message}` : 'Draft autosave is unavailable.', toastType: 'warning' }));
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [activeOrder?.draftId, activeOrder?.patientId, dispatch, durableDraftEnabled, durableDraftPayload, durableDraftSignature, state.currentOrganisationId]);
+  }, [activeOrder?.draftId, activeOrder?.patientId, dispatch, durableDraftEnabled, durableDraftPayload, durableDraftSignature, fileRemovalBusyRxId, state.currentOrganisationId, uploadingRxId]);
 
   useEffect(() => {
     if (!activeOrder?.prescriptions.length) return setSelectedRxId(null);
@@ -459,16 +468,26 @@ export default function CreateOrder() {
       const contentType = file.type as 'application/pdf' | 'image/jpeg' | 'image/png';
       if (!['application/pdf', 'image/jpeg', 'image/png'].includes(contentType)) throw new Error('Use a PDF, JPG or PNG prescription file.');
       if (file.size > 16_000_000) throw new Error('Prescription files must be 16 MB or smaller.');
+      const draftId = await ensureDurableDraft(activeOrder, durableDraftPayload ?? {});
       const uploaded = await uploadPrescriptionFile({ organisationId: state.currentOrganisationId, filename: file.name, contentType, sizeBytes: file.size }, file);
-      if (prescription.fileId) {
-        try {
-          await deletePrescriptionFile(prescription.fileId, state.currentOrganisationId);
-        } catch (error) {
-          await deletePrescriptionFile(uploaded.id, state.currentOrganisationId).catch(() => undefined);
-          throw error;
-        }
+      const prescriptions = activeOrder.prescriptions.map(candidate => candidate.id === rxId
+        ? { ...candidate, copyFileName: file.name, fileId: uploaded.id }
+        : candidate);
+      try {
+        await updateOrderDraft(draftId, {
+          organisationId: state.currentOrganisationId,
+          patientId: activeOrder.patientId,
+          payload: { ...(durableDraftPayload ?? {}), prescriptions },
+        });
+      } catch (error) {
+        await deletePrescriptionFile(uploaded.id, state.currentOrganisationId).catch(() => undefined);
+        throw error;
       }
       dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: uploaded.id });
+      if (prescription.fileId) {
+        void deletePrescriptionFile(prescription.fileId, state.currentOrganisationId)
+          .catch(() => console.warn('Previous prescription copy cleanup was deferred.'));
+      }
       if (prescription.entryMode === 'manual') {
         dispatch({ type: 'ADD_TOAST', message: prescription.fileId ? 'Prescription copy replaced securely.' : 'Manual prescription copy uploaded securely.', toastType: 'success' });
       } else {
@@ -489,9 +508,21 @@ export default function CreateOrder() {
     setFileRemovalBusyRxId(rxId);
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live' && prescription.fileId) {
-        await deletePrescriptionFile(prescription.fileId, state.currentOrganisationId);
+        const draftId = await ensureDurableDraft(activeOrder, durableDraftPayload ?? {});
+        const prescriptions = activeOrder.prescriptions.map(candidate => candidate.id === rxId
+          ? { ...candidate, copyFileName: null, fileId: null, clinicScanId: undefined, curaleafPrescriptionId: undefined }
+          : candidate);
+        await updateOrderDraft(draftId, {
+          organisationId: state.currentOrganisationId,
+          patientId: activeOrder.patientId,
+          payload: { ...(durableDraftPayload ?? {}), prescriptions },
+        });
+        dispatch({ type: 'CLEAR_RX_FILE', orderId: activeOrder.id, rxId });
+        void deletePrescriptionFile(prescription.fileId, state.currentOrganisationId)
+          .catch(() => console.warn('Removed prescription copy cleanup was deferred.'));
+      } else {
+        dispatch({ type: 'CLEAR_RX_FILE', orderId: activeOrder.id, rxId });
       }
-      dispatch({ type: 'CLEAR_RX_FILE', orderId: activeOrder.id, rxId });
       setScanError(null);
       dispatch({ type: 'ADD_TOAST', message: 'Prescription copy removed. You can upload a replacement.', toastType: 'info' });
       setConfirmingFileRemoveRxId(null);

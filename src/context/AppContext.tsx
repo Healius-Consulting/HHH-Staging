@@ -6,7 +6,7 @@ import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPrev
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
-import { nextDraftIdAfterDeletion, preferredDraftPaymentRoute } from '../utils/createOrderDraft';
+import { nextDraftIdAfterDeletion, preferredDraftIndex, preferredDraftPaymentRoute } from '../utils/createOrderDraft';
 import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeEligibilityStatus } from '../utils/eligibilityPresentation';
 
 /* ═══════════════════════════════════════════════════════════
@@ -624,7 +624,7 @@ export type Action =
   | { type: 'SET_CATALOGUE_ERROR'; message: string }
   | { type: 'APPLY_CURALEAF_QUOTE'; items: Array<{ productId: string; wholesalePrice: number; patientPrice: number; inStock: boolean; stockStatus?: 'in_stock' | 'low_stock' | 'out_of_stock' }> }
   | { type: 'SYNC_CRM_PATIENTS'; organisationId: string; patients: CRMPatient[] }
-  | { type: 'SYNC_PORTAL_ORDERS'; organisationId: string; orders: PatientOrder[] }
+  | { type: 'SYNC_PORTAL_ORDERS'; organisationId: string; orders: PatientOrder[]; preferredActiveOrderId?: number }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
   | { type: 'ADD_SUBMISSION'; submission: EligibilitySubmission }
@@ -1275,11 +1275,17 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, crm: [...byId.values()] };
     }
     case 'SYNC_PORTAL_ORDERS': {
+      const previousActive = state.orders.find(order => order.id === state.activeOrderId);
       const retained = state.orders.filter(order => order.organisationId !== action.organisationId || order.payment.status === 'none' && !order.draftId);
       const orders = [...retained, ...action.orders];
       const nextOrderId = Math.max(state.nextIds.order, ...orders.map(order => order.id + 1));
       const nextRxId = Math.max(state.nextIds.rx, ...orders.flatMap(order => order.prescriptions.map(rx => rx.id + 1)));
-      return { ...state, orders, nextIds: { ...state.nextIds, order: nextOrderId, rx: nextRxId } };
+      const rehydratedActive = previousActive?.draftId
+        ? orders.find(order => order.draftId === previousActive.draftId && order.payment.status === 'none')
+        : null;
+      const existingActive = orders.find(order => order.id === state.activeOrderId && order.payment.status === 'none');
+      const activeOrderId = rehydratedActive?.id ?? existingActive?.id ?? action.preferredActiveOrderId ?? null;
+      return { ...state, orders, activeOrderId, nextIds: { ...state.nextIds, order: nextOrderId, rx: nextRxId } };
     }
     case 'LOG_INTERACTION': {
       return {
@@ -1311,8 +1317,6 @@ function reducer(state: AppState, action: Action): AppState {
         return {
           ...state,
           workspaceMode: 'training',
-          screen: 'home',
-          screenHistory: [],
           navigationTarget: null,
           catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
           catalogueSource: state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
@@ -1327,8 +1331,6 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         workspaceMode: 'live',
-        screen: 'home',
-        screenHistory: [],
         navigationTarget: null,
         catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
         crm: [],
@@ -2097,11 +2099,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .map(mapPortalOrder);
         const organisation = state.organisations.find(item => item.id === organisationId);
         const defaultPaymentRoute = preferredDraftPaymentRoute(Boolean(organisation?.worldpay.enabled), organisation?.worldpay.status ?? 'not-connected');
-        const orders = [...persistedOrders, ...draftRecords
-          .slice()
-          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-          .map((record, index) => mapPortalDraft(record, index, defaultPaymentRoute))];
-        dispatch({ type: 'SYNC_PORTAL_ORDERS', organisationId, orders });
+        const orderedDraftRecords = draftRecords.slice().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+        const mappedDrafts = orderedDraftRecords.map((record, index) => mapPortalDraft(record, index, defaultPaymentRoute));
+        const preferredIndex = preferredDraftIndex(orderedDraftRecords);
+        const orders = [...persistedOrders, ...mappedDrafts];
+        dispatch({
+          type: 'SYNC_PORTAL_ORDERS',
+          organisationId,
+          orders,
+          preferredActiveOrderId: preferredIndex >= 0 ? mappedDrafts[preferredIndex]?.id : undefined,
+        });
       } catch (error) {
         if (!cancelled) console.warn('Order history sync unavailable:', error);
       } finally {
