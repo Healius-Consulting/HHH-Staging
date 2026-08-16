@@ -17,13 +17,7 @@ const surface: Surface = resolveSurface();
 
 
 
-const apiOrigin = new URL(
-  process.env.HHH_FIREBASE_API_ORIGIN
-    ?? 'https://europe-west2-hhh26-4ebd2.cloudfunctions.net/apiLondon',
-);
-if (apiOrigin.protocol !== 'https:' || apiOrigin.username || apiOrigin.password || apiOrigin.search || apiOrigin.hash) {
-  throw new Error('HHH_FIREBASE_API_ORIGIN must be an HTTPS origin/path without credentials, query, or fragment.');
-}
+const apiOrigin = (process.env.HHH_FIREBASE_API_ORIGIN ?? 'https://europe-west2-hhh26-4ebd2.cloudfunctions.net/apiLondon').replace(/\/$/, '');
 
 const portalSurface = surface === 'portal';
 const securityHeaders = [
@@ -42,7 +36,6 @@ export const config = {
   outputDirectory: 'dist',
   regions: ['lhr1'],
   functions: portalSurface ? {
-
     'api/page-gate.ts': {
       maxDuration: 10,
       regions: ['lhr1'],
@@ -61,32 +54,28 @@ export const config = {
     { source: '/general-5', destination: '/faq', permanent: true },
     { source: '/general-5-1', destination: '/privacy', permanent: true },
   ],
-  rewrites: [
-    ...(portalSurface ? [
-      { source: '/login', destination: '/api/page-gate?__hhh_path=/login' },
-      { source: '/reset-password', destination: '/api/page-gate?__hhh_path=/reset-password' },
-      { source: '/v1/auth/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v1/auth/$1?__hhh_surface=auto` },
-      { source: '/pharmacy/v1/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v1/$1?__hhh_surface=pharmacy` },
-      { source: '/admin/v1/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v1/$1?__hhh_surface=admin` },
-      { source: '/pharmacy/v2/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v2/$1?__hhh_surface=pharmacy` },
-      { source: '/admin/v2/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v2/$1?__hhh_surface=admin` },
-      { source: '/pharmacy', destination: '/api/page-gate?__hhh_path=/pharmacy' },
-      { source: '/admin', destination: '/api/page-gate?__hhh_path=/admin' },
-      { source: '/pharmacy/(.*)', destination: '/api/page-gate?__hhh_path=/pharmacy/$1' },
-      { source: '/admin/(.*)', destination: '/api/page-gate?__hhh_path=/admin/$1' },
-    ] : []),
-    {
-      source: '/v1/(.*)',
-      destination: `${apiOrigin.toString().replace(/\/$/, '')}/v1/$1`,
-    },
-    {
-      source: '/v2/(.*)',
-      destination: `${apiOrigin.toString().replace(/\/$/, '')}/v2/$1`,
-    },
-    ...(portalSurface ? [] : [{ source: '/(.*)', destination: '/index.html' }]),
+  rewrites: portalSurface ? [
+    { source: '/login', destination: '/api/page-gate?__hhh_path=/login' },
+    { source: '/reset-password', destination: '/api/page-gate?__hhh_path=/reset-password' },
+    { source: '/v1/auth/(.*)', destination: `${apiOrigin}/v1/auth/$1?__hhh_surface=auto` },
+    { source: '/pharmacy/v1/(.*)', destination: `${apiOrigin}/v1/$1?__hhh_surface=pharmacy` },
+    { source: '/admin/v1/(.*)', destination: `${apiOrigin}/v1/$1?__hhh_surface=admin` },
+    { source: '/pharmacy/v2/(.*)', destination: `${apiOrigin}/v2/$1?__hhh_surface=pharmacy` },
+    { source: '/admin/v2/(.*)', destination: `${apiOrigin}/v2/$1?__hhh_surface=admin` },
+    { source: '/pharmacy', destination: '/api/page-gate?__hhh_path=/pharmacy' },
+    { source: '/admin', destination: '/api/page-gate?__hhh_path=/admin' },
+    { source: '/pharmacy/(.*)', destination: '/api/page-gate?__hhh_path=/pharmacy/$1' },
+    { source: '/admin/(.*)', destination: '/api/page-gate?__hhh_path=/admin/$1' },
+    { source: '/v1/(.*)', destination: `${apiOrigin}/v1/$1` },
+    { source: '/v2/(.*)', destination: `${apiOrigin}/v2/$1` },
+  ] : [
+    { source: '/v1/(.*)', destination: `${apiOrigin}/v1/$1` },
+    { source: '/v2/(.*)', destination: `${apiOrigin}/v2/$1` },
+    { source: '/(.*)', destination: '/index.html' },
   ],
   headers: [
     { source: '/(.*)', headers: [...securityHeaders, { key: 'Cache-Control', value: 'private, no-store' }] },
     { source: '/assets/(.*)', headers: [...securityHeaders, { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
   ],
 };
+
