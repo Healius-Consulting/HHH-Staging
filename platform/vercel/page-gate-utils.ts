@@ -75,13 +75,27 @@ export function requestHost(request: Request) {
   return host.split(':')[0]!.toLowerCase();
 }
 
+export const DEFAULT_ALLOWED_HOSTS = [
+  'portal.holistichealthhub.cc',
+  'portal.holistichealthhub.live',
+  'portal.holistichealthhub.co.uk',
+  'portal.hhh.thinktimeless.co.uk',
+  'holistichealthhub.cc',
+  'holistichealthhub.live',
+  'holistichealthhub.co.uk',
+  'hhh.thinktimeless.co.uk',
+  'localhost',
+  '127.0.0.1',
+];
+
 export function allowedHosts(environment: NodeJS.ProcessEnv) {
   const configured = (environment.HHH_ALLOWED_HOSTS ?? '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
   const vercelHosts = [environment.VERCEL_URL, environment.VERCEL_BRANCH_URL, environment.VERCEL_PROJECT_PRODUCTION_URL]
     .map(value => value?.trim().toLowerCase())
     .filter((value): value is string => Boolean(value));
-  return new Set([...configured, ...vercelHosts]);
+  return new Set([...DEFAULT_ALLOWED_HOSTS, ...configured, ...vercelHosts]);
 }
+
 
 export function organisationId(claims: SessionClaims | StaffRecord) {
   if (typeof claims.organisationId === 'string' && claims.organisationId) return claims.organisationId;
