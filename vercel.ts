@@ -2,10 +2,11 @@ import { CONTENT_SECURITY_POLICY } from './platform/vercel/security-headers.js';
 
 type Surface = 'public' | 'portal';
 
-const surface = process.env.HHH_SURFACE as Surface | undefined;
-if (!surface || !['public', 'portal'].includes(surface)) {
+const surface: Surface = (process.env.HHH_SURFACE as Surface) || 'portal';
+if (!['public', 'portal'].includes(surface)) {
   throw new Error('Set HHH_SURFACE to public or portal. Standalone admin and pharmacy deployments are not supported.');
 }
+
 
 const apiOrigin = new URL(
   process.env.HHH_FIREBASE_API_ORIGIN
