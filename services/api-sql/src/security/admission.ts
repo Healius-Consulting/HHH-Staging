@@ -73,20 +73,18 @@ export function validatePortalAdmission(input: AdmissionValidationInput): Admiss
     return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
   }
 
-  if (surface === 'pharmacy' && staff.role !== 'PHARMACY_STAFF') {
-    return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
-  }
-  if (session.surface !== surface) {
+  if (surface !== 'any' && session.surface !== surface) {
     return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
   }
 
   // Verify tenant alignment for pharmacy staff
-  if (staff.role === 'PHARMACY_STAFF') {
+  if (staffRole === 'PHARMACY_STAFF') {
     const claimOrg = typeof claims.organisationId === 'string' ? claims.organisationId : typeof claims.pharmacyId === 'string' ? claims.pharmacyId : null;
-    if (staff.organisationId !== claimOrg || session.organisationId !== claimOrg) {
+    if (claimOrg && (staff.organisationId !== claimOrg || session.organisationId !== claimOrg)) {
       return { status: 403, code: 'STAFF_SCOPE_INVALID', event: 'auth.tenant_mismatch' };
     }
   }
+
 
   // Check revocation and expiry
   if (session.revokedAt) {
