@@ -5,10 +5,21 @@ import { fileURLToPath } from 'node:url';
 import { build, loadEnv } from 'vite';
 import { assertSurfaceBuildEnvironment } from '../platform/vercel/surface-build-environment.mjs';
 
+function resolveSurface() {
+  if (process.argv[2] === 'public' || process.argv[2] === 'portal') return process.argv[2];
+  if (process.env.HHH_SURFACE === 'public' || process.env.HHH_SURFACE === 'portal') return process.env.HHH_SURFACE;
+  const projectName = process.env.VERCEL_PROJECT_NAME ?? '';
+  if (projectName.includes('api') || projectName.includes('public')) {
+    return 'public';
+  }
+  return 'portal';
+}
+
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const surface = process.argv[2] ?? process.env.HHH_SURFACE ?? 'portal';
+const surface = resolveSurface();
 const supportedSurfaces = new Set(['public', 'portal']);
 const privateDirectory = path.join(repositoryRoot, '.vercel-private');
+
 
 if (!surface || !supportedSurfaces.has(surface)) {
   throw new Error('HHH_SURFACE must be public or portal. Standalone admin and pharmacy deployments are not supported.');

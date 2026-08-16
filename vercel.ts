@@ -2,10 +2,19 @@ import { CONTENT_SECURITY_POLICY } from './platform/vercel/security-headers.js';
 
 type Surface = 'public' | 'portal';
 
-const surface: Surface = (process.env.HHH_SURFACE as Surface) || 'portal';
-if (!['public', 'portal'].includes(surface)) {
-  throw new Error('Set HHH_SURFACE to public or portal. Standalone admin and pharmacy deployments are not supported.');
+function resolveSurface(): Surface {
+  if (process.env.HHH_SURFACE === 'public' || process.env.HHH_SURFACE === 'portal') {
+    return process.env.HHH_SURFACE;
+  }
+  const projectName = process.env.VERCEL_PROJECT_NAME ?? '';
+  if (projectName.includes('api') || projectName.includes('public')) {
+    return 'public';
+  }
+  return 'portal';
 }
+
+const surface: Surface = resolveSurface();
+
 
 
 const apiOrigin = new URL(
