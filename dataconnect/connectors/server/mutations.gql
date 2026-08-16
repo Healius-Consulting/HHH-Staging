@@ -1,0 +1,622 @@
+# Server-only SQL Connect mutations for HHH Platform.
+# Fail-closed boundary: client operations default to NO_ACCESS.
+
+mutation CreateStaffSession(
+  $sessionHash: String!
+  $staffUid: String!
+  $organisationId: UUID
+  $surface: String!
+  $role: StaffRole!
+  $userAgentHash: String!
+  $lastActivityAt: Timestamp!
+  $idleExpiresAt: Timestamp!
+  $absoluteExpiresAt: Timestamp!
+) @auth(level: NO_ACCESS) {
+  staffSession_insert(data: {
+    sessionHash: $sessionHash
+    staffUid: $staffUid
+    organisationId: $organisationId
+    surface: $surface
+    role: $role
+    userAgentHash: $userAgentHash
+    lastActivityAt: $lastActivityAt
+    idleExpiresAt: $idleExpiresAt
+    absoluteExpiresAt: $absoluteExpiresAt
+  })
+}
+
+mutation TouchStaffSession(
+  $sessionHash: String!
+  $lastActivityAt: Timestamp!
+  $idleExpiresAt: Timestamp!
+) @auth(level: NO_ACCESS) {
+  staffSession_update(
+    key: { sessionHash: $sessionHash }
+    data: {
+      lastActivityAt: $lastActivityAt
+      idleExpiresAt: $idleExpiresAt
+    }
+  )
+}
+
+mutation RevokeStaffSession(
+  $sessionHash: String!
+  $revokedAt: Timestamp!
+  $revokeReason: String!
+) @auth(level: NO_ACCESS) {
+  staffSession_update(
+    key: { sessionHash: $sessionHash }
+    data: {
+      revokedAt: $revokedAt
+      revokeReason: $revokeReason
+    }
+  )
+}
+
+mutation AppendAuditLog(
+  $organisationId: UUID
+  $actorUid: String
+  $actorRole: StaffRole
+  $event: String!
+  $recordType: String
+  $recordId: String
+  $requestId: String
+  $sessionHashPrefix: String
+  $ipHash: String
+  $surface: String
+  $details: Any
+) @auth(level: NO_ACCESS) {
+  auditLog_insert(data: {
+    organisationId: $organisationId
+    actorUid: $actorUid
+    actorRole: $actorRole
+    event: $event
+    recordType: $recordType
+    recordId: $recordId
+    requestId: $requestId
+    sessionHashPrefix: $sessionHashPrefix
+    ipHash: $ipHash
+    surface: $surface
+    details: $details
+  })
+}
+
+mutation InsertSetupTask(
+  $organisationId: UUID!
+  $taskCode: String!
+  $completed: Boolean!
+  $evidence: String
+  $completedByUid: String
+  $completedAt: Timestamp
+) @auth(level: NO_ACCESS) {
+  setupTask_insert(data: {
+    organisationId: $organisationId
+    taskCode: $taskCode
+    completed: $completed
+    evidence: $evidence
+    completedByUid: $completedByUid
+    completedAt: $completedAt
+  })
+}
+
+mutation UpdateStaffPreferences(
+  $uid: String!
+  $preferences: Any!
+) @auth(level: NO_ACCESS) {
+  staffUser_update(
+    key: { uid: $uid }
+    data: {
+      preferences: $preferences
+    }
+  )
+}
+
+mutation CreateEligibilitySubmission(
+  $sourceOrganisationId: UUID
+  $assignedOrganisationId: UUID
+  $sourceType: ReferralSourceType!
+  $firstName: String!
+  $surname: String!
+  $dob: Date!
+  $mobile: String!
+  $email: String!
+  $emailHash: String!
+  $postcode: String!
+  $triedTwoTreatments: Boolean!
+  $psychiatricExclusion: Boolean!
+  $heardAbout: String
+  $idempotencyKeyHash: String!
+  $assignmentStatus: AssignmentStatus!
+  $pharmacyAccessStatus: AccessStatus!
+  $consentVersion: String!
+  $referralConsent: Boolean!
+  $dataSharingConsent: Boolean!
+  $marketingConsent: Boolean!
+  $privacyNoticeVersion: String!
+) @auth(level: NO_ACCESS) {
+  eligibilitySubmission_insert(data: {
+    sourceOrganisationId: $sourceOrganisationId
+    assignedOrganisationId: $assignedOrganisationId
+    sourceType: $sourceType
+    firstName: $firstName
+    surname: $surname
+    dob: $dob
+    mobile: $mobile
+    email: $email
+    emailHash: $emailHash
+    postcode: $postcode
+    triedTwoTreatments: $triedTwoTreatments
+    psychiatricExclusion: $psychiatricExclusion
+    heardAbout: $heardAbout
+    idempotencyKeyHash: $idempotencyKeyHash
+    assignmentStatus: $assignmentStatus
+    pharmacyAccessStatus: $pharmacyAccessStatus
+    consentVersion: $consentVersion
+    referralConsent: $referralConsent
+    dataSharingConsent: $dataSharingConsent
+    marketingConsent: $marketingConsent
+    privacyNoticeVersion: $privacyNoticeVersion
+  })
+}
+
+mutation ReassignSubmission(
+  $id: UUID!
+  $newOrganisationId: UUID!
+  $expectedAssignmentVersion: Int!
+  $newAssignmentVersion: Int!
+  $actorUid: String!
+  $action: String!
+  $reasonCode: String!
+) @auth(level: NO_ACCESS) {
+  eligibilitySubmission_update(
+    key: { id: $id }
+    data: {
+      assignedOrganisationId: $newOrganisationId
+      assignmentStatus: CONFIRMED
+      pharmacyAccessStatus: ACTIVATED
+      assignmentVersion: $newAssignmentVersion
+      allocationCompletedAt_expr: "request.time"
+    }
+  )
+  eligibilityAssignmentEvent_insert(data: {
+    submissionId: $id
+    newOrganisationId: $newOrganisationId
+    actorUid: $actorUid
+    action: $action
+    reasonCode: $reasonCode
+    previousAssignmentVersion: $expectedAssignmentVersion
+    newAssignmentVersion: $newAssignmentVersion
+  })
+}
+
+mutation CreatePatientWithIdentity(
+  $organisationId: UUID!
+  $sourceSubmissionId: UUID
+  $firstName: String!
+  $surname: String!
+  $dob: Date!
+  $email: String!
+  $emailHash: String!
+  $mobile: String!
+  $address: String
+  $postcode: String!
+) @auth(level: NO_ACCESS) {
+  patient_insert(data: {
+    organisationId: $organisationId
+    sourceSubmissionId: $sourceSubmissionId
+    firstName: $firstName
+    surname: $surname
+    dob: $dob
+    email: $email
+    mobile: $mobile
+    address: $address
+    postcode: $postcode
+    status: ACTIVE
+    activatedAt_expr: "request.time"
+  })
+}
+
+mutation CreatePrescriptionFile(
+  $organisationId: UUID!
+  $patientId: UUID
+  $storagePath: String!
+  $originalFilename: String!
+  $contentType: String!
+  $sizeBytes: Int64!
+  $uploadedByUid: String
+) @auth(level: NO_ACCESS) {
+  prescriptionFile_insert(data: {
+    organisationId: $organisationId
+    patientId: $patientId
+    storagePath: $storagePath
+    originalFilename: $originalFilename
+    contentType: $contentType
+    sizeBytes: $sizeBytes
+    uploadedByUid: $uploadedByUid
+    status: UPLOADED
+    uploadedAt_expr: "request.time"
+  })
+}
+
+mutation CreatePrescription(
+  $organisationId: UUID!
+  $patientId: UUID!
+  $prescriberId: UUID
+  $fileId: UUID!
+  $serialNumber: String!
+  $issueDate: Date!
+  $expiryDate: Date!
+  $status: PrescriptionStatus!
+  $patientNameSnapshot: String!
+  $patientDobSnapshot: Date!
+  $prescriberSnapshot: Any!
+) @auth(level: NO_ACCESS) {
+  prescription_insert(data: {
+    organisationId: $organisationId
+    patientId: $patientId
+    prescriberId: $prescriberId
+    fileId: $fileId
+    serialNumber: $serialNumber
+    issueDate: $issueDate
+    expiryDate: $expiryDate
+    status: $status
+    patientNameSnapshot: $patientNameSnapshot
+    patientDobSnapshot: $patientDobSnapshot
+    prescriberSnapshot: $prescriberSnapshot
+  })
+}
+
+mutation CreateOrderDraft(
+  $organisationId: UUID!
+  $patientId: UUID
+  $payload: Any!
+  $createdByUid: String!
+) @auth(level: NO_ACCESS) {
+  orderDraft_insert(data: {
+    organisationId: $organisationId
+    patientId: $patientId
+    status: DRAFT
+    paymentStatus: NONE
+    payload: $payload
+    createdByUid: $createdByUid
+  })
+}
+
+mutation CreateOrder(
+  $organisationId: UUID!
+  $patientId: UUID!
+  $draftId: UUID
+  $orderNumber: String
+  $status: OrderStatus!
+  $paymentStatus: PaymentStatus!
+  $fulfilmentStatus: FulfilmentStatus!
+  $paymentRoute: PaymentRoute!
+  $currency: String!
+  $medicineTotalPence: Int64!
+  $dispensingFeePence: Int64!
+  $deliveryPence: Int64!
+  $taxPence: Int64!
+  $totalPence: Int64!
+  $quoteSnapshot: Any
+  $createdByUid: String!
+) @auth(level: NO_ACCESS) {
+  order_insert(data: {
+    organisationId: $organisationId
+    patientId: $patientId
+    draftId: $draftId
+    orderNumber: $orderNumber
+    status: $status
+    paymentStatus: $paymentStatus
+    fulfilmentStatus: $fulfilmentStatus
+    paymentRoute: $paymentRoute
+    currency: $currency
+    medicineTotalPence: $medicineTotalPence
+    dispensingFeePence: $dispensingFeePence
+    deliveryPence: $deliveryPence
+    taxPence: $taxPence
+    totalPence: $totalPence
+    quoteSnapshot: $quoteSnapshot
+    createdByUid: $createdByUid
+    submittedAt_expr: "request.time"
+  })
+}
+
+mutation AppendPlacementEvent(
+  $organisationId: UUID!
+  $orderId: UUID!
+  $orderLineId: UUID
+  $fromState: PlacementState
+  $toState: PlacementState!
+  $reason: String
+  $externalReference: String
+  $actorUid: String
+) @auth(level: NO_ACCESS) {
+  placementEvent_insert(data: {
+    organisationId: $organisationId
+    orderId: $orderId
+    orderLineId: $orderLineId
+    fromState: $fromState
+    toState: $toState
+    reason: $reason
+    externalReference: $externalReference
+    actorUid: $actorUid
+  })
+}
+
+mutation CreatePayment(
+  $organisationId: UUID!
+  $orderId: UUID!
+  $patientId: UUID
+  $status: PaymentStatus!
+  $amountPence: Int64!
+  $currency: String!
+  $route: PaymentRoute!
+  $manualReference: String
+  $receiptHash: String
+) @auth(level: NO_ACCESS) {
+  payment_insert(data: {
+    organisationId: $organisationId
+    orderId: $orderId
+    patientId: $patientId
+    status: $status
+    amountPence: $amountPence
+    currency: $currency
+    route: $route
+    manualReference: $manualReference
+    receiptHash: $receiptHash
+  })
+}
+
+mutation UpdatePaymentStatus(
+  $id: UUID!
+  $status: PaymentStatus!
+  $receiptHash: String
+  $orderId: UUID!
+) @auth(level: NO_ACCESS) {
+  payment_update(
+    key: { id: $id }
+    data: {
+      status: $status
+      receiptHash: $receiptHash
+    }
+  )
+  order_update(
+    key: { id: $orderId }
+    data: {
+      paymentStatus: $status
+      paidAt_expr: "request.time"
+    }
+  )
+}
+
+mutation CreateRefund(
+  $organisationId: UUID!
+  $orderId: UUID!
+  $paymentId: UUID!
+  $amountPence: Int64!
+  $currency: String!
+  $cause: String!
+  $route: PaymentRoute!
+  $status: RefundStatus!
+  $idempotencyKey: String!
+  $confirmedByUid: String
+) @auth(level: NO_ACCESS) {
+  refund_insert(data: {
+    organisationId: $organisationId
+    orderId: $orderId
+    paymentId: $paymentId
+    amountPence: $amountPence
+    currency: $currency
+    cause: $cause
+    route: $route
+    status: $status
+    idempotencyKey: $idempotencyKey
+    confirmedByUid: $confirmedByUid
+  })
+}
+
+mutation CreateShipment(
+  $organisationId: UUID!
+  $orderId: UUID!
+  $supplierPurchaseOrderId: String!
+  $supplierShipmentId: String
+  $supplierCustomerReference: String
+  $status: ShipmentStatus!
+  $dispatchedAt: Timestamp
+) @auth(level: NO_ACCESS) {
+  shipment_insert(data: {
+    organisationId: $organisationId
+    orderId: $orderId
+    supplierPurchaseOrderId: $supplierPurchaseOrderId
+    supplierShipmentId: $supplierShipmentId
+    supplierCustomerReference: $supplierCustomerReference
+    status: $status
+    dispatchedAt: $dispatchedAt
+  })
+}
+
+mutation CreateGoodsReceipt(
+  $organisationId: UUID!
+  $shipmentId: UUID!
+  $receivedByUid: String!
+  $status: ReceiptStatus!
+  $notes: String
+) @auth(level: NO_ACCESS) {
+  goodsReceipt_insert(data: {
+    organisationId: $organisationId
+    shipmentId: $shipmentId
+    receivedByUid: $receivedByUid
+    status: $status
+    notes: $notes
+  })
+}
+
+mutation CreateOrganisation(
+  $id: UUID!
+  $name: String!
+  $tradingName: String!
+  $gphcNumber: String!
+  $superintendentName: String!
+  $address: String!
+  $primaryColour: String!
+  $logoText: String!
+  $portalName: String!
+  $status: OrganisationStatus!
+  $classification: WorkspaceClassification!
+  $intakeEnabled: Boolean!
+  $prescriptionEnabled: Boolean!
+  $paymentsEnabled: Boolean!
+  $supplierOrdersEnabled: Boolean!
+  $patientsEnabled: Boolean!
+  $resourcesEnabled: Boolean!
+  $worldpayEnabled: Boolean!
+  $defaultPaymentRoute: PaymentRoute!
+) @auth(level: NO_ACCESS) {
+  organisation_insert(data: {
+    id: $id
+    name: $name
+    tradingName: $tradingName
+    gphcNumber: $gphcNumber
+    superintendentName: $superintendentName
+    address: $address
+    primaryColour: $primaryColour
+    logoText: $logoText
+    portalName: $portalName
+    status: $status
+    classification: $classification
+    intakeEnabled: $intakeEnabled
+    prescriptionEnabled: $prescriptionEnabled
+    paymentsEnabled: $paymentsEnabled
+    supplierOrdersEnabled: $supplierOrdersEnabled
+    patientsEnabled: $patientsEnabled
+    resourcesEnabled: $resourcesEnabled
+    worldpayEnabled: $worldpayEnabled
+    defaultPaymentRoute: $defaultPaymentRoute
+  })
+}
+
+mutation CreateOrganisationDomain(
+  $organisationId: UUID!
+  $hostname: String!
+) @auth(level: NO_ACCESS) {
+  organisationDomain_insert(data: {
+    organisationId: $organisationId
+    hostname: $hostname
+  })
+}
+
+mutation CreateReferralToken(
+  $organisationId: UUID!
+  $tokenHash: String!
+  $intakeVersion: String!
+) @auth(level: NO_ACCESS) {
+  referralToken_insert(data: {
+    organisationId: $organisationId
+    tokenHash: $tokenHash
+    intakeVersion: $intakeVersion
+  })
+}
+
+mutation CreateStaffUserDirect(
+  $uid: String!
+  $organisationId: UUID
+  $email: String!
+  $displayName: String!
+  $role: StaffRole!
+  $status: StaffStatus!
+  $disabled: Boolean!
+) @auth(level: NO_ACCESS) {
+  staffUser_insert(data: {
+    uid: $uid
+    organisationId: $organisationId
+    email: $email
+    displayName: $displayName
+    role: $role
+    status: $status
+    disabled: $disabled
+  })
+}
+
+mutation CreatePatientDirect(
+  $id: UUID!
+  $organisationId: UUID!
+  $firstName: String!
+  $surname: String!
+  $dob: Date!
+  $email: String!
+  $mobile: String!
+  $address: String
+  $postcode: String!
+  $status: PatientStatus!
+) @auth(level: NO_ACCESS) {
+  patient_insert(data: {
+    id: $id
+    organisationId: $organisationId
+    firstName: $firstName
+    surname: $surname
+    dob: $dob
+    email: $email
+    mobile: $mobile
+    address: $address
+    postcode: $postcode
+    status: $status
+    activatedAt_expr: "request.time"
+  })
+}
+
+mutation CreateOrderDirect(
+  $id: UUID!
+  $organisationId: UUID!
+  $patientId: UUID!
+  $orderNumber: String
+  $status: OrderStatus!
+  $paymentStatus: PaymentStatus!
+  $fulfilmentStatus: FulfilmentStatus!
+  $paymentRoute: PaymentRoute!
+  $currency: String!
+  $medicineTotalPence: Int64!
+  $dispensingFeePence: Int64!
+  $deliveryPence: Int64!
+  $taxPence: Int64!
+  $totalPence: Int64!
+  $quoteSnapshot: Any
+  $createdByUid: String!
+) @auth(level: NO_ACCESS) {
+  order_insert(data: {
+    id: $id
+    organisationId: $organisationId
+    patientId: $patientId
+    orderNumber: $orderNumber
+    status: $status
+    paymentStatus: $paymentStatus
+    fulfilmentStatus: $fulfilmentStatus
+    paymentRoute: $paymentRoute
+    currency: $currency
+    medicineTotalPence: $medicineTotalPence
+    dispensingFeePence: $dispensingFeePence
+    deliveryPence: $deliveryPence
+    taxPence: $taxPence
+    totalPence: $totalPence
+    quoteSnapshot: $quoteSnapshot
+    createdByUid: $createdByUid
+    submittedAt_expr: "request.time"
+  })
+}
+
+mutation UpdateStaffUserRole(
+  $uid: String!
+  $role: StaffRole!
+  $organisationId: UUID
+) @auth(level: NO_ACCESS) {
+  staffUser_update(
+    key: { uid: $uid }
+    data: {
+      role: $role
+      organisationId: $organisationId
+    }
+  )
+}
+
+
+
+

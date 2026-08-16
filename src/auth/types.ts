@@ -8,6 +8,9 @@ export interface AuthenticatedStaff {
   organisationId?: string;
   emailVerified: boolean;
   mfaEnrolled: boolean;
+  surface?: 'pharmacy' | 'admin';
+  idleExpiresAt?: string;
+  absoluteExpiresAt?: string;
 }
 
 export type AuthPhase =
@@ -25,4 +28,5 @@ export interface AuthState {
   staff: AuthenticatedStaff | null;
   error: string | null;
   notice: string | null;
+  sessionWarning?: boolean;
 }

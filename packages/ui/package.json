@@ -1,0 +1,9 @@
+{
+  "name": "@hhh/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "exports": { ".": "./src/index.tsx", "./tokens.css": "./src/tokens.css" },
+  "peerDependencies": { "react": "^19.0.0" }
+}

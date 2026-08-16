@@ -8,8 +8,7 @@ React/TypeScript staff portal, public eligibility application and Firebase backe
 
 ## Prototype surfaces
 
-- **HHH admin portal** — pharmacy onboarding, tenant branding/modules, cross-pharmacy patient attribution, platform integrations and a master compliance/evidence register.
-- **Client / clinic portal** — tenant-isolated referral processing, patient CRM, prescription building, dual payment routing, supplier tracking and goods-in/collection.
+- **Combined staff portal** — one authenticated origin with HHH administration under `/admin/...` and tenant-isolated pharmacy workspaces under `/pharmacy/...`.
 - **Tokenised eligibility form** — a unique URL per pharmacy links every submission to the correct client.
 - **Pharmacy resources** — copy the patient link, save a print-ready QR code, and generate a developer content-pack ZIP.
 - **No patient account surface** — patients use the public eligibility form only; all authenticated access is staff-only.
@@ -22,13 +21,13 @@ npm install
 npm run dev
 ```
 
-To run the complete local flow, configure `.env` from `.env.example`, configure the API from `services/api/.env.example`, then use three terminals:
+To run the combined portal locally against its configured API, link the repository to the portal Vercel project, configure `.env` from `.env.example`, then run:
 
 ```bash
-npm run dev:api
-npm run dev:eligibility
 npm run dev
 ```
+
+The internal `dev:pharmacy` and `dev:admin` commands exist only for isolated bundle development; they still use `/pharmacy/...` and `/admin/...` and are not separate deployment surfaces. Run `dev:api` and `dev:eligibility` separately only when working on those services.
 
 When the Firebase web configuration is absent, the staff portal stays locked instead of exposing a demo password. Production builds never include seeded patients or orders.
 
@@ -46,7 +45,7 @@ Use the gateway shown at `http://localhost:5173`. The separately hosted pharmacy
 http://localhost:5174/?token=<pharmacy-referral-token>
 ```
 
-Staff accounts are invite-only Firebase Authentication users. Assign either the `hhh_admin` role or the `pharmacy_staff` role with an `organisationId` custom claim and verify the email address before workspace access. TOTP support remains implemented but is disabled for staging by default; enable it later with `VITE_REQUIRE_MFA=true` on Vercel and `REQUIRE_MFA=true` on the API.
+Staff accounts are invite-only Firebase Authentication users. Assign either the `hhh_admin` role or the `pharmacy_staff` role with an `organisationId` custom claim and verify the email address before workspace access. Cookie-mode pharmacy and admin builds require TOTP and the deployed API must set `REQUIRE_MFA=true`; there is no shared staging bypass.
 
 ## Documentation
 
@@ -55,6 +54,8 @@ Start with [`specs/README.md`](specs/README.md). Important documents include:
 - [`specs/production-architecture.md`](specs/production-architecture.md) — production topology, security, tenant isolation, integrations and onboarding.
 - [`specs/separate-form-deployment.md`](specs/separate-form-deployment.md) — separate-domain form, shared API/database, environment variables and deployment outputs.
 - [`specs/firebase-vercel-runbook.md`](specs/firebase-vercel-runbook.md) — the current Firebase/Vercel configuration and go-live checklist.
+- [`specs/sql-connect-backend-rewrite.md`](specs/sql-connect-backend-rewrite.md) — the relational redesign, security boundary and staged Firestore migration plan.
+- [`services/api-sql/README.md`](services/api-sql/README.md) — the isolated API rewrite workspace, implementation plan and route-by-route SQL cutover matrix.
 - [`specs/project-manager-playbook.md`](specs/project-manager-playbook.md) — pre-live and per-pharmacy delivery checklist.
 - [`specs/uk-compliance-register.md`](specs/uk-compliance-register.md) — UK GDPR, ICO and GPhC requirements register.
 - [`specs/Rocky-API-Reference.md`](specs/Rocky-API-Reference.md) — confirmed Rocky endpoints, schemas and corrections to earlier assumptions.
@@ -65,7 +66,7 @@ Start with [`specs/README.md`](specs/README.md). Important documents include:
 - Curaleaf Rocky is called only by the backend. HHH’s single API key is a Firebase Functions deployment secret; each pharmacy’s customer ID and portal email are stored separately in Secret Manager and never exposed to either Vercel application.
 - Before a pharmacy has a verified Curaleaf customer ID, it receives a clearly labelled training workspace. The supplied dummy dataset returns after refresh, while all training edits stay in memory and are discarded on refresh/sign-out rather than written to Firebase.
 - Curaleaf dispatch is not courier tracking. The platform records supplier dispatch, then the pharmacy records partial/full goods-in and separately confirms dispensing checks before collection notification.
-- Worldpay must use hosted checkout, secure pharmacy merchant onboarding and verified server-side webhooks. The portal now models each pharmacy connection, but live onboarding/payment calls remain disabled until Worldpay approves the platform model and supplies credentials.
+- Worldpay uses the WPeCommerce Hosted Payment Pages API with one server-side merchant connection per pharmacy. Webhooks are acknowledged without an invented shared secret; HHH independently verifies the transaction reference, amount, currency, entity and settlement state through Payment Queries before marking an order paid. TRY UAT and Worldpay approval remain pre-live gates.
 - Prescription scans require private UK-hosted storage, short-lived access links, retention rules and audit logging.
 - The eligibility privacy notice and consent wording require solicitor/DPO approval before live use.
 

@@ -3,28 +3,50 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "workspaces": [
-    "services/api"
+    "services/api",
+    "services/web",
+    "packages/domain",
+    "packages/ui"
   ],
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run dev:portal",
+    "dev:portal": "HHH_SURFACE=portal npx vercel dev",
     "dev:eligibility": "vite --config vite.eligibility.config.ts",
+    "dev:public": "vite --config vite.public.config.ts",
+    "dev:pharmacy": "vite --config vite.pharmacy.config.ts",
+    "dev:admin": "vite --config vite.admin.config.ts",
     "dev:api": "npm run dev --workspace @hhh/api",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && npm run build:vercel:portal",
     "build:eligibility": "vite build --config vite.eligibility.config.ts",
+    "build:public": "vite build --config vite.public.config.ts",
+    "build:pharmacy": "vite build --config vite.pharmacy.config.ts",
+    "build:admin": "vite build --config vite.admin.config.ts",
+    "build:vercel": "node scripts/build-vercel-surface.mjs",
+    "build:vercel:public": "node scripts/build-vercel-surface.mjs public",
+    "build:vercel:portal": "node scripts/build-vercel-surface.mjs portal",
     "build:api": "npm run build --workspace @hhh/api",
-    "build:all": "npm run build && npm run build:eligibility && npm run build:api",
+    "repair:legacy-qr": "node scripts/register-legacy-referral-aliases.mjs",
+    "migrate:primary-allocation-holding": "node scripts/migrate-primary-allocation-holding.mjs",
+    "build:all": "npm run build --workspace @hhh/ui && npm run build:vercel:public && npm run build:vercel:portal && npm run build:api",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@hhh/domain": "0.1.0",
+    "@hhh/ui": "0.1.0",
     "firebase": "^12.16.0",
+    "firebase-admin": "^14.2.0",
+    "google-auth-library": "^10.9.1",
     "jszip": "^3.10.1",
     "lucide-react": "^1.22.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
@@ -35,5 +57,9 @@
     "oxlint": "^1.69.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1",
+    "jose": "5.10.0"
   }
 }

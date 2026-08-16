@@ -1,0 +1,50 @@
+:root {
+  --hhh-colour-ink: #17241c;
+  --hhh-colour-muted: #526157;
+  --hhh-colour-surface: #ffffff;
+  --hhh-colour-surface-subtle: #f3f6f3;
+  --hhh-colour-border: #d9e0da;
+  --hhh-colour-focus: #146c43;
+  --hhh-status-success-text: #075b37;
+  --hhh-status-success-surface: #e5f7ed;
+  --hhh-status-warning-text: #684012;
+  --hhh-status-warning-surface: #fff8e8;
+  --hhh-status-danger-text: #7f2925;
+  --hhh-status-danger-surface: #fff1f0;
+  --hhh-space-1: 0.25rem;
+  --hhh-space-2: 0.5rem;
+  --hhh-space-3: 0.75rem;
+  --hhh-space-4: 1rem;
+  --hhh-space-6: 1.5rem;
+  --hhh-space-8: 2rem;
+  --hhh-radius-sm: 0.5rem;
+  --hhh-radius-md: 0.75rem;
+  --hhh-elevation-1: 0 2px 8px rgb(20 38 27 / 8%);
+}
+
+.hhh-focusable:focus-visible { outline: 3px solid var(--hhh-colour-focus); outline-offset: 2px; }
+.hhh-public-button{ display:inline-flex; min-height:44px; align-items:center; justify-content:center; gap:.5rem; padding:.7rem 1rem; border:1px solid transparent; border-radius:var(--hhh-radius-sm); font:inherit; font-weight:700; cursor:pointer; }
+.hhh-public-button--primary{ color:#fff; background:#124f3b; }
+.hhh-public-button--secondary{ color:#124f3b; background:#fff; border-color:#a9c4b6; }
+.hhh-public-button--quiet{ color:#124f3b; background:transparent; }
+.hhh-field-shell{ display:grid; gap:var(--hhh-space-2); color:var(--hhh-colour-ink); font-weight:650; }
+.hhh-field-shell > small{ color:var(--hhh-colour-muted); font-weight:400; }
+.hhh-field-shell > strong{ color:var(--hhh-status-danger-text); }
+.hhh-notice{ padding:var(--hhh-space-3) var(--hhh-space-4); border:1px solid var(--hhh-colour-border); border-radius:var(--hhh-radius-sm); }
+.hhh-notice--success{ color:var(--hhh-status-success-text); background:var(--hhh-status-success-surface); }
+.hhh-notice--warning{ color:var(--hhh-status-warning-text); background:var(--hhh-status-warning-surface); }
+.hhh-notice--danger{ color:var(--hhh-status-danger-text); background:var(--hhh-status-danger-surface); }
+.hhh-status-badge{ display:inline-flex; min-height:24px; align-items:center; padding:0 .55rem; border-radius:999px; font-size:.75rem; font-weight:750; }
+.hhh-status-badge--success{ color:var(--hhh-status-success-text); background:var(--hhh-status-success-surface); }
+.hhh-status-badge--warning{ color:var(--hhh-status-warning-text); background:var(--hhh-status-warning-surface); }
+.hhh-status-badge--danger{ color:var(--hhh-status-danger-text); background:var(--hhh-status-danger-surface); }
+.hhh-status-badge--neutral{ color:var(--hhh-colour-muted); background:var(--hhh-colour-surface-subtle); }
+.hhh-public-card{ padding:var(--hhh-space-6); background:var(--hhh-colour-surface); border:1px solid var(--hhh-colour-border); border-radius:var(--hhh-radius-md); box-shadow:var(--hhh-elevation-1); }
+.hhh-page-container{ width:min(100% - 2rem, 72rem); margin-inline:auto; }
+.hhh-skip-link{ position:fixed; z-index:9999; top:.5rem; left:.5rem; padding:.75rem 1rem; color:#fff; background:#124f3b; transform:translateY(-150%); }
+.hhh-skip-link:focus{ transform:none; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { scroll-behavior: auto; }
+  .hhh-motion { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}

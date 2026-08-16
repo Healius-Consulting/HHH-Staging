@@ -1,0 +1,24 @@
+{
+  "name": "@hhh/domain",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./conditions.d.ts",
+      "default": "./conditions.js"
+    },
+    "./delivery": {
+      "types": "./delivery.d.ts",
+      "default": "./delivery.js"
+    },
+    "./prescription-date": {
+      "types": "./prescription-date.d.ts",
+      "default": "./prescription-date.js"
+    },
+    "./portal-route": {
+      "types": "./portal-route.d.ts",
+      "default": "./portal-route.js"
+    }
+  }
+}

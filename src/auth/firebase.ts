@@ -15,12 +15,15 @@ const options: FirebaseOptions = {
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined,
   appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
 };
+const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY as string | undefined;
+const appCheckRequired = import.meta.env.VITE_REQUIRE_APP_CHECK === 'true';
 
 const missingKeys = [
   ['VITE_FIREBASE_API_KEY', options.apiKey],
   ['VITE_FIREBASE_AUTH_DOMAIN', options.authDomain],
   ['VITE_FIREBASE_PROJECT_ID', options.projectId],
   ['VITE_FIREBASE_APP_ID', options.appId],
+  ...(!import.meta.env.DEV && appCheckRequired ? [['VITE_FIREBASE_APP_CHECK_SITE_KEY', appCheckSiteKey]] : []),
 ].filter(([, value]) => !value).map(([key]) => key as string);
 
 export const firebaseConfiguration = {
@@ -31,7 +34,8 @@ export const firebaseConfiguration = {
 // Keep MFA available in the application without forcing it in early staging.
 // Set VITE_REQUIRE_MFA=true alongside REQUIRE_MFA=true on the API when HHH is
 // ready to make TOTP enrolment a mandatory access control.
-export const mfaRequired = import.meta.env.VITE_REQUIRE_MFA === 'true';
+export const serverSessionAuth = import.meta.env.VITE_AUTH_MODE === 'cookie' || (!import.meta.env.DEV && import.meta.env.VITE_AUTH_MODE !== 'bearer');
+export const mfaRequired = import.meta.env.VITE_REQUIRE_MFA === 'true' || serverSessionAuth;
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
@@ -41,11 +45,10 @@ if (firebaseConfiguration.configured) {
   app = getApps().length ? getApp() : initializeApp(options);
   auth = getAuth(app);
 
-  const siteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY as string | undefined;
-  if (siteKey && typeof window !== 'undefined') {
+  if (appCheckRequired && appCheckSiteKey && typeof window !== 'undefined') {
     try {
       appCheck = initializeAppCheck(app, {
-        provider: new ReCaptchaEnterpriseProvider(siteKey),
+        provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
         isTokenAutoRefreshEnabled: true,
       });
     } catch (error) {

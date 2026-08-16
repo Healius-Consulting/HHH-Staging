@@ -1,5 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Upload, Plus, Minus, X, FileText, Send, CreditCard, User, CheckCircle, Search, AlertTriangle, ListFilter, Banknote } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
+import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, FileScan, FileText, Pencil, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import ProviderStatusNotice from '../components/ProviderStatusNotice';
+import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
 import {
   useApp,
   money,
@@ -9,669 +12,1221 @@ import {
   orderRevenue,
   orderCost,
   marginPct,
-  TYPE_LABELS,
-  STOCK_LABELS,
+  getUnresolvedReason,
+  orderReference,
   type LineItem,
-  type CatalogueItem,
+  type PatientOrder,
+  type UnresolvedOrderReason,
 } from '../context/AppContext';
-
-const TYPE_FILTERS = ['All', 'oil', 'flos', 'capsule', 'lozenge', 'vape'] as const;
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
+import { confirmPortalOrderRefund, createOrderDraft, createPortalOrder, createPortalOrderRefund, createWorldpaySession, deleteOrderDraft, deletePrescriptionFile, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, updateOrderDraft, uploadPrescriptionFile } from '../shared/api';
+import { formatPatientDob } from '../utils/patientDob';
+import { checkPatientIdentity } from '../utils/patientIdentity';
+import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
+  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && canCreateOrderForPatient(patient));
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
-
-  /* ── Draft Orders Selection ── */
-  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && patient.status === 'HHH approved');
-  const draftOrders = state.orders.filter(o => o.organisationId === state.currentOrganisationId && o.payment.status === 'none');
-  const activeOrder = state.orders.find(o => o.organisationId === state.currentOrganisationId && o.id === state.activeOrderId && o.payment.status === 'none');
-  const patient = activeOrder?.patientId
-    ? tenantPatients.find(c => c.id === activeOrder.patientId) ?? null
+  const canUseWorldpay = organisation.worldpay.enabled && organisation.worldpay.status === 'connected';
+  const draftOrders = state.orders.filter(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none');
+  const activeOrder = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === state.activeOrderId && order.payment.status === 'none');
+  const selectedPaymentRoute = activeOrder?.paymentRoute ?? (canUseWorldpay ? 'worldpay' : 'manual');
+  const redoSourceOrder = activeOrder?.redoContext
+    ? state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === activeOrder.redoContext!.originalOrderId)
     : null;
-
-  /* ── Active Prescription Selection ── */
+  const patient = activeOrder?.patientId ? tenantPatients.find(candidate => candidate.id === activeOrder.patientId) ?? null : null;
   const [selectedRxId, setSelectedRxId] = useState<number | null>(null);
+  const [changingPatient, setChangingPatient] = useState(false);
+  const [patientQuery, setPatientQuery] = useState('');
+  const [patientSearchOpen, setPatientSearchOpen] = useState(false);
+  const [patientActiveIndex, setPatientActiveIndex] = useState(0);
+  const [confirmingDraftDeleteId, setConfirmingDraftDeleteId] = useState<number | null>(null);
+  const [confirmingRxDeleteId, setConfirmingRxDeleteId] = useState<number | null>(null);
+  const [quoteBusy, setQuoteBusy] = useState(false);
+  const [quoteError, setQuoteError] = useState<{ title: string; detail: string } | null>(null);
+  const [quotedSignature, setQuotedSignature] = useState<string | null>(null);
+  const [quoteSummary, setQuoteSummary] = useState<{ shippingPrice: number; taxRate: number } | null>(null);
+  const [quotedUnavailableProductIds, setQuotedUnavailableProductIds] = useState<string[]>([]);
+  const quoteRequestVersion = useRef(0);
+  const draftCreationInFlight = useRef(new Map<number, Promise<string>>());
+  const deletedDraftOrderIds = useRef(new Set<number>());
+  const [uploadingRxId, setUploadingRxId] = useState<number | null>(null);
+  const [confirmingFileRemoveRxId, setConfirmingFileRemoveRxId] = useState<number | null>(null);
+  const [fileRemovalBusyRxId, setFileRemovalBusyRxId] = useState<number | null>(null);
+  const [readingRxId, setReadingRxId] = useState<number | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [editingClinicFormularyRxId, setEditingClinicFormularyRxId] = useState<number | null>(null);
+  const [selectedUnresolvedOrderId, setSelectedUnresolvedOrderId] = useState<number | null>(null);
+  const [redoRefundReference, setRedoRefundReference] = useState('');
+  const [redoRefundBusy, setRedoRefundBusy] = useState(false);
+  const durableDraftEnabled = isApiConfigured && !isLocalPortalPreview && state.workspaceMode === 'live';
+  const durableDraftPayload = useMemo(() => activeOrder ? {
+    localOrderId: activeOrder.id,
+    patientId: activeOrder.patientId,
+    prescriptions: activeOrder.prescriptions,
+    dispensingFeePence: Math.round(activeOrder.dispensingFee * 100),
+    paymentRoute: selectedPaymentRoute,
+    redoContext: activeOrder.redoContext ?? null,
+  } : null, [activeOrder, selectedPaymentRoute]);
+  const durableDraftSignature = durableDraftPayload ? JSON.stringify(durableDraftPayload) : '';
 
-  // Auto-default activeRxId to the first prescription in the active order
+  const ensureDurableDraft = useCallback((order: PatientOrder, payload: Record<string, unknown>) => {
+    if (order.draftId) return Promise.resolve(order.draftId);
+    const existing = draftCreationInFlight.current.get(order.id);
+    if (existing) return existing;
+    const creation = createOrderDraft({ organisationId: state.currentOrganisationId, patientId: order.patientId, payload })
+      .then(async record => {
+        if (deletedDraftOrderIds.current.has(order.id)) {
+          await deleteOrderDraft(record.id, state.currentOrganisationId).catch(() => undefined);
+          throw new Error('This draft was removed before it finished saving.');
+        }
+        dispatch({ type: 'SET_ORDER_DRAFT_ID', orderId: order.id, draftId: record.id });
+        return record.id;
+      })
+      .finally(() => draftCreationInFlight.current.delete(order.id));
+    draftCreationInFlight.current.set(order.id, creation);
+    return creation;
+  }, [dispatch, state.currentOrganisationId]);
+
   useEffect(() => {
-    if (activeOrder && activeOrder.prescriptions.length > 0) {
-      const exists = activeOrder.prescriptions.some(rx => rx.id === selectedRxId);
-      if (!exists) {
-        setSelectedRxId(activeOrder.prescriptions[0].id);
-      }
-    } else {
-      setSelectedRxId(null);
+    if (activeOrder?.payment.status === 'none' && activeOrder.paymentRoute === 'worldpay' && !canUseWorldpay) {
+      dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'manual' });
     }
+  }, [activeOrder?.id, activeOrder?.payment.status, activeOrder?.paymentRoute, canUseWorldpay, dispatch]);
+
+  useEffect(() => {
+    if (!durableDraftEnabled || !activeOrder || activeOrder.draftId) return;
+    void ensureDurableDraft(activeOrder, durableDraftPayload ?? {})
+      .catch(error => dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? `Draft autosave unavailable: ${error.message}` : 'Draft autosave is unavailable.', toastType: 'warning' }))
+  }, [activeOrder, dispatch, durableDraftEnabled, durableDraftPayload, ensureDurableDraft]);
+
+  useEffect(() => {
+    if (!durableDraftEnabled || !activeOrder?.draftId || !durableDraftPayload || uploadingRxId !== null || fileRemovalBusyRxId !== null) return;
+    const timer = window.setTimeout(() => {
+      void updateOrderDraft(activeOrder.draftId!, { organisationId: state.currentOrganisationId, patientId: activeOrder.patientId, payload: durableDraftPayload })
+        .catch(error => dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? `Draft autosave unavailable: ${error.message}` : 'Draft autosave is unavailable.', toastType: 'warning' }));
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [activeOrder?.draftId, activeOrder?.patientId, dispatch, durableDraftEnabled, durableDraftPayload, durableDraftSignature, fileRemovalBusyRxId, state.currentOrganisationId, uploadingRxId]);
+
+  useEffect(() => {
+    if (!activeOrder?.prescriptions.length) return setSelectedRxId(null);
+    if (!activeOrder.prescriptions.some(rx => rx.id === selectedRxId)) setSelectedRxId(activeOrder.prescriptions[0].id);
   }, [activeOrder, selectedRxId]);
 
-  /* ── Prescription scan local progress ── */
-  const [scanningRxId, setScanningRxId] = useState<number | null>(null);
-  const [scanProgress, setScanProgress] = useState(0);
+  useEffect(() => {
+    quoteRequestVersion.current += 1;
+    setChangingPatient(false);
+    setPatientQuery('');
+    setPatientSearchOpen(false);
+    setPatientActiveIndex(0);
+    setConfirmingDraftDeleteId(null);
+    setConfirmingRxDeleteId(null);
+    setConfirmingFileRemoveRxId(null);
+    setQuoteError(null);
+    setQuotedSignature(null);
+    setQuoteSummary(null);
+    setQuotedUnavailableProductIds([]);
+    setQuoteBusy(false);
+    setEditingClinicFormularyRxId(null);
+    setSelectedUnresolvedOrderId(activeOrder?.redoContext?.originalOrderId ?? null);
+    setRedoRefundReference('');
+  }, [activeOrder?.id, activeOrder?.redoContext?.originalOrderId]);
 
-  const startScan = (rxId: number) => {
-    setScanningRxId(rxId);
-    setScanProgress(0);
-    dispatch({ type: 'ADD_TOAST', message: 'Analyzing prescription PDF metadata...', toastType: 'info' });
+  const matchingPatients = useMemo(() => {
+    const query = patientQuery.trim().toLowerCase();
+    return tenantPatients.filter(candidate => !query || [candidate.name, candidate.email, candidate.mobile, candidate.dob ?? '', formatPatientDob(candidate.dob)].some(value => value.toLowerCase().includes(query))).slice(0, 7);
+  }, [patientQuery, tenantPatients]);
+
+  const unresolvedOrdersForPatient = useMemo(() => {
+    if (!patient) return [] as Array<{ order: PatientOrder; reason: UnresolvedOrderReason; itemCount: number }>;
+    const now = new Date();
+    return state.orders
+      .filter(order => order.organisationId === state.currentOrganisationId && order.patientId === patient.id)
+      .map(order => {
+        const reason = getUnresolvedReason(order, now);
+        if (!reason) return null;
+        return {
+          order,
+          reason,
+          itemCount: order.prescriptions.flatMap(rx => rx.items).length,
+        };
+      })
+      .filter((entry): entry is { order: PatientOrder; reason: UnresolvedOrderReason; itemCount: number } => Boolean(entry))
+      .sort((a, b) => new Date(b.order.date).getTime() - new Date(a.order.date).getTime());
+  }, [patient, state.currentOrganisationId, state.orders]);
+
+  useEffect(() => {
+    if (!unresolvedOrdersForPatient.length) {
+      setSelectedUnresolvedOrderId(null);
+      return;
+    }
+    if (activeOrder?.redoContext?.originalOrderId && unresolvedOrdersForPatient.some(entry => entry.order.id === activeOrder.redoContext!.originalOrderId)) {
+      setSelectedUnresolvedOrderId(activeOrder.redoContext.originalOrderId);
+      return;
+    }
+    if (!unresolvedOrdersForPatient.some(entry => entry.order.id === selectedUnresolvedOrderId)) {
+      setSelectedUnresolvedOrderId(unresolvedOrdersForPatient[0].order.id);
+    }
+  }, [activeOrder?.redoContext?.originalOrderId, selectedUnresolvedOrderId, unresolvedOrdersForPatient]);
+
+  const selectedRx = activeOrder?.prescriptions.find(rx => rx.id === selectedRxId) ?? null;
+  const selectedRxIndex = activeOrder && selectedRx ? activeOrder.prescriptions.findIndex(rx => rx.id === selectedRx.id) : -1;
+  const requiresLiveCuraleafEvidence = state.workspaceMode === 'live' && !isLocalPortalPreview;
+  const identityCheck = selectedRx && patient ? checkPatientIdentity({
+    selectedName: patient.name,
+    selectedDob: patient.dob,
+    prescriptionName: selectedRx.curaleafPatientName,
+    prescriptionDob: selectedRx.curaleafPatientDob,
+  }) : null;
+  const hasPrescriptionRecords = Boolean(activeOrder?.prescriptions.length);
+  const readiness = activeOrder ? [
+    { label: 'Approved referral or active patient linked', complete: canCreateOrderForPatient(patient) },
+    { label: 'Prescription evidence attached', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => Boolean(rx.copyFileName) && (!requiresLiveCuraleafEvidence || Boolean(rx.fileId))) },
+    { label: 'Serial number / Clinic source verified', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => rx.entryMode === 'manual' ? Boolean(rx.serialNumber?.trim()) : Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
+    { label: 'Prescription inside its 28-day window', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => prescriptionDateIsCurrent(rx.issueDate, rx.expiryDate)) },
+    { label: 'Prescriber details complete', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => Boolean(rx.issueDate && rx.prescriber.trim() && (rx.entryMode === 'manual' ? rx.prescriberPin?.trim() : rx.prescriberId))) },
+    { label: 'Prescription identity matches patient', complete: Boolean(patient) && hasPrescriptionRecords && activeOrder.prescriptions.every(rx => checkPatientIdentity({ selectedName: patient!.name, selectedDob: patient!.dob, prescriptionName: rx.curaleafPatientName, prescriptionDob: rx.curaleafPatientDob }).status === 'match') },
+    { label: 'Priced medicines and quantities complete', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => Boolean(item.productId && item.formulaId) && Number.isInteger(item.qty) && item.qty > 0 && Number.isInteger(item.unitsNeededCount) && item.unitsNeededCount! > 0 && Number.isFinite(item.retail) && item.retail > 0)) },
+  ] : [];
+  const prescriptionReady = readiness.every(item => item.complete);
+  const wholesaleKnown = Boolean(activeOrder?.prescriptions.every(rx => rx.items.every(item => item.cost !== null)));
+  const orderMargin = activeOrder && wholesaleKnown
+    ? marginPct(orderCost(activeOrder), orderRevenue(activeOrder) - activeOrder.dispensingFee)
+    : null;
+  const currentQuoteItems = activeOrder?.prescriptions.flatMap(rx => rx.items.map(item => ({ packId: item.productId, quantity: item.qty }))) ?? [];
+  const currentQuoteSignature = JSON.stringify(currentQuoteItems.slice().sort((a, b) => a.packId.localeCompare(b.packId)));
+
+  useEffect(() => {
+    quoteRequestVersion.current += 1;
+    setQuoteError(null);
+    setQuotedSignature(null);
+    setQuoteSummary(null);
+    setQuotedUnavailableProductIds([]);
+  }, [currentQuoteSignature]);
+
+  const quoteCurrent = wholesaleKnown && quotedSignature === currentQuoteSignature;
+  const currentUnavailableProductIds = quotedSignature === currentQuoteSignature ? quotedUnavailableProductIds : [];
+  const quoteAvailable = quoteCurrent && currentUnavailableProductIds.length === 0;
+  const dispensingFeeValid = !activeOrder || activeOrder.dispensingFee === 0 || activeOrder.dispensingFee >= 5 && activeOrder.dispensingFee <= 15;
+  const quoteGateComplete = !requiresLiveCuraleafEvidence || quoteAvailable;
+  const replacementUsesNewPayment = activeOrder?.redoContext?.priceResolution === 'refund_and_recharge';
+  const paymentRouteReady = Boolean(activeOrder?.redoContext?.isPaidRedo && !replacementUsesNewPayment) || selectedPaymentRoute === 'manual' || canUseWorldpay;
+  const paidRedoAmountDifference = activeOrder?.redoContext?.isPaidRedo && redoSourceOrder
+    ? Math.round((orderRevenue(activeOrder) - redoSourceOrder.payment.amount) * 100) / 100
+    : 0;
+  const paidRedoAmountMatches = !activeOrder?.redoContext?.isPaidRedo || Math.abs(paidRedoAmountDifference) < 0.005;
+  const redoPriceResolutionReady = paidRedoAmountMatches
+    || activeOrder?.redoContext?.priceResolution === 'absorb' && paidRedoAmountDifference > 0
+    || replacementUsesNewPayment && redoSourceOrder?.refund?.status === 'completed';
+  const readyForPayment = prescriptionReady && quoteGateComplete && paymentRouteReady && redoPriceResolutionReady && dispensingFeeValid;
+  const paymentGate = activeOrder ? [
+    ...readiness,
+    { label: requiresLiveCuraleafEvidence ? 'Live Curaleaf price and stock quote verified' : 'Curaleaf quote optional in training', complete: quoteGateComplete },
+    { label: 'Dispensing charge is £0 or £5–£15', complete: dispensingFeeValid },
+    { label: activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Original verified payment route retained' : selectedPaymentRoute === 'worldpay' ? 'Worldpay merchant connection verified' : 'Pharmacy-managed payment route selected', complete: paymentRouteReady },
+    ...(activeOrder.redoContext?.isPaidRedo ? [{ label: 'Replacement price decision recorded', complete: redoPriceResolutionReady }] : []),
+  ] : [];
+  const outstandingPaymentGates = paymentGate.filter(item => !item.complete);
+  const workflowSteps = activeOrder ? [
+    { label: 'Patient', detail: patient ? 'Approved and linked' : 'Select approved patient', complete: Boolean(patient), active: !patient },
+    { label: 'Prescription', detail: prescriptionReady ? `${activeOrder.prescriptions.length} record${activeOrder.prescriptions.length === 1 ? '' : 's'} verified` : `${readiness.filter(item => item.complete).length}/${readiness.length} checks passed`, complete: prescriptionReady, active: Boolean(patient) && !prescriptionReady },
+    { label: 'Curaleaf quote', detail: requiresLiveCuraleafEvidence ? quoteAvailable ? 'Price and stock verified' : 'Required before payment' : quoteAvailable ? 'Training quote checked' : 'Optional in training', complete: quoteGateComplete, active: prescriptionReady && !quoteGateComplete },
+    { label: 'Payment', detail: readyForPayment ? replacementUsesNewPayment ? 'New payment ready' : activeOrder.redoContext?.isPaidRedo ? 'Carry-over ready' : `${selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy route'} ready` : activeOrder.redoContext?.isPaidRedo && !redoPriceResolutionReady ? 'Price decision needed' : `${outstandingPaymentGates.length} blocker${outstandingPaymentGates.length === 1 ? '' : 's'}`, complete: false, active: readyForPayment },
+  ] : [];
+  const activeOrderRef = activeOrder ? orderReference(activeOrder) : '';
+  const confirmingDraft = confirmingDraftDeleteId === null ? null : draftOrders.find(order => order.id === confirmingDraftDeleteId) ?? null;
+  const confirmingDraftPatient = confirmingDraft?.patientId ? tenantPatients.find(candidate => candidate.id === confirmingDraft.patientId) : null;
+  const confirmingDraftLabel = confirmingDraftPatient?.name ?? (confirmingDraft ? `Unlinked draft #${confirmingDraft.id}` : 'this draft');
+
+  const initials = (name: string) => name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2);
+  const gmcNumber = (value?: string) => {
+    const number = value?.trim() ? Number(value) : null;
+    return number && Number.isInteger(number) && number > 0 ? number : null;
   };
-
-  useEffect(() => {
-    if (scanningRxId === null || !activeOrder) return;
-    const interval = setInterval(() => {
-      setScanProgress(prev => Math.min(100, prev + Math.floor(Math.random() * 14) + 6));
-    }, 100);
-    return () => clearInterval(interval);
-  }, [scanningRxId, activeOrder]);
-
-  useEffect(() => {
-    if (scanProgress < 100 || scanningRxId === null || !activeOrder) return;
-    const completedRxId = scanningRxId;
-    setScanningRxId(null);
+  const applyClinicScan = (rxId: number, scan: Awaited<ReturnType<typeof scanCuraleafClinicPrescription>>) => {
+    if (!activeOrder || scan.status !== 'ready' || !scan.prescription || !scan.prescriber || !scan.matchedItems?.length) return false;
+    const items: LineItem[] = scan.matchedItems.map(item => ({
+      productId: item.packId,
+      formulaId: item.formulaId,
+      name: item.formulaName,
+      qty: item.quantity,
+      unitsNeededCount: item.unitsNeededCount,
+      cost: null,
+      retail: Number(item.patientPackPrice),
+    }));
     dispatch({
-      type: 'SET_RX_COPY',
+      type: 'APPLY_CURALEAF_SCAN',
       orderId: activeOrder.id,
-      rxId: completedRxId,
-      fileName: `prescription_scan_${completedRxId}.pdf`,
+      rxId,
+      scan: {
+        scanId: scan.scanId,
+        prescriptionId: scan.prescription.id,
+        state: scan.prescription.state,
+        serialNumber: scan.prescription.serialNumber,
+        issueDate: scan.prescription.issueDate,
+        expiryDate: scan.prescription.expiryDate,
+        prescriberId: scan.prescriber.id,
+        prescriberName: scan.prescriber.name,
+        prescriberGmcNumber: scan.prescriber.gmcNumber?.toString() ?? '',
+        prescriberGphcNumber: scan.prescriber.gphcNumber ?? '',
+        patientName: scan.prescription.patient?.name,
+        patientDob: scan.prescription.patient?.dob,
+        items,
+      },
     });
-    dispatch({ type: 'ADD_TOAST', message: `Prescription copy prescription_scan_${completedRxId}.pdf verified & attached.`, toastType: 'success' });
-  }, [scanProgress, scanningRxId, activeOrder, dispatch]);
-
-  /* ── Product Catalog Search & Category Filters ── */
-  const [catalogQuery, setCatalogQuery] = useState('');
-  const [catalogTypeFilter, setCatalogTypeFilter] = useState<string>('All');
-
-  const filteredProducts = useMemo(() => {
-    let items = state.catalogue;
-    if (catalogQuery.trim()) {
-      const q = catalogQuery.toLowerCase();
-      items = items.filter(i => i.name.toLowerCase().includes(q));
-    }
-    if (catalogTypeFilter !== 'All') {
-      items = items.filter(i => i.type === catalogTypeFilter);
-    }
-    return items;
-  }, [state.catalogue, catalogQuery, catalogTypeFilter]);
-
-  const handleAddToRx = (item: CatalogueItem) => {
-    if (!activeOrder) {
-      dispatch({ type: 'ADD_TOAST', message: 'Please create an active order first.', toastType: 'warning' });
-      return;
-    }
-    if (selectedRxId === null) {
-      dispatch({ type: 'ADD_TOAST', message: 'Please select a prescription block (Column 1) to edit.', toastType: 'warning' });
-      return;
-    }
-
-    const rx = activeOrder.prescriptions.find(r => r.id === selectedRxId);
-    if (!rx) return;
-
-    if (rx.items.some(li => li.productId === item.id)) {
-      dispatch({ type: 'ADD_TOAST', message: `"${item.name}" is already in this prescription.`, toastType: 'warning' });
-      return;
-    }
-
-    const lineItem: LineItem = {
-      productId: item.id,
-      name: item.name,
-      qty: 1,
-      cost: item.cost,
-      retail: item.retail,
-      fee: 0,
-    };
-
-    dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRxId, item: lineItem });
-    dispatch({ type: 'ADD_TOAST', message: `Added "${item.name}" to Rx #${activeOrder.prescriptions.indexOf(rx) + 1}.`, toastType: 'success' });
+    setQuotedSignature(null);
+    setQuoteSummary(null);
+    setQuotedUnavailableProductIds([]);
+    setQuoteError(null);
+    return true;
   };
 
-  const initials = (name: string) =>
-    name
-      .split(' ')
-      .map(w => w[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-
-  const getStockClass = (stock: CatalogueItem['stock']) => {
-    switch (stock) {
-      case 'in': return 'stock-dot stock-in';
-      case 'low': return 'stock-dot stock-low';
-      case 'out': return 'stock-dot stock-out';
+  const readClinicBarcode = async (rxId: number, fileId: string) => {
+    if (!activeOrder) return;
+    setReadingRxId(rxId);
+    setScanError(null);
+    try {
+      const scan = await scanCuraleafClinicPrescription(state.currentOrganisationId, fileId);
+      if (scan.status === 'processing') {
+        dispatch({ type: 'ADD_TOAST', message: 'Curaleaf is still reading the barcode. Wait a moment, then check again.', toastType: 'info' });
+        return;
+      }
+      if (!applyClinicScan(rxId, scan)) throw new Error('Curaleaf did not return the complete prescription and pack details.');
+      dispatch({ type: 'ADD_TOAST', message: 'Curaleaf verified the barcode and supplied the prescription details.', toastType: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Curaleaf could not read this prescription barcode.';
+      setScanError(message);
+      dispatch({ type: 'ADD_TOAST', message, toastType: 'error' });
+    } finally {
+      setReadingRxId(null);
     }
+  };
+
+  const applySyntheticClinicScan = (rxId: number, fileName = `synthetic-curaleaf-clinic-${rxId}.pdf`) => {
+    if (!activeOrder) return;
+    const product = state.catalogue.find(item => item.supplierState === 'ACTIVE' && item.formulaId && item.packSize && item.retail > 0)
+      ?? state.catalogue.find(item => item.formulaId && item.packSize)
+      ?? {
+        id: '00000000-0000-4000-8000-000000000002',
+        formulaId: '00000000-0000-4000-8000-000000000001',
+        name: 'Synthetic Curaleaf Clinic training medicine',
+        packSize: 10,
+        retail: 50,
+        cost: 35,
+      };
+    const issued = new Date();
+    const expiry = new Date(issued);
+    expiry.setDate(expiry.getDate() + 28);
+    const serial = `TRAINING-${issued.toISOString().slice(0, 10).replaceAll('-', '')}-${activeOrder.id}-${rxId}`;
+    dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName, fileId: null });
+    dispatch({
+      type: 'APPLY_CURALEAF_SCAN',
+      orderId: activeOrder.id,
+      rxId,
+      scan: {
+        scanId: `training-scan-${activeOrder.id}-${rxId}`,
+        prescriptionId: `training-prescription-${activeOrder.id}-${rxId}`,
+        state: 'ACTIVE',
+        serialNumber: serial,
+        issueDate: issued.toISOString().slice(0, 10),
+        expiryDate: expiry.toISOString().slice(0, 10),
+        prescriberId: `training-prescriber-${rxId}`,
+        prescriberName: 'Dr Curaleaf Training',
+        prescriberGmcNumber: '7000001',
+        prescriberGphcNumber: '',
+        patientName: patient?.name ?? 'Training Patient',
+        patientDob: patient?.dob ?? '1980-01-01',
+        items: [{
+          productId: product.id,
+          formulaId: product.formulaId,
+          name: product.name,
+          qty: 1,
+          unitsNeededCount: product.packSize ?? 1,
+          cost: product.cost,
+          retail: product.retail,
+        }],
+      },
+    });
+    dispatch({ type: 'ADD_TOAST', message: 'Synthetic Clinic barcode verified for training. Nothing was sent to Curaleaf.', toastType: 'info' });
+  };
+
+  const createPaymentRequest = async () => {
+    if (!activeOrder || !readyForPayment) return;
+    setCheckoutBusy(true);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live') {
+        if (!quoteAvailable) throw new Error('A complete in-stock Curaleaf quote is required before creating the live order.');
+        const lineItems = activeOrder.prescriptions.flatMap(rx => rx.items.map(item => ({
+          packId: item.productId,
+          quantity: item.qty,
+        })));
+        const persisted = activeOrder.backendId ? { id: activeOrder.backendId } : await createPortalOrder({
+          organisationId: state.currentOrganisationId,
+          draftId: activeOrder.draftId,
+          patientId: activeOrder.patientId!,
+          paymentRoute: selectedPaymentRoute,
+          lineItems,
+          prescriptions: activeOrder.prescriptions.map(rx => ({
+            fileId: rx.fileId!,
+            clinicScanId: rx.clinicScanId,
+            curaleafPrescriptionId: rx.curaleafPrescriptionId,
+            serialNumber: rx.serialNumber!,
+            issueDate: rx.issueDate!,
+            expiryDate: rx.expiryDate,
+            patient: {
+              name: rx.curaleafPatientName!,
+              dob: rx.curaleafPatientDob!,
+            },
+            prescriber: {
+              id: rx.prescriberId,
+              pin: rx.prescriberPin ?? '',
+              gmcNumber: gmcNumber(rx.prescriberGmcNumber),
+              gphcNumber: rx.prescriberGphcNumber?.trim() || null,
+              name: rx.prescriber,
+              initials: rx.prescriber.split(/\s+/).map(part => part[0]).join('').toUpperCase().slice(0, 20),
+            },
+            items: rx.items.map(item => ({
+              formulaId: item.formulaId!,
+              unitsNeededCount: item.unitsNeededCount!,
+              packId: item.productId,
+              quantity: item.qty,
+            })),
+          })),
+          dispensingFeePence: Math.round(activeOrder.dispensingFee * 100),
+          currency: 'GBP',
+          ...(activeOrder.redoContext ? {
+            redoContext: {
+              originalOrderId: activeOrder.redoContext.originalBackendId ?? activeOrder.redoContext.originalOrderId,
+              isPaidRedo: activeOrder.redoContext.isPaidRedo,
+              requireCuraleafAuth: true as const,
+              priceResolution: activeOrder.redoContext.priceResolution,
+            },
+          } : {}),
+        });
+        if (!activeOrder.backendId) {
+          dispatch({ type: 'SET_ORDER_BACKEND_ID', orderId: activeOrder.id, backendId: persisted.id });
+          if ('lineItems' in persisted) dispatch({
+            type: 'SYNC_ORDER_PATIENT_PRICES',
+            orderId: activeOrder.id,
+            items: persisted.lineItems.map(item => ({ productId: item.productId, patientPrice: item.unitPricePence / 100 })),
+          });
+        }
+        if (activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment) {
+          dispatch({ type: 'CARRY_OVER_PAYMENT', orderId: activeOrder.id, sourceOrderId: activeOrder.redoContext.originalOrderId });
+          dispatch({ type: 'ADD_TOAST', message: 'The verified payment was carried over. No second patient payment was requested.', toastType: 'success' });
+        } else if (selectedPaymentRoute === 'worldpay') {
+          if (!canUseWorldpay) throw new Error('This pharmacy’s Worldpay connection is not verified. Change the default route in Settings.');
+          const session = await createWorldpaySession(persisted.id, {
+            organisationId: state.currentOrganisationId,
+          });
+          const provider = session.provider as { url?: string; _links?: { redirect?: { href?: string } } };
+          const paymentUrl = provider.url ?? provider._links?.redirect?.href;
+          if (paymentUrl) await navigator.clipboard.writeText(paymentUrl).catch(() => undefined);
+          dispatch({ type: 'SEND_PAYMENT_LINK', orderId: activeOrder.id });
+          dispatch({ type: 'ADD_TOAST', message: paymentUrl ? 'Worldpay checkout created and its secure link copied.' : 'Worldpay checkout created. It is awaiting the patient.', toastType: 'success' });
+        } else {
+          dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
+          dispatch({ type: 'ADD_TOAST', message: 'Order saved. Confirm the pharmacy payment before sending its prescriptions to Curaleaf.', toastType: 'success' });
+        }
+      } else if (activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment) {
+        dispatch({ type: 'CARRY_OVER_PAYMENT', orderId: activeOrder.id, sourceOrderId: activeOrder.redoContext.originalOrderId });
+        dispatch({ type: 'ADD_TOAST', message: 'Training payment carry-over recorded. No second payment request was created.', toastType: 'info' });
+      } else if (selectedPaymentRoute === 'worldpay') {
+        if (!canUseWorldpay) return;
+        dispatch({ type: 'SEND_PAYMENT_LINK', orderId: activeOrder.id });
+        dispatch({ type: 'ADD_TOAST', message: 'Training Worldpay request created. No external payment was sent.', toastType: 'success' });
+      } else {
+        dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
+        dispatch({ type: 'ADD_TOAST', message: 'Training pharmacy payment selected. No external record was created.', toastType: 'success' });
+      }
+      dispatch({ type: 'SET_SCREEN', screen: 'orders' });
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The order could not be created.', toastType: 'error' });
+    } finally {
+      setCheckoutBusy(false);
+    }
+  };
+
+  const attachPrescriptionFile = async (rxId: number, file: File) => {
+    if (!activeOrder) return;
+    const prescription = activeOrder.prescriptions.find(candidate => candidate.id === rxId);
+    if (!prescription) return;
+    if (isLocalPortalPreview || state.workspaceMode !== 'live') {
+      if (prescription.entryMode === 'manual') {
+        dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: `training-file-${activeOrder.id}-${rxId}` });
+        dispatch({ type: 'ADD_TOAST', message: 'Manual prescription attached for training. Nothing was uploaded.', toastType: 'info' });
+      } else {
+        applySyntheticClinicScan(rxId, file.name);
+      }
+      return;
+    }
+    setUploadingRxId(rxId);
+    try {
+      const contentType = file.type as 'application/pdf' | 'image/jpeg' | 'image/png';
+      if (!['application/pdf', 'image/jpeg', 'image/png'].includes(contentType)) throw new Error('Use a PDF, JPG or PNG prescription file.');
+      if (file.size > 16_000_000) throw new Error('Prescription files must be 16 MB or smaller.');
+      const draftId = await ensureDurableDraft(activeOrder, durableDraftPayload ?? {});
+      const uploaded = await uploadPrescriptionFile({ organisationId: state.currentOrganisationId, filename: file.name, contentType, sizeBytes: file.size }, file);
+      const prescriptions = activeOrder.prescriptions.map(candidate => candidate.id === rxId
+        ? { ...candidate, copyFileName: file.name, fileId: uploaded.id }
+        : candidate);
+      try {
+        await updateOrderDraft(draftId, {
+          organisationId: state.currentOrganisationId,
+          patientId: activeOrder.patientId,
+          payload: { ...(durableDraftPayload ?? {}), prescriptions },
+        });
+      } catch (error) {
+        await deletePrescriptionFile(uploaded.id, state.currentOrganisationId).catch(() => undefined);
+        throw error;
+      }
+      dispatch({ type: 'SET_RX_FILE', orderId: activeOrder.id, rxId, fileName: file.name, fileId: uploaded.id });
+      if (prescription.fileId) {
+        void deletePrescriptionFile(prescription.fileId, state.currentOrganisationId)
+          .catch(() => console.warn('Previous prescription copy cleanup was deferred.'));
+      }
+      if (prescription.entryMode === 'manual') {
+        dispatch({ type: 'ADD_TOAST', message: prescription.fileId ? 'Prescription copy replaced securely.' : 'Manual prescription copy uploaded securely.', toastType: 'success' });
+      } else {
+        dispatch({ type: 'ADD_TOAST', message: 'Prescription uploaded securely. Curaleaf is reading its barcode now.', toastType: 'success' });
+        await readClinicBarcode(rxId, uploaded.id);
+      }
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Prescription upload failed.', toastType: 'error' });
+    } finally {
+      setUploadingRxId(null);
+    }
+  };
+
+  const removePrescriptionFile = async (rxId: number) => {
+    if (!activeOrder) return;
+    const prescription = activeOrder.prescriptions.find(candidate => candidate.id === rxId);
+    if (!prescription?.copyFileName) return;
+    setFileRemovalBusyRxId(rxId);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live' && prescription.fileId) {
+        const draftId = await ensureDurableDraft(activeOrder, durableDraftPayload ?? {});
+        const prescriptions = activeOrder.prescriptions.map(candidate => candidate.id === rxId
+          ? { ...candidate, copyFileName: null, fileId: null, clinicScanId: undefined, curaleafPrescriptionId: undefined }
+          : candidate);
+        await updateOrderDraft(draftId, {
+          organisationId: state.currentOrganisationId,
+          patientId: activeOrder.patientId,
+          payload: { ...(durableDraftPayload ?? {}), prescriptions },
+        });
+        dispatch({ type: 'CLEAR_RX_FILE', orderId: activeOrder.id, rxId });
+        void deletePrescriptionFile(prescription.fileId, state.currentOrganisationId)
+          .catch(() => console.warn('Removed prescription copy cleanup was deferred.'));
+      } else {
+        dispatch({ type: 'CLEAR_RX_FILE', orderId: activeOrder.id, rxId });
+      }
+      setScanError(null);
+      dispatch({ type: 'ADD_TOAST', message: 'Prescription copy removed. You can upload a replacement.', toastType: 'info' });
+      setConfirmingFileRemoveRxId(null);
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The prescription copy could not be removed.', toastType: 'error' });
+    } finally {
+      setFileRemovalBusyRxId(null);
+    }
+  };
+
+  const refreshQuote = async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!activeOrder || !currentQuoteItems.length || !isApiConfigured) return;
+    const requestVersion = ++quoteRequestVersion.current;
+    setQuoteBusy(true);
+    setQuoteError(null);
+    try {
+      const quote = isLocalPortalPreview
+        ? await getDevCuraleafQuote(currentQuoteItems)
+        : state.workspaceMode === 'live'
+          ? await getCuraleafQuote(state.currentOrganisationId, currentQuoteItems)
+          : await getCuraleafTrainingQuote(state.currentOrganisationId, currentQuoteItems);
+      if (requestVersion !== quoteRequestVersion.current) return;
+      const quotedPackIds = new Set(quote.items.map(item => item.packId));
+      const missingPackIds = [...new Set(currentQuoteItems.map(item => item.packId).filter(packId => !quotedPackIds.has(packId)))];
+      const lineNames = (packIds: string[]) => [...new Set(
+        activeOrder.prescriptions.flatMap(rx => rx.items)
+          .filter(item => packIds.includes(item.productId))
+          .map(item => item.name),
+      )];
+      if (missingPackIds.length) {
+        const names = lineNames(missingPackIds);
+        setQuotedSignature(null);
+        setQuoteSummary(null);
+        setQuotedUnavailableProductIds([]);
+        setQuoteError({
+          title: 'Selected pack not quoted by Curaleaf',
+          detail: state.workspaceMode === 'training'
+            ? `Curaleaf returned no wholesale or availability line for ${names.join(', ') || 'the selected pack'}. The draft is unchanged and no supplier order has been sent.`
+            : `Curaleaf returned no wholesale or availability line for ${names.join(', ') || 'the selected pack'}, although it remains listed in the catalogue. Keep the draft and retry later, or ask your HHH administrator to raise the pack with Curaleaf.`,
+        });
+        return;
+      }
+      dispatch({
+        type: 'APPLY_CURALEAF_QUOTE',
+        items: quote.items.map(item => ({
+          productId: item.packId,
+          wholesalePrice: Number(item.wholesalePackPrice),
+          patientPrice: Number(item.patientPackPrice),
+          inStock: item.inStock,
+          stockStatus: item.stockStatus ?? (item.inStock ? 'in_stock' : 'out_of_stock'),
+        })),
+      });
+      const unavailableProductIds = quote.items.filter(item => !item.inStock || item.stockStatus === 'out_of_stock').map(item => item.packId);
+      setQuotedSignature(currentQuoteSignature);
+      setQuoteSummary({ shippingPrice: Number(quote.shippingPrice) || 0, taxRate: Number(quote.taxRate) || 0 });
+      setQuotedUnavailableProductIds(unavailableProductIds);
+      if (unavailableProductIds.length) {
+        const names = lineNames(unavailableProductIds);
+        setQuoteError({
+          title: 'Selected pack is currently unavailable',
+          detail: `Curaleaf returned pricing for ${names.join(', ') || 'the selected pack'} but marked it out of stock. Payment remains blocked; keep the draft and refresh later.`,
+        });
+        if (!silent) dispatch({ type: 'ADD_TOAST', message: 'Curaleaf returned pricing, but one or more selected packs are out of stock.', toastType: 'info' });
+      } else {
+        setQuoteError(null);
+        if (!silent) dispatch({ type: 'ADD_TOAST', message: `Curaleaf quote refreshed for ${quote.items.length} product line${quote.items.length === 1 ? '' : 's'}.`, toastType: 'success' });
+      }
+    } catch (error) {
+      if (requestVersion !== quoteRequestVersion.current) return;
+      setQuoteSummary(null);
+      setQuotedSignature(null);
+      setQuotedUnavailableProductIds([]);
+      setQuoteError({
+        title: 'Quote request could not be completed',
+        detail: error instanceof Error ? error.message : 'The Curaleaf quote could not be loaded. Wait and retry, or contact your HHH administrator if this continues.',
+      });
+    } finally {
+      if (requestVersion === quoteRequestVersion.current) setQuoteBusy(false);
+    }
+  };
+
+  const automaticQuoteRef = useRef(refreshQuote);
+  automaticQuoteRef.current = refreshQuote;
+  const automaticQuoteOrderId = activeOrder?.id ?? null;
+  const hasCurrentQuoteItems = currentQuoteItems.length > 0;
+
+  useEffect(() => {
+    if (!automaticQuoteOrderId || !hasCurrentQuoteItems || !isApiConfigured) return;
+    const timeoutId = window.setTimeout(() => {
+      void automaticQuoteRef.current({ silent: true });
+    }, 500);
+    return () => window.clearTimeout(timeoutId);
+  }, [automaticQuoteOrderId, currentQuoteSignature, hasCurrentQuoteItems, state.currentOrganisationId, state.workspaceMode]);
+
+  const selectPatient = (patientId: string) => {
+    if (!activeOrder || !patientId) return;
+    if (patientId === activeOrder.patientId) {
+      setChangingPatient(false);
+      setPatientQuery('');
+      setPatientSearchOpen(false);
+      return;
+    }
+    const linkedPatient = tenantPatients.find(candidate => candidate.id === patientId);
+    if (!linkedPatient) return;
+    const replacingPatient = Boolean(activeOrder.patientId);
+    dispatch({ type: 'SET_ORDER_PATIENT', orderId: activeOrder.id, patientId });
+    dispatch({ type: 'ADD_TOAST', message: replacingPatient ? `Draft reassigned to ${linkedPatient.name}.` : `Linked patient “${linkedPatient.name}”.`, toastType: 'success' });
+    setChangingPatient(false);
+    setPatientQuery('');
+    setPatientSearchOpen(false);
+  };
+
+  const handleRedoPrescription = (sourceOrderId: number) => {
+    if (!activeOrder) return;
+    const source = unresolvedOrdersForPatient.find(entry => entry.order.id === sourceOrderId);
+    if (!source) return;
+    dispatch({ type: 'APPLY_REDO_FROM_ORDER', orderId: activeOrder.id, sourceOrderId });
+    setSelectedUnresolvedOrderId(sourceOrderId);
+    dispatch({
+      type: 'ADD_TOAST',
+      message: source.order.payment.status === 'paid'
+        ? `Order #${sourceOrderId} loaded into this draft (${source.itemCount} item${source.itemCount === 1 ? '' : 's'}). Payment can be carried over after you attach and authenticate the new prescription PDF.`
+        : `Order #${sourceOrderId} loaded into this draft (${source.itemCount} item${source.itemCount === 1 ? '' : 's'}). Attach and authenticate the new prescription PDF before checkout.`,
+      toastType: 'info',
+    });
+  };
+
+  const chooseAbsorbDifference = () => {
+    if (!activeOrder || paidRedoAmountDifference <= 0) return;
+    dispatch({ type: 'SET_REDO_PRICE_RESOLUTION', orderId: activeOrder.id, resolution: 'absorb' });
+    dispatch({ type: 'ADD_TOAST', message: `The pharmacy will absorb ${money(paidRedoAmountDifference)}. The patient’s verified payment stays unchanged.`, toastType: 'info' });
+  };
+
+  const beginRefundAndRecharge = async () => {
+    if (!activeOrder?.redoContext || !redoSourceOrder || redoRefundBusy) return;
+    dispatch({ type: 'SET_REDO_PRICE_RESOLUTION', orderId: activeOrder.id, resolution: 'refund_and_recharge' });
+    if (redoSourceOrder.refund) return;
+    setRedoRefundBusy(true);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live' && redoSourceOrder.backendId) {
+        const refund = await createPortalOrderRefund(redoSourceOrder.backendId, { organisationId: state.currentOrganisationId, reason: 'replacement_price_changed', resolution: 'replace_new_payment' });
+        dispatch({ type: 'SET_ORDER_REFUND', orderId: redoSourceOrder.id, refund });
+      } else {
+        dispatch({ type: 'START_ORDER_REFUND', orderId: redoSourceOrder.id, reason: 'replacement_price_changed', resolution: 'replace_new_payment' });
+      }
+      dispatch({ type: 'ADD_TOAST', message: `Replacement held. Refund ${money(redoSourceOrder.payment.amount)} using payment ID ${redoSourceOrder.payment.ref ?? 'shown below'}.`, toastType: 'warning' });
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The refund task could not be created.', toastType: 'error' });
+    } finally { setRedoRefundBusy(false); }
+  };
+
+  const confirmRedoRefund = async () => {
+    if (!redoSourceOrder?.refund || redoRefundReference.trim().length < 3 || redoRefundBusy) return;
+    setRedoRefundBusy(true);
+    try {
+      if (!isLocalPortalPreview && state.workspaceMode === 'live' && redoSourceOrder.backendId) {
+        const refund = await confirmPortalOrderRefund(redoSourceOrder.backendId, redoSourceOrder.refund.id, { organisationId: state.currentOrganisationId, externalReference: redoRefundReference.trim() });
+        dispatch({ type: 'SET_ORDER_REFUND', orderId: redoSourceOrder.id, refund });
+      } else {
+        dispatch({ type: 'CONFIRM_ORDER_REFUND', orderId: redoSourceOrder.id, externalReference: redoRefundReference.trim() });
+      }
+      dispatch({ type: 'ADD_TOAST', message: 'Old payment refund confirmed. The replacement can now create a fresh payment link.', toastType: 'success' });
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The refund could not be confirmed.', toastType: 'error' });
+    } finally { setRedoRefundBusy(false); }
+  };
+
+  const beginPatientChange = () => {
+    if (activeOrder?.redoContext) return;
+    setPatientQuery('');
+    setPatientActiveIndex(0);
+    setPatientSearchOpen(true);
+    setChangingPatient(true);
+  };
+
+  const cancelPatientChange = () => {
+    setChangingPatient(false);
+    setPatientQuery('');
+    setPatientSearchOpen(false);
+    setPatientActiveIndex(0);
+  };
+
+  const renderPatientSearch = (mode: 'link' | 'change') => {
+    if (!activeOrder) return null;
+    return (
+      <div className={`rx-patient-change${mode === 'link' ? ' is-linking' : ''}`}>
+        <label className="rx-patient-change__heading" htmlFor={`rx-patient-${activeOrder.id}`}>
+          <small>{mode === 'change' ? 'Change linked patient' : 'Link patient'}</small>
+          <strong>{mode === 'change' ? 'Search approved patients' : 'Find an approved patient'}</strong>
+          <span>Type a name, email address or mobile number.</span>
+        </label>
+        <div className="rx-patient-combobox" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPatientSearchOpen(false); }}>
+          <div className="rx-patient-combobox__field">
+            <Search size={15} aria-hidden="true" />
+            <input
+              id={`rx-patient-${activeOrder.id}`}
+              className="input"
+              value={patientQuery}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={patientSearchOpen}
+              aria-controls={`rx-patient-results-${activeOrder.id}`}
+              aria-activedescendant={patientSearchOpen && matchingPatients[patientActiveIndex] ? `rx-patient-option-${matchingPatients[patientActiveIndex].id}` : undefined}
+              placeholder="Search approved patients…"
+              autoComplete="off"
+              onFocus={() => setPatientSearchOpen(true)}
+              onChange={event => { setPatientQuery(event.target.value); setPatientActiveIndex(0); setPatientSearchOpen(true); }}
+              onKeyDown={event => {
+                if (event.key === 'ArrowDown' && matchingPatients.length) { event.preventDefault(); setPatientSearchOpen(true); setPatientActiveIndex(index => Math.min(index + 1, matchingPatients.length - 1)); }
+                if (event.key === 'ArrowUp' && matchingPatients.length) { event.preventDefault(); setPatientActiveIndex(index => Math.max(index - 1, 0)); }
+                if (event.key === 'Enter' && patientSearchOpen && matchingPatients[patientActiveIndex]) { event.preventDefault(); selectPatient(matchingPatients[patientActiveIndex].id); }
+                if (event.key === 'Escape') { event.preventDefault(); setPatientSearchOpen(false); }
+              }}
+            />
+          </div>
+          {patientSearchOpen && (
+            <div id={`rx-patient-results-${activeOrder.id}`} className="rx-patient-results" role="listbox" aria-label="Matching approved patients">
+              {matchingPatients.length ? matchingPatients.map((candidate, index) => (
+                <button
+                  id={`rx-patient-option-${candidate.id}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === patientActiveIndex}
+                  className={index === patientActiveIndex ? 'active' : ''}
+                  key={candidate.id}
+                  onMouseEnter={() => setPatientActiveIndex(index)}
+                  onClick={() => selectPatient(candidate.id)}
+                >
+                  <span className="rx-patient-result__avatar" aria-hidden="true">{initials(candidate.name)}</span>
+                  <span><strong>{candidate.name}</strong><small className="rx-patient-result__dob">DOB {formatPatientDob(candidate.dob)}</small><small>{candidate.email} · {candidate.mobile}</small></span>
+                  {candidate.id === patient?.id ? <em>Current</em> : null}
+                </button>
+              )) : <span className="rx-patient-results__empty">No approved patients match “{patientQuery.trim()}”.</span>}
+            </div>
+          )}
+        </div>
+        {mode === 'change' ? <button type="button" className="btn btn-sm rx-patient-change__cancel" onClick={cancelPatientChange}>Cancel</button> : null}
+      </div>
+    );
+  };
+
+  const deleteDraft = async (orderId: number) => {
+    const target = state.orders.find(order => order.id === orderId && order.organisationId === state.currentOrganisationId && order.payment.status === 'none');
+    if (!target) return;
+    deletedDraftOrderIds.current.add(orderId);
+    if (durableDraftEnabled && target.draftId) {
+      try {
+        await deleteOrderDraft(target.draftId, state.currentOrganisationId);
+      } catch (error) {
+        deletedDraftOrderIds.current.delete(orderId);
+        dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The saved draft could not be deleted.', toastType: 'error' });
+        return;
+      }
+    }
+    dispatch({ type: 'CLEAR_ORDER', orderId });
+    dispatch({ type: 'ADD_TOAST', message: `Draft order ${orderId} deleted.`, toastType: 'info' });
+    setConfirmingDraftDeleteId(null);
+  };
+
+  const renderFormularyEditor = () => {
+    if (!selectedRx || !activeOrder) return null;
+    return (
+      <ManualPrescriptionEditor
+        view="formulary"
+        prescription={selectedRx}
+        catalogue={state.catalogue}
+        onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
+        onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
+        onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
+        onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}
+        onUpdateQuantity={(productId, qty) => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId, qty })}
+        onUpdateUnits={(productId, unitsNeededCount) => dispatch({ type: 'UPDATE_ITEM_UNITS', orderId: activeOrder.id, rxId: selectedRx.id, productId, unitsNeededCount })}
+      />
+    );
   };
 
   return (
-    <div className="page-body">
-      {/* ── Active draft selection chips ── */}
-      <div className="flex items-center gap-sm chip-row">
-        <span className="section-label" style={{ margin: 0 }}>Active Session drafts:</span>
-        {draftOrders.map(o => {
-          const p = o.patientId ? tenantPatients.find(c => c.id === o.patientId) : null;
-          return (
-            <button
-              key={o.id}
-              className={`chip${o.id === state.activeOrderId ? ' active' : ''}`}
-              onClick={() => dispatch({ type: 'SET_ACTIVE_ORDER', orderId: o.id })}
-            >
-              <User size={12} />
-              {p ? p.name : `Draft Order #${o.id}`}
-            </button>
-          );
-        })}
-        <button
-          className="btn btn-sm btn-primary"
-          onClick={() => dispatch({ type: 'NEW_ORDER' })}
-        >
-          <Plus size={12} /> New Draft Order
+    <div className="page-body rx-workbench">
+      <section className="rx-draft-bar card" aria-label="Prescription draft sessions">
+        <div className="rx-draft-bar__title">
+          <p className="section-label">Draft sessions</p>
+          <strong>{draftOrders.length} open</strong>
+        </div>
+        <div className="rx-draft-tabs" role="tablist" aria-label="Open prescription drafts">
+          {draftOrders.map(order => {
+            const draftPatient = order.patientId ? tenantPatients.find(candidate => candidate.id === order.patientId) : null;
+            const active = order.id === state.activeOrderId;
+            return (
+              <div className={`rx-draft-tab-wrap${active ? ' active' : ''}`} key={order.id}>
+                <button type="button" role="tab" aria-selected={active} className="rx-draft-tab" onClick={() => dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id })}>
+                  <span className="rx-draft-tab__avatar">{draftPatient ? initials(draftPatient.name) : '—'}</span>
+                  <span>
+                    <strong>{draftPatient?.name ?? `Unlinked draft #${order.id}`}</strong>
+                    <small>{order.prescriptions.length} Rx{order.prescriptions.length === 1 ? '' : 's'}{order.redoContext ? ` · ${orderReference(order)}` : ''}</small>
+                  </span>
+                </button>
+                <button type="button" className="rx-draft-tab-delete" aria-label={`Delete ${draftPatient?.name ?? `unlinked draft ${order.id}`}`} onClick={() => setConfirmingDraftDeleteId(order.id)}><Trash2 size={13} /></button>
+              </div>
+            );
+          })}
+        </div>
+        <button type="button" className="btn btn-primary rx-new-draft" onClick={() => dispatch({ type: 'NEW_ORDER' })}>
+          + New patient order
         </button>
-      </div>
+      </section>
 
-      {/* ── Empty State ── */}
-      {(!state.activeOrderId || !activeOrder) ? (
+      {confirmingDraft ? (
+        <section className="rx-draft-delete-confirm card" role="alertdialog" aria-modal="true" aria-label={`Delete ${confirmingDraftLabel}`}>
+          <span><Trash2 size={16} /><span><strong>Delete {confirmingDraftLabel}?</strong><small>This removes every unfinished prescription record in this draft. This cannot be undone.</small></span></span>
+          <div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDeleteId(null)}>Keep draft</button>
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => void deleteDraft(confirmingDraft.id)}>Delete draft</button>
+          </div>
+        </section>
+      ) : null}
+
+      {!activeOrder ? (
         <div className="empty-state">
-          <div className="empty-icon"><FileText size={32} /></div>
-          <h3>No Active Rx Draft</h3>
-          <p style={{ marginTop: 6, fontSize: 'var(--font-sm)', color: 'var(--text-secondary)' }}>
-            Start a new order using the <strong>+ New Draft Order</strong> button above.
-          </p>
+          <FileText size={32} />
+          <h3>No active prescription</h3>
+          <p className="empty-desc">Start a prescription, link an approved patient and add the supplied prescription records.</p>
         </div>
       ) : (
-        <div className="workspace-3col">
-          
-          {/* ═══ COLUMN 1: Patient Link & Rx Files ═══ */}
-          <div className="col-left">
-            <div className="col-header">
-              <span className="col-header-title">
-                <User size={16} /> 1. Link &amp; Documents
-              </span>
+        <>
+          <section className={`rx-patient-band rx-builder-context card${changingPatient || !patient ? ' is-changing-patient' : ''}`}>
+            <div className="rx-patient-band__identity rx-builder-patient">
+              {patient ? (
+                changingPatient ? (
+                  renderPatientSearch('change')
+                ) : (
+                  <>
+                    <span className="avatar">{initials(patient.name)}</span>
+                    <span className="rx-patient-identity-copy">
+                      <p className="section-label">STEP 1</p>
+                      <p className="section-label rx-patient-approved-label"><CheckCircle size={12} /> Approved patient</p>
+                      <strong>{patient.name}</strong>
+                      <span className="rx-patient-meta" aria-label="Patient identity details">
+                        <span>DOB {formatPatientDob(patient.dob)}</span>
+                        <span>{patient.email}</span>
+                        <span>{patient.mobile}</span>
+                      </span>
+                    </span>
+                    <div className="rx-patient-actions">
+                      {activeOrder.redoContext
+                        ? <span className="rx-redo-patient-lock"><ShieldCheck size={12} /> Locked to redo</span>
+                        : <button type="button" className="btn btn-secondary btn-sm" onClick={beginPatientChange}><Pencil size={12} /> Change</button>}
+                      <button type="button" className="icon-button danger" aria-label="Delete this prescription draft" title="Delete draft" onClick={() => setConfirmingDraftDeleteId(activeOrder.id)}><Trash2 size={14} /></button>
+                    </div>
+                  </>
+                )
+              ) : (
+                renderPatientSearch('link')
+              )}
             </div>
-            
-            <div className="col-content">
-              {/* Patient linking */}
-              <div style={{ marginBottom: 20 }}>
-                <span className="text-xs font-bold text-muted uppercase" style={{ display: 'block', marginBottom: 8 }}>Linked Patient</span>
-                {patient ? (
-                  <div className="patient-card">
-                    <div className="avatar">{initials(patient.name)}</div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-sm">{patient.name}</span>
-                        <span className="pill pill-green">Linked</span>
-                      </div>
-                      <div className="text-xs text-muted" style={{ marginTop: 2 }}>{patient.email}</div>
-                      <div className="text-xs text-faint" style={{ marginTop: 2 }}>{patient.mobile}</div>
+            <ol className="rx-builder-flow" aria-label="Create order workflow">
+              {workflowSteps.map((step, index) => (
+                <li key={step.label} className={step.complete ? 'complete' : step.active ? 'active' : ''}>
+                  <span className="rx-builder-flow__number">{step.complete ? <CheckCircle size={15} /> : index + 1}</span>
+                  <span><strong>{step.label}</strong><small>{step.detail}</small></span>
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          {patient && activeOrder.redoContext ? (
+            <section className="rx-replacement-context card" aria-label={`Replacement order ${activeOrderRef}`}>
+              <span className="rx-replacement-context__mark">{activeOrderRef.replace(/^#\d+/, '')}</span>
+              <span className="rx-replacement-context__identity">
+                <p className="section-label">Replacement prescription</p>
+                <strong>Order {activeOrderRef}</strong>
+                <small>
+                  Replaces order {redoSourceOrder ? orderReference(redoSourceOrder) : `#${activeOrder.redoContext.originalOrderId}`}
+                  {' · '}{activeOrder.redoContext.reason === 'rejected' ? 'Curaleaf rejected' : 'Prescription expired'}
+                </small>
+              </span>
+              <span className="rx-replacement-context__carry">
+                <strong>{activeOrder.prescriptions.flatMap(rx => rx.items).length} medicine{activeOrder.prescriptions.flatMap(rx => rx.items).length === 1 ? '' : 's'} carried forward</strong>
+                <small>The old document was cleared automatically.</small>
+              </span>
+              <span className="rx-replacement-context__next"><ShieldCheck size={15} /><span><strong>New prescription required</strong><small>Authenticate the replacement below.</small></span></span>
+            </section>
+          ) : patient && unresolvedOrdersForPatient.length > 0 ? (
+            <details key={`${activeOrder.id}-${activeOrder.redoContext?.originalOrderId ?? 'none'}`} className="rx-unresolved-panel rx-unresolved-drawer card" aria-label="Unresolved archived and rejected orders" open={Boolean(activeOrder.redoContext)}>
+              <summary className="rx-unresolved-panel__header">
+                <span>
+                  <p className="section-label">Unresolved for this patient</p>
+                  <strong>{unresolvedOrdersForPatient.length} archived / rejected order{unresolvedOrdersForPatient.length === 1 ? '' : 's'}</strong>
+                  <small>Open to repair a previous order using a newly authenticated prescription.</small>
+                </span>
+                <span className="pill pill-neutral">Review</span>
+              </summary>
+              <div className="rx-unresolved-drawer__body">
+                <p>Select one to load its medicines into this draft. The old document is never reused; a new prescription must pass authentication.</p>
+                <div className="rx-unresolved-list" role="listbox" aria-label="Unresolved orders">
+                {unresolvedOrdersForPatient.map(entry => {
+                  const selected = selectedUnresolvedOrderId === entry.order.id;
+                  const itemNames = entry.order.prescriptions.flatMap(rx => rx.items.map(item => item.name));
+                  return (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      key={entry.order.id}
+                      className={`rx-unresolved-item${selected ? ' is-selected' : ''}`}
+                      onClick={() => setSelectedUnresolvedOrderId(entry.order.id)}
+                    >
+                      <span className="rx-unresolved-item__meta">
+                        <strong>Order {orderReference(entry.order)}</strong>
+                        <small>
+                          {entry.reason === 'rejected' ? 'Curaleaf rejected' : '28-day archived'}
+                          {' · '}
+                          {new Date(entry.order.date).toLocaleDateString('en-GB')}
+                          {' · '}
+                          {entry.order.payment.status === 'paid' ? 'Paid' : entry.order.payment.status}
+                        </small>
+                      </span>
+                      <span className="rx-unresolved-item__items">
+                        {entry.itemCount} item{entry.itemCount === 1 ? '' : 's'}
+                        {itemNames.length ? ` · ${itemNames.slice(0, 2).join(', ')}${itemNames.length > 2 ? '…' : ''}` : ''}
+                      </span>
+                      <span className={`pill ${entry.reason === 'rejected' ? 'pill-red' : 'pill-neutral'}`}>{entry.reason === 'rejected' ? 'Rejected' : 'Archived'}</span>
+                    </button>
+                  );
+                })}
+                </div>
+                <footer className="rx-unresolved-panel__actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={!selectedUnresolvedOrderId}
+                  onClick={() => selectedUnresolvedOrderId && handleRedoPrescription(selectedUnresolvedOrderId)}
+                >
+                  <RefreshCw size={14} />
+                  Use this draft as replacement
+                </button>
+                <span>
+                  Clears the old PDF and pre-fills medicines. New Curaleaf prescription authentication is required
+                  {selectedUnresolvedOrderId && unresolvedOrdersForPatient.find(entry => entry.order.id === selectedUnresolvedOrderId)?.order.payment.status === 'paid'
+                    ? '; the existing verified payment is carried over after authentication, so no second payment request is created.'
+                    : '.'}
+                </span>
+                </footer>
+              </div>
+            </details>
+          ) : null}
+
+          <button type="button" className="rx-mobile-review-bar" onClick={() => document.getElementById('rx-order-review')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+            <span><small>Patient total</small><strong>{money(orderRevenue(activeOrder))}</strong></span>
+            <span>Review order <ArrowRight size={15} /></span>
+          </button>
+
+          <div className="rx-workbench-layout">
+            <main className="rx-workbench-main">
+              <section className="rx-surface card rx-record-editor">
+                <header className="rx-surface__header">
+                  <div className="section-heading" style={{ margin: 0 }}>
+                    <div>
+                      <p className="section-label">Step 2 · Prescription evidence</p>
+                      <h3><FileText size={17} /> Authenticate each prescription record</h3>
                     </div>
                   </div>
-                ) : (
-                  <div>
-                    <select
-                      className="input select"
-                      value=""
-                      onChange={e => {
-                        if (e.target.value) {
-                          const p = tenantPatients.find(c => c.id === e.target.value);
-                          dispatch({
-                            type: 'SET_ORDER_PATIENT',
-                            orderId: activeOrder.id,
-                            patientId: e.target.value,
-                          });
-                          if (p) {
-                            dispatch({ type: 'ADD_TOAST', message: `Linked patient "${p.name}" to order.`, toastType: 'success' });
-                          }
-                        }
-                      }}
-                    >
-                      <option value="">Link a CRM patient...</option>
-                      {tenantPatients.map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.email})
-                        </option>
-                      ))}
-                    </select>
-                    <small className="text-muted">Only patients approved for programme onboarding by HHH are available.</small>
-                  </div>
-                )}
-              </div>
-
-              <div className="divider" />
-
-              {/* Prescriptions stack */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-muted uppercase">Prescription Uploads ({activeOrder.prescriptions.length})</span>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}>+Add Rx</button>
+                </header>
+                <div className="rx-record-tabs" role="tablist" aria-label="Prescription records">
+                  {activeOrder.prescriptions.map((rx, index) => {
+                    const active = rx.id === selectedRxId;
+                    return (
+                      <button key={rx.id} type="button" role="tab" aria-selected={active} className={active ? 'active' : ''} onClick={() => setSelectedRxId(rx.id)}>
+                        <FileText size={14} />
+                        <span><strong>Rx {index + 1}</strong><small>{rx.items.length} item{rx.items.length === 1 ? '' : 's'}</small></span>
+                        <span className={`rx-record-state${rx.copyFileName && rx.prescriber.trim() ? ' complete' : ''}`} aria-hidden="true" />
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {activeOrder.prescriptions.map((rx, rxIdx) => {
-                  const isSelected = selectedRxId === rx.id;
-                  return (
-                    <div 
-                      key={rx.id} 
-                      className={`card rx-block ${isSelected ? 'selected card-surface' : ''}`}
-                      onClick={() => setSelectedRxId(rx.id)}
-                    >
-                      <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
-                        <span className="text-sm font-semibold flex items-center gap-xs">
-                          <FileText size={14} className={isSelected ? 'text-green' : 'text-muted'} />
-                          Rx #{rxIdx + 1}
-                        </span>
-                        {isSelected && <span className="pill pill-green" style={{ fontSize: 9, padding: '2px 6px' }}>Active</span>}
+                {selectedRx && (
+                  <div className="rx-record-body">
+                    <div className="rx-record-evidence">
+                      <div className="rx-record-evidence__heading">
+                        <div>
+                          <p className="section-label">Editing</p>
+                          <strong>Prescription {selectedRxIndex + 1}</strong>
+                        </div>
                         {activeOrder.prescriptions.length > 1 && (
-                          <button
-                            className="btn btn-sm btn-danger"
-                            style={{ padding: '2px 4px' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: rx.id });
-                              dispatch({ type: 'ADD_TOAST', message: `Removed Rx #${rxIdx + 1}.`, toastType: 'info' });
-                            }}
-                          >
-                            <X size={10} />
+                          <button type="button" className="icon-button danger" aria-label={`Delete prescription ${selectedRxIndex + 1}`} title="Cancel this prescription record" onClick={() => setConfirmingRxDeleteId(selectedRx.id)}>
+                            <Trash2 size={14} />
                           </button>
                         )}
                       </div>
-
-                      {/* File upload state */}
-                      <div
-                        className={`upload-zone${rx.copyFileName ? ' uploaded' : ''} ${scanningRxId === rx.id ? 'scanning' : ''}`}
-                        style={{ padding: '8px 12px', fontSize: 12 }}
-                        onClick={(e) => {
-                          if (rx.copyFileName || scanningRxId !== null) return;
-                          e.stopPropagation();
-                          startScan(rx.id);
-                        }}
-                      >
-                        <div className="upload-icon">
-                          {rx.copyFileName ? <CheckCircle size={14} className="text-green" /> : <Upload size={14} />}
+                      {confirmingRxDeleteId === selectedRx.id ? (
+                        <div className="rx-prescription-cancel-confirm" role="alert">
+                          <AlertTriangle size={16} />
+                          <span><strong>Cancel prescription {selectedRxIndex + 1}?</strong><small>This removes only this unpaid draft prescription. Once a payment request exists, cancellation is handled from Orders with the payment and Curaleaf safeguards.</small></span>
+                          <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingRxDeleteId(null)}>Keep it</button><button type="button" className="btn btn-danger btn-sm" onClick={() => { dispatch({ type: 'REMOVE_RX', orderId: activeOrder.id, rxId: selectedRx.id }); dispatch({ type: 'ADD_TOAST', message: `Cancelled prescription ${selectedRxIndex + 1}.`, toastType: 'info' }); setConfirmingRxDeleteId(null); }}>Cancel prescription</button></div>
                         </div>
-                        <div style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', flex: 1 }}>
-                          {scanningRxId === rx.id ? (
-                            <span className="text-green font-semibold">Scanning {scanProgress}%</span>
-                          ) : rx.copyFileName ? (
-                            <span className="text-green">{rx.copyFileName}</span>
-                          ) : (
-                            <span className="text-muted">Click to scan Rx copy</span>
-                          )}
-                        </div>
+                      ) : null}
+                      <div className="rx-entry-mode" role="group" aria-label="Prescription entry route">
+                        <button type="button" aria-pressed={selectedRx.entryMode === 'clinic'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' }); }}>
+                          <FileScan size={15} /><span><strong>Scan Rx barcode</strong><small>Preferred automatic route</small></span>
+                        </button>
+                        <button type="button" aria-pressed={selectedRx.entryMode === 'manual'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'manual' }); }}>
+                          <Pencil size={15} /><span><strong>Manually enter Rx details</strong><small>Copy from the signed document</small></span>
+                        </button>
                       </div>
-
-                      {/* Scanning laser UI */}
-                      {scanningRxId === rx.id && (
-                        <div className="scanner-container scanning" style={{ marginTop: 8, padding: 8 }}>
-                          <div className="scanner-laser" />
-                          <div className="scan-progress-wrapper" style={{ marginTop: 0 }}>
-                            <div className="scan-progress-track">
-                              <div className="scan-progress-fill" style={{ width: `${scanProgress}%` }} />
-                            </div>
-                          </div>
+                      <div className="rx-clinic-note">
+                        <FileScan size={18} aria-hidden="true" />
+                        <span>
+                          <strong>{selectedRx.entryMode === 'clinic' ? 'Scan the prescription barcode' : 'Attach the prescription copy'}</strong>
+                          <span>{selectedRx.entryMode === 'clinic' ? 'Attach a redacted copy (redact patient details) of the prescription with a clear barcode. (TIP: Apply a blank dispensing label to cover confidential patient details).' : 'Attach a redacted copy (redact patient details) of the prescription with all other prescriptions details clearly visible. (TIP: Apply a blank dispensing label to cover confidential patient details).'}</span>
+                        </span>
+                      </div>
+                      {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
+                        {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
+                      </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
+                        <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
+                        {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading its barcode…' : selectedRx.copyFileName ?? (selectedRx.entryMode === 'manual' ? 'Attach signed prescription' : 'Attach barcode prescription')}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded and server-verified' : 'PDF, JPG or PNG · maximum 16 MB'}</small></span>
+                      </label>}
+                      {selectedRx.entryMode === 'clinic' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
+                      {selectedRx.copyFileName ? (
+                        <div className="rx-document-actions">
+                          <span>Choose the upload control above to replace this copy.</span>
+                          <button type="button" className="btn btn-sm btn-danger" disabled={fileRemovalBusyRxId === selectedRx.id} onClick={() => setConfirmingFileRemoveRxId(selectedRx.id)}><Trash2 size={13} /> Remove copy</button>
                         </div>
-                      )}
-
-                      {/* Prescriber Metadata */}
-                      <input
-                        className="input"
-                        placeholder="Prescriber name (e.g. Dr Lee)"
-                        value={rx.prescriber}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={e =>
-                          dispatch({
-                            type: 'SET_RX_PRESCRIBER',
-                            orderId: activeOrder.id,
-                            rxId: rx.id,
-                            prescriber: e.target.value,
-                          })
-                        }
-                        style={{ marginTop: 8, padding: '4px 8px', fontSize: 12 }}
-                      />
-                    </div>
-                  );
-                })}
-
-                <button
-                  className="btn btn-sm btn-primary"
-                  onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}
-                  style={{ width: '100%', marginTop: 4 }}
-                >
-                  <Plus size={12} /> Add another Rx copy
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* ═══ COLUMN 2: Prescription Builder Workspace ═══ */}
-          <div className="col-center">
-            <div className="col-header">
-              <span className="col-header-title">
-                <FileText size={16} /> 2. Prescription Workspace
-              </span>
-              {activeOrder.prescriptions.length > 0 && selectedRxId && (
-                <span className="pill pill-green">
-                  Editing Rx #{activeOrder.prescriptions.findIndex(r => r.id === selectedRxId) + 1}
-                </span>
-              )}
-            </div>
-
-            <div className="col-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {activeOrder.prescriptions.map((rx, rxIdx) => {
-                const isSelected = selectedRxId === rx.id;
-                if (!isSelected) return null;
-
-                return (
-                  <div key={rx.id}>
-                    <div className="flex justify-between items-center" style={{ marginBottom: 12 }}>
-                      <span className="text-xs font-bold text-muted uppercase">Line items inside Rx #{rxIdx + 1}</span>
-                      <span className="text-xs text-muted">{rx.items.length} items assigned</span>
+                      ) : null}
+                      {confirmingFileRemoveRxId === selectedRx.id ? (
+                        <div className="rx-prescription-cancel-confirm" role="alertdialog" aria-modal="true" aria-label={`Remove ${selectedRx.copyFileName}`}>
+                          <AlertTriangle size={16} />
+                          <span><strong>Remove {selectedRx.copyFileName}?</strong><small>The encrypted copy will be removed from this draft. You can then upload a replacement.</small></span>
+                          <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingFileRemoveRxId(null)}>Keep copy</button><button type="button" className="btn btn-danger btn-sm" disabled={fileRemovalBusyRxId === selectedRx.id} onClick={() => void removePrescriptionFile(selectedRx.id)}>{fileRemovalBusyRxId === selectedRx.id ? 'Removing…' : 'Remove copy'}</button></div>
+                        </div>
+                      ) : null}
+                      {selectedRx.entryMode === 'clinic' && scanError ? <ProviderStatusNotice title="Barcode not verified" detail={`${scanError} Check that the full Curaleaf Clinic barcode is sharp and visible. If it still fails, use the manual route or contact your HHH administrator.`} /> : null}
                     </div>
 
-                    {rx.items.length === 0 ? (
-                      <div className="empty-state" style={{ padding: '24px 12px' }}>
-                        <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                          No products added to this prescription yet.<br />
-                          Select a product from the <strong>Curaleaf Catalog (Column 3)</strong> to add it here.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="item-list">
-                        {rx.items.map(item => {
+                    <div className="rx-line-editor rx-prescription-details">
+                      {selectedRx.entryMode === 'manual' ? (
+                        <ManualPrescriptionEditor
+                          view="details"
+                          prescription={selectedRx}
+                          catalogue={state.catalogue}
+                          onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
+                          onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
+                          onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
+                          onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}
+                          onUpdateQuantity={(productId, qty) => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId, qty })}
+                          onUpdateUnits={(productId, unitsNeededCount) => dispatch({ type: 'UPDATE_ITEM_UNITS', orderId: activeOrder.id, rxId: selectedRx.id, productId, unitsNeededCount })}
+                        />
+                      ) : selectedRx.clinicScanId ? (
+                        <div className="rx-clinic-result" aria-label="Curaleaf verified prescription details">
+                          <div className="rx-clinic-result__status"><ShieldCheck size={18} /><span><strong>{isLocalPortalPreview ? 'Synthetic Curaleaf response' : 'Verified by Curaleaf'}</strong><small>{isLocalPortalPreview ? 'Read-only local training fixture' : 'Read-only supplier record'} · {selectedRx.curaleafPrescriptionState}</small></span></div>
+                          <dl>
+                            <div><dt>Prescription serial</dt><dd>{selectedRx.serialNumber}</dd></div>
+                            <div><dt>Prescriber</dt><dd>{selectedRx.prescriber}</dd></div>
+                            <div><dt>Issued</dt><dd>{selectedRx.issueDate ? new Date(`${selectedRx.issueDate}T00:00:00`).toLocaleDateString('en-GB') : '—'}</dd></div>
+                            <div><dt>Expires</dt><dd>{selectedRx.expiryDate ? new Date(`${selectedRx.expiryDate}T00:00:00`).toLocaleDateString('en-GB') : '—'}</dd></div>
+                            <div><dt>Registration</dt><dd>{selectedRx.prescriberGmcNumber ? `GMC ${selectedRx.prescriberGmcNumber}` : selectedRx.prescriberGphcNumber ? `GPhC ${selectedRx.prescriberGphcNumber}` : 'Held by Curaleaf'}</dd></div>
+                          </dl>
+                        </div>
+                      ) : <p className="rx-scan-waiting">No prescription fields need completing. They appear here after Curaleaf verifies the barcode.</p>}
+                      {identityCheck && (selectedRx.clinicScanId || selectedRx.entryMode === 'manual' && (selectedRx.curaleafPatientName || selectedRx.curaleafPatientDob)) && identityCheck.status !== 'match' ? <ProviderStatusNotice title={identityCheck.status === 'mismatch' ? 'Patient details do not match' : 'Patient details unavailable'} detail={`${identityCheck.reason} Payment and Curaleaf submission remain blocked until the prescription and patient record match.`} /> : null}
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className="rx-surface card rx-formulary-stage">
+                <header className="rx-surface__header">
+                  <div className="section-heading" style={{ margin: 0 }}>
+                    <div>
+                      <p className="section-label">Step 3. products and pricing</p>
+                      <h3>
+                        <ShieldCheck size={17} />
+                        {selectedRx?.entryMode === 'manual'
+                          ? 'Select the prescribed Curaleaf medicines'
+                          : editingClinicFormularyRxId === selectedRx?.id
+                            ? 'Correct the Curaleaf formula and pack match'
+                            : 'Review the Curaleaf formula and pack match'}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="rx-formulary-actions">
+                    {selectedRx?.items.length ? <span className="pill pill-green"><CheckCircle size={11} /> {selectedRx.entryMode === 'clinic' && editingClinicFormularyRxId !== selectedRx.id ? 'Matched automatically' : `${selectedRx.items.length} selected`}</span> : null}
+                    {selectedRx?.entryMode === 'clinic' && selectedRx.clinicScanId ? (
+                      editingClinicFormularyRxId === selectedRx.id ? (
+                        <button type="button" className="btn btn-sm btn-primary" onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'ADD_TOAST', message: 'Formulary corrections saved to this prescription draft.', toastType: 'success' }); }}><Save size={13} /> Save formulary</button>
+                      ) : (
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditingClinicFormularyRxId(selectedRx.id)}><Pencil size={13} /> Edit formulary</button>
+                      )
+                    ) : null}
+                  </div>
+                </header>
+                {state.catalogueLoading ? <ProviderStatusNotice state="loading" title="Refreshing Curaleaf products" detail="The latest patient prices and pack information are being retrieved." /> : null}
+                {state.catalogueError ? <ProviderStatusNotice title="Curaleaf information is temporarily delayed" detail="Wait and try again later. If this continues, contact your HHH administrator; pharmacy staff do not need to change the connection." /> : null}
+                {!selectedRx ? <div className="rx-inline-empty"><FileText size={20} /><span><strong>Select a prescription record</strong><small>Its prescribed medicines will appear here.</small></span></div> : selectedRx.entryMode === 'manual' || editingClinicFormularyRxId === selectedRx.id ? renderFormularyEditor() : (
+                  <div className="rx-line-editor">
+                    <div className="rx-line-editor__heading"><span><small>Curaleaf formulary result</small><strong>{selectedRx.items.length} prescribed product{selectedRx.items.length === 1 ? '' : 's'}</strong></span><span>Matched automatically · read-only</span></div>
+                    {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileScan size={20} /><span><strong>Medicines appear after the barcode scan</strong><small>Curaleaf supplies the formula, prescribed quantity and matching pack automatically.</small></span></div> : (
+                      <div className="rx-item-stack">
+                        {selectedRx.items.map((item, index) => {
                           const margin = lineMargin(item);
+                          const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
+                          const product = state.catalogue.find(candidate => candidate.id === item.productId);
+                          const stockLabel = product?.availability === 'out' ? 'Out of stock' : product?.availability === 'low' ? 'Low stock' : product?.availability === 'in' ? 'In stock' : 'Stock check required';
+                          const stockPill = product?.availability === 'out' ? 'pill-red' : product?.availability === 'in' ? 'pill-green' : 'pill-amber';
                           return (
-                            <div className="item-block" key={item.productId}>
-                              <div className="item-top">
-                                <span className="font-semibold" style={{ fontSize: 13 }}>{item.name}</span>
-                                <span className="font-bold">{money(lineRevenue(item))}</span>
+                            <article className="rx-prescribed-item" key={item.productId}>
+                              <header className="rx-prescribed-item__header">
+                                <span className="rx-prescribed-item__index">Medicine {String(index + 1).padStart(2, '0')}</span>
+                                <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Matched from the Curaleaf prescription</small></span>
+                                <span className={`pill ${stockPill}`}>{stockLabel}</span>
+                              </header>
+                              <div className="rx-prescribed-item__pricing">
+                                <div className="rx-prescribed-item__quantity rx-prescribed-item__quantity--readonly"><small>Curaleaf pack match</small><strong>{item.qty} {item.qty === 1 ? 'pack' : 'packs'}</strong><em>Read-only</em></div>
+                                <div className="rx-prescribed-units"><small>Prescribed quantity</small><strong>{item.unitsNeededCount ?? '—'} {state.catalogue.find(product => product.id === item.productId)?.unit ?? 'units'}</strong><em>From barcode</em></div>
+                                <div className="rx-price-flow rx-price-flow--readonly" aria-label={`Pricing for ${item.name}`}>
+                                  <span className="rx-price-node rx-price-node--px"><small>RRP</small><strong>{money(item.retail)}</strong><em>{money(lineRevenue(item))} line</em></span>
+                                  <span className="rx-price-node rx-price-node--wx"><small>Wholesale cost</small><strong>{item.cost === null ? 'Quote required' : money(item.cost)}</strong><em>{item.cost === null ? 'Order-specific' : `${money(lineCost(item))} line`}</em></span>
+                                </div>
+                                <span className={`rx-prescribed-item__contribution${margin !== null && margin < 25 ? ' low' : ''}`}><small>Gross margin</small><strong>{contribution === null || margin === null ? 'Pending' : `${contribution >= 0 ? '+' : '−'}${money(Math.abs(contribution))} · ${margin}%`}</strong></span>
                               </div>
-
-                              <div className="item-meta">
-                                <div className="qty-control">
-                                  <button
-                                    className="qty-btn"
-                                    onClick={() =>
-                                      dispatch({
-                                        type: 'UPDATE_ITEM_QTY',
-                                        orderId: activeOrder.id,
-                                        rxId: rx.id,
-                                        productId: item.productId,
-                                        qty: item.qty - 1,
-                                      })
-                                    }
-                                  >
-                                    <Minus size={12} />
-                                  </button>
-                                  <span style={{ minWidth: 16, textAlign: 'center' }}>{item.qty}</span>
-                                  <button
-                                    className="qty-btn"
-                                    onClick={() =>
-                                      dispatch({
-                                        type: 'UPDATE_ITEM_QTY',
-                                        orderId: activeOrder.id,
-                                        rxId: rx.id,
-                                        productId: item.productId,
-                                        qty: item.qty + 1,
-                                      })
-                                    }
-                                  >
-                                    <Plus size={12} />
-                                  </button>
-                                </div>
-
-                                <label className="line-price-editor">
-                                  <span>Patient price</span>
-                                  <span className="money-input"><span>£</span><input aria-label={`Patient price for ${item.name}`} type="number" min="0" step="0.01" value={item.retail} onChange={event => dispatch({ type: 'SET_ITEM_RETAIL', orderId: activeOrder.id, rxId: rx.id, productId: item.productId, retail: Math.max(0, Number(event.target.value)) })} /></span>
-                                </label>
-
-                                <div>
-                                  <span className="text-faint">Cost: {money(lineCost(item))} &middot; </span>
-                                  <span className={margin >= 25 ? 'text-green' : 'text-amber'}>
-                                    {margin}% margin
-                                  </span>
-                                </div>
-
-                                <button
-                                  className="btn btn-sm btn-danger"
-                                  style={{ padding: 4 }}
-                                  onClick={() =>
-                                    dispatch({
-                                      type: 'REMOVE_ITEM_FROM_RX',
-                                      orderId: activeOrder.id,
-                                      rxId: rx.id,
-                                      productId: item.productId,
-                                    })
-                                  }
-                                >
-                                  <X size={12} />
-                                </button>
-                              </div>
-
-                              {/* Dispensing fee trigger if margin is low */}
-                              {margin < 25 && (
-                                <div className="fee-bar">
-                                  <span className="text-amber flex items-center gap-xs">
-                                    <AlertTriangle size={12} /> Low Margin. Append Fee:
-                                  </span>
-                                  <div className="flex gap-xs">
-                                    {[0, 5, 10, 15].map(fee => (
-                                      <button
-                                        key={fee}
-                                        className={`fee-btn${item.fee === fee ? ' active' : ''}`}
-                                        onClick={() =>
-                                          dispatch({
-                                            type: 'SET_ITEM_FEE',
-                                            orderId: activeOrder.id,
-                                            rxId: rx.id,
-                                            productId: item.productId,
-                                            fee,
-                                          })
-                                        }
-                                      >
-                                        £{fee}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
+                            </article>
                           );
                         })}
                       </div>
                     )}
                   </div>
-                );
-              })}
-
-              <div className="divider" style={{ marginTop: 'auto' }} />
-
-              {/* Overall Summary section */}
-              <div className="card card-surface" style={{ margin: 0 }}>
-                <h4 className="font-semibold text-sm" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <CreditCard size={14} /> Overall Order Summary
-                </h4>
-
-                <div className="kv-line">
-                  <span className="text-muted">Total Sub-orders (Rxs)</span>
-                  <span className="font-semibold">{activeOrder.prescriptions.length}</span>
-                </div>
-
-                <div className="kv-line">
-                  <span className="text-muted">Total Wholesale Cost</span>
-                  <span>{money(orderCost(activeOrder))}</span>
-                </div>
-
-                <label className="order-delivery-selector">
-                  <span><strong>Delivery option</strong><small>Charges are controlled by {organisation.tradingName}.</small></span>
-                  <select className="input select" value={activeOrder.deliveryOptionId ?? ''} onChange={event => dispatch({ type: 'SET_ORDER_DELIVERY', orderId: activeOrder.id, optionId: event.target.value })}>
-                    {organisation.deliveryOptions.filter(option => option.enabled).map(option => <option key={option.id} value={option.id}>{option.label} · {money(option.amount)}</option>)}
-                  </select>
-                </label>
-
-                {(() => {
-                  const rev = orderRevenue(activeOrder);
-                  const cost = orderCost(activeOrder);
-                  const margin = marginPct(cost, rev);
-                  return (
-                    <div className="kv-line">
-                      <span className="text-muted">Consolidated Margin</span>
-                      <span className={`font-bold ${margin >= 25 ? 'text-green' : 'text-amber'}`}>
-                        {margin}%
-                      </span>
-                    </div>
-                  );
-                })()}
-
-                <div className="kv-line total" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-                  <span>Patient total <small className="text-muted">including {money(activeOrder.feeExtra)} delivery</small></span>
-                  <span className="text-green font-bold">{money(orderRevenue(activeOrder))}</span>
-                </div>
-
-                {/* Submit / Link Actions */}
-                <div style={{ marginTop: 16 }}>
-                  {(() => {
-                    const noPatient = !activeOrder.patientId;
-                    const missingCopy = activeOrder.prescriptions.some(rx => !rx.copyFileName);
-                    const missingPrescriber = activeOrder.prescriptions.some(rx => !rx.prescriber.trim());
-                    const noItems = activeOrder.prescriptions.some(rx => rx.items.length === 0);
-                    const disabled = noPatient || missingCopy || missingPrescriber || noItems;
-
-                    return (
-                      <div>
-                        <span className="section-label">Choose how the patient will pay</span>
-                        <div className="payment-route-grid">
-                        <button
-                          className="payment-route-option worldpay"
-                          disabled={disabled}
-                          onClick={() => {
-                            dispatch({ type: 'SEND_PAYMENT_LINK', orderId: activeOrder.id });
-                            dispatch({ type: 'ADD_TOAST', message: 'Worldpay online payment selected. Checkout creation will activate when this pharmacy’s merchant account is connected.', toastType: 'info' });
-                            dispatch({ type: 'SET_SCREEN', screen: 'review' });
-                          }}
-                        >
-                          <span className="payment-route-icon"><CreditCard size={18} /></span>
-                          <span><strong>Worldpay online</strong><small>Payment settles directly to this pharmacy’s approved merchant account.</small></span>
-                          <Send size={14} />
-                        </button>
-                        <button
-                          className="payment-route-option pharmacy"
-                          disabled={disabled}
-                          onClick={() => {
-                            dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
-                            dispatch({ type: 'ADD_TOAST', message: 'Order moved to pharmacy-managed payment. Confirm receipt after taking payment by EPOS, cash or another method.', toastType: 'info' });
-                            dispatch({ type: 'SET_SCREEN', screen: 'review' });
-                          }}
-                        >
-                          <span className="payment-route-icon"><Banknote size={18} /></span>
-                          <span><strong>Pharmacy / EPOS</strong><small>Take card, cash, transfer or another payment and confirm it manually.</small></span>
-                          <CheckCircle size={14} />
-                        </button>
-                        </div>
-                        {disabled && (
-                          <div className="text-xs text-amber" style={{ marginTop: 8, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                            <AlertTriangle size={12} />
-                            <span>
-                              {noPatient && 'Link a CRM patient'}
-                              {!noPatient && missingCopy && 'Upload copy for all prescriptions'}
-                              {!noPatient && !missingCopy && missingPrescriber && 'Record the prescribing doctor for all prescriptions'}
-                              {!noPatient && !missingCopy && !missingPrescriber && noItems && 'Add products to all prescriptions'}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ═══ COLUMN 3: Searchable Curaleaf Product Catalog ═══ */}
-          <div className="col-right">
-            <div className="col-header">
-              <span className="col-header-title">
-                <ListFilter size={16} /> 3. Curaleaf Catalog
-              </span>
-            </div>
-
-            <div className="col-content" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {/* Search bar */}
-              <div style={{ position: 'relative' }}>
-                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                <input
-                  className="input"
-                  placeholder="Search products..."
-                  value={catalogQuery}
-                  onChange={e => setCatalogQuery(e.target.value)}
-                  style={{ paddingLeft: 30 }}
-                />
-              </div>
-
-              {/* Filter chips */}
-              <div className="flex gap-xs" style={{ flexWrap: 'wrap' }}>
-                {TYPE_FILTERS.map(t => (
-                  <button
-                    key={t}
-                    className={`chip ${catalogTypeFilter === t ? 'chip-active' : ''}`}
-                    style={{ padding: '4px 10px', fontSize: 12 }}
-                    onClick={() => setCatalogTypeFilter(t)}
-                  >
-                    {t === 'All' ? 'All' : TYPE_LABELS[t] || t}
-                  </button>
-                ))}
-              </div>
-
-              {/* Product catalog list */}
-              <div className="catalog-list">
-                {filteredProducts.length === 0 ? (
-                  <div className="text-center text-xs text-muted" style={{ padding: '20px 0' }}>
-                    No products match filter.
-                  </div>
-                ) : (
-                  filteredProducts.map(item => {
-                    const margin = marginPct(item.cost, item.retail);
-                    const isOutOfStock = item.stock === 'out';
-                    
-                    return (
-                      <div 
-                        key={item.id} 
-                        className="catalog-item-card"
-                        style={{ opacity: isOutOfStock ? 0.6 : 1 }}
-                      >
-                        <div className="catalog-item-header">
-                          <span className="catalog-item-name">{item.name}</span>
-                          <span className="pill pill-neutral" style={{ fontSize: 12, padding: '2px 8px' }}>
-                            {TYPE_LABELS[item.type] || item.type}
-                          </span>
-                        </div>
-
-                        <div className="catalog-item-meta">
-                          <div className="stock-indicator">
-                            <span className={getStockClass(item.stock)} />
-                            <span style={{ fontSize: 13 }}>{STOCK_LABELS[item.stock]}</span>
-                          </div>
-                          
-                          <div className="catalog-item-prices">
-                            <span>Cost: {money(item.cost)}</span>
-                            <span className="font-semibold text-primary">Guide price: {money(item.retail)}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex justify-between items-center" style={{ marginTop: 4 }}>
-                          <span className={margin >= 25 ? 'text-green text-xs' : 'text-amber text-xs'}>
-                            {margin}% base margin
-                          </span>
-                          
-                          <button
-                            className="btn btn-sm btn-primary"
-                            disabled={isOutOfStock}
-                            style={{ padding: '4px 8px' }}
-                            onClick={() => handleAddToRx(item)}
-                          >
-                            <Plus size={12} /> Add to Rx
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
                 )}
-              </div>
-            </div>
-          </div>
+              </section>
+            </main>
 
-        </div>
+            <aside className="rx-checkout-rail">
+              <section className="rx-checkout-panel card" id="rx-order-review">
+                <header>
+                  <p className="section-label">Step 4 · Order {activeOrderRef}</p>
+                  <strong>{replacementUsesNewPayment ? 'Review and restart payment' : activeOrder.redoContext?.isPaidRedo ? 'Review and carry over payment' : 'Review and request payment'}</strong>
+                  <small>{patient?.name ?? 'Patient not linked'} · {activeOrder.prescriptions.length} prescription record{activeOrder.prescriptions.length === 1 ? '' : 's'}</small>
+                </header>
+                <dl className="rx-order-totals">
+                  <div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div>
+                  <div><dt>Wholesale Total (excl VAT)</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div>
+                  <div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div>
+                  <div><dt>gross margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${money(orderRevenue(activeOrder) - activeOrder.dispensingFee - orderCost(activeOrder))} · ${orderMargin}%`}</dd></div>
+                </dl>
+                <div className={`rx-checkout-readiness${quoteError ? ' has-error' : ''}`}>
+                  <span className="section-label">{state.workspaceMode === 'training' ? 'Curaleaf test quote' : 'Live Curaleaf quote'}</span>
+                  <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : quoteBusy ? <RefreshCw size={13} className="spin" /> : <span className="rx-readiness-dot" />}{quoteAvailable ? 'Wholesale and stock verified' : quoteBusy ? 'Updating automatically for this basket…' : quoteError ? 'Automatic quote needs attention' : quoteCurrent ? 'Pricing returned · stock unavailable' : currentQuoteItems.length ? 'Automatic quote waiting to refresh' : 'Add a medicine to generate a quote'}</span>
+                  {quoteSummary && quoteCurrent ? <span className={quoteAvailable ? 'complete' : ''}>{quoteAvailable ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />} Shipping {money(quoteSummary.shippingPrice)} · tax {quoteSummary.taxRate}%</span> : null}
+                  <small className="rx-auto-quote-note">Quotes refresh after a medicine or pack quantity changes.</small>
+                  {quoteError ? <>
+                    <ProviderStatusNotice title={quoteError.title} detail={quoteError.detail} />
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Retrying quote…' : 'Retry quote now'}</button>
+                  </> : null}
+                </div>
+                <div className="rx-dispensing-charge">
+                  <span><strong>Dispensing charge</strong><small>optional dispensing fee may be added. please ensure you remain competitive.</small></span>
+                  <div className="rx-dispensing-presets" role="group" aria-label="Set dispensing charge">{[5, 10, 15].map(amount => <button type="button" key={amount} aria-pressed={activeOrder.dispensingFee === amount} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount })}>{money(amount)}</button>)}<button type="button" aria-pressed={activeOrder.dispensingFee === 0} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: 0 })}>No charge</button></div>
+                  <label className="rx-dispensing-custom"><span>Custom</span><span className="money-input"><span>£</span><input type="number" min="5" max="15" step="0.01" value={activeOrder.dispensingFee || ''} onFocus={event => event.currentTarget.select()} onChange={event => { const amount = Number(event.target.value); dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: event.target.value === '' ? 0 : Math.max(5, Math.min(15, amount)) }); }} aria-label="Custom dispensing charge" /></span></label>
+                </div>
+                <div className="rx-patient-total"><span><small>Patient total</small><em>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)} products + {money(activeOrder.dispensingFee)} dispensing</em></span><strong>{money(orderRevenue(activeOrder))}</strong></div>
+                {activeOrder.redoContext?.isPaidRedo && redoSourceOrder ? (
+                  <div className={`rx-redo-balance${paidRedoAmountMatches ? ' is-matched' : ' is-different'}`}>
+                    <span><small>Verified payment carried by order {orderReference(redoSourceOrder)}</small><strong>{money(redoSourceOrder.payment.amount)}</strong></span>
+                    <span><small>Replacement difference</small><strong>{paidRedoAmountDifference === 0 ? money(0) : `${paidRedoAmountDifference > 0 ? '+' : '−'}${money(Math.abs(paidRedoAmountDifference))}`}</strong></span>
+                    <p>{paidRedoAmountMatches ? 'Amounts match. The original verified payment may be carried over after authentication.' : activeOrder.redoContext.priceResolution === 'absorb' ? `The pharmacy will contribute ${money(paidRedoAmountDifference)}; the patient is not charged again.` : replacementUsesNewPayment ? redoSourceOrder.refund?.status === 'completed' ? 'Old payment refunded. Saving creates a fresh payment link for the replacement total.' : 'Replacement held until the old Worldpay refund is confirmed.' : 'Choose how to handle the price difference before continuing.'}</p>
+                    {!paidRedoAmountMatches ? <div className="rx-redo-balance__choices">
+                      <button type="button" className={`btn btn-sm ${replacementUsesNewPayment ? 'btn-primary' : 'btn-secondary'}`} disabled={redoRefundBusy} onClick={() => void beginRefundAndRecharge()}><RefreshCw size={12} /> Hold, refund & new link</button>
+                      {paidRedoAmountDifference > 0 ? <button type="button" className={`btn btn-sm ${activeOrder.redoContext.priceResolution === 'absorb' ? 'btn-primary' : 'btn-secondary'}`} onClick={chooseAbsorbDifference}><Banknote size={12} /> Absorb {money(paidRedoAmountDifference)}</button> : null}
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDeleteId(activeOrder.id)}><X size={12} /> Cancel replacement</button>
+                    </div> : null}
+                    {replacementUsesNewPayment && redoSourceOrder.refund?.status === 'pending_confirmation' ? <div className="rx-redo-refund-confirm">
+                      <span><small>Refund in Worldpay</small><code>{redoSourceOrder.refund.paymentReference}</code><em>Refund {money(redoSourceOrder.refund.amountPence / 100)}, then enter its confirmation ID.</em></span>
+                      <input className="input" value={redoRefundReference} onChange={event => setRedoRefundReference(event.target.value)} placeholder="Worldpay refund / command ID" />
+                      <button type="button" className="btn btn-primary btn-sm" disabled={redoRefundBusy || redoRefundReference.trim().length < 3} onClick={() => void confirmRedoRefund()}>{redoRefundBusy ? 'Recording…' : 'Confirm refund'}</button>
+                    </div> : null}
+                  </div>
+                ) : null}
+                <details className="rx-payment-gate" open={!readyForPayment}>
+                  <summary>
+                    <span><small>Payment gate</small><strong>{readyForPayment ? 'All required checks passed' : `${outstandingPaymentGates.length} requirement${outstandingPaymentGates.length === 1 ? '' : 's'} outstanding`}</strong></span>
+                    <span className={readyForPayment ? 'complete' : ''}>{paymentGate.filter(item => item.complete).length}/{paymentGate.length}</span>
+                  </summary>
+                  <div className="rx-payment-gate__checks">
+                    {paymentGate.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}
+                  </div>
+                </details>
+                <div className="rx-payment-actions">
+                  <span className="section-label">Payment route</span>
+                  {activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? (
+                    <div className="rx-payment-route-toggle"><div className="is-selected"><ShieldCheck size={17} /><span><strong>Verified payment carry-over</strong><small>{activeOrder.redoContext.priceResolution === 'absorb' ? 'Original payment retained · pharmacy pays difference' : 'No second charge to the patient'}</small></span><CheckCircle size={14} /></div></div>
+                  ) : (
+                    <div className="rx-payment-route-toggle" role="radiogroup" aria-label="Pharmacy payment route">
+                      <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'worldpay'} disabled={!canUseWorldpay} className={selectedPaymentRoute === 'worldpay' ? 'is-selected' : ''} onClick={() => dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'worldpay' })}><CreditCard size={17} /><span><strong>Worldpay</strong><small>{canUseWorldpay ? 'Fresh hosted checkout' : 'Not configured'}</small></span>{selectedPaymentRoute === 'worldpay' ? <CheckCircle size={14} /> : null}</button>
+                      <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'manual'} className={selectedPaymentRoute === 'manual' ? 'is-selected' : ''} onClick={() => dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'manual' })}><Banknote size={17} /><span><strong>Manual payment</strong><small>EPOS, cash or transfer</small></span>{selectedPaymentRoute === 'manual' ? <CheckCircle size={14} /> : null}</button>
+                    </div>
+                  )}
+                  <p className="rx-payment-route-note">{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'The original payment remains linked only after the replacement prescription passes every gate.' : 'The selected route becomes immutable when the order enters payment.'}</p>
+                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? replacementUsesNewPayment ? 'Save & create new Worldpay link' : 'send payment link' : 'Continue with manual payment'}</button>
+                </div>
+                {!readyForPayment && <p className="rx-checkout-blocker"><AlertTriangle size={13} /><span><strong>Payment remains locked</strong>{outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}{outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}</span></p>}
+              </section>
+            </aside>
+          </div>
+        </>
       )}
     </div>
   );

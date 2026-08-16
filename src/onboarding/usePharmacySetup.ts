@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getPharmacySetupStatus, isApiConfigured, updatePharmacySetupTask } from '../shared/api';
 import type { PharmacySetupStatus, SetupTaskId } from '../shared/contracts';
 import { SETUP_TASKS } from './setup';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
 
 function emptyStatus(organisationId: string): PharmacySetupStatus {
   return {
@@ -76,9 +77,12 @@ export function usePharmacySetup(organisationId: string | undefined) {
     setLoading(true);
     setError(null);
     const load = async () => {
-      if (!isApiConfigured) {
+      if (!isApiConfigured || isLocalPortalPreview) {
         const local = readDevelopmentStatus(organisationId);
-        if (!cancelled) setStatus(local || emptyStatus(organisationId));
+        if (!cancelled) {
+          setStatus(local || emptyStatus(organisationId));
+          setLoading(false);
+        }
         return;
       }
       try {
@@ -89,7 +93,7 @@ export function usePharmacySetup(organisationId: string | undefined) {
         if (!cancelled) {
           setStatus(local || emptyStatus(organisationId));
           setError(import.meta.env.DEV
-            ? 'The setup API is unavailable, so changes are stored in this browser for local development only.'
+            ? 'The setup service is unavailable, so changes are stored in this browser for local development only.'
             : loadError instanceof Error ? loadError.message : 'Setup status could not be loaded.');
         }
       } finally {
@@ -120,7 +124,7 @@ export function usePharmacySetup(organisationId: string | undefined) {
     setError(null);
 
     try {
-      if (!isApiConfigured) {
+      if (!isApiConfigured || isLocalPortalPreview) {
         writeDevelopmentStatus(optimistic);
         return;
       }
@@ -129,7 +133,7 @@ export function usePharmacySetup(organisationId: string | undefined) {
     } catch (saveError) {
       if (import.meta.env.DEV) {
         writeDevelopmentStatus(optimistic);
-        setError('The setup API is unavailable. This change is stored locally for development and is not production evidence.');
+        setError('The setup service is unavailable. This change is stored locally for development and is not production evidence.');
       } else {
         setStatus(previous);
         setError(saveError instanceof Error ? saveError.message : 'The setup task could not be saved.');

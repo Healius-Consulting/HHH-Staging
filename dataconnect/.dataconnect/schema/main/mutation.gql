@@ -1,0 +1,4382 @@
+extend type Mutation {
+  """
+  ✨ Insert a single `AuditLog` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  auditLog_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: AuditLog_Data!
+  ): AuditLog_KeyOutput! @fdc_generated(from: "AuditLog", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Company` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  company_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Company_Data!
+  ): Company_KeyOutput! @fdc_generated(from: "Company", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Condition` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  condition_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Condition_Data!
+  ): Condition_KeyOutput! @fdc_generated(from: "Condition", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `DispenseEvent` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  dispenseEvent_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: DispenseEvent_Data!
+  ): DispenseEvent_KeyOutput! @fdc_generated(from: "DispenseEvent", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `EligibilityAssignmentEvent` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  eligibilityAssignmentEvent_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: EligibilityAssignmentEvent_Data!
+  ): EligibilityAssignmentEvent_KeyOutput! @fdc_generated(from: "EligibilityAssignmentEvent", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `EligibilityCondition` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  eligibilityCondition_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: EligibilityCondition_Data!
+  ): EligibilityCondition_KeyOutput! @fdc_generated(from: "EligibilityCondition", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `EligibilityConsent` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  eligibilityConsent_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: EligibilityConsent_Data!
+  ): EligibilityConsent_KeyOutput! @fdc_generated(from: "EligibilityConsent", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `EligibilitySubmission` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  eligibilitySubmission_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: EligibilitySubmission_Data!
+  ): EligibilitySubmission_KeyOutput! @fdc_generated(from: "EligibilitySubmission", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `GoodsReceipt` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  goodsReceipt_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: GoodsReceipt_Data!
+  ): GoodsReceipt_KeyOutput! @fdc_generated(from: "GoodsReceipt", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `GoodsReceiptLine` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  goodsReceiptLine_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: GoodsReceiptLine_Data!
+  ): GoodsReceiptLine_KeyOutput! @fdc_generated(from: "GoodsReceiptLine", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `IntegrationConnection` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  integrationConnection_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: IntegrationConnection_Data!
+  ): IntegrationConnection_KeyOutput! @fdc_generated(from: "IntegrationConnection", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `IntegrationOperation` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  integrationOperation_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: IntegrationOperation_Data!
+  ): IntegrationOperation_KeyOutput! @fdc_generated(from: "IntegrationOperation", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `IntegrationWebhookEvent` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  integrationWebhookEvent_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: IntegrationWebhookEvent_Data!
+  ): IntegrationWebhookEvent_KeyOutput! @fdc_generated(from: "IntegrationWebhookEvent", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `NotificationOutbox` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  notificationOutbox_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: NotificationOutbox_Data!
+  ): NotificationOutbox_KeyOutput! @fdc_generated(from: "NotificationOutbox", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Order` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  order_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Order_Data!
+  ): Order_KeyOutput! @fdc_generated(from: "Order", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `OrderDraft` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  orderDraft_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: OrderDraft_Data!
+  ): OrderDraft_KeyOutput! @fdc_generated(from: "OrderDraft", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `OrderLine` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  orderLine_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: OrderLine_Data!
+  ): OrderLine_KeyOutput! @fdc_generated(from: "OrderLine", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `OrderPrescription` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  orderPrescription_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: OrderPrescription_Data!
+  ): OrderPrescription_KeyOutput! @fdc_generated(from: "OrderPrescription", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Organisation` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  organisation_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Organisation_Data!
+  ): Organisation_KeyOutput! @fdc_generated(from: "Organisation", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `OrganisationDomain` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  organisationDomain_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: OrganisationDomain_Data!
+  ): OrganisationDomain_KeyOutput! @fdc_generated(from: "OrganisationDomain", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Patient` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  patient_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Patient_Data!
+  ): Patient_KeyOutput! @fdc_generated(from: "Patient", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `PatientCondition` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  patientCondition_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: PatientCondition_Data!
+  ): PatientCondition_KeyOutput! @fdc_generated(from: "PatientCondition", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `PatientIdentity` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  patientIdentity_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: PatientIdentity_Data!
+  ): PatientIdentity_KeyOutput! @fdc_generated(from: "PatientIdentity", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Payment` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  payment_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Payment_Data!
+  ): Payment_KeyOutput! @fdc_generated(from: "Payment", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `PaymentReceipt` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  paymentReceipt_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: PaymentReceipt_Data!
+  ): PaymentReceipt_KeyOutput! @fdc_generated(from: "PaymentReceipt", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `PharmacyDirectoryProfile` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  pharmacyDirectoryProfile_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: PharmacyDirectoryProfile_Data!
+  ): PharmacyDirectoryProfile_KeyOutput! @fdc_generated(from: "PharmacyDirectoryProfile", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `PlacementEvent` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  placementEvent_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: PlacementEvent_Data!
+  ): PlacementEvent_KeyOutput! @fdc_generated(from: "PlacementEvent", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Prescriber` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  prescriber_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Prescriber_Data!
+  ): Prescriber_KeyOutput! @fdc_generated(from: "Prescriber", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Prescription` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  prescription_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Prescription_Data!
+  ): Prescription_KeyOutput! @fdc_generated(from: "Prescription", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `PrescriptionFile` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  prescriptionFile_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: PrescriptionFile_Data!
+  ): PrescriptionFile_KeyOutput! @fdc_generated(from: "PrescriptionFile", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `PrescriptionLine` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  prescriptionLine_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: PrescriptionLine_Data!
+  ): PrescriptionLine_KeyOutput! @fdc_generated(from: "PrescriptionLine", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `ReferralFeeEvent` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  referralFeeEvent_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: ReferralFeeEvent_Data!
+  ): ReferralFeeEvent_KeyOutput! @fdc_generated(from: "ReferralFeeEvent", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `ReferralToken` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  referralToken_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: ReferralToken_Data!
+  ): ReferralToken_KeyOutput! @fdc_generated(from: "ReferralToken", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Refund` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  refund_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Refund_Data!
+  ): Refund_KeyOutput! @fdc_generated(from: "Refund", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `SetupTask` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  setupTask_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: SetupTask_Data!
+  ): SetupTask_KeyOutput! @fdc_generated(from: "SetupTask", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `Shipment` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  shipment_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: Shipment_Data!
+  ): Shipment_KeyOutput! @fdc_generated(from: "Shipment", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `ShipmentLine` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  shipmentLine_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: ShipmentLine_Data!
+  ): ShipmentLine_KeyOutput! @fdc_generated(from: "ShipmentLine", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `StaffSession` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  staffSession_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: StaffSession_Data!
+  ): StaffSession_KeyOutput! @fdc_generated(from: "StaffSession", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `StaffTask` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  staffTask_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: StaffTask_Data!
+  ): StaffTask_KeyOutput! @fdc_generated(from: "StaffTask", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `StaffUser` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  staffUser_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: StaffUser_Data!
+  ): StaffUser_KeyOutput! @fdc_generated(from: "StaffUser", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert `AuditLog` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  auditLog_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [AuditLog_Data!]!
+  ): [AuditLog_KeyOutput!]! @fdc_generated(from: "AuditLog", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Company` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  company_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Company_Data!]!
+  ): [Company_KeyOutput!]! @fdc_generated(from: "Company", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Condition` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  condition_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Condition_Data!]!
+  ): [Condition_KeyOutput!]! @fdc_generated(from: "Condition", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `DispenseEvent` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  dispenseEvent_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [DispenseEvent_Data!]!
+  ): [DispenseEvent_KeyOutput!]! @fdc_generated(from: "DispenseEvent", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `EligibilityAssignmentEvent` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  eligibilityAssignmentEvent_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [EligibilityAssignmentEvent_Data!]!
+  ): [EligibilityAssignmentEvent_KeyOutput!]! @fdc_generated(from: "EligibilityAssignmentEvent", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `EligibilityCondition` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  eligibilityCondition_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [EligibilityCondition_Data!]!
+  ): [EligibilityCondition_KeyOutput!]! @fdc_generated(from: "EligibilityCondition", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `EligibilityConsent` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  eligibilityConsent_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [EligibilityConsent_Data!]!
+  ): [EligibilityConsent_KeyOutput!]! @fdc_generated(from: "EligibilityConsent", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `EligibilitySubmission` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  eligibilitySubmission_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [EligibilitySubmission_Data!]!
+  ): [EligibilitySubmission_KeyOutput!]! @fdc_generated(from: "EligibilitySubmission", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `GoodsReceipt` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  goodsReceipt_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [GoodsReceipt_Data!]!
+  ): [GoodsReceipt_KeyOutput!]! @fdc_generated(from: "GoodsReceipt", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `GoodsReceiptLine` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  goodsReceiptLine_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [GoodsReceiptLine_Data!]!
+  ): [GoodsReceiptLine_KeyOutput!]! @fdc_generated(from: "GoodsReceiptLine", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `IntegrationConnection` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  integrationConnection_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [IntegrationConnection_Data!]!
+  ): [IntegrationConnection_KeyOutput!]! @fdc_generated(from: "IntegrationConnection", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `IntegrationOperation` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  integrationOperation_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [IntegrationOperation_Data!]!
+  ): [IntegrationOperation_KeyOutput!]! @fdc_generated(from: "IntegrationOperation", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `IntegrationWebhookEvent` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  integrationWebhookEvent_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [IntegrationWebhookEvent_Data!]!
+  ): [IntegrationWebhookEvent_KeyOutput!]! @fdc_generated(from: "IntegrationWebhookEvent", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `NotificationOutbox` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  notificationOutbox_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [NotificationOutbox_Data!]!
+  ): [NotificationOutbox_KeyOutput!]! @fdc_generated(from: "NotificationOutbox", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Order` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  order_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Order_Data!]!
+  ): [Order_KeyOutput!]! @fdc_generated(from: "Order", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `OrderDraft` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  orderDraft_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [OrderDraft_Data!]!
+  ): [OrderDraft_KeyOutput!]! @fdc_generated(from: "OrderDraft", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `OrderLine` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  orderLine_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [OrderLine_Data!]!
+  ): [OrderLine_KeyOutput!]! @fdc_generated(from: "OrderLine", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `OrderPrescription` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  orderPrescription_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [OrderPrescription_Data!]!
+  ): [OrderPrescription_KeyOutput!]! @fdc_generated(from: "OrderPrescription", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Organisation` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  organisation_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Organisation_Data!]!
+  ): [Organisation_KeyOutput!]! @fdc_generated(from: "Organisation", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `OrganisationDomain` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  organisationDomain_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [OrganisationDomain_Data!]!
+  ): [OrganisationDomain_KeyOutput!]! @fdc_generated(from: "OrganisationDomain", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Patient` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  patient_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Patient_Data!]!
+  ): [Patient_KeyOutput!]! @fdc_generated(from: "Patient", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `PatientCondition` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  patientCondition_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [PatientCondition_Data!]!
+  ): [PatientCondition_KeyOutput!]! @fdc_generated(from: "PatientCondition", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `PatientIdentity` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  patientIdentity_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [PatientIdentity_Data!]!
+  ): [PatientIdentity_KeyOutput!]! @fdc_generated(from: "PatientIdentity", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Payment` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  payment_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Payment_Data!]!
+  ): [Payment_KeyOutput!]! @fdc_generated(from: "Payment", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `PaymentReceipt` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  paymentReceipt_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [PaymentReceipt_Data!]!
+  ): [PaymentReceipt_KeyOutput!]! @fdc_generated(from: "PaymentReceipt", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `PharmacyDirectoryProfile` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  pharmacyDirectoryProfile_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [PharmacyDirectoryProfile_Data!]!
+  ): [PharmacyDirectoryProfile_KeyOutput!]! @fdc_generated(from: "PharmacyDirectoryProfile", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `PlacementEvent` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  placementEvent_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [PlacementEvent_Data!]!
+  ): [PlacementEvent_KeyOutput!]! @fdc_generated(from: "PlacementEvent", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Prescriber` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  prescriber_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Prescriber_Data!]!
+  ): [Prescriber_KeyOutput!]! @fdc_generated(from: "Prescriber", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Prescription` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  prescription_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Prescription_Data!]!
+  ): [Prescription_KeyOutput!]! @fdc_generated(from: "Prescription", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `PrescriptionFile` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  prescriptionFile_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [PrescriptionFile_Data!]!
+  ): [PrescriptionFile_KeyOutput!]! @fdc_generated(from: "PrescriptionFile", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `PrescriptionLine` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  prescriptionLine_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [PrescriptionLine_Data!]!
+  ): [PrescriptionLine_KeyOutput!]! @fdc_generated(from: "PrescriptionLine", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `ReferralFeeEvent` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  referralFeeEvent_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [ReferralFeeEvent_Data!]!
+  ): [ReferralFeeEvent_KeyOutput!]! @fdc_generated(from: "ReferralFeeEvent", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `ReferralToken` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  referralToken_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [ReferralToken_Data!]!
+  ): [ReferralToken_KeyOutput!]! @fdc_generated(from: "ReferralToken", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Refund` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  refund_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Refund_Data!]!
+  ): [Refund_KeyOutput!]! @fdc_generated(from: "Refund", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `SetupTask` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  setupTask_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [SetupTask_Data!]!
+  ): [SetupTask_KeyOutput!]! @fdc_generated(from: "SetupTask", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `Shipment` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  shipment_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [Shipment_Data!]!
+  ): [Shipment_KeyOutput!]! @fdc_generated(from: "Shipment", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `ShipmentLine` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  shipmentLine_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [ShipmentLine_Data!]!
+  ): [ShipmentLine_KeyOutput!]! @fdc_generated(from: "ShipmentLine", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `StaffSession` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  staffSession_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [StaffSession_Data!]!
+  ): [StaffSession_KeyOutput!]! @fdc_generated(from: "StaffSession", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `StaffTask` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  staffTask_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [StaffTask_Data!]!
+  ): [StaffTask_KeyOutput!]! @fdc_generated(from: "StaffTask", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `StaffUser` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  staffUser_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [StaffUser_Data!]!
+  ): [StaffUser_KeyOutput!]! @fdc_generated(from: "StaffUser", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert or update a single `AuditLog` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AuditLog`.
+  """
+  auditLog_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: AuditLog_Data!
+  ): AuditLog_KeyOutput! @fdc_generated(from: "AuditLog", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Company` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Company`.
+  """
+  company_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Company_Data!
+  ): Company_KeyOutput! @fdc_generated(from: "Company", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Condition` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Condition`.
+  """
+  condition_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Condition_Data!
+  ): Condition_KeyOutput! @fdc_generated(from: "Condition", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `DispenseEvent` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `DispenseEvent`.
+  """
+  dispenseEvent_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: DispenseEvent_Data!
+  ): DispenseEvent_KeyOutput! @fdc_generated(from: "DispenseEvent", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `EligibilityAssignmentEvent` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `EligibilityAssignmentEvent`.
+  """
+  eligibilityAssignmentEvent_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: EligibilityAssignmentEvent_Data!
+  ): EligibilityAssignmentEvent_KeyOutput! @fdc_generated(from: "EligibilityAssignmentEvent", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `EligibilityCondition` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `EligibilityCondition`.
+  """
+  eligibilityCondition_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: EligibilityCondition_Data!
+  ): EligibilityCondition_KeyOutput! @fdc_generated(from: "EligibilityCondition", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `EligibilityConsent` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `EligibilityConsent`.
+  """
+  eligibilityConsent_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: EligibilityConsent_Data!
+  ): EligibilityConsent_KeyOutput! @fdc_generated(from: "EligibilityConsent", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `EligibilitySubmission` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `EligibilitySubmission`.
+  """
+  eligibilitySubmission_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: EligibilitySubmission_Data!
+  ): EligibilitySubmission_KeyOutput! @fdc_generated(from: "EligibilitySubmission", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `GoodsReceipt` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `GoodsReceipt`.
+  """
+  goodsReceipt_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: GoodsReceipt_Data!
+  ): GoodsReceipt_KeyOutput! @fdc_generated(from: "GoodsReceipt", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `GoodsReceiptLine` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `GoodsReceiptLine`.
+  """
+  goodsReceiptLine_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: GoodsReceiptLine_Data!
+  ): GoodsReceiptLine_KeyOutput! @fdc_generated(from: "GoodsReceiptLine", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `IntegrationConnection` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `IntegrationConnection`.
+  """
+  integrationConnection_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: IntegrationConnection_Data!
+  ): IntegrationConnection_KeyOutput! @fdc_generated(from: "IntegrationConnection", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `IntegrationOperation` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `IntegrationOperation`.
+  """
+  integrationOperation_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: IntegrationOperation_Data!
+  ): IntegrationOperation_KeyOutput! @fdc_generated(from: "IntegrationOperation", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `IntegrationWebhookEvent` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `IntegrationWebhookEvent`.
+  """
+  integrationWebhookEvent_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: IntegrationWebhookEvent_Data!
+  ): IntegrationWebhookEvent_KeyOutput! @fdc_generated(from: "IntegrationWebhookEvent", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `NotificationOutbox` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `NotificationOutbox`.
+  """
+  notificationOutbox_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: NotificationOutbox_Data!
+  ): NotificationOutbox_KeyOutput! @fdc_generated(from: "NotificationOutbox", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Order` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Order`.
+  """
+  order_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Order_Data!
+  ): Order_KeyOutput! @fdc_generated(from: "Order", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `OrderDraft` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `OrderDraft`.
+  """
+  orderDraft_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: OrderDraft_Data!
+  ): OrderDraft_KeyOutput! @fdc_generated(from: "OrderDraft", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `OrderLine` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `OrderLine`.
+  """
+  orderLine_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: OrderLine_Data!
+  ): OrderLine_KeyOutput! @fdc_generated(from: "OrderLine", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `OrderPrescription` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `OrderPrescription`.
+  """
+  orderPrescription_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: OrderPrescription_Data!
+  ): OrderPrescription_KeyOutput! @fdc_generated(from: "OrderPrescription", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Organisation` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Organisation`.
+  """
+  organisation_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Organisation_Data!
+  ): Organisation_KeyOutput! @fdc_generated(from: "Organisation", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `OrganisationDomain` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `OrganisationDomain`.
+  """
+  organisationDomain_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: OrganisationDomain_Data!
+  ): OrganisationDomain_KeyOutput! @fdc_generated(from: "OrganisationDomain", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Patient` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Patient`.
+  """
+  patient_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Patient_Data!
+  ): Patient_KeyOutput! @fdc_generated(from: "Patient", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `PatientCondition` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PatientCondition`.
+  """
+  patientCondition_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: PatientCondition_Data!
+  ): PatientCondition_KeyOutput! @fdc_generated(from: "PatientCondition", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `PatientIdentity` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PatientIdentity`.
+  """
+  patientIdentity_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: PatientIdentity_Data!
+  ): PatientIdentity_KeyOutput! @fdc_generated(from: "PatientIdentity", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Payment` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Payment`.
+  """
+  payment_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Payment_Data!
+  ): Payment_KeyOutput! @fdc_generated(from: "Payment", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `PaymentReceipt` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PaymentReceipt`.
+  """
+  paymentReceipt_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: PaymentReceipt_Data!
+  ): PaymentReceipt_KeyOutput! @fdc_generated(from: "PaymentReceipt", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `PharmacyDirectoryProfile` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PharmacyDirectoryProfile`.
+  """
+  pharmacyDirectoryProfile_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: PharmacyDirectoryProfile_Data!
+  ): PharmacyDirectoryProfile_KeyOutput! @fdc_generated(from: "PharmacyDirectoryProfile", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `PlacementEvent` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PlacementEvent`.
+  """
+  placementEvent_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: PlacementEvent_Data!
+  ): PlacementEvent_KeyOutput! @fdc_generated(from: "PlacementEvent", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Prescriber` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Prescriber`.
+  """
+  prescriber_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Prescriber_Data!
+  ): Prescriber_KeyOutput! @fdc_generated(from: "Prescriber", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Prescription` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Prescription`.
+  """
+  prescription_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Prescription_Data!
+  ): Prescription_KeyOutput! @fdc_generated(from: "Prescription", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `PrescriptionFile` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PrescriptionFile`.
+  """
+  prescriptionFile_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: PrescriptionFile_Data!
+  ): PrescriptionFile_KeyOutput! @fdc_generated(from: "PrescriptionFile", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `PrescriptionLine` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PrescriptionLine`.
+  """
+  prescriptionLine_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: PrescriptionLine_Data!
+  ): PrescriptionLine_KeyOutput! @fdc_generated(from: "PrescriptionLine", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `ReferralFeeEvent` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ReferralFeeEvent`.
+  """
+  referralFeeEvent_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: ReferralFeeEvent_Data!
+  ): ReferralFeeEvent_KeyOutput! @fdc_generated(from: "ReferralFeeEvent", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `ReferralToken` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ReferralToken`.
+  """
+  referralToken_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: ReferralToken_Data!
+  ): ReferralToken_KeyOutput! @fdc_generated(from: "ReferralToken", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Refund` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Refund`.
+  """
+  refund_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Refund_Data!
+  ): Refund_KeyOutput! @fdc_generated(from: "Refund", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `SetupTask` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `SetupTask`.
+  """
+  setupTask_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: SetupTask_Data!
+  ): SetupTask_KeyOutput! @fdc_generated(from: "SetupTask", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `Shipment` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Shipment`.
+  """
+  shipment_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: Shipment_Data!
+  ): Shipment_KeyOutput! @fdc_generated(from: "Shipment", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `ShipmentLine` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ShipmentLine`.
+  """
+  shipmentLine_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: ShipmentLine_Data!
+  ): ShipmentLine_KeyOutput! @fdc_generated(from: "ShipmentLine", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `StaffSession` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `StaffSession`.
+  """
+  staffSession_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: StaffSession_Data!
+  ): StaffSession_KeyOutput! @fdc_generated(from: "StaffSession", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `StaffTask` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `StaffTask`.
+  """
+  staffTask_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: StaffTask_Data!
+  ): StaffTask_KeyOutput! @fdc_generated(from: "StaffTask", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `StaffUser` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `StaffUser`.
+  """
+  staffUser_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: StaffUser_Data!
+  ): StaffUser_KeyOutput! @fdc_generated(from: "StaffUser", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update `AuditLog` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AuditLog`.
+  """
+  auditLog_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [AuditLog_Data!]!
+  ): [AuditLog_KeyOutput!]! @fdc_generated(from: "AuditLog", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Company` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Company`.
+  """
+  company_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Company_Data!]!
+  ): [Company_KeyOutput!]! @fdc_generated(from: "Company", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Condition` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Condition`.
+  """
+  condition_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Condition_Data!]!
+  ): [Condition_KeyOutput!]! @fdc_generated(from: "Condition", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `DispenseEvent` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `DispenseEvent`.
+  """
+  dispenseEvent_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [DispenseEvent_Data!]!
+  ): [DispenseEvent_KeyOutput!]! @fdc_generated(from: "DispenseEvent", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `EligibilityAssignmentEvent` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `EligibilityAssignmentEvent`.
+  """
+  eligibilityAssignmentEvent_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [EligibilityAssignmentEvent_Data!]!
+  ): [EligibilityAssignmentEvent_KeyOutput!]! @fdc_generated(from: "EligibilityAssignmentEvent", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `EligibilityCondition` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `EligibilityCondition`.
+  """
+  eligibilityCondition_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [EligibilityCondition_Data!]!
+  ): [EligibilityCondition_KeyOutput!]! @fdc_generated(from: "EligibilityCondition", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `EligibilityConsent` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `EligibilityConsent`.
+  """
+  eligibilityConsent_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [EligibilityConsent_Data!]!
+  ): [EligibilityConsent_KeyOutput!]! @fdc_generated(from: "EligibilityConsent", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `EligibilitySubmission` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `EligibilitySubmission`.
+  """
+  eligibilitySubmission_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [EligibilitySubmission_Data!]!
+  ): [EligibilitySubmission_KeyOutput!]! @fdc_generated(from: "EligibilitySubmission", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `GoodsReceipt` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `GoodsReceipt`.
+  """
+  goodsReceipt_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [GoodsReceipt_Data!]!
+  ): [GoodsReceipt_KeyOutput!]! @fdc_generated(from: "GoodsReceipt", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `GoodsReceiptLine` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `GoodsReceiptLine`.
+  """
+  goodsReceiptLine_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [GoodsReceiptLine_Data!]!
+  ): [GoodsReceiptLine_KeyOutput!]! @fdc_generated(from: "GoodsReceiptLine", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `IntegrationConnection` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `IntegrationConnection`.
+  """
+  integrationConnection_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [IntegrationConnection_Data!]!
+  ): [IntegrationConnection_KeyOutput!]! @fdc_generated(from: "IntegrationConnection", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `IntegrationOperation` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `IntegrationOperation`.
+  """
+  integrationOperation_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [IntegrationOperation_Data!]!
+  ): [IntegrationOperation_KeyOutput!]! @fdc_generated(from: "IntegrationOperation", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `IntegrationWebhookEvent` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `IntegrationWebhookEvent`.
+  """
+  integrationWebhookEvent_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [IntegrationWebhookEvent_Data!]!
+  ): [IntegrationWebhookEvent_KeyOutput!]! @fdc_generated(from: "IntegrationWebhookEvent", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `NotificationOutbox` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `NotificationOutbox`.
+  """
+  notificationOutbox_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [NotificationOutbox_Data!]!
+  ): [NotificationOutbox_KeyOutput!]! @fdc_generated(from: "NotificationOutbox", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Order` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Order`.
+  """
+  order_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Order_Data!]!
+  ): [Order_KeyOutput!]! @fdc_generated(from: "Order", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `OrderDraft` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `OrderDraft`.
+  """
+  orderDraft_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [OrderDraft_Data!]!
+  ): [OrderDraft_KeyOutput!]! @fdc_generated(from: "OrderDraft", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `OrderLine` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `OrderLine`.
+  """
+  orderLine_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [OrderLine_Data!]!
+  ): [OrderLine_KeyOutput!]! @fdc_generated(from: "OrderLine", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `OrderPrescription` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `OrderPrescription`.
+  """
+  orderPrescription_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [OrderPrescription_Data!]!
+  ): [OrderPrescription_KeyOutput!]! @fdc_generated(from: "OrderPrescription", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Organisation` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Organisation`.
+  """
+  organisation_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Organisation_Data!]!
+  ): [Organisation_KeyOutput!]! @fdc_generated(from: "Organisation", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `OrganisationDomain` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `OrganisationDomain`.
+  """
+  organisationDomain_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [OrganisationDomain_Data!]!
+  ): [OrganisationDomain_KeyOutput!]! @fdc_generated(from: "OrganisationDomain", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Patient` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Patient`.
+  """
+  patient_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Patient_Data!]!
+  ): [Patient_KeyOutput!]! @fdc_generated(from: "Patient", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `PatientCondition` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PatientCondition`.
+  """
+  patientCondition_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [PatientCondition_Data!]!
+  ): [PatientCondition_KeyOutput!]! @fdc_generated(from: "PatientCondition", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `PatientIdentity` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PatientIdentity`.
+  """
+  patientIdentity_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [PatientIdentity_Data!]!
+  ): [PatientIdentity_KeyOutput!]! @fdc_generated(from: "PatientIdentity", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Payment` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Payment`.
+  """
+  payment_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Payment_Data!]!
+  ): [Payment_KeyOutput!]! @fdc_generated(from: "Payment", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `PaymentReceipt` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PaymentReceipt`.
+  """
+  paymentReceipt_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [PaymentReceipt_Data!]!
+  ): [PaymentReceipt_KeyOutput!]! @fdc_generated(from: "PaymentReceipt", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `PharmacyDirectoryProfile` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PharmacyDirectoryProfile`.
+  """
+  pharmacyDirectoryProfile_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [PharmacyDirectoryProfile_Data!]!
+  ): [PharmacyDirectoryProfile_KeyOutput!]! @fdc_generated(from: "PharmacyDirectoryProfile", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `PlacementEvent` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PlacementEvent`.
+  """
+  placementEvent_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [PlacementEvent_Data!]!
+  ): [PlacementEvent_KeyOutput!]! @fdc_generated(from: "PlacementEvent", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Prescriber` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Prescriber`.
+  """
+  prescriber_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Prescriber_Data!]!
+  ): [Prescriber_KeyOutput!]! @fdc_generated(from: "Prescriber", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Prescription` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Prescription`.
+  """
+  prescription_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Prescription_Data!]!
+  ): [Prescription_KeyOutput!]! @fdc_generated(from: "Prescription", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `PrescriptionFile` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PrescriptionFile`.
+  """
+  prescriptionFile_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [PrescriptionFile_Data!]!
+  ): [PrescriptionFile_KeyOutput!]! @fdc_generated(from: "PrescriptionFile", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `PrescriptionLine` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PrescriptionLine`.
+  """
+  prescriptionLine_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [PrescriptionLine_Data!]!
+  ): [PrescriptionLine_KeyOutput!]! @fdc_generated(from: "PrescriptionLine", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `ReferralFeeEvent` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ReferralFeeEvent`.
+  """
+  referralFeeEvent_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [ReferralFeeEvent_Data!]!
+  ): [ReferralFeeEvent_KeyOutput!]! @fdc_generated(from: "ReferralFeeEvent", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `ReferralToken` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ReferralToken`.
+  """
+  referralToken_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [ReferralToken_Data!]!
+  ): [ReferralToken_KeyOutput!]! @fdc_generated(from: "ReferralToken", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Refund` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Refund`.
+  """
+  refund_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Refund_Data!]!
+  ): [Refund_KeyOutput!]! @fdc_generated(from: "Refund", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `SetupTask` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `SetupTask`.
+  """
+  setupTask_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [SetupTask_Data!]!
+  ): [SetupTask_KeyOutput!]! @fdc_generated(from: "SetupTask", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `Shipment` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Shipment`.
+  """
+  shipment_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [Shipment_Data!]!
+  ): [Shipment_KeyOutput!]! @fdc_generated(from: "Shipment", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `ShipmentLine` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ShipmentLine`.
+  """
+  shipmentLine_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [ShipmentLine_Data!]!
+  ): [ShipmentLine_KeyOutput!]! @fdc_generated(from: "ShipmentLine", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `StaffSession` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `StaffSession`.
+  """
+  staffSession_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [StaffSession_Data!]!
+  ): [StaffSession_KeyOutput!]! @fdc_generated(from: "StaffSession", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `StaffTask` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `StaffTask`.
+  """
+  staffTask_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [StaffTask_Data!]!
+  ): [StaffTask_KeyOutput!]! @fdc_generated(from: "StaffTask", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `StaffUser` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `StaffUser`.
+  """
+  staffUser_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [StaffUser_Data!]!
+  ): [StaffUser_KeyOutput!]! @fdc_generated(from: "StaffUser", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Update a single `AuditLog` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `AuditLog` or `null` if not found.
+  """
+  auditLog_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: AuditLog_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AuditLog_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: AuditLog_Data!
+  ): AuditLog_KeyOutput @fdc_generated(from: "AuditLog", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Company` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Company` or `null` if not found.
+  """
+  company_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Company_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Company_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Company_Data!
+  ): Company_KeyOutput @fdc_generated(from: "Company", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Condition` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Condition` or `null` if not found.
+  """
+  condition_update(
+    """
+    The key used to identify the object.
+    """
+    key: Condition_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Condition_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Condition_Data!
+  ): Condition_KeyOutput @fdc_generated(from: "Condition", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `DispenseEvent` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `DispenseEvent` or `null` if not found.
+  """
+  dispenseEvent_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: DispenseEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DispenseEvent_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: DispenseEvent_Data!
+  ): DispenseEvent_KeyOutput @fdc_generated(from: "DispenseEvent", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `EligibilityAssignmentEvent` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `EligibilityAssignmentEvent` or `null` if not found.
+  """
+  eligibilityAssignmentEvent_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: EligibilityAssignmentEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: EligibilityAssignmentEvent_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: EligibilityAssignmentEvent_Data!
+  ): EligibilityAssignmentEvent_KeyOutput @fdc_generated(from: "EligibilityAssignmentEvent", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `EligibilityCondition` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `EligibilityCondition` or `null` if not found.
+  """
+  eligibilityCondition_update(
+    """
+    The key used to identify the object.
+    """
+    key: EligibilityCondition_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: EligibilityCondition_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: EligibilityCondition_Data!
+  ): EligibilityCondition_KeyOutput @fdc_generated(from: "EligibilityCondition", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `EligibilityConsent` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `EligibilityConsent` or `null` if not found.
+  """
+  eligibilityConsent_update(
+    """
+    The key used to identify the object.
+    """
+    key: EligibilityConsent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: EligibilityConsent_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: EligibilityConsent_Data!
+  ): EligibilityConsent_KeyOutput @fdc_generated(from: "EligibilityConsent", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `EligibilitySubmission` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `EligibilitySubmission` or `null` if not found.
+  """
+  eligibilitySubmission_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: EligibilitySubmission_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: EligibilitySubmission_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: EligibilitySubmission_Data!
+  ): EligibilitySubmission_KeyOutput @fdc_generated(from: "EligibilitySubmission", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `GoodsReceipt` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `GoodsReceipt` or `null` if not found.
+  """
+  goodsReceipt_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: GoodsReceipt_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: GoodsReceipt_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: GoodsReceipt_Data!
+  ): GoodsReceipt_KeyOutput @fdc_generated(from: "GoodsReceipt", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `GoodsReceiptLine` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `GoodsReceiptLine` or `null` if not found.
+  """
+  goodsReceiptLine_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: GoodsReceiptLine_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: GoodsReceiptLine_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: GoodsReceiptLine_Data!
+  ): GoodsReceiptLine_KeyOutput @fdc_generated(from: "GoodsReceiptLine", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `IntegrationConnection` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `IntegrationConnection` or `null` if not found.
+  """
+  integrationConnection_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: IntegrationConnection_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: IntegrationConnection_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: IntegrationConnection_Data!
+  ): IntegrationConnection_KeyOutput @fdc_generated(from: "IntegrationConnection", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `IntegrationOperation` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `IntegrationOperation` or `null` if not found.
+  """
+  integrationOperation_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: IntegrationOperation_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: IntegrationOperation_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: IntegrationOperation_Data!
+  ): IntegrationOperation_KeyOutput @fdc_generated(from: "IntegrationOperation", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `IntegrationWebhookEvent` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `IntegrationWebhookEvent` or `null` if not found.
+  """
+  integrationWebhookEvent_update(
+    """
+    The key used to identify the object.
+    """
+    key: IntegrationWebhookEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: IntegrationWebhookEvent_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: IntegrationWebhookEvent_Data!
+  ): IntegrationWebhookEvent_KeyOutput @fdc_generated(from: "IntegrationWebhookEvent", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `NotificationOutbox` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `NotificationOutbox` or `null` if not found.
+  """
+  notificationOutbox_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: NotificationOutbox_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: NotificationOutbox_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: NotificationOutbox_Data!
+  ): NotificationOutbox_KeyOutput @fdc_generated(from: "NotificationOutbox", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Order` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Order` or `null` if not found.
+  """
+  order_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Order_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Order_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Order_Data!
+  ): Order_KeyOutput @fdc_generated(from: "Order", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `OrderDraft` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `OrderDraft` or `null` if not found.
+  """
+  orderDraft_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: OrderDraft_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OrderDraft_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: OrderDraft_Data!
+  ): OrderDraft_KeyOutput @fdc_generated(from: "OrderDraft", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `OrderLine` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `OrderLine` or `null` if not found.
+  """
+  orderLine_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: OrderLine_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OrderLine_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: OrderLine_Data!
+  ): OrderLine_KeyOutput @fdc_generated(from: "OrderLine", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `OrderPrescription` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `OrderPrescription` or `null` if not found.
+  """
+  orderPrescription_update(
+    """
+    The key used to identify the object.
+    """
+    key: OrderPrescription_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OrderPrescription_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: OrderPrescription_Data!
+  ): OrderPrescription_KeyOutput @fdc_generated(from: "OrderPrescription", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Organisation` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Organisation` or `null` if not found.
+  """
+  organisation_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Organisation_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Organisation_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Organisation_Data!
+  ): Organisation_KeyOutput @fdc_generated(from: "Organisation", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `OrganisationDomain` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `OrganisationDomain` or `null` if not found.
+  """
+  organisationDomain_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: OrganisationDomain_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OrganisationDomain_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: OrganisationDomain_Data!
+  ): OrganisationDomain_KeyOutput @fdc_generated(from: "OrganisationDomain", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Patient` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Patient` or `null` if not found.
+  """
+  patient_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Patient_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Patient_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Patient_Data!
+  ): Patient_KeyOutput @fdc_generated(from: "Patient", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `PatientCondition` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `PatientCondition` or `null` if not found.
+  """
+  patientCondition_update(
+    """
+    The key used to identify the object.
+    """
+    key: PatientCondition_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PatientCondition_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: PatientCondition_Data!
+  ): PatientCondition_KeyOutput @fdc_generated(from: "PatientCondition", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `PatientIdentity` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `PatientIdentity` or `null` if not found.
+  """
+  patientIdentity_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: PatientIdentity_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PatientIdentity_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: PatientIdentity_Data!
+  ): PatientIdentity_KeyOutput @fdc_generated(from: "PatientIdentity", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Payment` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Payment` or `null` if not found.
+  """
+  payment_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Payment_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Payment_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Payment_Data!
+  ): Payment_KeyOutput @fdc_generated(from: "Payment", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `PaymentReceipt` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `PaymentReceipt` or `null` if not found.
+  """
+  paymentReceipt_update(
+    """
+    The key used to identify the object.
+    """
+    key: PaymentReceipt_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PaymentReceipt_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: PaymentReceipt_Data!
+  ): PaymentReceipt_KeyOutput @fdc_generated(from: "PaymentReceipt", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `PharmacyDirectoryProfile` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `PharmacyDirectoryProfile` or `null` if not found.
+  """
+  pharmacyDirectoryProfile_update(
+    """
+    The key used to identify the object.
+    """
+    key: PharmacyDirectoryProfile_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PharmacyDirectoryProfile_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: PharmacyDirectoryProfile_Data!
+  ): PharmacyDirectoryProfile_KeyOutput @fdc_generated(from: "PharmacyDirectoryProfile", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `PlacementEvent` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `PlacementEvent` or `null` if not found.
+  """
+  placementEvent_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: PlacementEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PlacementEvent_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: PlacementEvent_Data!
+  ): PlacementEvent_KeyOutput @fdc_generated(from: "PlacementEvent", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Prescriber` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Prescriber` or `null` if not found.
+  """
+  prescriber_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Prescriber_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Prescriber_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Prescriber_Data!
+  ): Prescriber_KeyOutput @fdc_generated(from: "Prescriber", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Prescription` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Prescription` or `null` if not found.
+  """
+  prescription_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Prescription_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Prescription_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Prescription_Data!
+  ): Prescription_KeyOutput @fdc_generated(from: "Prescription", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `PrescriptionFile` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `PrescriptionFile` or `null` if not found.
+  """
+  prescriptionFile_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: PrescriptionFile_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PrescriptionFile_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: PrescriptionFile_Data!
+  ): PrescriptionFile_KeyOutput @fdc_generated(from: "PrescriptionFile", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `PrescriptionLine` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `PrescriptionLine` or `null` if not found.
+  """
+  prescriptionLine_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: PrescriptionLine_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PrescriptionLine_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: PrescriptionLine_Data!
+  ): PrescriptionLine_KeyOutput @fdc_generated(from: "PrescriptionLine", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `ReferralFeeEvent` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `ReferralFeeEvent` or `null` if not found.
+  """
+  referralFeeEvent_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: ReferralFeeEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ReferralFeeEvent_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: ReferralFeeEvent_Data!
+  ): ReferralFeeEvent_KeyOutput @fdc_generated(from: "ReferralFeeEvent", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `ReferralToken` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `ReferralToken` or `null` if not found.
+  """
+  referralToken_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: ReferralToken_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ReferralToken_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: ReferralToken_Data!
+  ): ReferralToken_KeyOutput @fdc_generated(from: "ReferralToken", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Refund` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Refund` or `null` if not found.
+  """
+  refund_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Refund_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Refund_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Refund_Data!
+  ): Refund_KeyOutput @fdc_generated(from: "Refund", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `SetupTask` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `SetupTask` or `null` if not found.
+  """
+  setupTask_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: SetupTask_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: SetupTask_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: SetupTask_Data!
+  ): SetupTask_KeyOutput @fdc_generated(from: "SetupTask", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `Shipment` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Shipment` or `null` if not found.
+  """
+  shipment_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Shipment_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Shipment_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: Shipment_Data!
+  ): Shipment_KeyOutput @fdc_generated(from: "Shipment", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `ShipmentLine` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `ShipmentLine` or `null` if not found.
+  """
+  shipmentLine_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: ShipmentLine_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ShipmentLine_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: ShipmentLine_Data!
+  ): ShipmentLine_KeyOutput @fdc_generated(from: "ShipmentLine", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `StaffSession` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `StaffSession` or `null` if not found.
+  """
+  staffSession_update(
+    """
+    The key used to identify the object.
+    """
+    key: StaffSession_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: StaffSession_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: StaffSession_Data!
+  ): StaffSession_KeyOutput @fdc_generated(from: "StaffSession", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `StaffTask` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `StaffTask` or `null` if not found.
+  """
+  staffTask_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: StaffTask_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: StaffTask_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: StaffTask_Data!
+  ): StaffTask_KeyOutput @fdc_generated(from: "StaffTask", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `StaffUser` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `StaffUser` or `null` if not found.
+  """
+  staffUser_update(
+    """
+    The key used to identify the object.
+    """
+    key: StaffUser_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: StaffUser_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: StaffUser_Data!
+  ): StaffUser_KeyOutput @fdc_generated(from: "StaffUser", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update `AuditLog` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  auditLog_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: AuditLog_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: AuditLog_Data!
+  ): Int! @fdc_generated(from: "AuditLog", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Company` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  company_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Company_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Company_Data!
+  ): Int! @fdc_generated(from: "Company", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Condition` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  condition_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Condition_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Condition_Data!
+  ): Int! @fdc_generated(from: "Condition", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `DispenseEvent` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  dispenseEvent_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: DispenseEvent_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: DispenseEvent_Data!
+  ): Int! @fdc_generated(from: "DispenseEvent", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `EligibilityAssignmentEvent` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  eligibilityAssignmentEvent_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: EligibilityAssignmentEvent_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: EligibilityAssignmentEvent_Data!
+  ): Int! @fdc_generated(from: "EligibilityAssignmentEvent", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `EligibilityCondition` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  eligibilityCondition_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: EligibilityCondition_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: EligibilityCondition_Data!
+  ): Int! @fdc_generated(from: "EligibilityCondition", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `EligibilityConsent` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  eligibilityConsent_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: EligibilityConsent_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: EligibilityConsent_Data!
+  ): Int! @fdc_generated(from: "EligibilityConsent", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `EligibilitySubmission` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  eligibilitySubmission_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: EligibilitySubmission_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: EligibilitySubmission_Data!
+  ): Int! @fdc_generated(from: "EligibilitySubmission", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `GoodsReceipt` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  goodsReceipt_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: GoodsReceipt_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: GoodsReceipt_Data!
+  ): Int! @fdc_generated(from: "GoodsReceipt", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `GoodsReceiptLine` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  goodsReceiptLine_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: GoodsReceiptLine_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: GoodsReceiptLine_Data!
+  ): Int! @fdc_generated(from: "GoodsReceiptLine", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `IntegrationConnection` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  integrationConnection_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: IntegrationConnection_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: IntegrationConnection_Data!
+  ): Int! @fdc_generated(from: "IntegrationConnection", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `IntegrationOperation` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  integrationOperation_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: IntegrationOperation_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: IntegrationOperation_Data!
+  ): Int! @fdc_generated(from: "IntegrationOperation", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `IntegrationWebhookEvent` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  integrationWebhookEvent_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: IntegrationWebhookEvent_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: IntegrationWebhookEvent_Data!
+  ): Int! @fdc_generated(from: "IntegrationWebhookEvent", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `NotificationOutbox` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  notificationOutbox_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: NotificationOutbox_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: NotificationOutbox_Data!
+  ): Int! @fdc_generated(from: "NotificationOutbox", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Order` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  order_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Order_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Order_Data!
+  ): Int! @fdc_generated(from: "Order", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `OrderDraft` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  orderDraft_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: OrderDraft_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: OrderDraft_Data!
+  ): Int! @fdc_generated(from: "OrderDraft", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `OrderLine` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  orderLine_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: OrderLine_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: OrderLine_Data!
+  ): Int! @fdc_generated(from: "OrderLine", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `OrderPrescription` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  orderPrescription_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: OrderPrescription_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: OrderPrescription_Data!
+  ): Int! @fdc_generated(from: "OrderPrescription", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Organisation` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  organisation_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Organisation_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Organisation_Data!
+  ): Int! @fdc_generated(from: "Organisation", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `OrganisationDomain` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  organisationDomain_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: OrganisationDomain_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: OrganisationDomain_Data!
+  ): Int! @fdc_generated(from: "OrganisationDomain", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Patient` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  patient_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Patient_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Patient_Data!
+  ): Int! @fdc_generated(from: "Patient", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `PatientCondition` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  patientCondition_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: PatientCondition_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: PatientCondition_Data!
+  ): Int! @fdc_generated(from: "PatientCondition", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `PatientIdentity` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  patientIdentity_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: PatientIdentity_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: PatientIdentity_Data!
+  ): Int! @fdc_generated(from: "PatientIdentity", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Payment` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  payment_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Payment_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Payment_Data!
+  ): Int! @fdc_generated(from: "Payment", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `PaymentReceipt` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  paymentReceipt_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: PaymentReceipt_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: PaymentReceipt_Data!
+  ): Int! @fdc_generated(from: "PaymentReceipt", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `PharmacyDirectoryProfile` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  pharmacyDirectoryProfile_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: PharmacyDirectoryProfile_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: PharmacyDirectoryProfile_Data!
+  ): Int! @fdc_generated(from: "PharmacyDirectoryProfile", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `PlacementEvent` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  placementEvent_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: PlacementEvent_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: PlacementEvent_Data!
+  ): Int! @fdc_generated(from: "PlacementEvent", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Prescriber` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  prescriber_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Prescriber_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Prescriber_Data!
+  ): Int! @fdc_generated(from: "Prescriber", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Prescription` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  prescription_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Prescription_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Prescription_Data!
+  ): Int! @fdc_generated(from: "Prescription", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `PrescriptionFile` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  prescriptionFile_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: PrescriptionFile_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: PrescriptionFile_Data!
+  ): Int! @fdc_generated(from: "PrescriptionFile", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `PrescriptionLine` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  prescriptionLine_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: PrescriptionLine_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: PrescriptionLine_Data!
+  ): Int! @fdc_generated(from: "PrescriptionLine", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `ReferralFeeEvent` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  referralFeeEvent_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: ReferralFeeEvent_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: ReferralFeeEvent_Data!
+  ): Int! @fdc_generated(from: "ReferralFeeEvent", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `ReferralToken` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  referralToken_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: ReferralToken_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: ReferralToken_Data!
+  ): Int! @fdc_generated(from: "ReferralToken", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Refund` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  refund_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Refund_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Refund_Data!
+  ): Int! @fdc_generated(from: "Refund", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `SetupTask` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  setupTask_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: SetupTask_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: SetupTask_Data!
+  ): Int! @fdc_generated(from: "SetupTask", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `Shipment` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  shipment_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: Shipment_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: Shipment_Data!
+  ): Int! @fdc_generated(from: "Shipment", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `ShipmentLine` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  shipmentLine_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: ShipmentLine_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: ShipmentLine_Data!
+  ): Int! @fdc_generated(from: "ShipmentLine", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `StaffSession` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  staffSession_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: StaffSession_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: StaffSession_Data!
+  ): Int! @fdc_generated(from: "StaffSession", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `StaffTask` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  staffTask_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: StaffTask_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: StaffTask_Data!
+  ): Int! @fdc_generated(from: "StaffTask", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `StaffUser` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  staffUser_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: StaffUser_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: StaffUser_Data!
+  ): Int! @fdc_generated(from: "StaffUser", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Delete a single `AuditLog` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  auditLog_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: AuditLog_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AuditLog_FirstRow
+  ): AuditLog_KeyOutput @fdc_generated(from: "AuditLog", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Company` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  company_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Company_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Company_FirstRow
+  ): Company_KeyOutput @fdc_generated(from: "Company", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Condition` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  condition_delete(
+    """
+    The key used to identify the object.
+    """
+    key: Condition_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Condition_FirstRow
+  ): Condition_KeyOutput @fdc_generated(from: "Condition", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `DispenseEvent` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  dispenseEvent_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: DispenseEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DispenseEvent_FirstRow
+  ): DispenseEvent_KeyOutput @fdc_generated(from: "DispenseEvent", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `EligibilityAssignmentEvent` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  eligibilityAssignmentEvent_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: EligibilityAssignmentEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: EligibilityAssignmentEvent_FirstRow
+  ): EligibilityAssignmentEvent_KeyOutput @fdc_generated(from: "EligibilityAssignmentEvent", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `EligibilityCondition` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  eligibilityCondition_delete(
+    """
+    The key used to identify the object.
+    """
+    key: EligibilityCondition_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: EligibilityCondition_FirstRow
+  ): EligibilityCondition_KeyOutput @fdc_generated(from: "EligibilityCondition", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `EligibilityConsent` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  eligibilityConsent_delete(
+    """
+    The key used to identify the object.
+    """
+    key: EligibilityConsent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: EligibilityConsent_FirstRow
+  ): EligibilityConsent_KeyOutput @fdc_generated(from: "EligibilityConsent", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `EligibilitySubmission` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  eligibilitySubmission_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: EligibilitySubmission_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: EligibilitySubmission_FirstRow
+  ): EligibilitySubmission_KeyOutput @fdc_generated(from: "EligibilitySubmission", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `GoodsReceipt` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  goodsReceipt_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: GoodsReceipt_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: GoodsReceipt_FirstRow
+  ): GoodsReceipt_KeyOutput @fdc_generated(from: "GoodsReceipt", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `GoodsReceiptLine` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  goodsReceiptLine_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: GoodsReceiptLine_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: GoodsReceiptLine_FirstRow
+  ): GoodsReceiptLine_KeyOutput @fdc_generated(from: "GoodsReceiptLine", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `IntegrationConnection` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  integrationConnection_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: IntegrationConnection_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: IntegrationConnection_FirstRow
+  ): IntegrationConnection_KeyOutput @fdc_generated(from: "IntegrationConnection", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `IntegrationOperation` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  integrationOperation_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: IntegrationOperation_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: IntegrationOperation_FirstRow
+  ): IntegrationOperation_KeyOutput @fdc_generated(from: "IntegrationOperation", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `IntegrationWebhookEvent` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  integrationWebhookEvent_delete(
+    """
+    The key used to identify the object.
+    """
+    key: IntegrationWebhookEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: IntegrationWebhookEvent_FirstRow
+  ): IntegrationWebhookEvent_KeyOutput @fdc_generated(from: "IntegrationWebhookEvent", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `NotificationOutbox` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  notificationOutbox_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: NotificationOutbox_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: NotificationOutbox_FirstRow
+  ): NotificationOutbox_KeyOutput @fdc_generated(from: "NotificationOutbox", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Order` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  order_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Order_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Order_FirstRow
+  ): Order_KeyOutput @fdc_generated(from: "Order", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `OrderDraft` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  orderDraft_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: OrderDraft_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OrderDraft_FirstRow
+  ): OrderDraft_KeyOutput @fdc_generated(from: "OrderDraft", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `OrderLine` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  orderLine_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: OrderLine_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OrderLine_FirstRow
+  ): OrderLine_KeyOutput @fdc_generated(from: "OrderLine", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `OrderPrescription` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  orderPrescription_delete(
+    """
+    The key used to identify the object.
+    """
+    key: OrderPrescription_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OrderPrescription_FirstRow
+  ): OrderPrescription_KeyOutput @fdc_generated(from: "OrderPrescription", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Organisation` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  organisation_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Organisation_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Organisation_FirstRow
+  ): Organisation_KeyOutput @fdc_generated(from: "Organisation", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `OrganisationDomain` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  organisationDomain_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: OrganisationDomain_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OrganisationDomain_FirstRow
+  ): OrganisationDomain_KeyOutput @fdc_generated(from: "OrganisationDomain", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Patient` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  patient_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Patient_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Patient_FirstRow
+  ): Patient_KeyOutput @fdc_generated(from: "Patient", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `PatientCondition` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  patientCondition_delete(
+    """
+    The key used to identify the object.
+    """
+    key: PatientCondition_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PatientCondition_FirstRow
+  ): PatientCondition_KeyOutput @fdc_generated(from: "PatientCondition", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `PatientIdentity` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  patientIdentity_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: PatientIdentity_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PatientIdentity_FirstRow
+  ): PatientIdentity_KeyOutput @fdc_generated(from: "PatientIdentity", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Payment` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  payment_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Payment_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Payment_FirstRow
+  ): Payment_KeyOutput @fdc_generated(from: "Payment", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `PaymentReceipt` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  paymentReceipt_delete(
+    """
+    The key used to identify the object.
+    """
+    key: PaymentReceipt_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PaymentReceipt_FirstRow
+  ): PaymentReceipt_KeyOutput @fdc_generated(from: "PaymentReceipt", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `PharmacyDirectoryProfile` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  pharmacyDirectoryProfile_delete(
+    """
+    The key used to identify the object.
+    """
+    key: PharmacyDirectoryProfile_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PharmacyDirectoryProfile_FirstRow
+  ): PharmacyDirectoryProfile_KeyOutput @fdc_generated(from: "PharmacyDirectoryProfile", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `PlacementEvent` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  placementEvent_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: PlacementEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PlacementEvent_FirstRow
+  ): PlacementEvent_KeyOutput @fdc_generated(from: "PlacementEvent", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Prescriber` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  prescriber_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Prescriber_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Prescriber_FirstRow
+  ): Prescriber_KeyOutput @fdc_generated(from: "Prescriber", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Prescription` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  prescription_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Prescription_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Prescription_FirstRow
+  ): Prescription_KeyOutput @fdc_generated(from: "Prescription", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `PrescriptionFile` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  prescriptionFile_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: PrescriptionFile_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PrescriptionFile_FirstRow
+  ): PrescriptionFile_KeyOutput @fdc_generated(from: "PrescriptionFile", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `PrescriptionLine` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  prescriptionLine_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: PrescriptionLine_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PrescriptionLine_FirstRow
+  ): PrescriptionLine_KeyOutput @fdc_generated(from: "PrescriptionLine", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `ReferralFeeEvent` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  referralFeeEvent_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: ReferralFeeEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ReferralFeeEvent_FirstRow
+  ): ReferralFeeEvent_KeyOutput @fdc_generated(from: "ReferralFeeEvent", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `ReferralToken` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  referralToken_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: ReferralToken_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ReferralToken_FirstRow
+  ): ReferralToken_KeyOutput @fdc_generated(from: "ReferralToken", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Refund` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  refund_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Refund_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Refund_FirstRow
+  ): Refund_KeyOutput @fdc_generated(from: "Refund", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `SetupTask` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  setupTask_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: SetupTask_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: SetupTask_FirstRow
+  ): SetupTask_KeyOutput @fdc_generated(from: "SetupTask", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `Shipment` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  shipment_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Shipment_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Shipment_FirstRow
+  ): Shipment_KeyOutput @fdc_generated(from: "Shipment", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `ShipmentLine` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  shipmentLine_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: ShipmentLine_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ShipmentLine_FirstRow
+  ): ShipmentLine_KeyOutput @fdc_generated(from: "ShipmentLine", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `StaffSession` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  staffSession_delete(
+    """
+    The key used to identify the object.
+    """
+    key: StaffSession_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: StaffSession_FirstRow
+  ): StaffSession_KeyOutput @fdc_generated(from: "StaffSession", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `StaffTask` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  staffTask_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: StaffTask_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: StaffTask_FirstRow
+  ): StaffTask_KeyOutput @fdc_generated(from: "StaffTask", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `StaffUser` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  staffUser_delete(
+    """
+    The key used to identify the object.
+    """
+    key: StaffUser_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: StaffUser_FirstRow
+  ): StaffUser_KeyOutput @fdc_generated(from: "StaffUser", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete `AuditLog` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  auditLog_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: AuditLog_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "AuditLog", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Company` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  company_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Company_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Company", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Condition` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  condition_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Condition_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Condition", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `DispenseEvent` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  dispenseEvent_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: DispenseEvent_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "DispenseEvent", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `EligibilityAssignmentEvent` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  eligibilityAssignmentEvent_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: EligibilityAssignmentEvent_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "EligibilityAssignmentEvent", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `EligibilityCondition` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  eligibilityCondition_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: EligibilityCondition_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "EligibilityCondition", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `EligibilityConsent` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  eligibilityConsent_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: EligibilityConsent_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "EligibilityConsent", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `EligibilitySubmission` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  eligibilitySubmission_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: EligibilitySubmission_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "EligibilitySubmission", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `GoodsReceipt` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  goodsReceipt_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: GoodsReceipt_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "GoodsReceipt", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `GoodsReceiptLine` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  goodsReceiptLine_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: GoodsReceiptLine_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "GoodsReceiptLine", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `IntegrationConnection` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  integrationConnection_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: IntegrationConnection_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "IntegrationConnection", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `IntegrationOperation` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  integrationOperation_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: IntegrationOperation_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "IntegrationOperation", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `IntegrationWebhookEvent` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  integrationWebhookEvent_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: IntegrationWebhookEvent_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "IntegrationWebhookEvent", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `NotificationOutbox` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  notificationOutbox_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: NotificationOutbox_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "NotificationOutbox", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Order` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  order_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Order_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Order", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `OrderDraft` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  orderDraft_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: OrderDraft_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "OrderDraft", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `OrderLine` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  orderLine_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: OrderLine_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "OrderLine", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `OrderPrescription` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  orderPrescription_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: OrderPrescription_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "OrderPrescription", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Organisation` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  organisation_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Organisation_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Organisation", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `OrganisationDomain` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  organisationDomain_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: OrganisationDomain_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "OrganisationDomain", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Patient` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  patient_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Patient_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Patient", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `PatientCondition` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  patientCondition_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: PatientCondition_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "PatientCondition", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `PatientIdentity` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  patientIdentity_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: PatientIdentity_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "PatientIdentity", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Payment` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  payment_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Payment_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Payment", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `PaymentReceipt` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  paymentReceipt_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: PaymentReceipt_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "PaymentReceipt", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `PharmacyDirectoryProfile` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  pharmacyDirectoryProfile_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: PharmacyDirectoryProfile_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "PharmacyDirectoryProfile", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `PlacementEvent` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  placementEvent_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: PlacementEvent_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "PlacementEvent", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Prescriber` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  prescriber_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Prescriber_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Prescriber", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Prescription` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  prescription_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Prescription_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Prescription", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `PrescriptionFile` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  prescriptionFile_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: PrescriptionFile_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "PrescriptionFile", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `PrescriptionLine` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  prescriptionLine_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: PrescriptionLine_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "PrescriptionLine", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `ReferralFeeEvent` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  referralFeeEvent_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: ReferralFeeEvent_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "ReferralFeeEvent", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `ReferralToken` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  referralToken_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: ReferralToken_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "ReferralToken", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Refund` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  refund_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Refund_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Refund", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `SetupTask` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  setupTask_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: SetupTask_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "SetupTask", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `Shipment` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  shipment_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: Shipment_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "Shipment", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `ShipmentLine` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  shipmentLine_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: ShipmentLine_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "ShipmentLine", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `StaffSession` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  staffSession_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: StaffSession_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "StaffSession", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `StaffTask` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  staffTask_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: StaffTask_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "StaffTask", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `StaffUser` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  staffUser_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: StaffUser_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "StaffUser", purpose: DELETE_MULTIPLE)
+}

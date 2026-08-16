@@ -1,25 +1,30 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, LockKeyhole } from 'lucide-react';
-import type { PharmacyTenant } from '../context/AppContext';
+import { useApp, type PharmacyTenant } from '../context/AppContext';
 import { SETUP_TASKS } from './setup';
 import { usePharmacySetup } from './usePharmacySetup';
+import { isApiConfigured, updatePaymentSettings } from '../shared/api';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
 
 interface PharmacySetupWizardProps {
   organisation: PharmacyTenant;
   setup: ReturnType<typeof usePharmacySetup>;
+  embedded?: boolean;
 }
 
-export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizardProps) {
+export function PharmacySetupWizard({ organisation, setup, embedded = false }: PharmacySetupWizardProps) {
+  const { dispatch } = useApp();
   const { status, loading, savingTask, error, updateTask } = setup;
   const [activeIndex, setActiveIndex] = useState(0);
   const [evidence, setEvidence] = useState<Record<string, string>>({});
+  const initialPaymentEvidence = useRef(organisation.defaultPaymentRoute === 'worldpay' ? 'worldpay-enabled' : 'pharmacy-only');
   const activeDefinition = SETUP_TASKS[activeIndex];
   const activeTask = status?.tasks.find(task => task.id === activeDefinition.id);
-  const adminManaged = activeDefinition.id === 'curaleaf_account';
+  const adminManaged = activeDefinition.owner === 'hhh_admin';
 
   useEffect(() => {
     if (!status) return;
-    setEvidence(Object.fromEntries(status.tasks.map(task => [task.id, task.evidence || ''])));
+    setEvidence(Object.fromEntries(status.tasks.map(task => [task.id, task.evidence || (task.id === 'payment_route' ? initialPaymentEvidence.current : '')])));
     const nextIncomplete = status.tasks.findIndex(task => !task.completed);
     if (nextIncomplete >= 0) setActiveIndex(nextIncomplete);
   }, [status]);
@@ -27,24 +32,60 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
   const percent = useMemo(() => status ? Math.round(status.completedCount / status.requiredCount * 100) : 0, [status]);
 
   if (loading || !status) {
-    return <div className="page-body setup-page"><section className="card setup-loading" aria-live="polite">Loading pharmacy setup…</section></div>;
+    return <div className={`${embedded ? '' : 'page-body '}setup-page`}><section className="card setup-loading" aria-live="polite">Loading pharmacy setup…</section></div>;
   }
 
   const currentEvidence = evidence[activeDefinition.id] || '';
   const canComplete = !adminManaged && currentEvidence.trim().length >= 2;
+  const worldpayEnabled = activeDefinition.id === 'payment_route' && currentEvidence === 'worldpay-enabled';
+  const setWorldpayEnabled = async (enabled: boolean) => {
+    setEvidence(current => ({ ...current, payment_route: enabled ? 'worldpay-enabled' : 'pharmacy-only' }));
+    dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: enabled ? 'worldpay' : 'manual' } });
+    dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled } });
+    try {
+      if (!isLocalPortalPreview && isApiConfigured) await updatePaymentSettings(organisation.id, enabled ? 'worldpay' : 'manual');
+    } catch (saveError) {
+      setEvidence(current => ({ ...current, payment_route: enabled ? 'pharmacy-only' : 'worldpay-enabled' }));
+      dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: enabled ? 'manual' : 'worldpay' } });
+      dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { enabled: !enabled } });
+      dispatch({ type: 'ADD_TOAST', message: saveError instanceof Error ? saveError.message : 'Payment settings could not be saved.', toastType: 'error' });
+    }
+  };
 
   return (
-    <div className="page-body setup-page">
+    <div className={`${embedded ? '' : 'page-body '}setup-page`}>
       <section className="card setup-hero">
         <div>
-          <p className="section-label">Pharmacy activation</p>
-          <h2>{status.completed ? 'Setup complete' : 'Finish your secure workspace setup'}</h2>
-          <p>{status.completed ? 'All required operational checks are recorded.' : 'Complete these checks before processing patient data, taking payment, or placing Curaleaf orders.'}</p>
+          <p className="section-label">Pharmacy activation & go-live gates</p>
+          <h2>Technical Go-Live Gates & Operational Checklist</h2>
+          <p>This operational checklist supports readiness. Go-live itself is controlled in Admin by exactly two hard gates: signed company GDPR evidence and a validated branch LIVE Curaleaf key.</p>
         </div>
         <div className="setup-progress-summary" aria-label={`${status.completedCount} of ${status.requiredCount} tasks complete`}>
-          <strong>{percent}%</strong><span>{status.completedCount}/{status.requiredCount} complete</span>
+          <strong>{percent}%</strong><span>{status.completedCount}/{status.requiredCount} operational steps</span>
         </div>
       </section>
+
+      {/* Two authoritative Go-Live gates */}
+      <section className="card go-live-gates-banner" style={{ padding: '1.25rem', marginBottom: '1rem', background: 'var(--surface-tint, #f0fdf4)', border: '1px solid var(--border-color, #bbf7d0)' }}>
+        <h3 style={{ margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <LockKeyhole size={18} />
+          <span>2 Hard Go-Live Gates</span>
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', marginTop: '0.75rem' }}>
+          <div style={{ padding: '0.75rem', background: '#fff', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
+            <small style={{ color: '#6b7280' }}>Gate 1</small>
+            <div style={{ fontWeight: 600 }}>Company GDPR Evidence</div>
+            <span className="pill pill-neutral" style={{ marginTop: '0.25rem' }}>Verified by HHH admin</span>
+          </div>
+
+          <div style={{ padding: '0.75rem', background: '#fff', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
+            <small style={{ color: '#6b7280' }}>Gate 2</small>
+            <div style={{ fontWeight: 600 }}>Branch LIVE Validation</div>
+            <span className="pill pill-neutral" style={{ marginTop: '0.25rem' }}>Verified by HHH admin</span>
+          </div>
+        </div>
+      </section>
+
 
       {error && <div className="banner banner-amber" role="status"><AlertCircle size={16} /> {error}</div>}
 
@@ -53,9 +94,15 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
           {SETUP_TASKS.map((definition, index) => {
             const task = status.tasks.find(candidate => candidate.id === definition.id);
             return (
-              <button type="button" key={definition.id} className={`setup-checklist-item ${index === activeIndex ? 'active' : ''} ${task?.completed ? 'complete' : ''}`} onClick={() => setActiveIndex(index)}>
+              <button type="button" key={definition.id} aria-current={index === activeIndex ? 'step' : undefined} className={`setup-checklist-item ${index === activeIndex ? 'active' : ''} ${task?.completed ? 'complete' : ''}`} onClick={() => setActiveIndex(index)}>
                 {task?.completed ? <CheckCircle2 size={18} /> : <span className="setup-step-number">{index + 1}</span>}
-                <span><strong>{definition.title}</strong><small>{task?.completed ? 'Completed' : definition.id === 'curaleaf_account' ? 'HHH admin managed' : 'Required'}</small></span>
+                <span>
+                  <span className="setup-task-title-row">
+                    <strong>{definition.title}</strong>
+                    {definition.owner === 'hhh_admin' ? <em className="setup-owner-tag">HHH admin</em> : null}
+                  </span>
+                  <small>{task?.completed ? 'Completed' : definition.owner === 'hhh_admin' ? 'Managed centrally' : 'Pharmacy action'}</small>
+                </span>
               </button>
             );
           })}
@@ -64,7 +111,13 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
         <section className="card setup-step" aria-labelledby="setup-step-title">
           <div className="setup-step-heading">
             <span className="resource-icon">{activeTask?.completed ? <CheckCircle2 size={20} /> : <ClipboardCheck size={20} />}</span>
-            <div><p className="section-label">Step {activeIndex + 1} of {SETUP_TASKS.length}</p><h2 id="setup-step-title">{activeDefinition.title}</h2></div>
+            <div>
+              <p className="section-label">Step {activeIndex + 1} of {SETUP_TASKS.length}</p>
+              <span className="setup-step-title-row">
+                <h2 id="setup-step-title">{activeDefinition.title}</h2>
+                {adminManaged ? <em className="setup-owner-tag">HHH admin</em> : null}
+              </span>
+            </div>
           </div>
           <p>{activeDefinition.description}</p>
 
@@ -78,20 +131,20 @@ export function PharmacySetupWizard({ organisation, setup }: PharmacySetupWizard
           )}
 
           {adminManaged ? (
-            <div className={`banner ${activeTask?.completed ? 'banner-green' : 'banner-blue'} setup-admin-managed`}><LockKeyhole size={16} /><span><strong>{activeTask?.completed ? 'Curaleaf account activated by HHH.' : 'No action is required from the pharmacy.'}</strong> {activeTask?.completed ? 'The secure customer connection is available; the portal never displays the customer ID or API key.' : 'You can continue exploring every workspace with temporary training data while HHH waits for Curaleaf and securely enters the returned account details.'}</span></div>
+            <div className={`banner ${activeTask?.completed ? 'banner-green' : 'banner-blue'} setup-admin-managed`}><LockKeyhole size={16} /><span><strong>{activeTask?.completed ? 'Curaleaf account approved by HHH.' : 'No action is required from the pharmacy.'}</strong> {activeTask?.completed ? 'The secure customer connection is available; the portal never displays the customer ID or API key.' : 'You can continue exploring every workspace with temporary training data while HHH validates and approves this pharmacy’s Curaleaf credentials.'}</span></div>
+          ) : activeDefinition.id === 'payment_route' ? (
+            <fieldset className="setup-payment-routes">
+              <legend>{activeDefinition.evidenceLabel}</legend>
+              <label className="setup-payment-option fixed"><input type="checkbox" checked disabled /><span><strong>Pharmacy-managed payment</strong><small>Always available for EPOS, cash, bank transfer or another pharmacy-controlled route.</small></span></label>
+              <label className="setup-payment-option"><input type="checkbox" checked={worldpayEnabled} onChange={event => void setWorldpayEnabled(event.target.checked)} /><span><strong>Offer Worldpay checkout</strong><small>Optional. Enable this route now or change it later from Organisation settings.</small></span></label>
+              {worldpayEnabled && <div className="setup-worldpay-link"><span><strong>{organisation.worldpay.status === 'connected' ? 'Worldpay account linked' : 'Merchant account linking required'}</strong><small>{organisation.worldpay.status === 'connected' ? 'This pharmacy can offer Worldpay at prescription checkout.' : 'Follow the Worldpay onboarding method agreed with the provider. Enabling the option alone does not create or send a payment request.'}</small></span>{organisation.worldpay.status !== 'connected' && <button type="button" className="btn btn-sm" onClick={() => { dispatch({ type: 'UPDATE_WORLDPAY', organisationId: organisation.id, updates: { status: 'onboarding' } }); dispatch({ type: 'ADD_TOAST', message: 'Worldpay onboarding marked as started. Continue through the provider-approved account-linking process.', toastType: 'info' }); }}>Start account linking</button>}</div>}
+            </fieldset>
           ) : <label className="setup-evidence-field">
             <span>{activeDefinition.evidenceLabel}</span>
-            {activeDefinition.options ? (
-              <select className="input" value={currentEvidence} onChange={event => setEvidence(current => ({ ...current, [activeDefinition.id]: event.target.value }))}>
-                <option value="">Select a route</option>
-                {activeDefinition.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            ) : (
-              <input className="input" value={currentEvidence} placeholder={activeDefinition.placeholder} onChange={event => setEvidence(current => ({ ...current, [activeDefinition.id]: event.target.value }))} />
-            )}
+            <input className="input" value={currentEvidence} placeholder={activeDefinition.placeholder} onChange={event => setEvidence(current => ({ ...current, [activeDefinition.id]: event.target.value }))} />
           </label>}
 
-          <div className="setup-security-note"><LockKeyhole size={16} /><span>Do not enter passwords, API keys, card details, or patient information here. Secrets are connected separately through the secure backend.</span></div>
+          <div className="setup-security-note"><LockKeyhole size={16} /><span>Do not enter passwords, access keys, card details, or patient information here. Account details are connected separately and securely.</span></div>
 
           <div className="setup-step-actions">
             <button type="button" className="btn" disabled={activeIndex === 0} onClick={() => setActiveIndex(index => index - 1)}><ArrowLeft size={15} /> Previous</button>

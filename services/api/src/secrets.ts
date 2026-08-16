@@ -4,6 +4,7 @@ import { HttpError } from './http.js';
 import type { IntegrationName } from './types.js';
 
 const client = new SecretManagerServiceClient();
+const SECRET_REGION = 'europe-west2';
 
 function projectId() {
   const value = config.FIREBASE_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
@@ -11,44 +12,81 @@ function projectId() {
   return value;
 }
 
-function secretId(organisationId: string, integration: IntegrationName) {
-  const safeId = organisationId.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 180);
-  return `hhh-${integration}-${safeId}`;
+function secretId(pharmacyId: string, integration: IntegrationName) {
+  const safeId = pharmacyId.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 180);
+  return `hhh-${integration}-${safeId}-${SECRET_REGION}`;
 }
 
-function secretPath(organisationId: string, integration: IntegrationName) {
-  return `projects/${projectId()}/secrets/${secretId(organisationId, integration)}`;
+function secretPath(pharmacyId: string, integration: IntegrationName) {
+  return `projects/${projectId()}/secrets/${secretId(pharmacyId, integration)}`;
 }
 
-export async function writeIntegrationSecret(organisationId: string, integration: IntegrationName, value: Record<string, string>) {
+export async function writeIntegrationSecret(pharmacyId: string, integration: IntegrationName, value: Record<string, string>) {
   const parent = `projects/${projectId()}`;
-  const name = secretPath(organisationId, integration);
+  const name = secretPath(pharmacyId, integration);
   try {
-    await client.getSecret({ name });
-  } catch (error) {
-    if ((error as { code?: number }).code !== 5) throw error;
-    await client.createSecret({
-      parent,
-      secretId: secretId(organisationId, integration),
-      secret: { replication: { userManaged: { replicas: [{ location: 'europe-west2' }] } }, labels: { application: 'hhh', integration } },
-    });
-  }
+    try {
+      await client.getSecret({ name });
+    } catch (error) {
+      if ((error as { code?: number }).code !== 5) throw error;
+      await client.createSecret({
+        parent,
+        secretId: secretId(pharmacyId, integration),
+        secret: { replication: { userManaged: { replicas: [{ location: SECRET_REGION }] } }, labels: { application: 'hhh', integration, region: SECRET_REGION } },
+      });
+    }
 
-  const [version] = await client.addSecretVersion({
-    parent: name,
-    payload: { data: Buffer.from(JSON.stringify(value), 'utf8') },
-  });
-  return { secretName: name, version: version.name?.split('/').at(-1) ?? 'latest' };
+    const [version] = await client.addSecretVersion({
+      parent: name,
+      payload: { data: Buffer.from(JSON.stringify(value), 'utf8') },
+    });
+    return { secretName: name, version: version.name?.split('/').at(-1) ?? 'latest' };
+  } catch (error) {
+    const code = (error as { code?: number }).code;
+    const details = String((error as { details?: string }).details ?? (error as Error).message ?? '');
+    if (code === 7 || /PERMISSION_DENIED|secretmanager/i.test(details)) {
+      throw new HttpError(503, 'Curaleaf credentials could not be stored: Secret Manager permission is missing on the API runtime. Grant roles/secretmanager.admin (or create + accessor) to the Cloud Functions service account.', 'SECRET_MANAGER_DENIED');
+    }
+    throw error;
+  }
 }
 
-export async function readIntegrationSecret<T extends Record<string, string>>(organisationId: string, integration: IntegrationName): Promise<T> {
+export async function readIntegrationSecret<T extends Record<string, string>>(pharmacyId: string, integration: IntegrationName): Promise<T> {
   try {
-    const [version] = await client.accessSecretVersion({ name: `${secretPath(organisationId, integration)}/versions/latest` });
+    const [version] = await client.accessSecretVersion({ name: `${secretPath(pharmacyId, integration)}/versions/latest` });
     const raw = version.payload?.data?.toString();
     if (!raw) throw new Error('Secret payload is empty.');
     return JSON.parse(raw) as T;
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    throw new HttpError(503, `${integration === 'curaleaf' ? 'Curaleaf' : 'Worldpay'} is not connected for this pharmacy.`, 'INTEGRATION_NOT_CONNECTED');
+    // Fallback: try legacy 'curaleaf' integration name if curaleaf_test/live requested
+    if (integration === 'curaleaf_test' || integration === 'curaleaf_live') {
+      try {
+        const [version] = await client.accessSecretVersion({ name: `${secretPath(pharmacyId, 'curaleaf')}/versions/latest` });
+        const raw = version.payload?.data?.toString();
+        if (raw) return JSON.parse(raw) as T;
+      } catch {
+        // Fallthrough
+      }
+    }
+    throw new HttpError(503, `${integration.includes('curaleaf') ? 'Curaleaf' : 'Worldpay'} is not connected for this pharmacy.`, 'INTEGRATION_NOT_CONNECTED');
   }
+}
+
+export type CuraleafPlatformSecretId =
+  | 'CURALEAF_READ_API_KEY_EUROPE_WEST2'
+  | 'CURALEAF_WRITE_API_KEY_EUROPE_WEST2'
+  | 'CURALEAF_API_KEY_EUROPE_WEST2';
+
+export async function readPlatformSecret(secretIds: readonly CuraleafPlatformSecretId[]): Promise<string> {
+  for (const secretId of secretIds) {
+    try {
+      const [version] = await client.accessSecretVersion({ name: `projects/${projectId()}/secrets/${secretId}/versions/latest` });
+      const value = version.payload?.data?.toString().trim();
+      if (value) return value;
+    } catch {
+      // Try the next supported secret name, including the legacy single key.
+    }
+  }
+  throw new HttpError(503, 'The HHH Curaleaf API keys are not configured.', 'PLATFORM_INTEGRATION_NOT_CONNECTED');
 }

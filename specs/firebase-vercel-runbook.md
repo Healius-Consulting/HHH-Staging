@@ -1,57 +1,131 @@
-# Firebase and Vercel deployment runbook
+# Firebase and Vercel staging runbook
 
-This repository deploys as three independently configured surfaces:
+This is the active low-cost staging topology. It uses only Vercel Hobby capabilities, but it does **not** weaken the application authentication boundary.
 
-1. **Staff portal** — Vercel project using `vercel.json`, output `dist`.
-2. **Public eligibility form** — a second Vercel project using `vercel.eligibility.json`, output `dist-eligibility`.
-3. **Authenticated API** — Firebase Functions in `europe-west2`, with Firestore, Storage, App Check and Secret Manager.
+> Vercel Hobby is restricted by Vercel to personal, non-commercial use. Use this configuration only for owner-operated development with synthetic data. Before a client, pharmacy, patient, or production workload uses it, move both projects to an appropriate paid account and complete the security/compliance gates. Firebase and other external services have their own limits and charges.
 
-Production must start with empty patient, referral and order collections. The React seed records are enabled only in local Vite development when Firebase is not configured.
+## Topology
 
-## Firebase project setup
+Create two Vercel projects from this repository, both with the repository root as their Root Directory:
 
-- Create separate Firebase projects for development/staging and production.
-- Enable email/password for staff. TOTP is available but may remain disabled during the private staging demo; before enforcing it, upgrade Authentication with Identity Platform and set both MFA environment flags to `true`.
-- Create the web app and copy only the public Firebase web configuration into Vercel environment variables.
-- Register both Vercel domains for App Check and Firebase Authentication authorised domains.
-- Deploy the Firestore indexes/rules, Storage rules and Functions from the repository root.
-- Grant the Functions runtime service account the minimum Secret Manager accessor role for the named integration secrets.
-- Never put Curaleaf API keys or Worldpay merchant secrets in `VITE_*` variables.
-- Configure HHH’s one Curaleaf API key once with `firebase functions:secrets:set CURALEAF_API_KEY`. Pharmacy activation then stores only that pharmacy’s customer ID and returned portal email in its Europe-hosted secret.
+| Project | `HHH_SURFACE` | Build output | Intended hostname |
+|---|---|---|---|
+| HHH public | `public` | `dist-public` | `www.<base-domain>` |
+| HHH staff portal | `portal` | `dist-portal` | `portal.<base-domain>` |
 
-Example deployment after selecting the correct Firebase project:
+`vercel.ts` accepts only `public` or `portal`, runs server functions in London (`lhr1`), and proxies same-origin requests to `apiLondon`, the Firebase Function in `europe-west2`. The staff portal uses `/pharmacy/...` and `/admin/...`; `/login` and `/reset-password` are the only shared staff routes. Keep Firebase Functions for the API and scheduled reconciliation jobs; the Cloud Run/Terraform deployment is deferred and is not part of this staging path.
+
+The protected build script compiles separate pharmacy and admin bundles into one portal artefact. It removes both `index.html` files from static output and packages them only with `api/page-gate.ts`. The gate derives the workspace from the pathname and verifies the Firebase session cookie, server-side session record, role, tenant, active staff profile, MFA, idle expiry, absolute expiry, and exact portal host before returning protected HTML. Anonymous page requests receive a `303` before protected HTML is returned. Static JavaScript is public by design and must contain no credentials or patient/tenant data.
+
+## Vercel project settings
+
+Do not override the Framework, Build Command, Output Directory, or Function Region in the dashboard; `vercel.ts` owns them. Use Node.js 22.
+
+Set these non-secret variables on every project:
+
+```text
+HHH_SURFACE=public | portal
+HHH_FIREBASE_API_ORIGIN=https://europe-west2-<firebase-project>.cloudfunctions.net/apiLondon
+VITE_APP_ENV=staging
+VITE_FIREBASE_API_KEY=<firebase-web-key>
+VITE_FIREBASE_AUTH_DOMAIN=<firebase-project>.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=<firebase-project>
+VITE_FIREBASE_STORAGE_BUCKET=<firebase-project>.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID=<sender-id>
+VITE_FIREBASE_APP_ID=<web-app-id>
+VITE_FIREBASE_APP_CHECK_SITE_KEY=<recaptcha-enterprise-site-key>
+VITE_REQUIRE_APP_CHECK=true
+```
+
+Set these encrypted runtime variables only on the portal project:
+
+```text
+HHH_ALLOWED_HOSTS=<exact-custom-hostname>[,<exact-staging-hostname>]
+FIREBASE_PROJECT_ID=<firebase-project>
+FIREBASE_SERVICE_ACCOUNT_JSON=<single-line-service-account-json>
+IP_HASH_SECRET=<at-least-32-random-bytes>
+```
+
+The preferred portal configuration uses Vercel OIDC workload identity federation. If a service-account JSON fallback is temporarily required, use it only by the Vercel page gate, grant only Firebase Auth session verification and the minimum Firestore access needed for `staffSessions`, `staffUsers`, and PII-minimised `auditLogs`, and never expose it through a `VITE_*` variable. Rotate it immediately if it appears in a build log or client bundle.
+
+`HHH_ALLOWED_HOSTS` is an exact comma-separated allow-list. Vercel's current deployment URL variables are also accepted for that deployment, but authenticated UAT should use fixed staging hostnames so Firebase authorised origins and API origin checks remain exact.
+
+## Firebase API settings
+
+Deploy `apiLondon` and the scheduled jobs to the staging Firebase project in `europe-west2`. Configure the API with:
+
+```text
+NODE_ENV=production
+AUTH_MODE=cookie-enforced
+SESSION_COOKIE_SECURE=true
+REQUIRE_MFA=true
+REQUIRE_APP_CHECK=true
+PORTAL_APP_ORIGIN=https://<exact-portal-host>
+PUBLIC_APP_ORIGIN=https://<exact-public-host>
+ALLOWED_ORIGINS=https://<exact-public-host>,https://<exact-portal-host>
+IP_HASH_SECRET=<at-least-32-random-bytes>
+```
+
+Register both exact custom hostnames in Firebase Authentication and register the portal hostname in App Check. Keep Firestore and Storage browser rules at deny-all. Curaleaf, Worldpay, message-provider, and service-account secrets remain server-side and must never use a `VITE_*` name.
+
+Apply the exact-origin CORS policy required by the signed prescription and pharmacy-logo upload URLs (replace the bucket name when using another Firebase project):
 
 ```bash
-firebase use <project-id>
+gcloud storage buckets update gs://<firebase-storage-bucket> --cors-file=storage.cors.json
+```
+
+The Vercel build now fails closed if the required Firebase client configuration is absent, and requires `VITE_FIREBASE_APP_CHECK_SITE_KEY` whenever `VITE_REQUIRE_APP_CHECK=true`. Set the browser and API requirement flags together; do not enable API `REQUIRE_APP_CHECK=true` before the matching reCAPTCHA Enterprise App Check web registration exists.
+
+Deploy after selecting the staging project:
+
+```bash
+firebase use <staging-project-id>
 firebase deploy --only firestore:rules,firestore:indexes,storage,functions
 ```
 
-## Staff portal Vercel project
+## Hobby features and deferred paid features
 
-- Import the repository with the root directory left at the repository root.
-- Use `vercel.json` (the default).
-- Configure the Firebase web values, API URL and App Check site key from `.env.example`.
-- Keep Preview and Production values separate. Preview must point only at the non-production Firebase project.
+Hobby-compatible and retained now:
 
-## Eligibility Vercel project
+- Separate public and combined-portal projects with automatic TLS.
+- London Vercel Functions for the protected page gate.
+- Vercel CDN for fingerprinted static assets only.
+- Application-level MFA, fail-closed page/API auth, CSRF, App Check, role and tenant checks.
+- Standard Vercel Authentication for preview/deployment URLs if enabled in the dashboard; it is supplemental and never replaces the page gate.
+- Basic Vercel Firewall/DDoS protections within Hobby limits.
 
-- Import the same repository as a second Vercel project.
-- Keep the repository root as the project root.
-- Set the build command to `npm run build:eligibility` and output directory to `dist-eligibility`, or deploy with `vercel --local-config vercel.eligibility.json`.
-- Configure `VITE_API_BASE_URL` plus the public Firebase web/App Check values from `.env.example`. The eligibility application uses App Check but does not receive staff credentials or initialise a patient account flow.
+Not enabled now:
 
-## Access boundary
+- Pro team collaboration and paid usage.
+- Password-protected/shareable preview links.
+- Advanced or managed WAF rules, advanced rate limiting, multi-region failover, Secure Compute, log drains, or enterprise controls.
+- Any Vercel healthcare/compliance add-on or claim that the Hobby deployment is suitable for live health data.
 
-Firebase Auth, verified ID tokens, role/organisation claims, App Check and tenant checks are the application security boundary. A normal Vercel deployment does not provide a dependable end-to-end IP allowlist for this architecture. Add an upstream access proxy or an appropriate Vercel enterprise control later if IP restriction becomes mandatory.
+The Cloud Run load balancer, Cloud Armor, private origin, and Terraform implementation remains in `infra/terraform` as a deferred alternative; it is not deployed by this runbook.
 
-## Go-live checks
+## Verification before any deployment is shared
 
-- Create users through the HHH admin process only; there is no patient sign-up.
-- Confirm an unactivated pharmacy sees the training banner and dummy records, can practise every workflow, and loses all dummy mutations on refresh without any patient/order writes in Firestore.
-- Submit the external Curaleaf onboarding form, then have an HHH administrator enter the returned customer ID and portal email. The pharmacy must not receive an API-key field.
-- Verify every staff email before granting workspace access. For the initial staging demo, set `VITE_REQUIRE_MFA=false` and `REQUIRE_MFA=false`; enable both together when mandatory TOTP is introduced.
-- Test that a pharmacy user cannot read or mutate another organisation by changing request identifiers.
-- Confirm setup-incomplete staff can open Dashboard, Setup and Resources but cannot submit orders, access patient records or configure live payment actions.
-- Complete one manual-payment UAT and one Worldpay HPP sandbox UAT per pharmacy.
-- Complete Curaleaf manual/barcode submission UAT, dispatch reconciliation, partial goods-in, full goods-in and collection-ready checks.
-- Confirm audit logs exist for authentication, setup, secret changes, order submission, goods-in, readiness and collection.
+Run:
+
+```bash
+npm ci
+npm run lint
+npm run build:vercel:public
+npm run build:vercel:portal
+npx tsx --test tests/**/*.test.ts
+npm test --workspace @hhh/api
+```
+
+Then verify:
+
+- `dist-portal/index.html`, `dist-pharmacy/index.html`, and `dist-admin/index.html` do not exist after portal preparation.
+- `.vercel-private/pharmacy/index.html` and `.vercel-private/admin/index.html` are function-only and ignored by Git.
+- Anonymous `/pharmacy/...` and `/admin/...` routes return `303` to `/login` and never return protected HTML.
+- Wrong-role, wrong-tenant, expired, idle, revoked, non-MFA, and disabled staff sessions fail closed.
+- Public, pharmacy, and admin client bundles contain only their intended surface, while only `public` and `portal` are deployable.
+- `/pharmacy/v1/*`, `/admin/v1/*`, and shared `/v1/auth/*` remain same-origin and protected responses are never cached.
+- Only synthetic records and payment sandboxes are present.
+
+## Upgrade gate
+
+Before client/commercial use, at minimum move the projects to Vercel Pro, assign ownership and billing to the correct legal entity, configure spend controls, review access and preview protection, and repeat the full security test. Pro alone does not authorise real patient data: penetration testing, DPIA, residency/data-processing review, recovery exercises, GPhC/GDPR/legal, Curaleaf, and Worldpay sign-off remain separate blockers.

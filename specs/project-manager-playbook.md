@@ -388,20 +388,17 @@ I confirm UAT sections applicable to our go-live phase have been tested and pass
 
 ## 9. Curaleaf open items to chase (TRD §9)
 
-Email / call **Mike Baker** (cc **Phil Jones**). Block full Rocky order flow until resolved.
+Phil answered Q1–Q13 on 5 August 2026. Keep only the externally owned gates below open and block full production Rocky order flow until they are resolved.
 
-| # | What to confirm | Why it matters |
-|---|-----------------|----------------|
-| 1 | `GET /products` and `POST /prescription` API exposure + timeline | Formulary and prescription upload |
-| 2 | Auth header scheme for Rocky (API key + username) | Integration |
-| 3 | Full request/response schemas for all endpoints | Build |
-| 4 | Max file size for prescription scan uploads | Platform limits |
-| 5 | Stock status field values (green/amber/red) | UI |
-| 6 | **`POST /purchase-order` — one PO with multiple prescription refs?** | **Critical architecture decision** |
-| 7 | Invoice delivery (shipments vs separate endpoint) | Orders tab |
-| 8 | Shipment status values + polling rate limits | Tracking |
-| 9 | Per-pharmacy **test credentials** for staging | UAT |
-| 10 | DPA with Curaleaf (I-03) | Legal |
+| # | What to confirm | Why it matters | Status |
+|---|-----------------|----------------|--------|
+| 1 | Ellis confirmation on whether HHH receives customer-specific catalogue/pricing | Catalogue operating model | Open (Phil: likely N/A for HHH) |
+| 2 | Stocked products in the development environment | Quote, PO and shipment UAT | Open (Q4 — Curaleaf to follow up) |
+| 3 | Existing sandbox key plus a second dev-pharmacy key | Two-tenant isolation UAT | Open (Q5 — Curaleaf to follow up) |
+| 4 | Written approval for direct-to-live onboarding after initial integration acceptance | Pharmacy onboarding runbook | Open (Q6 — needs Ellis + written OK) |
+| 5 | DPA/data-sharing terms and prescription-scan retention rules | Legal production gate | Open (Q13 — Curaleaf legal) |
+
+**Closed via Phil (5 Aug 2026) — do not re-chase:** `customerId` meaning; 16MB upload limit; ~1 req/s + Curaleaf’s 10s poll recommendation (HHH uses 60s); mandatory `prescriberId`; wholesale via quotes; CS-only PO cancel / declined scripts; no partner master key yet.
 
 ---
 

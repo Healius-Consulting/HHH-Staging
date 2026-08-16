@@ -1,8 +1,8 @@
 # Holistic Health Hub × Curaleaf — Medical Cannabis Platform
 
-Working **prototype and technical specification** for the Holistic Health Hub (HHH) medical-cannabis service platform, which integrates with Curaleaf Laboratories' **"Rocky"** REST API for B2B ordering. This repository is the brief for building the production application.
+Working **prototype and technical specification** for the Holistic Health Hub (HHH) medical-cannabis service platform, which integrates with Curaleaf Laboratories' **"Rocky"** REST API for B2B ordering.
 
-> **Status:** Prototype + requirements. The `.html` files are clickable, **in-memory mockups (no backend)** that serve as the functional spec. The production app is still to be built.
+> **Status:** The React applications and API are now the executable source of truth. The `.html` files are historical clickable, **in-memory mockups (no backend)** and must not be used as runtime data-model definitions. Shared domain values such as condition IDs live in `packages/domain`.
 
 ## The end-to-end journey
 
@@ -19,6 +19,7 @@ Pharmacy-token eligibility intake → Shaylen/HHH telephone review and programme
 | `Rocky_API_Technical_Requirements_v1.6.docx` | Newer TRD recovered from the July `main` update; use with the Rocky API reference and confirm final sandbox behaviour. |
 | `Rocky-API-Reference.md` | Confirmed Rocky routes and schemas plus corrections to earlier endpoint/auth/courier assumptions. |
 | `TRD-redline-Rx-suborder-flow.md`, `TRD-redline-patient-payment.md` | Requirement redlines pending merge into the TRD. |
+| `Master-Pharmacy-Order-Flow.md` | Implemented six-stage flow, authoritative Go-live gates, configuration and rollout procedure. |
 | `production-architecture.md` | Production architecture — hosting (frontend, backend, UK infra), security, hardened embed model, integrations, and the full pharmacy onboarding playbook (legal → go-live). |
 | `separate-form-deployment.md` | Exact build and environment setup for hosting the eligibility form, portal and shared API on separate domains. |
 | `ADR-hosted-form-link-out.md` | Accepted decision: pharmacies design their page and link to the centrally hosted tokenised form; no iframe or copied form code. |
@@ -36,9 +37,9 @@ Pharmacy-token eligibility intake → Shaylen/HHH telephone review and programme
 
 - An **order** = one or more prescription **sub-orders**; each sub-order = one uploaded prescription copy + its line items. Curaleaf reviews the prescription copy before approving each sub-order.
 - **One payment link per patient** (Worldpay), covering all of that patient's prescriptions. The patient pays **before** stock is ordered from Curaleaf (reduces unused-medication risk).
-- Each prescription is placed and tracked **individually** with Curaleaf. Hybrid **auto-place on payment** with a stock/price re-check; a held-for-review path on failure; placement can be undone until Curaleaf approves.
+- Each prescription is placed and tracked **individually** with Curaleaf. Auto-place follows payment and an in-stock/price re-check; low-margin increases enter an audited hold.
 - **Collection** model — the patient collects from the pharmacy (not home delivery). The Curaleaf→pharmacy dispatch (courier, notably DPD) is internal; "ready for collection" is triggered by pharmacy **goods-in**.
-- Patient notifications are limited to **three**: request to pay, payment confirmation (both via Worldpay), and "ready for collection" (via a connected SMS/email app).
+- Patient notifications are limited to payment request/reminders, payment confirmation, ready for collection per shipment, and the one-per-episode 48-hour delay exception.
 - Each pharmacy has a **unique eligibility form / QR** (token in the URL routes submissions to that pharmacy). An admin (all-pharmacy) view is planned.
 
 ## Integrations the production build will need
@@ -49,9 +50,19 @@ Pharmacy-token eligibility intake → Shaylen/HHH telephone review and programme
 - **SMS / email provider** — the "ready for collection" notification.
 - **File storage** for prescription scans — special-category health data (UK GDPR Art. 9); encryption + retention rules apply.
 
-## Open items (pending Curaleaf confirmation)
+## Open items (Curaleaf — remaining external gates)
 
-Several Rocky API details are not yet locked — see TRD §9. Most notably: whether `POST /purchase-order` accepts multiple `prescription_refs` (consolidated vs one PO per prescription), the auth header scheme, the `GET /products` response schema + exact stock-status values, scan max file size, shipment status set, and how delivery/goods-in is reported. An email requesting these has been sent to Curaleaf (Mike Baker / Phil Jones).
+Phil answered Q1–Q13 on **5 August 2026** (see `Curaleaf-OpenItems-Email-and-Agenda.docx` and `Rocky-API-Reference.md` “Confirmed operational constraints”). Confirmed: `customerId` internal; ~1 req/s + Curaleaf’s 10s poll recommendation (HHH uses 60s); 16MB uploads; prescriber required; wholesale via quotes; PO cancel / declined scripts via CS; no partner master key yet.
+
+**Still chasing Curaleaf / Ellis / legal:**
+
+1. Stocked products in the development environment (quote / PO / shipment UAT)
+2. Existing sandbox key + one additional dev-pharmacy key (multi-tenant isolation)
+3. Ellis confirmation that HHH does not need customer-specific catalogues
+4. Written approval for direct-to-live onboarding after initial acceptance
+5. DPA / data-sharing terms and prescription-scan retention rules
+
+Track chase owners in `project-manager-playbook.md` §9 and compliance I-02 / I-03. Notion remains the external decision log.
 
 ## Notes for scoping
 

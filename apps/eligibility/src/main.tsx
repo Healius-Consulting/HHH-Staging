@@ -2,11 +2,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../../src/index.css';
 import EligibilityApp from './EligibilityApp';
-import { readAppCheckToken } from '../../../src/auth/firebase';
+import { readPublicAppCheckToken } from '../../../src/auth/appCheck';
 import { setApiSecurityTokenProvider } from '../../../src/shared/api';
 
 setApiSecurityTokenProvider(async () => {
-  const token = await readAppCheckToken();
+  const token = await readPublicAppCheckToken();
   return token ? { 'X-Firebase-AppCheck': token } : {};
 });
 

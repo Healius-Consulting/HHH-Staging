@@ -1,5 +1,8 @@
-import { Activity, CreditCard, Package, CheckCircle, ListTodo, History, FileText } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { Activity, ArrowRight, ListTodo, History, FileText } from 'lucide-react';
+import { orderRevenue, useApp } from '../context/AppContext';
+import SummaryTiles from '../components/SummaryTiles';
+import { compactPatientName } from '../utils/patientName';
+import { orderCancellationResolution } from '../utils/orderStage';
 
 export default function Dashboard() {
   const { state, dispatch } = useApp();
@@ -9,15 +12,24 @@ export default function Dashboard() {
   const curaleafIntegration = state.platformIntegrations.find(integration => integration.id === 'curaleaf');
 
   /* ── Computed stats ── */
-  const newReferrals = state.submissions.filter(s => s.organisationId === organisationId && (s.status === 'New' || s.status === 'Under HHH review')).length;
-  const awaitingPayment = tenantOrders.filter(o => o.payment.status === 'sent').length;
+  const awaitingPaymentOrders = tenantOrders.filter(order =>
+    order.lifecycleStatus !== 'cancelled'
+    && !order.cancellation
+    && order.payment.status === 'sent'
+  );
+  const awaitingPayment = awaitingPaymentOrders.length;
+  const activeWorldpayLinks = awaitingPaymentOrders.filter(order => order.payment.route === 'worldpay').length;
 
   const inFulfilment = tenantOrders.filter(o =>
+    o.lifecycleStatus !== 'cancelled' &&
+    !o.cancellation &&
     o.payment.status === 'paid' &&
     o.prescriptions.some(rx => !['ready', 'collected'].includes(rx.status))
   ).length;
 
   const readyForCollection = tenantOrders.filter(o =>
+    o.lifecycleStatus !== 'cancelled' &&
+    !o.cancellation &&
     o.payment.status === 'paid' &&
     o.prescriptions.length > 0 &&
     o.prescriptions.every(rx => rx.status === 'ready')
@@ -25,6 +37,7 @@ export default function Dashboard() {
 
   // 1. Uncollected warnings (10+ days)
   const uncollectedAlerts = tenantOrders.flatMap(o => {
+    if (o.lifecycleStatus === 'cancelled' || o.cancellation) return [];
     const pName = tenantPatients.find(p => p.id === o.patientId)?.name ?? 'Unknown';
     const pMobile = tenantPatients.find(p => p.id === o.patientId)?.mobile ?? '';
     return o.prescriptions
@@ -42,12 +55,12 @@ export default function Dashboard() {
   });
 
   // 2. Overdue payments (3+ days)
-  const overduePaymentAlerts = tenantOrders
-    .filter(o => o.payment.status === 'sent' && o.payment.sentAt && (Date.now() - new Date(o.payment.sentAt).getTime()) >= 3 * 24 * 60 * 60 * 1000)
+  const overduePaymentAlerts = awaitingPaymentOrders
+    .filter(o => o.payment.sentAt && (Date.now() - new Date(o.payment.sentAt).getTime()) >= 3 * 24 * 60 * 60 * 1000)
     .map(o => {
       const pName = tenantPatients.find(p => p.id === o.patientId)?.name ?? 'Unknown';
       const pEmail = tenantPatients.find(p => p.id === o.patientId)?.email ?? '';
-      const amount = o.prescriptions.reduce((sum, rx) => sum + rx.items.reduce((s, item) => s + (item.retail * item.qty + (item.fee || 0)), 0), 0);
+      const amount = orderRevenue(o);
       return {
         type: 'payment' as const,
         id: `payment-${o.id}`,
@@ -62,7 +75,7 @@ export default function Dashboard() {
 
   // 3. Repeat overdue (30+ days)
   const repeatAlerts = tenantPatients.map(p => {
-    const pOrders = tenantOrders.filter(o => o.patientId === p.id);
+    const pOrders = tenantOrders.filter(o => o.patientId === p.id && orderCancellationResolution(o) === 'none');
     if (pOrders.length === 0) return null;
     const latestOrder = [...pOrders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
     const daysSince = Math.floor((Date.now() - new Date(latestOrder.date).getTime()) / (1000 * 60 * 60 * 24));
@@ -78,22 +91,24 @@ export default function Dashboard() {
     return null;
   }).filter((x): x is NonNullable<typeof x> => x !== null);
 
-  // 4. Intake Pending Bottleneck (> 48h)
-  const intakeAlerts = state.submissions
-    .filter(s => s.organisationId === organisationId && (s.status === 'New' || s.status === 'Under HHH review') && (Date.now() - new Date(s.submittedAt).getTime()) >= 48 * 60 * 60 * 1000)
-    .map(s => ({
-      type: 'intake' as const,
-      id: `intake-${s.id}`,
-      patientName: s.name,
-      condition: s.condition,
-      subId: s.id,
-      days: Math.floor((Date.now() - new Date(s.submittedAt).getTime()) / (1000 * 60 * 60 * 24)),
+  const cancellationAlerts = tenantOrders
+    .filter(order => orderCancellationResolution(order) === 'needs-action')
+    .map(order => ({
+      id: `cancellation-${order.id}`,
+      orderId: order.id,
+      patientName: tenantPatients.find(patient => patient.id === order.patientId)?.name ?? 'Unknown patient',
+      step: order.curaleafCancellation?.status === 'contact_required'
+        ? 'Call Curaleaf Customer Service before refunding or reordering.'
+        : order.curaleafCancellation?.status === 'awaiting_confirmation'
+          ? 'Waiting for Curaleaf cancellation confirmation.'
+          : `Refund ${order.payment.ref ?? 'the recorded payment'} and confirm the reference.`,
     }));
 
-  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length;
+  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + cancellationAlerts.length;
 
   /* ── Recent orders (last 5) ── */
-  const recentOrders = [...tenantOrders]
+  const recentOrders = tenantOrders
+    .filter(order => orderCancellationResolution(order) === 'none')
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5);
 
@@ -102,8 +117,11 @@ export default function Dashboard() {
     return tenantPatients.find(p => p.id === patientId)?.name ?? 'Unknown';
   };
 
-  const paymentPill = (status: string) => {
-    switch (status) {
+  const paymentPill = (order: (typeof tenantOrders)[number]) => {
+    if (order.refund?.status === 'completed') return <span className="pill pill-neutral">Refunded</span>;
+    if (order.cancellation?.status === 'refund_required') return <span className="pill pill-red">Refund due</span>;
+    if (order.lifecycleStatus === 'cancelled' || order.payment.status === 'cancelled') return <span className="pill pill-neutral">Cancelled</span>;
+    switch (order.payment.status) {
       case 'paid': return <span className="pill pill-green">Paid</span>;
       case 'sent': return <span className="pill pill-amber">Awaiting</span>;
       default:     return <span className="pill pill-neutral">Draft</span>;
@@ -111,227 +129,187 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="page-body">
-      {/* ══ Stats Grid ══ */}
-      <div className="stats-grid">
-        <div className="card card-surface stat-card" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'referrals' })}>
-          <div className="stat-card__head">
-            <span className="stat-card__label">Awaiting HHH Decisions</span>
-            <Activity size={18} className="text-info" />
-          </div>
-          <div className="flex items-baseline gap-xs">
-            <span className="stat-card__value">{newReferrals}</span>
-            <span className="stat-card__meta">pending review</span>
-          </div>
-        </div>
+    <div className="page-body operations-dashboard">
+      {totalUrgent > 0 && (
+        <p className="page-status-note" role="status">
+          <strong>{totalUrgent}</strong> urgent item{totalUrgent === 1 ? '' : 's'} require attention today.
+        </p>
+      )}
 
-        <div className="card card-surface stat-card" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'review' })}>
-          <div className="stat-card__head">
-            <span className="stat-card__label">Awaiting Payments</span>
-            <CreditCard size={18} className="text-amber" />
-          </div>
-          <div className="flex items-baseline gap-xs">
-            <span className="stat-card__value">{awaitingPayment}</span>
-            <span className="stat-card__meta">links active</span>
-          </div>
-        </div>
-
-        <div className="card card-surface stat-card" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'orders' })}>
-          <div className="stat-card__head">
-            <span className="stat-card__label">In Fulfilment</span>
-            <Package size={18} className="text-info" />
-          </div>
-          <div className="flex items-baseline gap-xs">
-            <span className="stat-card__value">{inFulfilment}</span>
-            <span className="stat-card__meta">supplier orders</span>
-          </div>
-        </div>
-
-        <div className="card card-surface stat-card" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'orders' })}>
-          <div className="stat-card__head">
-            <span className="stat-card__label">Ready for Collection</span>
-            <CheckCircle size={18} className="text-green" />
-          </div>
-          <div className="flex items-baseline gap-xs">
-            <span className="stat-card__value">{readyForCollection}</span>
-            <span className="stat-card__meta">patient alerts sent</span>
-          </div>
-        </div>
-      </div>
+      <section className="operations-brief">
+        <SummaryTiles label="Pharmacy workflow summary" items={[
+          { label: 'Patients', value: tenantPatients.length, detail: 'activated by HHH', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'patients' }) },
+          { label: 'Payments', value: awaitingPayment, detail: 'awaiting action', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
+          { label: 'Supplier', value: inFulfilment, detail: 'in fulfilment', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
+          { label: 'Collection', value: readyForCollection, detail: 'ready', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
+        ]} />
+      </section>
 
       <div className="page-grid-main">
         <div className="page-stack">
           
-          {/* Urgent Actions Section */}
           {totalUrgent > 0 && (
-            <div className="card card-urgent">
-              <h3 className="card-title flex items-center gap-sm">
-                <Activity size={18} /> Urgent Action Items ({totalUrgent})
-              </h3>
+            <section className="card card-urgent priority-queue">
+              <div className="section-heading"><div><p className="section-label">Attention required</p><h3><Activity size={17} /> Priority work queue</h3></div><span>{totalUrgent} open</span></div>
               <div className="alert-list">
-                {intakeAlerts.map(alert => (
+                {cancellationAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--danger">
-                    <div>
-                      <span className="alert-item__title">Pending Eligibility Intake · {alert.patientName}</span>
-                      <span className="alert-item__desc">
-                        Submitted <strong className="text-red">{alert.days} days ago</strong> for{' '}
-                        <strong className="text-primary">{alert.condition}</strong>. Review is pending.
-                      </span>
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Order cancellation</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
+                      <span className="alert-item__desc">{alert.step}</span>
                     </div>
-                    <button className="btn btn-sm btn-danger-solid" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'referrals' })}>
-                      Review Records
+                    <button className="priority-action" onClick={() => { dispatch({ type: 'SET_NAVIGATION_TARGET', target: { kind: 'order', key: String(alert.orderId) } }); dispatch({ type: 'SET_SCREEN', screen: 'orders' }); }}>
+                      Open order <ArrowRight size={14} />
                     </button>
                   </div>
                 ))}
 
                 {uncollectedAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--danger">
-                    <div>
-                      <span className="alert-item__title">Uncollected Medication · {alert.patientName}</span>
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Collection follow-up</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
                       <span className="alert-item__desc">
                         Ready for collection for <strong className="text-red">{alert.days} days</strong>. Contact: {alert.patientMobile}
                       </span>
                     </div>
                     <button
-                      className="btn btn-sm btn-danger-solid"
+                      className="priority-action"
                       onClick={() => {
                         dispatch({ type: 'ADD_TOAST', message: `SMS reminder resent to ${alert.patientName} (${alert.patientMobile}).`, toastType: 'success' });
                         dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'SMS Reminder', detail: `Resent counter pickup notification SMS to ${alert.patientMobile}.` });
                       }}
                     >
-                      Resend SMS
+                      Send reminder <ArrowRight size={14} />
                     </button>
                   </div>
                 ))}
 
                 {overduePaymentAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--warning">
-                    <div>
-                      <span className="alert-item__title">Overdue Payment · {alert.patientName}</span>
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Overdue payment</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
                       <span className="alert-item__desc">
                         <strong className="text-primary">£{alert.amount.toFixed(2)}</strong> outstanding for{' '}
                         <strong className="text-amber">{alert.days} days</strong>. {alert.patientEmail}
                       </span>
                     </div>
                     <button
-                      className="btn btn-sm btn-warning-outline"
+                      className="priority-action"
                       onClick={() => {
                         dispatch({ type: 'ADD_TOAST', message: `Worldpay billing link resent to ${alert.patientName} at ${alert.patientEmail}.`, toastType: 'info' });
                         dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Payment Link Resent', detail: `Resent Worldpay invoice link for £${alert.amount.toFixed(2)} to ${alert.patientEmail}.` });
                       }}
                     >
-                      Resend Link
+                      Resend link <ArrowRight size={14} />
                     </button>
                   </div>
                 ))}
 
                 {repeatAlerts.map(alert => (
                   <div key={alert.id} className="alert-item alert-item--info">
-                    <div>
-                      <span className="alert-item__title">Repeat Rx Overdue · {alert.patientName}</span>
+                    <div className="alert-item__copy">
+                      <span className="alert-item__category">Repeat prescription</span>
+                      <span className="alert-item__title">{alert.patientName}</span>
                       <span className="alert-item__desc">
                         Last order <strong className="text-info">{alert.days} days ago</strong>. Treatment gap exceeds guidelines.
                       </span>
                     </div>
-                    <div className="flex gap-xs flex-wrap">
+                    <div className="priority-action-group">
                       <button
-                        className="btn btn-sm"
+                        className="priority-action priority-action--quiet"
                         onClick={() => {
                           dispatch({ type: 'ADD_TOAST', message: `Follow-up logged for ${alert.patientName}.`, toastType: 'success' });
                           dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Callback Scheduled', detail: 'Scheduled repeat prescription assessment call.' });
                         }}
                       >
-                        Log Callback
+                        Log follow-up
                       </button>
                       <button
-                        className="btn btn-sm btn-primary"
+                        className="priority-action"
                         onClick={() => {
                           dispatch({ type: 'LOG_INTERACTION', patientId: alert.patientId, interactionType: 'Repeat Rx Initiated', detail: 'Created new repeat prescription order session from dashboard.' });
                           dispatch({ type: 'NEW_ORDER', patientId: alert.patientId });
                           dispatch({ type: 'SET_SCREEN', screen: 'create' });
                         }}
                       >
-                        Create Repeat Rx
+                        Create repeat <ArrowRight size={14} />
                       </button>
                     </div>
                   </div>
                 ))}
 
               </div>
-            </div>
+            </section>
           )}
 
           {/* Recent Pharmacy Sessions */}
-          <div className="card card-flush">
-            <h3 className="card-title card-title--spaced">
-              <History size={16} /> Recent Pharmacy Sessions
-            </h3>
+          <section className="card card-flush activity-ledger">
+            <div className="section-heading section-heading--padded"><div><p className="section-label">Activity ledger</p><h3><History size={16} /> Recent pharmacy sessions</h3><p>Continue active work or review the latest completed sessions.</p></div><span>{recentOrders.length} latest</span></div>
             {recentOrders.length === 0 ? (
               <div className="empty-state">No active sessions or order history.</div>
             ) : (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Patient name</th>
-                      <th>Session Date</th>
-                      <th>Payment Status</th>
-                      <th className="text-right">Sub-orders (Rxs)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentOrders.map(order => (
-                      <tr
-                        key={order.id}
-                        className="table-row-clickable"
-                        onClick={() => {
-                          dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id });
-                          dispatch({ type: 'SET_SCREEN', screen: 'create' });
-                        }}
-                      >
-                        <td className="font-semibold">{patientName(order.patientId)}</td>
-                        <td className="text-muted text-sm">
-                          {new Date(order.date).toLocaleDateString('en-GB', {
-                            day: 'numeric', month: 'short', year: 'numeric',
-                          })} at {new Date(order.date).toLocaleTimeString('en-GB', {
-                            hour: '2-digit', minute: '2-digit'
-                          })}
-                        </td>
-                        <td>{paymentPill(order.payment.status)}</td>
-                        <td className="text-right font-semibold">{order.prescriptions.length}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="session-ledger">
+                <div className="session-ledger__head" aria-hidden="true"><span>Date</span><span>Patient</span><span>Payment</span><span>Action</span></div>
+                <div role="list">
+                {recentOrders.map(order => {
+                  const sessionDate = new Date(order.date);
+                  const openSession = () => {
+                    if (order.payment.status === 'none') {
+                      dispatch({ type: 'SET_ACTIVE_ORDER', orderId: order.id });
+                      dispatch({ type: 'SET_SCREEN', screen: 'create' });
+                      return;
+                    }
+                    dispatch({ type: 'SET_NAVIGATION_TARGET', target: { kind: 'order', key: `${order.id}-${order.prescriptions[0]?.id ?? 0}` } });
+                    dispatch({ type: 'SET_SCREEN', screen: 'orders' });
+                  };
+                  return (
+                    <div className="session-ledger__row" role="listitem" key={order.id}>
+                      <time className="session-ledger__date" dateTime={sessionDate.toISOString()}>
+                        <strong>{sessionDate.toLocaleDateString('en-GB', { day: '2-digit' })}</strong>
+                        <span>{sessionDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</span>
+                      </time>
+                      <div className="session-ledger__patient">
+                        <button type="button" onClick={openSession} title={patientName(order.patientId)}>{compactPatientName(patientName(order.patientId))}</button>
+                        <span>{order.prescriptions.length} prescription{order.prescriptions.length === 1 ? '' : 's'} · {sessionDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <div className="session-ledger__status"><small>Status</small>{paymentPill(order)}</div>
+                      <button type="button" className="session-ledger__open" onClick={openSession} aria-label={`Open ${patientName(order.patientId)} prescription session`}>
+                        {order.payment.status === 'none' ? 'Continue' : 'Review'} <ArrowRight size={14} aria-hidden="true" />
+                      </button>
+                    </div>
+                  );
+                })}
+                </div>
               </div>
             )}
-          </div>
+          </section>
 
         </div>
 
         {/* RIGHT COLUMN: Operational Checklist */}
-        <div className="card card-surface duty-sidebar">
-          <h3 className="card-title">
-            <ListTodo size={16} /> Pharmacist Duties
-          </h3>
+        <aside className="card card-surface duty-sidebar">
+          <div className="section-heading"><div><p className="section-label">Shift handover</p><h3><ListTodo size={16} /> Pharmacist duties</h3></div></div>
 
           <div className="duty-list">
             <div className="duty-item">
-              <input type="checkbox" checked={newReferrals === 0} readOnly />
+              <input type="checkbox" checked readOnly aria-label="Patient access is HHH controlled" />
               <div>
-                <span className="font-semibold" style={{ display: 'block' }}>Review onboarding status</span>
-                <span className="text-muted text-xs">{newReferrals} pharmacy-attributed enquiries are still with HHH for review.</span>
+                <span className="font-semibold" style={{ display: 'block' }}>HHH-controlled activation</span>
+                <span className="text-muted text-xs">Only patients referred and activated by HHH appear in this workspace.</span>
               </div>
             </div>
             <div className="duty-item">
-              <input type="checkbox" checked={awaitingPayment === 0} readOnly />
+              <input type="checkbox" checked={awaitingPayment === 0} readOnly aria-label="Outstanding billing links cleared" />
               <div>
                 <span className="font-semibold" style={{ display: 'block' }}>Outstanding Billing Links</span>
-                <span className="text-muted text-xs">{awaitingPayment} Worldpay requests currently active.</span>
+                <span className="text-muted text-xs">{activeWorldpayLinks} active Worldpay payment link{activeWorldpayLinks === 1 ? '' : 's'}.</span>
               </div>
             </div>
             <div className="duty-item">
-              <input type="checkbox" checked={inFulfilment === 0} readOnly />
+              <input type="checkbox" checked={inFulfilment === 0} readOnly aria-label="Supply chain review complete" />
               <div>
                 <span className="font-semibold" style={{ display: 'block' }}>Supply Chain Review</span>
                 <span className="text-muted text-xs">{inFulfilment} orders processing with Curaleaf.</span>
@@ -343,9 +321,9 @@ export default function Dashboard() {
 
           <div className="integration-note">
             <h4><FileText size={12} /> Curaleaf Integration</h4>
-            <p>{curaleafIntegration?.status === 'connected' ? 'Connected to Curaleaf Rocky. Supplier orders and shipment events are available.' : 'Platform connection is pending live Curaleaf credentials. The configured formulary remains available for workflow testing.'}</p>
+            <p>{curaleafIntegration?.status === 'connected' ? 'Connected to Curaleaf. Supplier orders and shipment events are available.' : 'Curaleaf is managed by HHH administration. Wait and retry later, or contact your HHH administrator if access remains unavailable.'}</p>
           </div>
-        </div>
+        </aside>
 
       </div>
     </div>

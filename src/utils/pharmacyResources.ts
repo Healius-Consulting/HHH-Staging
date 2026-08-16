@@ -3,10 +3,21 @@ import QRCode from 'qrcode';
 import type { PharmacyTenant } from '../context/AppContext';
 import { deriveTenantTheme } from './tenantTheme';
 
+export const DEFAULT_ELIGIBILITY_FORM_URL = 'https://holistichealthhub.cc/eligibility';
+
+export function safeEligibilityFormBase(configuredBase: string | undefined, development = import.meta.env.DEV) {
+  const candidate = configuredBase?.trim() || (development ? 'http://localhost:5174/eligibility' : DEFAULT_ELIGIBILITY_FORM_URL);
+  try {
+    const url = new URL(candidate);
+    const localDevelopmentUrl = development && url.protocol === 'http:' && ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+    return url.protocol === 'https:' || localDevelopmentUrl ? url : new URL(DEFAULT_ELIGIBILITY_FORM_URL);
+  } catch {
+    return new URL(DEFAULT_ELIGIBILITY_FORM_URL);
+  }
+}
+
 export function eligibilityUrl(org: PharmacyTenant) {
-  const configuredBase = (import.meta.env.VITE_ELIGIBILITY_FORM_URL as string | undefined) || (import.meta.env.DEV ? 'http://localhost:5174' : undefined);
-  const url = new URL(configuredBase || window.location.origin + window.location.pathname);
-  if (!configuredBase) url.searchParams.set('mode', 'eligibility');
+  const url = safeEligibilityFormBase(import.meta.env.VITE_ELIGIBILITY_FORM_URL as string | undefined);
   url.searchParams.set('token', org.referralToken);
   return url.toString();
 }

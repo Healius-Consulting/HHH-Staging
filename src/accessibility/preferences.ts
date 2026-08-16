@@ -1,10 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export type AccessibilityTheme =
-  | 'clinical-light'
-  | 'clinical-dark'
-  | 'high-contrast'
-  | 'warm-low-glare';
+export type AccessibilityTheme = 'light' | 'dark';
 
 export type TextScale = 'default' | 'large' | 'larger';
 
@@ -21,7 +17,7 @@ export type AccessibilitySyncHandler = (
 ) => void | Promise<void>;
 
 export const DEFAULT_ACCESSIBILITY_PREFERENCES: AccessibilityPreferences = {
-  theme: 'clinical-light',
+  theme: 'light',
   textScale: 'default',
   reduceMotion: false,
   enhancedFocus: false,
@@ -30,12 +26,6 @@ export const DEFAULT_ACCESSIBILITY_PREFERENCES: AccessibilityPreferences = {
 
 const STORAGE_KEY = 'hhh:accessibility-preferences:v1';
 const CHANGE_EVENT = 'hhh:accessibility-preferences-change';
-const THEMES: AccessibilityTheme[] = [
-  'clinical-light',
-  'clinical-dark',
-  'high-contrast',
-  'warm-low-glare',
-];
 const TEXT_SCALES: TextScale[] = ['default', 'large', 'larger'];
 
 let syncHandler: AccessibilitySyncHandler | null = null;
@@ -44,14 +34,18 @@ function isBoolean(value: unknown): value is boolean {
   return typeof value === 'boolean';
 }
 
+function normaliseTheme(value: unknown): AccessibilityTheme {
+  if (value === 'dark' || value === 'clinical-dark' || value === 'high-contrast') return 'dark';
+  if (value === 'light' || value === 'clinical-light' || value === 'warm-low-glare') return 'light';
+  return DEFAULT_ACCESSIBILITY_PREFERENCES.theme;
+}
+
 function parsePreferences(value: unknown): AccessibilityPreferences {
   if (!value || typeof value !== 'object') return DEFAULT_ACCESSIBILITY_PREFERENCES;
   const candidate = value as Partial<AccessibilityPreferences>;
 
   return {
-    theme: candidate.theme && THEMES.includes(candidate.theme)
-      ? candidate.theme
-      : DEFAULT_ACCESSIBILITY_PREFERENCES.theme,
+    theme: normaliseTheme(candidate.theme),
     textScale: candidate.textScale && TEXT_SCALES.includes(candidate.textScale)
       ? candidate.textScale
       : DEFAULT_ACCESSIBILITY_PREFERENCES.textScale,
@@ -86,9 +80,7 @@ export function applyAccessibilityPreferences(preferences: AccessibilityPreferen
   root.dataset.reducedMotion = String(preferences.reduceMotion);
   root.dataset.enhancedFocus = String(preferences.enhancedFocus);
   root.dataset.underlineLinks = String(preferences.underlineLinks);
-  root.style.colorScheme = preferences.theme === 'clinical-dark' || preferences.theme === 'high-contrast'
-    ? 'dark'
-    : 'light';
+  root.style.colorScheme = preferences.theme;
 }
 
 if (typeof window !== 'undefined') {

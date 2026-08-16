@@ -1,0 +1,42 @@
+extend type EligibilityCondition {
+  """
+  ✨ Implicit foreign key field based on `EligibilityCondition`.`submission`. It must match the value of `EligibilitySubmission`.`id`. See `@ref` for how to customize it.
+  """
+  submissionId: UUID! @fdc_generated(from: "EligibilityCondition.submission", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `EligibilityCondition`.`condition`. It must match the value of `Condition`.`code`. See `@ref` for how to customize it.
+  """
+  conditionCode: String! @fdc_generated(from: "EligibilityCondition.condition", purpose: IMPLICIT_REF_FIELD)
+}
+extend type EligibilityConsent {
+  """
+  ✨ Implicit foreign key field based on `EligibilityConsent`.`submission`. It must match the value of `EligibilitySubmission`.`id`. See `@ref` for how to customize it.
+  """
+  submissionId: UUID! @fdc_generated(from: "EligibilityConsent.submission", purpose: IMPLICIT_REF_FIELD)
+}
+extend type OrderPrescription {
+  """
+  ✨ Implicit foreign key field based on `OrderPrescription`.`order`. It must match the value of `Order`.`id`. See `@ref` for how to customize it.
+  """
+  orderId: UUID! @fdc_generated(from: "OrderPrescription.order", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `OrderPrescription`.`prescription`. It must match the value of `Prescription`.`id`. See `@ref` for how to customize it.
+  """
+  prescriptionId: UUID! @fdc_generated(from: "OrderPrescription.prescription", purpose: IMPLICIT_REF_FIELD)
+}
+extend type PatientCondition {
+  """
+  ✨ Implicit foreign key field based on `PatientCondition`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
+  """
+  patientId: UUID! @fdc_generated(from: "PatientCondition.patient", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `PatientCondition`.`condition`. It must match the value of `Condition`.`code`. See `@ref` for how to customize it.
+  """
+  conditionCode: String! @fdc_generated(from: "PatientCondition.condition", purpose: IMPLICIT_REF_FIELD)
+}
+extend type PharmacyDirectoryProfile {
+  """
+  ✨ Implicit foreign key field based on `PharmacyDirectoryProfile`.`organisation`. It must match the value of `Organisation`.`id`. See `@ref` for how to customize it.
+  """
+  organisationId: UUID! @fdc_generated(from: "PharmacyDirectoryProfile.organisation", purpose: IMPLICIT_REF_FIELD)
+}
