@@ -6,13 +6,14 @@ import { build, loadEnv } from 'vite';
 import { assertSurfaceBuildEnvironment } from '../platform/vercel/surface-build-environment.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const surface = process.argv[2] ?? process.env.HHH_SURFACE;
+const surface = process.argv[2] ?? process.env.HHH_SURFACE ?? 'portal';
 const supportedSurfaces = new Set(['public', 'portal']);
 const privateDirectory = path.join(repositoryRoot, '.vercel-private');
 
 if (!surface || !supportedSurfaces.has(surface)) {
   throw new Error('HHH_SURFACE must be public or portal. Standalone admin and pharmacy deployments are not supported.');
 }
+
 
 const loadedEnvironment = loadEnv(process.env.NODE_ENV ?? 'production', repositoryRoot, '');
 assertSurfaceBuildEnvironment(surface, { ...loadedEnvironment, ...process.env });
