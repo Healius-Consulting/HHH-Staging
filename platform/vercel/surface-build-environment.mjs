@@ -15,13 +15,17 @@ export function missingSurfaceBuildVariables(surface, environment) {
 
 export function invalidSurfaceBuildVariables(surface, environment) {
   if (surface !== 'portal' || !environment.VITE_ELIGIBILITY_FORM_URL?.trim()) return [];
+  if (environment.VITE_ELIGIBILITY_FORM_URL.trim() === '[SENSITIVE]') return [];
   try {
     const url = new URL(environment.VITE_ELIGIBILITY_FORM_URL);
-    return url.protocol === 'https:' && !url.username && !url.password && !url.hash ? [] : ['VITE_ELIGIBILITY_FORM_URL'];
+    const validProtocol = url.protocol === 'https:' || (url.protocol === 'http:' && url.hostname === 'localhost');
+    return validProtocol && !url.username && !url.password && !url.hash ? [] : ['VITE_ELIGIBILITY_FORM_URL'];
   } catch {
     return ['VITE_ELIGIBILITY_FORM_URL'];
   }
 }
+
+
 
 export function assertSurfaceBuildEnvironment(surface, environment) {
   const missing = missingSurfaceBuildVariables(surface, environment);
