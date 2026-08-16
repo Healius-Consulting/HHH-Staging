@@ -23,10 +23,11 @@ import { isSupportedPortalRelativePath } from '@hhh/domain/portal-route';
 
 type ProtectedSurface = 'pharmacy' | 'admin';
 
-const deploymentSurface = process.env.HHH_SURFACE;
+const deploymentSurface = process.env.HHH_SURFACE || 'portal';
 const portalDeployment = deploymentSurface === 'portal';
 const sessionCookieName = '__Host-hhh_session';
 const csrfCookieName = '__Host-hhh_csrf';
+
 
 let activeVercelOidcToken: string | null = null;
 type ExternalAccessTokenClient = { getAccessToken(): Promise<{ token?: string | null }> };
