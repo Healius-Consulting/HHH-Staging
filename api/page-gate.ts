@@ -242,23 +242,105 @@ async function gate(request: Request) {
     const app = firebaseApp(request);
     gateStage = 'firebase.auth_service';
     const auth = getAuth(app);
-    gateStage = 'firebase.firestore_service';
-    const firestore = firestoreForRequest(request, app);
     gateStage = 'firebase.verify_session';
     const claims = await auth.verifySessionCookie(sessionCookie, true) as DecodedIdToken;
-    gateStage = 'firestore.read_session';
-    const [sessionSnapshot, staffSnapshot] = await Promise.all([
-      firestore.collection('staffSessions').doc(sessionHash).get(),
-      firestore.collection('staffUsers').doc(claims.uid).get(),
-    ]);
-    const record = sessionSnapshot.exists ? sessionSnapshot.data() as SessionRecord : null;
-    const staff = staffSnapshot.exists ? staffSnapshot.data() as StaffRecord : null;
+    gateStage = 'dataconnect.read_session';
+
+    const GET_PORTAL_ADMISSION_GQL = `
+      query GetPortalAdmission($sessionHash: String!, $staffUid: String!) @auth(level: NO_ACCESS) {
+        staffSession(sessionHash: $sessionHash) {
+          sessionHash
+          staffUid
+          organisationId
+          surface
+          role
+          userAgentHash
+          lastActivityAt
+          idleExpiresAt
+          absoluteExpiresAt
+          revokedAt
+          revokeReason
+        }
+        staffUser(uid: $staffUid) {
+          uid
+          organisationId
+          email
+          displayName
+          role
+          status
+          disabled
+        }
+      }
+    `;
+
+    const TOUCH_SESSION_GQL = `
+      mutation TouchStaffSession($sessionHash: String!, $lastActivityAt: Timestamp!, $idleExpiresAt: Timestamp!) @auth(level: NO_ACCESS) {
+        staffSession_update(
+          key: { sessionHash: $sessionHash }
+          data: {
+            lastActivityAt: $lastActivityAt
+            idleExpiresAt: $idleExpiresAt
+          }
+        )
+      }
+    `;
+
+    const REVOKE_SESSION_GQL = `
+      mutation RevokeStaffSession($sessionHash: String!, $revokedAt: Timestamp!, $revokeReason: String!) @auth(level: NO_ACCESS) {
+        staffSession_update(
+          key: { sessionHash: $sessionHash }
+          data: {
+            revokedAt: $revokedAt
+            revokeReason: $revokeReason
+          }
+        )
+      }
+    `;
+
+    const { getDataConnect } = await import('firebase-admin/data-connect');
+    const dataConnect = getDataConnect({
+      serviceId: 'hhh-platform-service',
+      location: 'europe-west2',
+    });
+
+    const admissionResult = await dataConnect.executeGraphql<{
+      staffSession: any | null;
+      staffUser: any | null;
+    }, any>(GET_PORTAL_ADMISSION_GQL, {
+      variables: { sessionHash, staffUid: claims.uid },
+    });
+
+    const sessionRow = admissionResult.data?.staffSession ?? null;
+    const staffRow = admissionResult.data?.staffUser ?? null;
+
+    const record: SessionRecord | null = sessionRow ? {
+      sessionHash: sessionRow.sessionHash,
+      uid: sessionRow.staffUid,
+      organisationId: sessionRow.organisationId,
+      surface: sessionRow.surface,
+      role: sessionRow.role === 'HHH_ADMIN' ? 'admin' : 'pharmacy_staff',
+      lastActivityAt: sessionRow.lastActivityAt,
+      idleExpiresAt: sessionRow.idleExpiresAt,
+      absoluteExpiresAt: sessionRow.absoluteExpiresAt,
+      revokedAt: sessionRow.revokedAt,
+    } : null;
+
+    const staff: StaffRecord | null = staffRow ? {
+      role: staffRow.role === 'HHH_ADMIN' ? 'admin' : 'pharmacy_staff',
+      organisationId: staffRow.organisationId,
+      status: staffRow.status.toLowerCase(),
+      disabled: staffRow.disabled,
+    } : null;
+
+
     const now = Date.now();
     const failure = validateGateSession({ claims, record, staff, sessionHash, surface: protectedSurface, now });
     if (failure) {
       if (failure.code === 'SESSION_IDLE_EXPIRED') {
         const revokedAt = new Date(now).toISOString();
-        await sessionSnapshot.ref.set({ revokedAt, revokeReason: 'idle_timeout', updatedAt: revokedAt }, { merge: true });
+        await dataConnect.executeGraphql(REVOKE_SESSION_GQL, {
+          variables: { sessionHash, revokedAt, revokeReason: 'idle_timeout' },
+        });
       }
       await securityEvent(request, failure.event, {
         requestId,
@@ -275,14 +357,14 @@ async function gate(request: Request) {
     }
 
     if (record && shouldTouchSession(record.lastActivityAt, now)) {
-      gateStage = 'firestore.touch_session';
+      gateStage = 'dataconnect.touch_session';
       const lastActivityAt = new Date(now).toISOString();
-      await sessionSnapshot.ref.set({
-        lastActivityAt,
-        idleExpiresAt: new Date(now + SESSION_IDLE_MS).toISOString(),
-        updatedAt: lastActivityAt,
-      }, { merge: true });
+      const idleExpiresAt = new Date(now + SESSION_IDLE_MS).toISOString();
+      await dataConnect.executeGraphql(TOUCH_SESSION_GQL, {
+        variables: { sessionHash, lastActivityAt, idleExpiresAt },
+      });
     }
+
     return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers: responseHeaders(requestId, 'text/html; charset=utf-8') });
   } catch (error) {
     await securityEvent(request, 'auth.session_rejected', {

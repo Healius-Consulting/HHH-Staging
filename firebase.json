@@ -1,7 +1,7 @@
 {
   "functions": [
     {
-      "source": "services/api",
+      "source": "services/api-sql",
       "codebase": "hhh-api",
       "runtime": "nodejs22",
       "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"],
