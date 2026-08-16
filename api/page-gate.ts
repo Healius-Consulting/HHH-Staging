@@ -248,7 +248,7 @@ async function gate(request: Request) {
 
     const GET_PORTAL_ADMISSION_GQL = `
       query GetPortalAdmission($sessionHash: String!, $staffUid: String!) @auth(level: NO_ACCESS) {
-        staffSession(sessionHash: $sessionHash) {
+        staffSession(key: { sessionHash: $sessionHash }) {
           sessionHash
           staffUid
           organisationId
@@ -261,7 +261,7 @@ async function gate(request: Request) {
           revokedAt
           revokeReason
         }
-        staffUser(uid: $staffUid) {
+        staffUser(key: { uid: $staffUid }) {
           uid
           organisationId
           email
@@ -272,6 +272,7 @@ async function gate(request: Request) {
         }
       }
     `;
+
 
     const TOUCH_SESSION_GQL = `
       mutation TouchStaffSession($sessionHash: String!, $lastActivityAt: Timestamp!, $idleExpiresAt: Timestamp!) @auth(level: NO_ACCESS) {
