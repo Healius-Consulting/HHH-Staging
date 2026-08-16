@@ -26,7 +26,6 @@ if (apiOrigin.protocol !== 'https:' || apiOrigin.username || apiOrigin.password 
 }
 
 const portalSurface = surface === 'portal';
-const outputDirectory = `dist-${surface}`;
 const securityHeaders = [
   { key: 'Content-Security-Policy', value: CONTENT_SECURITY_POLICY },
   { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
@@ -40,9 +39,10 @@ const securityHeaders = [
 export const config = {
   framework: 'vite',
   buildCommand: 'npm run build:vercel',
-  outputDirectory,
+  outputDirectory: 'dist',
   regions: ['lhr1'],
   functions: portalSurface ? {
+
     'api/page-gate.ts': {
       maxDuration: 10,
       regions: ['lhr1'],

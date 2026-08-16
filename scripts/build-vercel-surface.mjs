@@ -43,11 +43,18 @@ async function buildProtectedSurface(protectedSurface, outputDirectory = null) {
   if (outputDirectory) await cp(sourceDirectory, outputDirectory, { recursive: true });
 }
 
+const distDir = path.join(repositoryRoot, 'dist');
+await rm(distDir, { recursive: true, force: true });
+await mkdir(distDir, { recursive: true });
+
 if (surface === 'portal') {
   // Both client bundles remain independently compiled. Their HTML is private;
   // fingerprinted assets can safely share the portal's static output.
   await buildProtectedSurface('pharmacy', path.join(repositoryRoot, 'dist-portal'));
   await buildProtectedSurface('admin', path.join(repositoryRoot, 'dist-portal'));
+  await cp(path.join(repositoryRoot, 'dist-portal'), distDir, { recursive: true });
 } else if (surface === 'public') {
   await build({ configFile: path.join(repositoryRoot, 'vite.public.config.ts') });
+  await cp(path.join(repositoryRoot, 'dist-public'), distDir, { recursive: true });
 }
+
