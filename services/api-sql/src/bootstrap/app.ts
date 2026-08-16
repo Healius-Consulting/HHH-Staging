@@ -14,6 +14,25 @@ import { createPublicPaymentRouter } from '../transport/public/payment.router.js
 import { createPortalPaymentRouter } from '../transport/portal/payment.router.js';
 import { createPortalFulfilmentRouter } from '../transport/portal/fulfilment.router.js';
 
+export function isOriginPermitted(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (portalAppOrigins.has(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.hostname.endsWith('.vercel.app')) return true;
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    if (
+      url.hostname.endsWith('.holistichealthhub.cc') ||
+      url.hostname.endsWith('.holistichealthhub.live') ||
+      url.hostname.endsWith('.holistichealthhub.co.uk') ||
+      url.hostname.endsWith('.thinktimeless.co.uk')
+    ) return true;
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 export function createApp(): Express {
   const app = express();
 
@@ -26,7 +45,7 @@ export function createApp(): Express {
 
   app.use(cors({
     origin: (origin, callback) => {
-      if (!origin || portalAppOrigins.has(origin)) {
+      if (isOriginPermitted(origin)) {
         callback(null, true);
       } else {
         callback(new HttpError(403, 'CORS origin denied.', 'CORS_DENIED'));
@@ -34,6 +53,7 @@ export function createApp(): Express {
     },
     credentials: true,
   }));
+
 
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));

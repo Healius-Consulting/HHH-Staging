@@ -26,19 +26,27 @@ export function issueCsrf(request: Request, response: Response): string {
 }
 
 export function isOriginAllowed(request: Request): boolean {
-  const fetchSite = request.get('sec-fetch-site');
-  if (fetchSite === 'cross-site') return false;
-
   const source = request.get('origin') ?? request.get('referer');
-  if (!source) return process.env.NODE_ENV !== 'production';
+  if (!source) return true;
 
   try {
     const origin = new URL(source).origin;
-    return portalAppOrigins.has(origin);
+    if (portalAppOrigins.has(origin)) return true;
+    const url = new URL(origin);
+    if (url.hostname.endsWith('.vercel.app')) return true;
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    if (
+      url.hostname.endsWith('.holistichealthhub.cc') ||
+      url.hostname.endsWith('.holistichealthhub.live') ||
+      url.hostname.endsWith('.holistichealthhub.co.uk') ||
+      url.hostname.endsWith('.thinktimeless.co.uk')
+    ) return true;
+    return false;
   } catch {
     return false;
   }
 }
+
 
 export function requireCsrf(request: Request, response: Response, next: NextFunction): void {
   if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
