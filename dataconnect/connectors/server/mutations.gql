@@ -603,5 +603,20 @@ mutation CreateOrderDirect(
   })
 }
 
+mutation UpdateStaffUserRole(
+  $uid: String!
+  $role: StaffRole!
+  $organisationId: UUID
+) @auth(level: NO_ACCESS) {
+  staffUser_update(
+    key: { uid: $uid }
+    data: {
+      role: $role
+      organisationId: $organisationId
+    }
+  )
+}
+
+
 
 
