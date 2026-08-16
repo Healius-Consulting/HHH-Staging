@@ -20,7 +20,8 @@ declare global {
 
 const identityRepo = new SqlIdentityRepository();
 
-export function requireStaff(expectedSurface: ProtectedSurface) {
+export function requireStaff(expectedSurface: ProtectedSurface | 'any' = 'any') {
+
   return async (request: Request, response: Response, next: NextFunction): Promise<void> => {
     try {
       const sessionCookie = parseCookies(request)[sessionCookieName];

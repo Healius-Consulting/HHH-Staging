@@ -67,8 +67,9 @@ export function createAuthRouter(): Router {
     }
   };
 
-  router.get('/auth/session', requireStaff('pharmacy'), getSessionHandler);
-  router.get('/portal/session', requireStaff('pharmacy'), getSessionHandler);
+  router.get('/auth/session', requireStaff('any'), getSessionHandler);
+  router.get('/portal/session', requireStaff('any'), getSessionHandler);
+
 
   // DELETE /v1/auth/session - Log out and revoke session
   router.delete('/auth/session', requireCsrf, async (req: Request, res: Response, next: NextFunction) => {

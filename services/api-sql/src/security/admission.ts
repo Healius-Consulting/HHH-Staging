@@ -6,7 +6,7 @@ export interface AdmissionValidationInput {
   claims: DecodedIdToken;
   admission: PortalAdmissionResult;
   sessionHash: string;
-  surface: ProtectedSurface;
+  surface?: ProtectedSurface | 'any';
   now?: number;
 }
 
@@ -28,8 +28,16 @@ export interface AdmissionFailure {
   event: string;
 }
 
+function normalizeStaffRole(role: unknown): string {
+  if (typeof role !== 'string') return '';
+  const clean = role.toUpperCase().replace(/[-_]/g, '_');
+  if (clean === 'HHH_ADMIN' || clean === 'ADMIN') return 'HHH_ADMIN';
+  if (clean === 'PHARMACY_STAFF' || clean === 'PHARMACY') return 'PHARMACY_STAFF';
+  return clean;
+}
+
 export function validatePortalAdmission(input: AdmissionValidationInput): AdmissionFailure | null {
-  const { claims, admission, surface, now = Date.now() } = input;
+  const { claims, admission, surface = 'any', now = Date.now() } = input;
   const { session, staff } = admission;
 
   if (!session) {
@@ -49,15 +57,22 @@ export function validatePortalAdmission(input: AdmissionValidationInput): Admiss
   }
 
   // Verify role alignment
-  const claimRole = (typeof claims.role === 'string' ? claims.role.toUpperCase() : '') as StaffRole;
-  if (staff.role !== claimRole || session.role !== claimRole) {
+  const claimRole = normalizeStaffRole(claims.role);
+  const staffRole = normalizeStaffRole(staff.role);
+  const sessionRole = normalizeStaffRole(session.role);
+
+  if (staffRole !== claimRole || sessionRole !== claimRole) {
     return { status: 403, code: 'ROLE_MISMATCH', event: 'auth.role_mismatch' };
   }
 
   // Verify surface alignment
-  if (surface === 'admin' && staff.role !== 'HHH_ADMIN') {
+  if (surface === 'admin' && staffRole !== 'HHH_ADMIN') {
     return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
   }
+  if (surface === 'pharmacy' && staffRole !== 'PHARMACY_STAFF') {
+    return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
+  }
+
   if (surface === 'pharmacy' && staff.role !== 'PHARMACY_STAFF') {
     return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
   }
