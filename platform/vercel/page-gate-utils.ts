@@ -115,6 +115,14 @@ function validDate(value: unknown) {
   return Number.isFinite(milliseconds) ? milliseconds : null;
 }
 
+export function normalizeRole(role: unknown): 'hhh_admin' | 'pharmacy_staff' | null {
+  if (typeof role !== 'string') return null;
+  const lower = role.toLowerCase().replace(/[-_]/g, '_');
+  if (lower === 'hhh_admin' || lower === 'admin' || lower === 'hhhadmin') return 'hhh_admin';
+  if (lower === 'pharmacy_staff' || lower === 'pharmacy' || lower === 'pharmacystaff') return 'pharmacy_staff';
+  return null;
+}
+
 export function validateGateSession(input: {
   claims: SessionClaims;
   record: SessionRecord | null;
@@ -132,12 +140,12 @@ export function validateGateSession(input: {
 
   if (claims.email_verified !== true) return { status: 403, event: 'auth.role_denied', code: 'EMAIL_NOT_VERIFIED' };
   if (secondFactor(claims) !== 'totp') return { status: 403, event: 'auth.role_denied', code: 'MFA_TOTP_REQUIRED' };
-  if (claims.role !== expectedRole) return { status: 403, event: 'auth.role_denied', code: 'SURFACE_FORBIDDEN' };
+  if (normalizeRole(claims.role) !== expectedRole) return { status: 403, event: 'auth.role_denied', code: 'SURFACE_FORBIDDEN' };
   if (surface === 'pharmacy' && !claimsOrganisationId) return { status: 403, event: 'auth.tenant_mismatch', code: 'TENANT_REQUIRED' };
   if (!record || record.sessionHash !== sessionHash || record.uid !== claims.uid) {
     return { status: 401, event: 'auth.session_rejected', code: 'SESSION_RECORD_INVALID' };
   }
-  if (record.surface !== surface || record.role !== expectedRole) {
+  if (record.surface !== surface || normalizeRole(record.role) !== expectedRole) {
     return { status: 403, event: 'auth.role_denied', code: 'SESSION_SURFACE_FORBIDDEN' };
   }
   if (record.organisationId !== claimsOrganisationId) {
@@ -150,14 +158,15 @@ export function validateGateSession(input: {
   if (idleExpiry === null || idleExpiry <= now) {
     return { status: 401, event: 'auth.session_expired_idle', code: 'SESSION_IDLE_EXPIRED' };
   }
-  if (!staff || staff.disabled === true || staff.status !== 'active') {
+  if (!staff || staff.disabled === true || (typeof staff.status === 'string' && staff.status.toLowerCase() !== 'active')) {
     return { status: 401, event: 'auth.session_rejected', code: 'ACCOUNT_DISABLED' };
   }
-  if (staff.role !== claims.role || staffOrganisationId !== claimsOrganisationId) {
+  if (normalizeRole(staff.role) !== expectedRole || staffOrganisationId !== claimsOrganisationId) {
     return { status: 403, event: 'auth.tenant_mismatch', code: 'STAFF_SCOPE_INVALID' };
   }
   return null;
 }
+
 
 export function shouldTouchSession(lastActivityAt: unknown, now: number) {
   const activity = validDate(lastActivityAt);
