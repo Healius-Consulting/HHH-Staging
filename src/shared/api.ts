@@ -40,6 +40,12 @@ import type {
   GoLiveReadiness,
   AuthenticatedSession,
   PharmacyOverview,
+  PharmacyPrescriptionFinanceReport,
+  PostcodeSearchReceipt,
+  ReferralTokenResolution,
+  V2EligibilityQueueItem,
+  V2IntakeInput,
+  V2IntakeReceipt,
 } from './contracts';
 
 const configuredApiUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -146,6 +152,101 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getPublicPharmacy(referralToken: string) {
   return apiRequest<PublicPharmacy>(`/v1/public/pharmacies/by-token/${encodeURIComponent(referralToken)}`);
+}
+
+export function searchPublicPharmacies(postcode: string) {
+  return apiRequest<PostcodeSearchReceipt>('/v2/public/postcode-searches', { method: 'POST', body: JSON.stringify({ postcode }) });
+}
+
+export function resolvePublicReferralToken(referralToken: string) {
+  return apiRequest<ReferralTokenResolution>('/v2/public/referral-tokens/resolve', { method: 'POST', body: JSON.stringify({ token: referralToken }) });
+}
+
+export function createV2Intake(input: V2IntakeInput) {
+  return apiRequest<V2IntakeReceipt>('/v2/public/intakes', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function getAdminGeneralIntake() {
+  return apiRequest<{ records: V2EligibilityQueueItem[]; nextCursor: string | null }>('/v2/portal/admin/intake/general');
+}
+
+export function getAdminPharmacyReferralIntake() {
+  return apiRequest<{ records: V2EligibilityQueueItem[]; nextCursor: string | null }>('/v2/portal/admin/intake/pharmacy-referrals');
+}
+
+export function getAdminIntakeDetail(caseId: string) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}`);
+}
+
+export function getAssignmentCandidates(caseId: string, query = '') {
+  return apiRequest<{ records: Array<Record<string, unknown>> }>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/assignment-candidates?q=${encodeURIComponent(query)}`);
+}
+
+export function reassignIntake(caseId: string, input: { destinationOrganisationId: string; reasonCode: string; note?: string | null; expectedVersion: number; acknowledgeReviewStarted: boolean }) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/reassign`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function confirmIntakeAssignment(caseId: string, input: { reasonCode: string; note?: string | null; expectedVersion: number; acknowledgeReviewStarted: boolean }) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/confirm-assignment`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function recordIntakeFollowUpAttempt(caseId: string, input: {
+  expectedVersion: number;
+  contactMethod: 'phone' | 'email' | 'sms' | 'other';
+  outcome: 'not_started' | 'due' | 'attempted' | 'in_progress' | 'completed' | 'unable_to_contact';
+  reachedPatient: boolean;
+  note: string | null;
+  nextFollowUpAt: string | null;
+}) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/follow-up-attempts`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateIntakeFollowUp(caseId: string, input: Record<string, unknown>) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/follow-up`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function decideV2ProgrammeOnboarding(caseId: string, input: { expectedVersion: number; decision: 'approved' | 'declined'; notes: string | null }) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/programme-onboarding`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function getV2PharmacyEligibilityQueue() {
+  return apiRequest<{ records: V2EligibilityQueueItem[] }>('/v2/portal/eligibility-submissions');
+}
+
+export function getV2PharmacyEligibilityDetail(caseId: string) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/eligibility-submissions/${encodeURIComponent(caseId)}`);
+}
+
+export function updateV2PharmacyEligibilityReview(caseId: string, input: { expectedVersion: number; reviewStatus: string; outcomeStatus: string; notes: string | null }) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/eligibility-submissions/${encodeURIComponent(caseId)}/review`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function getDirectoryProfilesV2() {
+  return apiRequest<{ records: Array<Record<string, unknown>> }>('/v2/portal/admin/directory-profiles');
+}
+
+export function saveDirectoryProfileV2(organisationId: string, input: Record<string, unknown>) {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/directory-profiles/${encodeURIComponent(organisationId)}`, { method: 'PUT', body: JSON.stringify(input) });
+}
+
+export function changeDirectoryLifecycleV2(organisationId: string, action: 'submit-review' | 'publish' | 'pause' | 'unpublish') {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/directory-profiles/${encodeURIComponent(organisationId)}/${action}`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export function changeDirectoryQrV2(organisationId: string, action: 'activate' | 'pause') {
+  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/directory-profiles/${encodeURIComponent(organisationId)}/qr/${action}`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export async function downloadDirectoryQrPackV2(organisationId: string) {
+  const securityHeaders = securityTokenProvider ? await securityTokenProvider() : {};
+  const response = await fetch(`${apiBaseUrl()}/v2/portal/admin/directory-profiles/${encodeURIComponent(organisationId)}/qr-pack`, {
+    credentials: 'include', headers: { ...securityHeaders, ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { code?: string; message?: string } | null;
+    throw new ApiRequestError(response.status, body?.code ?? 'REQUEST_FAILED', body?.message ?? 'The content pack could not be downloaded.');
+  }
+  return response.blob();
 }
 
 export async function getAuthCsrf() {
@@ -486,6 +587,10 @@ export function getGoLiveReadiness(organisationId: string) {
   return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live-readiness`);
 }
 
+export function goLiveIntakeOrganisation(organisationId: string) {
+  return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/intake-live`, { method: 'POST', body: JSON.stringify({}) });
+}
+
 export function goLiveOrganisation(organisationId: string) {
   return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live`, { method: 'POST', body: JSON.stringify({}) });
 }
@@ -498,7 +603,7 @@ export function recordPharmacyGdprEvidenceReceived(organisationId: string) {
 }
 
 export function recordCompanyGdprEvidenceReceived(companyId: string) {
-  return apiRequest<{ success: true; companyId: string; gdprConfirmed: true; evidenceMethod: 'manual_receipt'; receivedAt: string }>(
+  return apiRequest<{ success: true; companyId: string; gdprConfirmed: true; evidenceMethod: 'manual_receipt'; receivedAt: string; activatedOrganisationIds: string[] }>(
     `/v1/portal/admin/companies/${encodeURIComponent(companyId)}/gdpr/record-received`,
     { method: 'POST', body: JSON.stringify({ received: true }) },
   );
@@ -588,6 +693,14 @@ export function getAdminReferralFinance(filters: { from?: string; to?: string; o
   if (filters.organisationId) query.set('organisationId', filters.organisationId);
   const suffix = query.size ? `?${query.toString()}` : '';
   return apiRequest<AdminReferralFinanceReport>(`/v1/portal/admin/finance/referrals${suffix}`);
+}
+
+export function getPharmacyPrescriptionFinance(filters: { from?: string; to?: string } = {}) {
+  const query = new URLSearchParams();
+  if (filters.from) query.set('from', filters.from);
+  if (filters.to) query.set('to', filters.to);
+  const suffix = query.size ? `?${query.toString()}` : '';
+  return apiRequest<PharmacyPrescriptionFinanceReport>(`/v1/portal/finance/prescriptions${suffix}`);
 }
 
 export function recordPatientRegisterExport(input: { query: string; organisationId: string; status: string; from: string | null; to: string | null; expectedScopeHash: string }) {

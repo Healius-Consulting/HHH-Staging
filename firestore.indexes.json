@@ -39,6 +39,47 @@
         { "fieldPath": "patientId", "order": "ASCENDING" },
         { "fieldPath": "kind", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "eligibilitySubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sourceType", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eligibilitySubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedOrganisationId", "order": "ASCENDING" },
+        { "fieldPath": "outcomeStatus", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pharmacyDirectoryProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "lifecycle", "order": "ASCENDING" },
+        { "fieldPath": "intakeState", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eligibilityAllocationOverlays",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedOrganisationId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eligibilityAssignmentEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "caseId", "order": "ASCENDING" },
+        { "fieldPath": "occurredAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -36,6 +36,8 @@ test('surface derives from configured host and ignores production override heade
 test('combined portal API namespaces select exactly one protected surface', () => {
   assert.equal(surfaceFromPortalApiPath('/pharmacy/v1/portal/orders'), 'pharmacy');
   assert.equal(surfaceFromPortalApiPath('/admin/v1/portal/admin/organisations'), 'admin');
+  assert.equal(surfaceFromPortalApiPath('/pharmacy/v2/portal/eligibility-submissions'), 'pharmacy');
+  assert.equal(surfaceFromPortalApiPath('/admin/v2/portal/admin/intake/general'), 'admin');
   assert.equal(surfaceFromPortalApiPath('/pharamcy/v1/portal/orders'), null);
   assert.equal(surfaceFromPortalApiPath('/v1/portal/orders'), null);
 });

@@ -39,7 +39,7 @@ export default function Header() {
     subtitle: 'Ordering & Payments Interface',
   };
 
-  const homeActions = state.screen === 'home' ? (
+  const homeActions = state.screen === 'home' && state.workspaceMode === 'live' ? (
     <button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'create' })}>
       <Plus size={15} /> Start new prescription
     </button>
@@ -58,7 +58,7 @@ export default function Header() {
       contextControl={
         <div className="header-context" aria-label={`Current pharmacy status: ${organisation.status}`}>
           <span>Account</span>
-          <span className={`tenant-status tenant-status--${organisation.status}`}>{organisation.status}</span>
+          <span className={`tenant-status tenant-status--${organisation.status}`}>{organisation.status.replace('_', ' ')}</span>
         </div>
       }
     />

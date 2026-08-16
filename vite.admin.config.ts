@@ -20,6 +20,7 @@ export default defineConfig({
     port: 5175,
     proxy: {
       '/admin/v1': { target: 'http://127.0.0.1:8080', rewrite: path => path.replace(/^\/admin/, '') },
+      '/admin/v2': { target: 'http://127.0.0.1:8080', rewrite: path => path.replace(/^\/admin/, '') },
       '/health': 'http://127.0.0.1:8080',
     },
   },

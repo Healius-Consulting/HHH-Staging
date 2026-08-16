@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
-import { AppProvider, useApp, type PharmacyTenant, type Screen, type StaffSession } from './context/AppContext';
+import { AppProvider, useApp, type PharmacyTenant, type Screen, type StaffSession, type WorkspaceMode } from './context/AppContext';
 import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
@@ -61,6 +61,7 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
     status: record.status,
     testAccount: record.testAccount,
     gdprExempt: record.gdprExempt,
+    workspaceClassification: record.workspaceClassification,
     staffCount: 0,
     platformFeeMonthly: record.platformFeeMonthly ?? null,
     defaultPaymentRoute: record.defaultPaymentRoute ?? 'manual',
@@ -197,8 +198,16 @@ function StaffWorkspace() {
   const tenantStyle = tenantThemeVariables(organisation?.brand.primary ?? '#0f766e') as React.CSSProperties;
   const setup = usePharmacySetup(state.portalMode === 'admin' ? undefined : authState.staff?.organisationId);
   const curaleafActivated = Boolean(setup.status?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
-  // Leave training only when all six setup steps are complete (including Curaleaf).
-  const liveWorkspaceReady = Boolean(setup.status?.completed);
+  const allocationHolding = organisation?.workspaceClassification === 'allocation_holding';
+  const workspaceMode: WorkspaceMode = allocationHolding
+    ? 'live'
+    : organisation?.testAccount
+      ? 'training'
+    : organisation?.status === 'live' && setup.status?.completed
+      ? 'live'
+      : organisation?.status === 'intake_live'
+        ? 'intake'
+        : 'training';
   const initialPathHandled = useRef(false);
 
   useEffect(() => {
@@ -232,11 +241,8 @@ function StaffWorkspace() {
 
   useEffect(() => {
     if (authState.staff?.role !== 'pharmacy_staff' || !setup.status || !authState.staff.organisationId) return;
-    dispatch({ type: 'SET_WORKSPACE_MODE', mode: liveWorkspaceReady ? 'live' : 'training', organisationId: authState.staff.organisationId });
-    if (liveWorkspaceReady && organisation?.status === 'onboarding') {
-      dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { status: 'live' } });
-    }
-  }, [authState.staff, dispatch, liveWorkspaceReady, organisation?.id, organisation?.status, setup.status]);
+    dispatch({ type: 'SET_WORKSPACE_MODE', mode: workspaceMode, organisationId: authState.staff.organisationId });
+  }, [authState.staff, dispatch, setup.status, workspaceMode]);
 
   useEffect(() => {
     document.getElementById('pharmacy-main-content')?.scrollTo({ top: 0 });
@@ -253,10 +259,13 @@ function StaffWorkspace() {
 
   const setupComplete = isLocalPortalPreview || Boolean(setup.status?.completed);
   const unrestrictedScreens = new Set(['home', 'formulary', 'settings']);
-  const isRestricted = !isLocalPortalPreview && curaleafActivated && !setupComplete && !unrestrictedScreens.has(state.screen);
+  const intakeScreens = new Set(['home', 'patients', 'settings']);
+  const isIntakeRestricted = !isLocalPortalPreview && state.workspaceMode === 'intake' && !intakeScreens.has(state.screen);
+  const isSetupRestricted = !isLocalPortalPreview && curaleafActivated && !setupComplete && !unrestrictedScreens.has(state.screen);
+  const isRestricted = isIntakeRestricted || isSetupRestricted;
 
   const renderScreen = () => {
-    if (isRestricted) return <SetupRequired onOpenSetup={() => dispatch({ type: 'SET_SCREEN', screen: 'settings' })} />;
+    if (isRestricted) return <SetupRequired mode={isIntakeRestricted ? 'intake' : 'setup'} onOpenSetup={() => dispatch({ type: 'SET_SCREEN', screen: 'settings' })} />;
     switch (state.screen) {
       case 'home': return serverSessionAuth ? <PharmacyOverview /> : <Dashboard />;
       case 'formulary': return <FormularyPricing />;
@@ -280,6 +289,18 @@ function StaffWorkspace() {
           <div className="training-mode-banner" role="status">
             <strong>Training workspace</strong>
             <span>Patient and order records are temporary. The catalogue may use live Curaleaf test data, but supplier writes and payments are not sent from this workspace.</span>
+          </div>
+        )}
+        {allocationHolding && (
+          <div className="intake-live-banner" role="status">
+            <strong>HHH allocation holding workspace</strong>
+            <span>Existing test patients and orders remain connected to Curaleaf TEST. New dedicated-link applications stay in the HHH admin workspace and appear here only after HHH completes the fixed-destination referral.</span>
+          </div>
+        )}
+        {state.workspaceMode === 'intake' && (
+          <div className="intake-live-banner" role="status">
+            <strong>Eligibility intake live</strong>
+            <span>Real patient submissions are stored in this pharmacy workspace. Prescriptions, payments and supplier actions remain locked until full activation.</span>
           </div>
         )}
         <div id="pharmacy-main-content" className="page-container" tabIndex={-1}>{renderScreen()}</div>

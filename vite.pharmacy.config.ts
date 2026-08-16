@@ -18,6 +18,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/pharmacy/v1': { target: 'http://127.0.0.1:8080', rewrite: path => path.replace(/^\/pharmacy/, '') },
+      '/pharmacy/v2': { target: 'http://127.0.0.1:8080', rewrite: path => path.replace(/^\/pharmacy/, '') },
       '/health': 'http://127.0.0.1:8080',
     },
   },

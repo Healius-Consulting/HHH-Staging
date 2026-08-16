@@ -1,0 +1,90 @@
+import type { DecodedIdToken } from 'firebase-admin/auth';
+import type { PortalAdmissionResult } from '../repositories/ports/identity.port.js';
+import type { ProtectedSurface, StaffRole } from './request-context.js';
+
+export interface AdmissionValidationInput {
+  claims: DecodedIdToken;
+  admission: PortalAdmissionResult;
+  sessionHash: string;
+  surface: ProtectedSurface;
+  now?: number;
+}
+
+export type AdmissionFailureCode =
+  | 'SESSION_NOT_FOUND'
+  | 'STAFF_NOT_FOUND'
+  | 'ACCOUNT_DISABLED'
+  | 'ACCOUNT_INACTIVE'
+  | 'STAFF_SCOPE_INVALID'
+  | 'SESSION_REVOKED'
+  | 'SESSION_EXPIRED'
+  | 'SESSION_IDLE_EXPIRED'
+  | 'SURFACE_DENIED'
+  | 'ROLE_MISMATCH';
+
+export interface AdmissionFailure {
+  status: 401 | 403;
+  code: AdmissionFailureCode;
+  event: string;
+}
+
+export function validatePortalAdmission(input: AdmissionValidationInput): AdmissionFailure | null {
+  const { claims, admission, surface, now = Date.now() } = input;
+  const { session, staff } = admission;
+
+  if (!session) {
+    return { status: 401, code: 'SESSION_NOT_FOUND', event: 'auth.session_not_found' };
+  }
+
+  if (!staff) {
+    return { status: 403, code: 'STAFF_NOT_FOUND', event: 'auth.staff_not_found' };
+  }
+
+  if (staff.disabled || staff.status === 'DISABLED' || staff.status === 'REMOVED') {
+    return { status: 403, code: 'ACCOUNT_DISABLED', event: 'auth.account_disabled' };
+  }
+
+  if (staff.status !== 'ACTIVE') {
+    return { status: 403, code: 'ACCOUNT_INACTIVE', event: 'auth.account_inactive' };
+  }
+
+  // Verify role alignment
+  const claimRole = (typeof claims.role === 'string' ? claims.role.toUpperCase() : '') as StaffRole;
+  if (staff.role !== claimRole || session.role !== claimRole) {
+    return { status: 403, code: 'ROLE_MISMATCH', event: 'auth.role_mismatch' };
+  }
+
+  // Verify surface alignment
+  if (surface === 'admin' && staff.role !== 'HHH_ADMIN') {
+    return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
+  }
+  if (surface === 'pharmacy' && staff.role !== 'PHARMACY_STAFF') {
+    return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
+  }
+  if (session.surface !== surface) {
+    return { status: 403, code: 'SURFACE_DENIED', event: 'auth.surface_denied' };
+  }
+
+  // Verify tenant alignment for pharmacy staff
+  if (staff.role === 'PHARMACY_STAFF') {
+    const claimOrg = typeof claims.organisationId === 'string' ? claims.organisationId : typeof claims.pharmacyId === 'string' ? claims.pharmacyId : null;
+    if (staff.organisationId !== claimOrg || session.organisationId !== claimOrg) {
+      return { status: 403, code: 'STAFF_SCOPE_INVALID', event: 'auth.tenant_mismatch' };
+    }
+  }
+
+  // Check revocation and expiry
+  if (session.revokedAt) {
+    return { status: 401, code: 'SESSION_REVOKED', event: 'auth.session_revoked' };
+  }
+
+  if (Date.parse(session.absoluteExpiresAt) <= now) {
+    return { status: 401, code: 'SESSION_EXPIRED', event: 'auth.session_expired' };
+  }
+
+  if (Date.parse(session.idleExpiresAt) <= now) {
+    return { status: 401, code: 'SESSION_IDLE_EXPIRED', event: 'auth.session_idle_expired' };
+  }
+
+  return null;
+}

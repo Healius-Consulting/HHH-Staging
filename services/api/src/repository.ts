@@ -28,7 +28,34 @@ export async function getRecord(collection: string, id: string) {
 
 export async function getTenantRecord(collection: string, id: string, pharmacyId: string) {
   const record = await getRecord(collection, id);
-  const recordTenant = record.pharmacyId ?? record.organisationId;
+  let recordTenant = record.pharmacyId ?? record.organisationId;
+  if (collection === 'eligibilitySubmissions') {
+    if (record.schemaVersion === 2 || record.intakeVersion === 'v2') {
+      recordTenant = record.assignedOrganisationId;
+    } else {
+      const overlay = await firestore.collection('eligibilityAllocationOverlays').doc(id).get();
+      if (overlay.exists) recordTenant = overlay.data()?.assignedOrganisationId;
+    }
+  }
+  if (collection === 'patients' && typeof record.sourceReferralId === 'string') {
+    const [submission, overlay] = await Promise.all([
+      firestore.collection('eligibilitySubmissions').doc(record.sourceReferralId).get(),
+      firestore.collection('eligibilityAllocationOverlays').doc(record.sourceReferralId).get(),
+    ]);
+    if (submission.exists) {
+      const source = submission.data()!;
+      const isV2 = source.schemaVersion === 2 || source.intakeVersion === 'v2';
+      const workflow = isV2 ? source : (overlay.data() ?? source);
+      recordTenant = isV2 ? source.assignedOrganisationId : (overlay.data()?.assignedOrganisationId ?? source.organisationId);
+      if (isV2 && (
+        workflow.assignmentStatus !== 'confirmed'
+        || workflow.pharmacyAccessStatus !== 'activated'
+        || workflow.programmeOnboardingDecision !== 'approved'
+      )) {
+        throw new HttpError(409, 'HHH allocation and onboarding approval are required before this action.', 'ASSIGNMENT_NOT_CONFIRMED');
+      }
+    }
+  }
   if (recordTenant !== pharmacyId) throw new HttpError(404, `${collection} record not found.`, 'NOT_FOUND');
   return record;
 }
@@ -43,6 +70,27 @@ export async function updateTenantRecord(collection: string, id: string, pharmac
 
 export async function listTenantRecords(collection: string, pharmacyId: string, limit = 200) {
   return cached(`list:${collection}:${pharmacyId}:${limit}`, LIST_TTL_MS, async () => {
+    if (collection === 'eligibilitySubmissions') {
+      const [original, assignedV2, movedLegacy] = await Promise.all([
+        firestore.collection(collection).where('organisationId', '==', pharmacyId).limit(limit).get(),
+        firestore.collection(collection).where('assignedOrganisationId', '==', pharmacyId).limit(limit).get(),
+        firestore.collection('eligibilityAllocationOverlays').where('assignedOrganisationId', '==', pharmacyId).limit(limit).get(),
+      ]);
+      const candidates = new Map(original.docs.concat(assignedV2.docs).map(document => [document.id, document.data()]));
+      await Promise.all(movedLegacy.docs.map(async overlay => {
+        if (candidates.has(overlay.id)) return;
+        const submission = await firestore.collection(collection).doc(overlay.id).get();
+        if (submission.exists) candidates.set(submission.id, submission.data()!);
+      }));
+      const effective = await Promise.all([...candidates].map(async ([id, item]) => {
+        if (item.schemaVersion === 2 || item.intakeVersion === 'v2') return item.assignedOrganisationId === pharmacyId ? item : null;
+        const overlay = await firestore.collection('eligibilityAllocationOverlays').doc(id).get();
+        const owner = overlay.exists ? overlay.data()?.assignedOrganisationId : item.organisationId;
+        return owner === pharmacyId ? item : null;
+      }));
+      return effective.filter((item): item is DocumentData => Boolean(item)).slice(0, limit)
+        .sort((a, b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? '')));
+    }
     // Try querying by pharmacyId first, fallback to organisationId
     const snapshotByPharmacy = await firestore.collection(collection).where('pharmacyId', '==', pharmacyId).limit(limit).get();
     let docs = snapshotByPharmacy.docs;
@@ -85,4 +133,3 @@ export async function listTenantRecordsByField(
       .sort((a, b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? '')));
   });
 }
-

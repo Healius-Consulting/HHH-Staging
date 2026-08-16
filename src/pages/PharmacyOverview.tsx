@@ -13,7 +13,7 @@ const views: Array<{ id: OverviewView; label: string; description: string }> = [
 ];
 
 const workflow = [
-  { key: 'patientReview', label: 'Review', detail: 'Patient review' },
+  { key: 'activePatients', label: 'Patients', detail: 'Activated by HHH' },
   { key: 'awaitingPayment', label: 'Payment', detail: 'Awaiting payment' },
   { key: 'supplierFulfilment', label: 'Supplier', detail: 'In fulfilment' },
   { key: 'readyForCollection', label: 'Collection', detail: 'Ready for collection' },
@@ -101,8 +101,9 @@ export default function PharmacyOverview() {
           <p className="section-label">Authenticated pharmacy workspace</p>
           <h1>{overview.organisation.tradingName}</h1>
           <div className="secure-overview__identity">
-            <span className={`status-badge status-badge--${overview.organisation.status}`}>{overview.organisation.status}</span>
+            <span className={`status-badge status-badge--${overview.organisation.status}`}>{overview.organisation.status.replace('_', ' ')}</span>
             {overview.organisation.trainingMode && <span className="status-badge status-badge--training">Training data</span>}
+            {overview.organisation.allocationHoldingMode && <span className="status-badge status-badge--intake_live">Allocation holding</span>}
             <span>As of {formatAsOf(overview.asOf)}</span>
           </div>
         </div>
@@ -155,7 +156,7 @@ export default function PharmacyOverview() {
         <section id="overview-pipeline" role="tabpanel" className="overview-panel" aria-labelledby="overview-tab-pipeline">
           <div className="pipeline-grid">
             {workflow.map((item, index) => {
-              const related = overview.priorityItems.filter(priority => index === 0 ? priority.kind === 'eligibility' || priority.kind === 'repeat' : index === 1 ? priority.kind === 'payment' : index === 2 ? priority.kind === 'supplier' || priority.kind === 'cancellation' : priority.kind === 'collection');
+              const related = overview.priorityItems.filter(priority => index === 0 ? priority.kind === 'repeat' : index === 1 ? priority.kind === 'payment' : index === 2 ? priority.kind === 'supplier' || priority.kind === 'cancellation' : priority.kind === 'collection');
               const oldest = related.reduce((max, record) => Math.max(max, record.ageDays), 0);
               return <article className="pipeline-stage" key={item.key}><span className="pipeline-stage__number">{index + 1}</span><h2>{item.label}</h2><strong>{overview.summary[item.key]}</strong><p>{item.detail}</p><div><span>{related.length} exceptions</span><span>{oldest ? `Oldest ${oldest}d` : 'No aged cases'}</span></div></article>;
             })}
@@ -168,7 +169,7 @@ export default function PharmacyOverview() {
         <section id="overview-handover" role="tabpanel" className="overview-panel handover-panel" aria-labelledby="overview-tab-handover">
           <div className="handover-privacy"><ShieldCheck aria-hidden="true" /><div><h2>Shared-screen safe</h2><p>This view contains queue totals and system health only. It does not display patient labels or contact details.</p></div></div>
           <div className="handover-grid">
-            <article><span>Onboarding waiting</span><strong>{overview.handover.onboardingWaiting}</strong></article>
+            <article><span>Active patients</span><strong>{overview.handover.activePatients}</strong></article>
             <article><span>Active payment links</span><strong>{overview.handover.activePaymentLinks}</strong></article>
             <article><span>Supplier orders</span><strong>{overview.handover.supplierOrdersInProgress}</strong></article>
             <article><span>Aged collections</span><strong>{overview.handover.agedCollections}</strong></article>

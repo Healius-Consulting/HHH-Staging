@@ -15,7 +15,6 @@ export default function Navigation() {
   const staffName = state.staffSession?.name || 'Staff User';
   const staffInitials = staffName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase();
   const counts: Partial<Record<Screen, number>> = {
-    patients: state.submissions.filter(s => s.organisationId === organisation.id && (s.status === 'New' || s.status === 'Under HHH review')).length,
     create: tenantOrders.filter(o => o.payment.status === 'none' && o.prescriptions.some(r => r.items.length > 0)).length,
     orders: tenantOrders.filter(o => o.payment.status !== 'none' && o.prescriptions.some(r => r.status !== 'collected')).length,
   };

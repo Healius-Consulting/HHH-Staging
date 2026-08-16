@@ -77,7 +77,7 @@ export interface PortalOrganisation {
   address: string;
   websiteDomains?: string[];
   primaryColour: string;
-  status: 'onboarding' | 'live' | 'paused';
+  status: 'onboarding' | 'intake_live' | 'live' | 'paused';
   referralToken?: string;
   platformFeeMonthly?: number | null;
   portalName?: string;
@@ -90,6 +90,7 @@ export interface PortalOrganisation {
   gdprComplianceFlag?: boolean;
   testAccount?: boolean;
   gdprExempt?: boolean;
+  workspaceClassification?: 'standard' | 'training' | 'allocation_holding';
 }
 
 export interface Company {

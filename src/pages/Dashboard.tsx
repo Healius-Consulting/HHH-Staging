@@ -2,7 +2,6 @@ import { Activity, ArrowRight, ListTodo, History, FileText } from 'lucide-react'
 import { orderRevenue, useApp } from '../context/AppContext';
 import SummaryTiles from '../components/SummaryTiles';
 import { compactPatientName } from '../utils/patientName';
-import { conditionLabel } from '@hhh/domain';
 import { orderCancellationResolution } from '../utils/orderStage';
 
 export default function Dashboard() {
@@ -13,7 +12,6 @@ export default function Dashboard() {
   const curaleafIntegration = state.platformIntegrations.find(integration => integration.id === 'curaleaf');
 
   /* ── Computed stats ── */
-  const newReferrals = state.submissions.filter(s => s.organisationId === organisationId && (s.status === 'New' || s.status === 'Under HHH review')).length;
   const awaitingPaymentOrders = tenantOrders.filter(order =>
     order.lifecycleStatus !== 'cancelled'
     && !order.cancellation
@@ -93,18 +91,6 @@ export default function Dashboard() {
     return null;
   }).filter((x): x is NonNullable<typeof x> => x !== null);
 
-  // 4. Intake Pending Bottleneck (> 48h)
-  const intakeAlerts = state.submissions
-    .filter(s => s.organisationId === organisationId && (s.status === 'New' || s.status === 'Under HHH review') && (Date.now() - new Date(s.submittedAt).getTime()) >= 48 * 60 * 60 * 1000)
-    .map(s => ({
-      type: 'intake' as const,
-      id: `intake-${s.id}`,
-      patientName: s.name,
-      condition: conditionLabel(s.primaryCondition),
-      subId: s.id,
-      days: Math.floor((Date.now() - new Date(s.submittedAt).getTime()) / (1000 * 60 * 60 * 24)),
-    }));
-
   const cancellationAlerts = tenantOrders
     .filter(order => orderCancellationResolution(order) === 'needs-action')
     .map(order => ({
@@ -118,7 +104,7 @@ export default function Dashboard() {
           : `Refund ${order.payment.ref ?? 'the recorded payment'} and confirm the reference.`,
     }));
 
-  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + intakeAlerts.length + cancellationAlerts.length;
+  const totalUrgent = uncollectedAlerts.length + overduePaymentAlerts.length + repeatAlerts.length + cancellationAlerts.length;
 
   /* ── Recent orders (last 5) ── */
   const recentOrders = tenantOrders
@@ -152,7 +138,7 @@ export default function Dashboard() {
 
       <section className="operations-brief">
         <SummaryTiles label="Pharmacy workflow summary" items={[
-          { label: 'Patient review', value: newReferrals, detail: 'awaiting decisions', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'patients' }) },
+          { label: 'Patients', value: tenantPatients.length, detail: 'activated by HHH', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'patients' }) },
           { label: 'Payments', value: awaitingPayment, detail: 'awaiting action', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
           { label: 'Supplier', value: inFulfilment, detail: 'in fulfilment', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
           { label: 'Collection', value: readyForCollection, detail: 'ready', onClick: () => dispatch({ type: 'SET_SCREEN', screen: 'orders' }) },
@@ -175,22 +161,6 @@ export default function Dashboard() {
                     </div>
                     <button className="priority-action" onClick={() => { dispatch({ type: 'SET_NAVIGATION_TARGET', target: { kind: 'order', key: String(alert.orderId) } }); dispatch({ type: 'SET_SCREEN', screen: 'orders' }); }}>
                       Open order <ArrowRight size={14} />
-                    </button>
-                  </div>
-                ))}
-
-                {intakeAlerts.map(alert => (
-                  <div key={alert.id} className="alert-item alert-item--danger">
-                    <div className="alert-item__copy">
-                      <span className="alert-item__category">Eligibility review</span>
-                      <span className="alert-item__title">{alert.patientName}</span>
-                      <span className="alert-item__desc">
-                        Submitted <strong className="text-red">{alert.days} days ago</strong> for{' '}
-                        <strong className="text-primary">{alert.condition}</strong>. Review is pending.
-                      </span>
-                    </div>
-                    <button className="priority-action" onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'patients' })}>
-                      Review patient <ArrowRight size={14} />
                     </button>
                   </div>
                 ))}
@@ -325,10 +295,10 @@ export default function Dashboard() {
 
           <div className="duty-list">
             <div className="duty-item">
-              <input type="checkbox" checked={newReferrals === 0} readOnly aria-label="Onboarding status reviewed" />
+              <input type="checkbox" checked readOnly aria-label="Patient access is HHH controlled" />
               <div>
-                <span className="font-semibold" style={{ display: 'block' }}>Review onboarding status</span>
-                <span className="text-muted text-xs">{newReferrals} pharmacy-attributed enquiries are still with HHH for review.</span>
+                <span className="font-semibold" style={{ display: 'block' }}>HHH-controlled activation</span>
+                <span className="text-muted text-xs">Only patients referred and activated by HHH appear in this workspace.</span>
               </div>
             </div>
             <div className="duty-item">

@@ -46,7 +46,7 @@ function wholesaleByPack(order: DocumentData) {
   };
 }
 
-function pharmacyFinanceRow(order: DocumentData) {
+export function pharmacyFinanceRow(order: DocumentData) {
   const lineItems = Array.isArray(order.lineItems) ? order.lineItems as Array<Record<string, unknown>> : [];
   const quote = wholesaleByPack(order);
   let productRevenuePence = 0;
@@ -73,14 +73,27 @@ function pharmacyFinanceRow(order: DocumentData) {
   });
   const dispensingFeePence = Number.isSafeInteger(order.dispensingFeePence) ? Number(order.dispensingFeePence) : 0;
   const patientRevenuePence = productRevenuePence + dispensingFeePence;
-  const recognised = order.paymentStatus === 'paid';
+  const paymentStatus = String(order.paymentStatus ?? 'pending');
+  const refund = order.refund && typeof order.refund === 'object' ? order.refund as Record<string, unknown> : {};
+  const cancellation = order.cancellation && typeof order.cancellation === 'object' ? order.cancellation as Record<string, unknown> : {};
+  const refundStatus = String(refund.status ?? 'none');
+  const refunded = paymentStatus === 'refunded' || refundStatus === 'completed';
+  const refundPending = !refunded && (paymentStatus === 'refund_required'
+    || refundStatus === 'pending_confirmation'
+    || cancellation.status === 'refund_required');
+  const recognised = paymentStatus === 'paid' && !refundPending && !refunded;
   return {
     orderId: String(order.id),
     patientId: String(order.patientId ?? ''),
+    paymentId: typeof order.paymentId === 'string' ? order.paymentId : null,
     createdAt: String(order.createdAt ?? ''),
-    paymentStatus: String(order.paymentStatus ?? 'pending'),
+    updatedAt: String(order.updatedAt ?? order.createdAt ?? ''),
+    refundConfirmedAt: typeof refund.confirmedAt === 'string' ? refund.confirmedAt : null,
+    paymentStatus,
     fulfilmentStatus: String(order.fulfilmentStatus ?? ''),
     recognised,
+    refunded,
+    refundPending,
     productRevenuePence,
     dispensingFeePence,
     patientRevenuePence,
@@ -94,47 +107,88 @@ function pharmacyFinanceRow(order: DocumentData) {
   };
 }
 
+export type PharmacyFinanceRow = ReturnType<typeof pharmacyFinanceRow> & {
+  recognisedAt: string | null;
+  refundedAt: string | null;
+  financialEventAt: string;
+};
+
+export function summarisePharmacyFinanceRows(rows: PharmacyFinanceRow[]) {
+  const recognised = rows.filter(row => row.recognised);
+  const refunded = rows.filter(row => row.refunded);
+  const refundPending = rows.filter(row => row.refundPending);
+  const pending = rows.filter(row => ['pending', 'awaiting_manual_payment', 'sent', 'awaiting_payment'].includes(row.paymentStatus));
+  const complete = recognised.filter(row => row.wholesaleComplete);
+  return {
+    prescriptionCount: rows.length,
+    paidPrescriptionCount: recognised.length,
+    pendingPrescriptionCount: pending.length,
+    refundedPrescriptionCount: refunded.length,
+    refundedPatientPence: refunded.reduce((sum, row) => sum + row.patientRevenuePence, 0),
+    refundPendingCount: refundPending.length,
+    refundPendingPatientPence: refundPending.reduce((sum, row) => sum + row.patientRevenuePence, 0),
+    patientRevenuePence: recognised.reduce((sum, row) => sum + row.patientRevenuePence, 0),
+    productRevenuePence: recognised.reduce((sum, row) => sum + row.productRevenuePence, 0),
+    dispensingFeesPence: recognised.reduce((sum, row) => sum + row.dispensingFeePence, 0),
+    wholesaleKnownForCount: complete.length,
+    wholesalePendingForCount: recognised.length - complete.length,
+    wholesaleProductPence: complete.reduce((sum, row) => sum + (row.wholesaleProductPence ?? 0), 0),
+    shippingPence: complete.reduce((sum, row) => sum + (row.shippingPence ?? 0), 0),
+    wholesalePence: complete.reduce((sum, row) => sum + (row.wholesalePence ?? 0), 0),
+    productMarginPence: complete.reduce((sum, row) => sum + (row.productMarginPence ?? 0), 0),
+    totalContributionPence: complete.reduce((sum, row) => sum + (row.totalContributionPence ?? 0), 0),
+  };
+}
+
+function financePeriodCounts(rows: PharmacyFinanceRow[], now = Date.now()) {
+  const recognised = rows.filter(row => row.recognised && row.recognisedAt);
+  const countSince = (days: number) => {
+    const cutoff = now - days * 24 * 60 * 60 * 1000;
+    return recognised.filter(row => Date.parse(row.recognisedAt!) >= cutoff).length;
+  };
+  return { '30': countSince(30), '90': countSince(90), '365': countSince(365), all: recognised.length };
+}
+
 export async function pharmacyPrescriptionFinance(organisationId: string, range: FinanceDateRange) {
   const snapshot = await firestore.collection('orders').where('organisationId', '==', organisationId).limit(2_000).get();
-  const baseRows = snapshot.docs
-    .map(document => pharmacyFinanceRow(document.data()))
-    .filter(row => inRange(row.createdAt, range))
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  const patientIds = [...new Set(baseRows.map(row => row.patientId).filter(Boolean))];
+  const baseRows = snapshot.docs.map(document => pharmacyFinanceRow(document.data()));
+  const paymentIds = [...new Set(baseRows.map(row => row.paymentId).filter((id): id is string => Boolean(id)))];
+  const payments = await Promise.all(paymentIds.map(id => firestore.collection('payments').doc(id).get()));
+  const paymentDetails = new Map(payments
+    .filter(payment => payment.exists && payment.data()?.organisationId === organisationId)
+    .map(payment => [payment.id, payment.data()!]));
+  const datedRows: PharmacyFinanceRow[] = baseRows.map(row => {
+    const payment = row.paymentId ? paymentDetails.get(row.paymentId) : undefined;
+    const recognisedAt = row.recognised
+      ? String(payment?.confirmedAt ?? payment?.paidAt ?? payment?.settledAt ?? payment?.updatedAt ?? row.updatedAt ?? row.createdAt)
+      : null;
+    const refundedAt = row.refunded ? row.refundConfirmedAt ?? row.updatedAt ?? row.createdAt : null;
+    return {
+      ...row,
+      recognisedAt,
+      refundedAt,
+      financialEventAt: recognisedAt ?? refundedAt ?? row.updatedAt ?? row.createdAt,
+    };
+  });
+  const rangedRows = datedRows
+    .filter(row => inRange(row.financialEventAt, range))
+    .sort((left, right) => right.financialEventAt.localeCompare(left.financialEventAt));
+  const patientIds = [...new Set(rangedRows.map(row => row.patientId).filter(Boolean))];
   const patients = await Promise.all(patientIds.map(id => firestore.collection('patients').doc(id).get()));
   const patientDetails = new Map(patients.filter(patient => patient.exists).map(patient => [
     patient.id,
-    {
-      patientName: `${String(patient.data()?.firstName ?? '')} ${String(patient.data()?.surname ?? '')}`.trim() || patient.id,
-      patientEmail: String(patient.data()?.email ?? ''),
-    },
+    `${String(patient.data()?.firstName ?? '')} ${String(patient.data()?.surname ?? '')}`.trim() || patient.id,
   ]));
-  const rows = baseRows.map(row => ({
-    ...row,
-    patientName: patientDetails.get(row.patientId)?.patientName ?? row.patientId,
-    patientEmail: patientDetails.get(row.patientId)?.patientEmail ?? '',
-  }));
-  const recognised = rows.filter(row => row.recognised);
-  const complete = recognised.filter(row => row.wholesaleComplete);
+  const rows = rangedRows.map(row => {
+    const { paymentId: _paymentId, refundConfirmedAt: _refundConfirmedAt, ...publicRow } = row;
+    return { ...publicRow, patientName: patientDetails.get(row.patientId) ?? row.patientId };
+  });
   return {
     organisationId,
     currency: 'GBP',
     range: { from: range.from ?? null, to: range.to ?? null },
-    totals: {
-      prescriptionCount: rows.length,
-      paidPrescriptionCount: recognised.length,
-      pendingPrescriptionCount: rows.length - recognised.length,
-      patientRevenuePence: recognised.reduce((sum, row) => sum + row.patientRevenuePence, 0),
-      productRevenuePence: recognised.reduce((sum, row) => sum + row.productRevenuePence, 0),
-      dispensingFeesPence: recognised.reduce((sum, row) => sum + row.dispensingFeePence, 0),
-      wholesaleKnownForCount: complete.length,
-      wholesalePendingForCount: recognised.length - complete.length,
-      wholesaleProductPence: complete.reduce((sum, row) => sum + (row.wholesaleProductPence ?? 0), 0),
-      shippingPence: complete.reduce((sum, row) => sum + (row.shippingPence ?? 0), 0),
-      wholesalePence: complete.reduce((sum, row) => sum + (row.wholesalePence ?? 0), 0),
-      productMarginPence: complete.reduce((sum, row) => sum + (row.productMarginPence ?? 0), 0),
-      totalContributionPence: complete.reduce((sum, row) => sum + (row.totalContributionPence ?? 0), 0),
-    },
+    periodCounts: financePeriodCounts(datedRows),
+    totals: summarisePharmacyFinanceRows(rangedRows),
     rows,
   };
 }

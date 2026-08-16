@@ -9,7 +9,7 @@ import { CONDITION_IDS, normaliseConditionId, type ConditionId } from './conditi
 import type { DocumentReference } from 'firebase-admin/firestore';
 import { audit } from './audit.js';
 import { identity, requireRole, requireStaff, tenantFor } from './auth.js';
-import { allowedOrigins, config } from './config.js';
+import { allowedOrigins, config, publicAppHostnames } from './config.js';
 import { CuraleafRequestError, curaleafConnectionStatus, curaleafList, curaleafPlatformList, curaleafPlatformRequest, curaleafRequest, scanClinicPrescription, submitClinicPrescription, submitManualPrescription, uploadClinicPrescriptionImage, validateCuraleafCredentials } from './curaleaf.js';
 import { fetchCuraleafAccountSnapshot } from './curaleaf-mirror.js';
 import { appCheck, auth, firestore, storage } from './firebase.js';
@@ -37,16 +37,18 @@ import { callCuraleafExtension } from './supplier-extension.js';
 import { migrateMasterFlowV2 } from './flow-migration.js';
 import { planOrderHandout, shipmentsReadyForHandout } from './order-handout.js';
 import { eligibilityReviewProjection, negativeEligibilityStatus, pharmacyDecisionReasonSchema, pharmacyReasonAuditDetails } from './eligibility-view.js';
-import { goLiveGateState, isExplicitCuraleafTestAccount } from './go-live.js';
+import { canAcceptPublicIntake, canAutoActivateIntake, goLiveGateState, isExplicitCuraleafTestAccount } from './go-live.js';
 import { createStaffSession, issueCsrf, requestSurfaceHost, requireCsrf, revokeCurrentSession, revokeUserSessions, securityEvent, sessionPayload, touchCurrentSession } from './session-auth.js';
 import { buildPharmacyOverview } from './pharmacy-overview.js';
 import { randomToken } from './session-utils.js';
+import { referralTokenSchema, secureOpaqueTokenSchema } from './tokens.js';
+import { portalIntakeV2Router, publicIntakeV2Router } from './intake-v2.js';
 
 
 
 
 const idSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
-const tokenSchema = z.string().min(16).max(160).regex(/^[A-Za-z0-9_-]+$/);
+const organisationStatusSchema = z.enum(['onboarding', 'intake_live', 'live', 'paused']);
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const timestamp = () => nowIso();
 const MAX_PRESCRIPTION_FILE_BYTES = 16_000_000;
@@ -108,7 +110,7 @@ const organisationDetailsSchema = z.object({
   primaryColour: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   logoText: z.string().trim().min(1).max(4),
   websiteDomains: z.array(z.string().trim().min(1).max(253)).max(20),
-  status: z.enum(['onboarding', 'live', 'paused']),
+  status: organisationStatusSchema,
   platformFeeMonthly: z.number().nonnegative().max(100_000).nullable(),
   portalName: z.string().trim().min(1).max(200),
   modules: tenantModulesSchema,
@@ -128,7 +130,7 @@ const setupDefinitions = [
 
 const conditionIdSchema = z.enum(CONDITION_IDS);
 const eligibilitySchema = z.object({
-  referralToken: tokenSchema,
+  referralToken: referralTokenSchema,
   firstName: z.string().trim().min(1).max(100),
   surname: z.string().trim().min(1).max(100),
   dob: z.iso.date(),
@@ -294,8 +296,10 @@ async function resolveReferralToken(rawToken: string) {
     const token = tokens.docs[0]?.data();
     if (!token) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
     const organisation = await getRecord('organisations', token.organisationId as string);
-    if (isExplicitCuraleafTestAccount(organisation)) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
-    if (organisation.status !== 'live') throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
+    if (!canAcceptPublicIntake(organisation)) throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
+    if (!isExplicitCuraleafTestAccount(organisation) && organisation.status === 'intake_live' && !(await goLiveReadiness(String(token.organisationId))).intakeReady) {
+      throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
+    }
     return { token, organisation };
   });
 }
@@ -351,6 +355,51 @@ async function companyForOrganisation(organisationId: string, organisation?: Rec
   return null;
 }
 
+async function autoActivateCompanyIntake(companyId: string, company: Record<string, unknown>, activatedBy: string, activatedAt: string) {
+  const branchIds = new Set(
+    Array.isArray(company.branchesOwned)
+      ? company.branchesOwned.filter((value): value is string => typeof value === 'string' && idSchema.safeParse(value).success)
+      : [],
+  );
+  const linked = await firestore.collection('organisations').where('companyId', '==', companyId).limit(500).get();
+  linked.docs.forEach(document => branchIds.add(document.id));
+  const documents = await Promise.all([...branchIds].map(id => firestore.collection('organisations').doc(id).get()));
+  const eligible = documents.filter(document => document.exists && canAutoActivateIntake(document.data()!));
+  if (!eligible.length) return [];
+  const batch = firestore.batch();
+  eligible.forEach(document => batch.set(document.ref, {
+    status: 'intake_live',
+    gdprComplianceFlag: false,
+    pausedReason: null,
+    pausedAt: null,
+    intakeWentLiveAt: activatedAt,
+    intakeWentLiveBy: activatedBy,
+    intakeActivationSource: 'gdpr_evidence_recorded',
+    updatedAt: activatedAt,
+  }, { merge: true }));
+  await batch.commit();
+  eligible.forEach(document => invalidateCollectionCache('organisations', document.id));
+  invalidateCache('admin:organisations', 'referral:');
+  return eligible.map(document => document.id);
+}
+
+async function autoActivateOrganisationIntake(organisationId: string, organisation: Record<string, unknown>, activatedBy: string, activatedAt: string) {
+  if (!canAutoActivateIntake(organisation)) return [];
+  await firestore.collection('organisations').doc(organisationId).set({
+    status: 'intake_live',
+    gdprComplianceFlag: false,
+    pausedReason: null,
+    pausedAt: null,
+    intakeWentLiveAt: activatedAt,
+    intakeWentLiveBy: activatedBy,
+    intakeActivationSource: 'gdpr_evidence_recorded',
+    updatedAt: activatedAt,
+  }, { merge: true });
+  invalidateCollectionCache('organisations', organisationId);
+  invalidateCache('admin:organisations', 'referral:');
+  return [organisationId];
+}
+
 async function goLiveReadiness(organisationId: string) {
   const organisation = await getRecord('organisations', organisationId);
   const [company, connectionSnapshot] = await Promise.all([
@@ -365,8 +414,10 @@ async function goLiveReadiness(organisationId: string) {
     organisationId,
     companyId: company?.id ?? null,
     testAccount: gates.testAccount,
+    allocationHolding: gates.allocationHolding,
+    intakeReady: gates.testAccount || gates.gdprPassed,
     ready: gates.gdprPassed && gates.curaleafPassed,
-    status: String(organisation.status ?? 'onboarding') as 'onboarding' | 'live' | 'paused',
+    status: organisationStatusSchema.catch('onboarding').parse(organisation.status),
     gates: {
       gdprEvidence: {
         passed: gates.gdprPassed,
@@ -381,12 +432,19 @@ async function goLiveReadiness(organisationId: string) {
 }
 
 export async function auditLiveOrganisationGates() {
-  const snapshot = await firestore.collection('organisations').where('status', '==', 'live').limit(500).get();
+  const snapshot = await firestore.collection('organisations').where('status', 'in', ['intake_live', 'live']).limit(500).get();
   const paused: string[] = [];
   for (const document of snapshot.docs) {
     const readiness = await goLiveReadiness(document.id);
-    if (readiness.ready) continue;
-    await document.ref.set({ status: 'paused', gdprComplianceFlag: !readiness.gates.gdprEvidence.passed && !readiness.testAccount, pausedReason: 'go_live_gate_audit_failed', pausedAt: timestamp(), updatedAt: timestamp() }, { merge: true });
+    const remainsReady = readiness.status === 'intake_live' ? readiness.intakeReady : readiness.ready;
+    if (remainsReady) continue;
+    await document.ref.set({
+      status: 'paused',
+      gdprComplianceFlag: !readiness.gates.gdprEvidence.passed && !readiness.testAccount,
+      pausedReason: readiness.status === 'intake_live' ? 'intake_gdpr_gate_audit_failed' : 'go_live_gate_audit_failed',
+      pausedAt: timestamp(),
+      updatedAt: timestamp(),
+    }, { merge: true });
     invalidateCollectionCache('organisations', document.id);
     paused.push(document.id);
   }
@@ -449,14 +507,14 @@ app.use((request, response, next) => {
 // rewrites it externally. Keep originalUrl for surface derivation and expose
 // the canonical /v1 path to the route handlers in either deployment.
 app.use((request, _response, next) => {
-  const match = request.url.match(/^\/(?:pharmacy|admin)(\/v1(?:\/|\?|$).*)/);
+  const match = request.url.match(/^\/(?:pharmacy|admin)(\/v[12](?:\/|\?|$).*)/);
   if (match?.[1]) request.url = match[1];
   next();
 });
 app.use(helmet({ strictTransportSecurity: false }));
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.has(origin)) return callback(null, true); callback(new HttpError(403, 'Origin is not permitted.', 'ORIGIN_DENIED')); }, methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'] }));
 app.use(express.json({ limit: '256kb', verify(request, _response, buffer) { (request as Request).rawBody = Buffer.from(buffer); } }));
-app.use(['/v1/auth', '/v1/portal', '/v1/public'], (_request, response, next) => {
+app.use(['/v1/auth', '/v1/portal', '/v1/public', '/v2/portal', '/v2/public'], (_request, response, next) => {
   response.setHeader('Cache-Control', 'no-store');
   response.setHeader('Pragma', 'no-cache');
   next();
@@ -472,12 +530,14 @@ app.get('/health', healthLimit, async (_request, response, next) => {
   } catch (error) { next(error); }
 });
 
-app.use('/v1/public', (request, _response, next) => {
+app.use(['/v1/public', '/v2/public'], (request, _response, next) => {
   const host = requestSurfaceHost(request);
   const localDevelopment = config.NODE_ENV !== 'production' && ['localhost', '127.0.0.1', '::1'].includes(host);
-  if (!localDevelopment && host !== new URL(config.PUBLIC_APP_ORIGIN).hostname) return next(new HttpError(404, 'Not found.', 'NOT_FOUND'));
+  if (!localDevelopment && !publicAppHostnames.has(host)) return next(new HttpError(404, 'Not found.', 'NOT_FOUND'));
   next();
 });
+
+app.use('/v2/public', publicIntakeV2Router);
 
 app.get('/v1/dev/curaleaf/catalog', publicReadLimit, localDevelopmentOnly, async (_request, response, next) => {
   try {
@@ -524,7 +584,7 @@ app.get('/v1/dev/curaleaf/activity', publicReadLimit, localDevelopmentOnly, asyn
 
 app.get('/v1/public/pharmacies/by-token/:token', eligibilityResolutionLimit, requirePublicAppCheck, async (request, response, next) => {
   try {
-    const { organisation } = await resolveReferralToken(tokenSchema.parse(request.params.token));
+    const { organisation } = await resolveReferralToken(referralTokenSchema.parse(request.params.token));
     response.json({ id: organisation.id, name: organisation.name, tradingName: organisation.tradingName, logoText: organisation.logoText, gphcNumber: organisation.gphcNumber, superintendent: organisation.superintendent, address: organisation.address, primaryColour: organisation.primaryColour });
   } catch (error) { next(error); }
 });
@@ -533,6 +593,7 @@ app.post('/v1/public/eligibility-submissions', eligibilitySubmissionLimit, requi
   try {
     const input = eligibilitySchema.parse(request.body);
     const { token, organisation } = await resolveReferralToken(input.referralToken);
+    const trainingSubmission = isExplicitCuraleafTestAccount(organisation);
     const submittedAt = timestamp();
     const submissionFields = {
       organisationId: organisation.id,
@@ -551,6 +612,7 @@ app.post('/v1/public/eligibility-submissions', eligibilitySubmissionLimit, requi
       consentShare: input.consentShare,
       marketingConsent: input.marketing,
       source: input.source,
+      trainingSubmission,
       consentCapturedAt: submittedAt,
       requestIp: request.ip,
       requestUserAgent: request.get('user-agent') ?? null,
@@ -578,7 +640,7 @@ app.post('/v1/public/eligibility-submissions', eligibilitySubmissionLimit, requi
 app.get('/v1/public/payment-receipts/:token', paymentReceiptLimit, requirePublicAppCheck, async (request, response, next) => {
   try {
     response.setHeader('Cache-Control', 'no-store');
-    const parsedToken = tokenSchema.safeParse(request.params.token);
+    const parsedToken = secureOpaqueTokenSchema.safeParse(request.params.token);
     if (!parsedToken.success) return response.json({ status: 'expired', message: 'This payment confirmation link has expired.' });
     const hash = tokenHash(parsedToken.data);
     const receipt = (await firestore.collection('paymentReceipts').doc(hash).get()).data();
@@ -677,6 +739,7 @@ app.use('/v1/portal', requireStaff);
 app.use('/v1/portal', requireCsrf);
 app.use('/v1/portal', portalReadLimit, portalWriteLimit);
 app.use('/v1/portal/integrations', externalProviderLimit);
+app.use('/v2/portal', requireStaff, requireCsrf, portalReadLimit, portalWriteLimit, portalIntakeV2Router);
 
 app.get('/v1/portal/session', async (request, response, next) => {
   try {
@@ -762,11 +825,11 @@ app.patch('/v1/portal/setup/:taskId', async (request, response, next) => {
   } catch (error) { next(error); }
 });
 
-app.get('/v1/portal/eligibility-submissions', async (request, response, next) => {
+app.get('/v1/portal/eligibility-submissions', requireRole('hhh_admin'), async (request, response, next) => {
   try {
     const organisationId = tenantFor(request, request.query.organisationId);
     const [records, organisation] = await Promise.all([listTenantRecords('eligibilitySubmissions', organisationId, 500), getRecord('organisations', organisationId)]);
-    response.json(records.map(record => {
+    response.json(records.filter(record => record.schemaVersion !== 2 && record.intakeVersion !== 'v2').map(record => {
       const { conditions, primaryCondition } = conditionSet(record);
       const review = eligibilityReviewProjection(record, identity(request).role);
       const emailDelivery = record.emailDelivery && typeof record.emailDelivery === 'object'
@@ -778,6 +841,7 @@ app.get('/v1/portal/eligibility-submissions', async (request, response, next) =>
       postcode: record.postcode, conditions, primaryCondition, tried2: record.triedTwoTreatments,
       psychExclusion: record.psychosisExclusion, consentReferral: record.consentReferral, consentShare: record.consentShare,
       marketing: record.marketingConsent, source: record.source,
+      trainingSubmission: record.trainingSubmission === true,
       ...review,
       emailDelivery: {
         status: typeof emailDelivery.status === 'string' ? emailDelivery.status : 'not_sent',
@@ -1108,9 +1172,10 @@ app.post('/v1/portal/admin/companies/:id/gdpr/confirm', requireRole('hhh_admin')
       gdprComplianceFlag: false,
       updatedAt: confirmedAt,
     });
+    const activatedOrganisationIds = await autoActivateCompanyIntake(companyId, snap.data()!, confirmedBy, confirmedAt);
     invalidateCollectionCache('companies', companyId);
-    await audit(request, 'company.gdpr_confirmed', { companyId, evidenceMethod: 'document_link', confirmedBy });
-    response.json({ success: true, companyId, gdprConfirmed: true, gdprDocUrl, evidenceMethod: 'document_link' });
+    await audit(request, 'company.gdpr_confirmed', { companyId, evidenceMethod: 'document_link', confirmedBy, activatedOrganisationIds });
+    response.json({ success: true, companyId, gdprConfirmed: true, gdprDocUrl, evidenceMethod: 'document_link', activatedOrganisationIds });
   } catch (error) { next(error); }
 });
 
@@ -1136,9 +1201,10 @@ app.post('/v1/portal/admin/companies/:id/gdpr/record-received', requireRole('hhh
       gdprComplianceFlag: false,
       updatedAt: recordedAt,
     });
+    const activatedOrganisationIds = await autoActivateCompanyIntake(companyId, snap.data()!, recordedBy, recordedAt);
     invalidateCollectionCache('companies', companyId);
-    await audit(request, 'company.gdpr_received_recorded', { companyId, evidenceMethod: 'manual_receipt', recordedBy });
-    response.json({ success: true, companyId, gdprConfirmed: true, evidenceMethod: 'manual_receipt', receivedAt: recordedAt });
+    await audit(request, 'company.gdpr_received_recorded', { companyId, evidenceMethod: 'manual_receipt', recordedBy, activatedOrganisationIds });
+    response.json({ success: true, companyId, gdprConfirmed: true, evidenceMethod: 'manual_receipt', receivedAt: recordedAt, activatedOrganisationIds });
   } catch (error) { next(error); }
 });
 
@@ -1165,6 +1231,9 @@ app.post('/v1/portal/admin/organisations/:id/gdpr/record-received', requireRole(
       gdprComplianceFlag: false,
       updatedAt: recordedAt,
     });
+    const activatedOrganisationIds = company
+      ? await autoActivateCompanyIntake(company.id, company, recordedBy, recordedAt)
+      : await autoActivateOrganisationIntake(organisationId, organisationSnapshot.data()!, recordedBy, recordedAt);
     invalidateCollectionCache('organisations', organisationId);
     if (company) invalidateCollectionCache('companies', company.id);
     invalidateCache('admin:organisations', 'referral:');
@@ -1173,8 +1242,9 @@ app.post('/v1/portal/admin/organisations/:id/gdpr/record-received', requireRole(
       companyId: company?.id ?? null,
       evidenceMethod: 'manual_receipt',
       recordedBy,
+      activatedOrganisationIds,
     });
-    response.json({ success: true, organisationId, companyId: company?.id ?? null, gdprConfirmed: true, evidenceMethod: 'manual_receipt', receivedAt: recordedAt });
+    response.json({ success: true, organisationId, companyId: company?.id ?? null, gdprConfirmed: true, evidenceMethod: 'manual_receipt', receivedAt: recordedAt, activatedOrganisationIds });
   } catch (error) { next(error); }
 });
 
@@ -2185,7 +2255,8 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       collectedAt: null,
     }]));
     const { paymentRoute: _ignoredRequestedRoute, redoContext: _ignoredClientRedo, draftId, ...authoritativeInput } = input;
-    const record = await createRecord('orders', {
+    const orderCreatedAt = timestamp();
+    const record = {
       ...authoritativeInput,
       prescriptions: normalisedPrescriptions,
       prescriptionFlow,
@@ -2211,7 +2282,41 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       status: 'open',
       redoContext: authoritativeRedoContext,
       redoOfOrderId: authoritativeRedoContext?.originalOrderId ?? null,
+      id: randomUUID(),
+      schemaVersion: 1,
+      createdAt: orderCreatedAt,
+      updatedAt: orderCreatedAt,
+    };
+    await firestore.runTransaction(async transaction => {
+      const sourceReferralId = typeof patient.sourceReferralId === 'string' ? patient.sourceReferralId : null;
+      if (sourceReferralId) {
+        const submissionRef = firestore.collection('eligibilitySubmissions').doc(sourceReferralId);
+        const overlayRef = firestore.collection('eligibilityAllocationOverlays').doc(sourceReferralId);
+        const [submissionSnapshot, overlaySnapshot] = await Promise.all([transaction.get(submissionRef), transaction.get(overlayRef)]);
+        if (submissionSnapshot.exists) {
+          const submission = submissionSnapshot.data()!;
+          const isV2 = submission.schemaVersion === 2 || submission.intakeVersion === 'v2';
+          const workflow = isV2 ? submission : (overlaySnapshot.data() ?? submission);
+          const effectiveOwner = isV2 ? submission.assignedOrganisationId : (overlaySnapshot.data()?.assignedOrganisationId ?? submission.organisationId);
+          if (effectiveOwner !== organisationId) throw new HttpError(404, 'The requested record was not found.', 'NOT_FOUND');
+          if (isV2 && (
+            workflow.assignmentStatus !== 'confirmed'
+            || workflow.pharmacyAccessStatus !== 'activated'
+            || workflow.programmeOnboardingDecision !== 'approved'
+          )) {
+            throw new HttpError(409, 'HHH allocation and onboarding approval are required before creating an order.', 'ASSIGNMENT_NOT_CONFIRMED');
+          }
+          transaction.set(isV2 ? submissionRef : overlayRef, {
+            ...(!isV2 && !overlaySnapshot.exists ? { sourceOrganisationId: submission.organisationId, assignedOrganisationId: organisationId, assignmentStatus: 'confirmed', assignmentVersion: 0 } : {}),
+            operationalStartedAt: workflow.operationalStartedAt ?? orderCreatedAt,
+            updatedAt: orderCreatedAt,
+          }, { merge: true });
+        }
+      }
+      transaction.create(firestore.collection('orders').doc(record.id), record);
     });
+    invalidateCollectionCache('orders', record.id);
+    if (typeof patient.sourceReferralId === 'string') invalidateCollectionCache('eligibilitySubmissions', patient.sourceReferralId);
 
     let placementFeeIndex = 0;
     for (const prescription of normalisedPrescriptions) {
@@ -3311,6 +3416,31 @@ app.get('/v1/portal/admin/organisations/:id/go-live-readiness', requireRole('hhh
   } catch (error) { next(error); }
 });
 
+app.post('/v1/portal/admin/organisations/:id/intake-live', requireRole('hhh_admin'), async (request, response, next) => {
+  try {
+    ensureFreshAuthentication(request);
+    const organisationId = idSchema.parse(request.params.id);
+    const readiness = await goLiveReadiness(organisationId);
+    if (readiness.testAccount || !readiness.intakeReady) {
+      throw new HttpError(409, readiness.testAccount
+        ? 'Training accounts cannot accept public patient intake.'
+        : 'Public intake requires recorded company GDPR evidence.', 'INTAKE_LIVE_GATE_INCOMPLETE');
+    }
+    const updatedAt = timestamp();
+    await firestore.collection('organisations').doc(organisationId).set({
+      status: 'intake_live',
+      gdprComplianceFlag: false,
+      intakeWentLiveAt: updatedAt,
+      intakeWentLiveBy: identity(request).uid,
+      updatedAt,
+    }, { merge: true });
+    invalidateCollectionCache('organisations', organisationId);
+    invalidateCache('admin:organisations', 'referral:');
+    await audit(request, 'organisation.intake_went_live', { organisationId, companyId: readiness.companyId, gdprEvidence: readiness.gates.gdprEvidence });
+    response.json({ ...(await goLiveReadiness(organisationId)), status: 'intake_live' });
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/portal/admin/organisations/:id/go-live', requireRole('hhh_admin'), async (request, response, next) => {
   try {
     ensureFreshAuthentication(request);
@@ -4029,10 +4159,13 @@ app.post('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (requ
 app.patch('/v1/portal/admin/organisations/:id', requireRole('hhh_admin'), async (request, response, next) => {
   try {
     const organisationId = idSchema.parse(request.params.id);
-    await getRecord('organisations', organisationId);
+    const current = await getRecord('organisations', organisationId);
     const input = organisationDetailsSchema.partial()
       .refine(value => Object.keys(value).length > 0, { message: 'At least one pharmacy detail must be supplied.' })
       .parse(request.body);
+    if (input.status !== undefined && input.status !== current.status && ['intake_live', 'live'].includes(input.status)) {
+      throw new HttpError(409, 'Use the audited intake or full go-live action to activate this pharmacy.', 'ACTIVATION_ACTION_REQUIRED');
+    }
     const changedFields = Object.keys(input);
     const requestedPaymentRoute = input.defaultPaymentRoute ?? (input.worldpayEnabled === undefined ? undefined : input.worldpayEnabled ? 'worldpay' : 'manual');
     if (requestedPaymentRoute === 'worldpay') {

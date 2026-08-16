@@ -41,12 +41,12 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
 
   const defaultCommands: CommandDefinition[] = [
     { label: 'Open overview', detail: 'Today’s position and priority queue', group: 'Navigate', icon: <Home size={16} />, run: () => navigate('home') },
-    { label: 'Patients hub', detail: 'Patient records, onboarding and order history', group: 'Navigate', keywords: 'find patient directory', icon: <UserSearch size={16} />, run: () => navigate('patients') },
+    { label: 'Patients hub', detail: 'HHH-activated patient records and order history', group: 'Navigate', keywords: 'find patient directory', icon: <UserSearch size={16} />, run: () => navigate('patients') },
     { label: 'Orders', detail: 'Payments, Curaleaf progress, delivery and collection', group: 'Navigate', keywords: 'billing track supplier provider prescription fulfilment', icon: <Package size={16} />, run: () => navigate('orders') },
     { label: 'Curaleaf catalogue', detail: 'Products, pack sizes and patient prices', group: 'Navigate', icon: <Tags size={16} />, run: () => navigate('formulary') },
     { label: 'Organisation settings', detail: 'Setup, payment routes, forms, QR assets and pharmacy identity', group: 'Navigate', keywords: 'resources eligibility content pack', icon: <Settings size={16} />, run: () => navigate('settings') },
     { label: 'Start a prescription', detail: 'Create a new draft session', group: 'Actions', icon: <FilePlus size={16} />, run: () => { dispatch({ type: 'NEW_ORDER' }); navigate('create'); } },
-    { label: 'Review patient onboarding', detail: 'See HHH decisions and attributed enquiries', group: 'Actions', icon: <Users size={16} />, run: () => navigate('patients') },
+    { label: 'Open patient records', detail: 'See patients activated for this pharmacy by HHH', group: 'Actions', icon: <Users size={16} />, run: () => navigate('patients') },
   ];
 
   const needle = query.trim().toLowerCase();
@@ -56,10 +56,6 @@ export default function CommandPalette({ commands: suppliedCommands, contextLabe
     const people = new Map<string, { id: string; name: string; email: string; mobile: string; dob: string }>();
     state.crm.filter(patient => patient.organisationId === organisationId).forEach(patient => {
       people.set(patient.email.toLowerCase(), { id: patient.id, name: patient.name, email: patient.email, mobile: patient.mobile, dob: patient.dob ?? '' });
-    });
-    state.submissions.filter(patient => patient.organisationId === organisationId).forEach(patient => {
-      const key = patient.email.toLowerCase();
-      if (!people.has(key)) people.set(key, { id: `sub-${patient.id}`, name: patient.name, email: patient.email, mobile: patient.mobile, dob: patient.dob });
     });
     const patientCommands = [...people.values()]
       .filter(patient => `${patient.name} ${patient.email} ${patient.mobile} ${patient.dob}`.toLowerCase().includes(needle))

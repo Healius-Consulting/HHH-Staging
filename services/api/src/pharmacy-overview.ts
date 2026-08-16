@@ -39,6 +39,31 @@ function cancelled(order: RecordData) {
   return text(order.lifecycleStatus) === 'cancelled' || Boolean(order.cancellation) || text(order.status) === 'cancelled';
 }
 
+export function cancellationRequiresAction(order: RecordData) {
+  const cancellation = object(order.cancellation);
+  const refund = object(order.refund);
+  const supplierCancellation = object(order.curaleafCancellation);
+  const cancellationStatus = text(cancellation.status) || text(order.cancellationStatus);
+  const paymentStatus = text(order.paymentStatus) || text(orderPayment(order).status);
+
+  if (text(refund.status) === 'completed' || paymentStatus === 'refunded') return false;
+
+  const hasCancellationWork = Boolean(order.cancellation)
+    || Boolean(order.refund)
+    || Boolean(order.curaleafCancellation)
+    || cancellationStatus === 'refund_required';
+  if (!hasCancellationWork) return false;
+
+  const supplierActionOutstanding = ['contact_required', 'awaiting_confirmation'].includes(text(supplierCancellation.status))
+    || ['curaleaf_contact_required', 'awaiting_curaleaf_confirmation'].includes(cancellationStatus);
+  const refundActionOutstanding = cancellationStatus === 'refund_required'
+    || text(refund.status) === 'pending_confirmation'
+    || paymentStatus === 'refund_required'
+    || paymentStatus === 'paid';
+
+  return supplierActionOutstanding || refundActionOutstanding;
+}
+
 function readyForCollection(order: RecordData) {
   const fulfilment = text(order.fulfilmentStatus);
   if (fulfilment === 'ready_for_collection') return true;
@@ -53,20 +78,20 @@ function inSupplierFlow(order: RecordData) {
 }
 
 export async function buildPharmacyOverview(organisationId: string, now = Date.now()) {
-  const [organisation, submissions, orders, patients, integrationsSnapshot] = await Promise.all([
-    getRecord('organisations', organisationId),
-    listTenantRecords('eligibilitySubmissions', organisationId, 500),
-    listTenantRecords('orders', organisationId, 500),
-    listTenantRecords('patients', organisationId, 500),
-    firestore.collection('integrationConnections').where('organisationId', '==', organisationId).limit(20).get(),
+  const organisation = await getRecord('organisations', organisationId);
+  const intakeOnly = organisation.status === 'intake_live';
+  const [orders, patients, integrationsSnapshot] = await Promise.all([
+    intakeOnly ? Promise.resolve([]) : listTenantRecords('orders', organisationId, 500),
+    intakeOnly ? Promise.resolve([]) : listTenantRecords('patients', organisationId, 500),
+    intakeOnly ? Promise.resolve(null) : firestore.collection('integrationConnections').where('organisationId', '==', organisationId).limit(20).get(),
   ]);
   return composePharmacyOverview({
     organisationId,
     organisation,
-    submissions,
+    submissions: [],
     orders,
     patients,
-    integrations: integrationsSnapshot.docs.map(document => ({ id: document.id, data: document.data() })),
+    integrations: integrationsSnapshot?.docs.map(document => ({ id: document.id, data: document.data() })) ?? [],
   }, now);
 }
 
@@ -78,27 +103,14 @@ export function composePharmacyOverview(input: {
   patients: RecordData[];
   integrations: Array<{ id: string; data: RecordData }>;
 }, now = Date.now()) {
-  const { organisationId, organisation, submissions, orders, patients } = input;
+  const { organisationId, organisation, orders, patients } = input;
   const patientById = new Map(patients.map(patient => [text(patient.id), patient]));
   const activeOrders = orders.filter(order => !cancelled(order));
-  const reviewSubmissions = submissions.filter(submission => ['new', 'under_hhh_review', 'under review', 'New', 'Under HHH review'].includes(text(submission.status)));
   const awaitingPaymentOrders = activeOrders.filter(order => ['sent', 'pending', 'awaiting_payment'].includes(text(orderPayment(order).status) || text(order.paymentStatus)));
   const supplierOrders = activeOrders.filter(inSupplierFlow);
   const collectionOrders = activeOrders.filter(readyForCollection);
 
   const priorityItems: Array<Record<string, unknown>> = [];
-  for (const submission of reviewSubmissions) {
-    const submittedAt = timestamp(submission, 'lastSubmittedAt', 'submittedAt', 'createdAt');
-    const days = ageDays(submittedAt, now);
-    if (now - submittedAt < 48 * 60 * 60 * 1000) continue;
-    priorityItems.push({
-      id: `eligibility-${text(submission.id)}`,
-      kind: 'eligibility', ageDays: days,
-      maskedPatientLabel: maskPatientLabel(patientName(submission)),
-      recordTarget: { kind: 'submission', id: text(submission.id) },
-      summary: `Eligibility decision pending for ${days} day${days === 1 ? '' : 's'}.`,
-    });
-  }
   for (const order of awaitingPaymentOrders) {
     const payment = orderPayment(order);
     const sentAt = timestamp(payment, 'sentAt', 'createdAt');
@@ -125,7 +137,7 @@ export function composePharmacyOverview(input: {
       summary: `Collection follow-up is overdue by ${days} day${days === 1 ? '' : 's'}.`,
     });
   }
-  for (const order of orders.filter(item => Boolean(item.cancellation) || text(item.cancellationStatus) === 'refund_required')) {
+  for (const order of orders.filter(cancellationRequiresAction)) {
     const patient = patientById.get(text(order.patientId));
     priorityItems.push({
       id: `cancellation-${text(order.id)}`, kind: 'cancellation', ageDays: ageDays(timestamp(order, 'updatedAt', 'createdAt'), now),
@@ -162,11 +174,12 @@ export function composePharmacyOverview(input: {
     organisation: {
       id: organisationId,
       tradingName: text(organisation.tradingName) || text(organisation.name),
-      status: ['onboarding', 'live', 'paused'].includes(text(organisation.status)) ? text(organisation.status) : 'onboarding',
-      trainingMode: Boolean(organisation.testAccount) || text(organisation.status) !== 'live',
+      status: ['onboarding', 'intake_live', 'live', 'paused'].includes(text(organisation.status)) ? text(organisation.status) : 'onboarding',
+      trainingMode: Boolean(organisation.testAccount) && organisation.workspaceClassification !== 'allocation_holding',
+      allocationHoldingMode: organisation.workspaceClassification === 'allocation_holding',
     },
     summary: {
-      patientReview: reviewSubmissions.length,
+      activePatients: patients.length,
       awaitingPayment: awaitingPaymentOrders.length,
       supplierFulfilment: supplierOrders.length,
       readyForCollection: collectionOrders.length,
@@ -175,7 +188,7 @@ export function composePharmacyOverview(input: {
     priorityItems,
     recentSessions,
     handover: {
-      onboardingWaiting: reviewSubmissions.length,
+      activePatients: patients.length,
       activePaymentLinks: awaitingPaymentOrders.length,
       supplierOrdersInProgress: supplierOrders.length,
       agedCollections: priorityItems.filter(item => item.kind === 'collection').length,

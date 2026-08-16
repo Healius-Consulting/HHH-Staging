@@ -47,7 +47,10 @@ export const config = {
     { source: '/admin/reset-password', destination: '/reset-password', permanent: true },
     { source: '/pharmacy/home', destination: '/pharmacy', permanent: true },
     { source: '/admin/overview', destination: '/admin', permanent: true },
-  ] : undefined,
+  ] : [
+    { source: '/general-5', destination: '/faq', permanent: true },
+    { source: '/general-5-1', destination: '/privacy', permanent: true },
+  ],
   rewrites: [
     ...(portalSurface ? [
       { source: '/login', destination: '/api/page-gate?__hhh_path=/login' },
@@ -55,6 +58,8 @@ export const config = {
       { source: '/v1/auth/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v1/auth/$1?__hhh_surface=auto` },
       { source: '/pharmacy/v1/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v1/$1?__hhh_surface=pharmacy` },
       { source: '/admin/v1/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v1/$1?__hhh_surface=admin` },
+      { source: '/pharmacy/v2/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v2/$1?__hhh_surface=pharmacy` },
+      { source: '/admin/v2/(.*)', destination: `${apiOrigin.toString().replace(/\/$/, '')}/v2/$1?__hhh_surface=admin` },
       { source: '/pharmacy', destination: '/api/page-gate?__hhh_path=/pharmacy' },
       { source: '/admin', destination: '/api/page-gate?__hhh_path=/admin' },
       { source: '/pharmacy/(.*)', destination: '/api/page-gate?__hhh_path=/pharmacy/$1' },
@@ -63,6 +68,10 @@ export const config = {
     {
       source: '/v1/(.*)',
       destination: `${apiOrigin.toString().replace(/\/$/, '')}/v1/$1`,
+    },
+    {
+      source: '/v2/(.*)',
+      destination: `${apiOrigin.toString().replace(/\/$/, '')}/v2/$1`,
     },
     ...(portalSurface ? [] : [{ source: '/(.*)', destination: '/index.html' }]),
   ],

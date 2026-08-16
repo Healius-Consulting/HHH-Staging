@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
-import { Activity, AlertTriangle, ArrowLeft, Building2, CalendarDays, FileText, Hash, Mail, MapPin, Phone, Search, ChevronRight, Plus, Users, Clipboard, Package, CheckCircle, HeartPulse, Route } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, Building2, CalendarDays, FileText, Hash, Mail, MapPin, Phone, Search, ChevronRight, Plus, Users, Package, CheckCircle, HeartPulse, Route } from 'lucide-react';
 import { getUnresolvedReason, orderReference, useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
@@ -189,24 +189,15 @@ export default function Patients() {
       });
     }
 
-    // Merge submissions
+    // An eligibility application becomes pharmacy-visible only after HHH has
+    // activated a corresponding patient record. Submission-only enquiries stay
+    // in the HHH intake workspace.
     for (const sub of state.submissions.filter(item => item.organisationId === state.currentOrganisationId)) {
       const key = sub.email.toLowerCase();
       const existing = map.get(key);
       if (existing) {
         existing.submission = sub;
         if (!existing.dob) existing.dob = sub.dob;
-      } else {
-        map.set(key, {
-          id: `sub-${sub.id}`,
-          name: sub.name,
-          email: sub.email,
-          mobile: sub.mobile,
-          dob: sub.dob,
-          crmPatient: null,
-          submission: sub,
-          orders: [],
-        });
       }
     }
 
@@ -232,9 +223,7 @@ export default function Patients() {
     }
 
     // 2. Tab Filter
-    if (activeTab === 'enquiries') {
-      list = list.filter(p => p.submission && p.submission.status !== 'Approved' && !isNegativeEligibilityStatus(p.submission.status));
-    } else if (activeTab === 'active') {
+    if (activeTab === 'active') {
       list = list.filter(p => p.crmPatient !== null);
     } else if (activeTab === 'on-order') {
       list = list.filter(p =>
@@ -343,6 +332,10 @@ export default function Patients() {
   }, [dispatch, openPatientProfile, patients, state.navigationTarget]);
 
   const handleCreateOrder = (patient: UnifiedPatient) => {
+    if (state.workspaceMode !== 'live') {
+      dispatch({ type: 'ADD_TOAST', message: 'Prescription ordering remains locked until full pharmacy activation.', toastType: 'warning' });
+      return;
+    }
     const crmPatient = patient.crmPatient;
     if (!canCreateOrderForPatient(crmPatient)) {
       dispatch({ type: 'ADD_TOAST', message: `${patient.name} cannot be added to an order until HHH completes programme onboarding.`, toastType: 'warning' });
@@ -378,7 +371,6 @@ export default function Patients() {
 
   // Metrics counts
   const totalCRM = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId).length;
-  const activeEnquiries = state.submissions.filter(s => s.organisationId === state.currentOrganisationId && (s.status === 'New' || s.status === 'Under HHH review')).length;
   const onOrderCount = patients.filter(p => p.crmPatient && p.orders.some(o => orderExceptionReason(o) ? orderNeedsResolution(o) : o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))).length;
   const currentOrganisation = state.organisations.find(organisation => organisation.id === state.currentOrganisationId);
   const selectedProfileStatus = selectedPatient ? deriveStatus(selectedPatient) : null;
@@ -396,10 +388,6 @@ export default function Patients() {
         <button type="button" aria-pressed={activeTab === 'all'} className={`filter-card ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
           <div className="filter-card__head"><span>All patients</span><Users size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} /></div>
           <span className="filter-card__value">{patients.length}</span>
-        </button>
-        <button type="button" aria-pressed={activeTab === 'enquiries'} className={`filter-card ${activeTab === 'enquiries' ? 'active' : ''}`} onClick={() => setActiveTab('enquiries')}>
-          <div className="filter-card__head"><span>Enquiries</span><Clipboard size={14} className={activeTab === 'enquiries' ? 'text-red' : 'text-muted'} /></div>
-          <span className="filter-card__value">{activeEnquiries}</span>
         </button>
         <button type="button" aria-pressed={activeTab === 'active'} className={`filter-card ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
           <div className="filter-card__head"><span>Active</span><CheckCircle size={14} className={activeTab === 'active' ? 'text-green' : 'text-muted'} /></div>
@@ -555,8 +543,10 @@ export default function Patients() {
               <div className="patient-record-drawer__actions">
                 <button
                   className="btn btn-primary btn-sm"
-                  disabled={!canCreateOrderForPatient(selectedPatient.crmPatient)}
-                  title={canCreateOrderForPatient(selectedPatient.crmPatient)
+                  disabled={state.workspaceMode !== 'live' || !canCreateOrderForPatient(selectedPatient.crmPatient)}
+                  title={state.workspaceMode !== 'live'
+                    ? 'Full pharmacy activation is required before creating an order'
+                    : canCreateOrderForPatient(selectedPatient.crmPatient)
                     ? selectedPatient.crmPatient?.status === 'Referred'
                       ? 'Create this approved referral’s first prescription order'
                       : 'Create a new prescription order'

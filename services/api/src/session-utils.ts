@@ -74,5 +74,7 @@ export function surfaceFromPortalApiPath(value: string) {
   catch { return null; }
   if (pathname === '/pharmacy/v1' || pathname.startsWith('/pharmacy/v1/')) return 'pharmacy' as const;
   if (pathname === '/admin/v1' || pathname.startsWith('/admin/v1/')) return 'admin' as const;
+  if (pathname === '/pharmacy/v2' || pathname.startsWith('/pharmacy/v2/')) return 'pharmacy' as const;
+  if (pathname === '/admin/v2' || pathname.startsWith('/admin/v2/')) return 'admin' as const;
   return null;
 }

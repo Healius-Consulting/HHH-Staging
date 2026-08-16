@@ -1,129 +1,104 @@
-import { useMemo, useState } from 'react';
-import { AlertCircle, BadgePoundSterling, PackageCheck, PoundSterling, ReceiptText, TrendingUp } from 'lucide-react';
-import {
-  money,
-  orderCost,
-  rxRevenue,
-  useApp,
-  type PatientOrder,
-} from '../context/AppContext';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, BadgePoundSterling, PackageCheck, PoundSterling, ReceiptText, RefreshCw, TrendingUp } from 'lucide-react';
+import { money } from '../context/AppContext';
+import { getPharmacyPrescriptionFinance } from '../shared/api';
+import type { PharmacyPrescriptionFinanceReport } from '../shared/contracts';
+import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { compactPatientName } from '../utils/patientName';
 import './PharmacyFinance.css';
 
 type Period = '30' | '90' | '365' | 'all';
+type FinanceRow = PharmacyPrescriptionFinanceReport['rows'][number];
 
-interface FinancialOrder {
-  order: PatientOrder;
-  patientName: string;
-  paidAt: Date;
-  productRevenue: number;
-  wholesale: number | null;
-  productMargin: number | null;
-  dispensingFees: number;
-  contribution: number | null;
-}
-
-const PERIOD_OPTIONS: Array<{ value: Period; label: string; short: string }> = [
-  { value: '30', label: 'Last 30 days', short: '30 days' },
-  { value: '90', label: 'Last 90 days', short: '90 days' },
-  { value: '365', label: 'Last 12 months', short: '12 months' },
-  { value: 'all', label: 'All paid prescriptions', short: 'All time' },
+const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
+  { value: '30', label: 'Last 30 days' },
+  { value: '90', label: 'Last 90 days' },
+  { value: '365', label: 'Last 12 months' },
+  { value: 'all', label: 'All paid prescriptions' },
 ];
 
-function hasCompleteWholesale(order: PatientOrder) {
-  const items = order.prescriptions.flatMap(prescription => prescription.items);
-  return items.length > 0 && items.every(item => item.cost !== null);
+function periodStart(period: Period) {
+  if (period === 'all') return undefined;
+  return new Date(Date.now() - Number(period) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-function orderReference(order: PatientOrder) {
-  if (order.backendId) return order.backendId;
-  return `Order ${order.id}`;
+function localPreviewFinanceReport(period: Period): PharmacyPrescriptionFinanceReport {
+  const now = new Date().toISOString();
+  const paidRow: FinanceRow = {
+    orderId: 'LOCAL-PAID-01', patientId: 'local-patient-1', patientName: 'Sample Patient',
+    createdAt: now, updatedAt: now, recognisedAt: now, refundedAt: null, financialEventAt: now,
+    paymentStatus: 'paid', fulfilmentStatus: 'supplier_processing', recognised: true, refunded: false, refundPending: false,
+    productRevenuePence: 10_000, dispensingFeePence: 500, patientRevenuePence: 10_500,
+    wholesaleProductPence: 8_000, shippingPence: 500, wholesalePence: 8_500,
+    productMarginPence: 2_000, totalContributionPence: 2_000, wholesaleComplete: true,
+    lines: [{ packId: 'local-pack-1', name: 'Sample product', quantity: 1, unitPricePence: 10_000, wholesaleUnitPence: 8_000, productMarginPence: 2_000 }],
+  };
+  const refundedRow: FinanceRow = {
+    ...paidRow,
+    orderId: 'LOCAL-REFUND-01', patientId: 'local-patient-2', patientName: 'Refunded Example',
+    paymentStatus: 'refunded', recognised: false, refunded: true, recognisedAt: null, refundedAt: now,
+  };
+  return {
+    organisationId: 'local-preview-pharmacy', currency: 'GBP', range: { from: periodStart(period) ?? null, to: null },
+    periodCounts: { '30': 1, '90': 1, '365': 1, all: 1 },
+    totals: {
+      prescriptionCount: 2, paidPrescriptionCount: 1, pendingPrescriptionCount: 0,
+      refundedPrescriptionCount: 1, refundedPatientPence: 10_500, refundPendingCount: 0, refundPendingPatientPence: 0,
+      patientRevenuePence: 10_500, productRevenuePence: 10_000, dispensingFeesPence: 500,
+      wholesaleKnownForCount: 1, wholesalePendingForCount: 0, wholesaleProductPence: 8_000,
+      shippingPence: 500, wholesalePence: 8_500, productMarginPence: 2_000, totalContributionPence: 2_000,
+    },
+    rows: [paidRow, refundedRow],
+  };
 }
 
-function FinancialValue({
-  value,
-  unavailable = false,
-}: {
-  value: number | null;
-  unavailable?: boolean;
-}) {
-  if (value === null || unavailable) return <span className="pharmacy-finance__pending">Awaiting quote</span>;
-  return <>{money(value)}</>;
+function pounds(pence: number) {
+  return money(pence / 100);
+}
+
+function FinancialValue({ value }: { value: number | null }) {
+  if (value === null) return <span className="pharmacy-finance__pending">Awaiting quote</span>;
+  return <>{pounds(value)}</>;
+}
+
+function recognisedDate(row: FinanceRow) {
+  return new Date(row.recognisedAt ?? row.financialEventAt);
 }
 
 export default function PharmacyFinance() {
-  const { state } = useApp();
   const [period, setPeriod] = useState<Period>('90');
-  const organisationId = state.currentOrganisationId;
+  const [report, setReport] = useState<PharmacyPrescriptionFinanceReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
 
-  const financialOrders = useMemo(() => {
-    const patientById = new Map(
-      state.crm
-        .filter(patient => patient.organisationId === organisationId)
-        .map(patient => [patient.id, patient.name]),
-    );
-    const cutoff = period === 'all'
-      ? null
-      : new Date(Date.now() - Number(period) * 24 * 60 * 60 * 1000);
+  const load = useCallback(async () => {
+    const version = requestVersion.current + 1;
+    requestVersion.current = version;
+    setLoading(true);
+    setError(null);
+    try {
+      const nextReport = isLocalPortalPreview
+        ? localPreviewFinanceReport(period)
+        : await getPharmacyPrescriptionFinance({ from: periodStart(period) });
+      if (requestVersion.current === version) setReport(nextReport);
+    } catch (loadError) {
+      if (requestVersion.current === version) setError(loadError instanceof Error ? loadError.message : 'The finance report is unavailable.');
+    } finally {
+      if (requestVersion.current === version) setLoading(false);
+    }
+  }, [period]);
 
-    return state.orders
-      .filter(order => order.organisationId === organisationId && order.payment.status === 'paid')
-      .map((order): FinancialOrder => {
-        const paidAt = new Date(order.payment.paidAt ?? order.date);
-        const calculatedProductRevenue = order.prescriptions.reduce((total, prescription) => total + rxRevenue(prescription), 0);
-        const productRevenue = calculatedProductRevenue > 0
-          ? calculatedProductRevenue
-          : Math.max(0, order.payment.amount - order.dispensingFee);
-        const wholesale = hasCompleteWholesale(order) ? orderCost(order) : null;
-        const productMargin = wholesale === null ? null : productRevenue - wholesale;
-        return {
-          order,
-          patientName: patientById.get(order.patientId ?? '') ?? 'Patient unavailable',
-          paidAt,
-          productRevenue,
-          wholesale,
-          productMargin,
-          dispensingFees: order.dispensingFee,
-          contribution: productMargin === null ? null : productMargin + order.dispensingFee,
-        };
-      })
-      .filter(record => cutoff === null || record.paidAt >= cutoff)
-      .sort((a, b) => b.paidAt.getTime() - a.paidAt.getTime());
-  }, [organisationId, period, state.crm, state.orders]);
+  useEffect(() => { void load(); }, [load]);
 
-  const totals = useMemo(() => {
-    const confirmed = financialOrders.filter(order => order.wholesale !== null);
-    const productRevenue = financialOrders.reduce((total, order) => total + order.productRevenue, 0);
-    const wholesale = confirmed.reduce((total, order) => total + (order.wholesale ?? 0), 0);
-    const productMargin = confirmed.reduce((total, order) => total + (order.productMargin ?? 0), 0);
-    const dispensingFees = financialOrders.reduce((total, order) => total + order.dispensingFees, 0);
-    const contribution = confirmed.reduce((total, order) => total + (order.contribution ?? 0), 0);
-    return {
-      productRevenue,
-      wholesale,
-      productMargin,
-      dispensingFees,
-      contribution,
-      confirmedCount: confirmed.length,
-      pendingCount: financialOrders.length - confirmed.length,
-      patientTotal: financialOrders.reduce((total, record) => total + record.productRevenue + record.dispensingFees, 0),
-    };
-  }, [financialOrders]);
-
+  const financialOrders = useMemo(() => (report?.rows ?? [])
+    .filter(row => row.recognised)
+    .sort((left, right) => recognisedDate(right).getTime() - recognisedDate(left).getTime()), [report]);
+  const totals = report?.totals;
   const periodLabel = PERIOD_OPTIONS.find(option => option.value === period)?.label ?? 'Selected period';
 
-  const periodCounts = useMemo(() => {
-    const paid = state.orders.filter(order => order.organisationId === organisationId && order.payment.status === 'paid');
-    const countFor = (value: Period) => {
-      if (value === 'all') return paid.length;
-      const cutoff = new Date(Date.now() - Number(value) * 24 * 60 * 60 * 1000);
-      return paid.filter(order => new Date(order.payment.paidAt ?? order.date) >= cutoff).length;
-    };
-    return Object.fromEntries(PERIOD_OPTIONS.map(option => [option.value, countFor(option.value)])) as Record<Period, number>;
-  }, [organisationId, state.orders]);
-
   return (
-    <div className="page-body pharmacy-finance">
+    <div className="page-body pharmacy-finance" aria-busy={loading}>
       <div className="filter-grid pharmacy-finance__periods" role="group" aria-label="Reporting period">
         {PERIOD_OPTIONS.map(option => (
           <button
@@ -134,110 +109,148 @@ export default function PharmacyFinance() {
             onClick={() => setPeriod(option.value)}
           >
             <div className="filter-card__head"><span>{option.label}</span></div>
-            <span className="filter-card__value">{periodCounts[option.value]}</span>
+            <span className="filter-card__value">{report?.periodCounts[option.value] ?? '—'}</span>
           </button>
         ))}
       </div>
 
-      <section className="summary-tiles pharmacy-finance__tiles" aria-label={`${periodLabel} financial summary`}>
-        <div className="summary-tile">
-          <span className="summary-tile__label">Patient product revenue</span>
-          <strong className="summary-tile__value">{money(totals.productRevenue)}</strong>
-          <small className="summary-tile__detail">Paid Curaleaf product prices</small>
-          <PoundSterling className="summary-tile__arrow" size={16} aria-hidden="true" />
-        </div>
-        <div className="summary-tile">
-          <span className="summary-tile__label">Curaleaf wholesale</span>
-          <strong className="summary-tile__value">{money(totals.wholesale)}</strong>
-          <small className="summary-tile__detail">{totals.pendingCount ? `${totals.pendingCount} awaiting quoted cost` : 'All quoted costs confirmed'}</small>
-          <PackageCheck className="summary-tile__arrow" size={16} aria-hidden="true" />
-        </div>
-        <div className="summary-tile">
-          <span className="summary-tile__label">Product margin</span>
-          <strong className="summary-tile__value">{money(totals.productMargin)}</strong>
-          <small className="summary-tile__detail">Patient price less wholesale</small>
-          <TrendingUp className="summary-tile__arrow" size={16} aria-hidden="true" />
-        </div>
-        <div className="summary-tile">
-          <span className="summary-tile__label">Dispensing fees</span>
-          <strong className="summary-tile__value">{money(totals.dispensingFees)}</strong>
-          <small className="summary-tile__detail">Retained by this pharmacy</small>
-          <ReceiptText className="summary-tile__arrow" size={16} aria-hidden="true" />
-        </div>
-        <div className="summary-tile summary-tile--accent">
-          <span className="summary-tile__label">Confirmed contribution</span>
-          <strong className="summary-tile__value">{money(totals.contribution)}</strong>
-          <small className="summary-tile__detail">
-            {totals.pendingCount
-              ? `${totals.confirmedCount} of ${financialOrders.length} orders costed`
-              : 'Margin + dispensing fees'}
-          </small>
-          <BadgePoundSterling className="summary-tile__arrow" size={16} aria-hidden="true" />
-        </div>
-      </section>
+      {loading && !report && (
+        <section className="overview-state" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <h2>Loading finance report</h2>
+          <p>Calculating the authorised paid-order totals.</p>
+        </section>
+      )}
 
-      {totals.pendingCount > 0 && (
-        <div className="alert-warning pharmacy-finance__notice" role="status">
-          <AlertCircle size={17} />
-          <div>
-            <strong>{totals.pendingCount} paid order{totals.pendingCount === 1 ? '' : 's'} awaiting wholesale data</strong>
-            <span>Revenue includes these payments; margin and contribution wait until Curaleaf supplies a quoted wholesale cost.</span>
-          </div>
+      {error && (
+        <div className="alert-warning pharmacy-finance__notice" role="alert">
+          <AlertCircle size={17} aria-hidden="true" />
+          <div><strong>Finance report unavailable</strong><span>{error}</span></div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void load()}><RefreshCw size={14} aria-hidden="true" /> Try again</button>
         </div>
       )}
 
-      <section className="card card-flush pharmacy-finance__ledger">
-        <div className="section-heading section-heading--padded">
-          <div>
-            <p className="section-label">Prescription ledger</p>
-            <h3>{financialOrders.length} paid order{financialOrders.length === 1 ? '' : 's'} · {periodLabel}</h3>
-          </div>
-          <span>Margin + fees = contribution</span>
-        </div>
+      {report && totals && (
+        <>
+          <section className="summary-tiles pharmacy-finance__tiles" aria-label={`${periodLabel} financial summary`} aria-live="polite">
+            <div className="summary-tile">
+              <span className="summary-tile__label">Patient product revenue</span>
+              <strong className="summary-tile__value">{pounds(totals.productRevenuePence)}</strong>
+              <small className="summary-tile__detail">Retained paid orders only</small>
+              <PoundSterling className="summary-tile__arrow" size={16} aria-hidden="true" />
+            </div>
+            <div className="summary-tile">
+              <span className="summary-tile__label">Quoted Curaleaf cost</span>
+              <strong className="summary-tile__value">{pounds(totals.wholesalePence)}</strong>
+              <small className="summary-tile__detail">Products {pounds(totals.wholesaleProductPence)} + shipping {pounds(totals.shippingPence)}</small>
+              <PackageCheck className="summary-tile__arrow" size={16} aria-hidden="true" />
+            </div>
+            <div className="summary-tile">
+              <span className="summary-tile__label">Product margin</span>
+              <strong className="summary-tile__value">{pounds(totals.productMarginPence)}</strong>
+              <small className="summary-tile__detail">Patient product price less quoted product cost</small>
+              <TrendingUp className="summary-tile__arrow" size={16} aria-hidden="true" />
+            </div>
+            <div className="summary-tile">
+              <span className="summary-tile__label">Dispensing fees</span>
+              <strong className="summary-tile__value">{pounds(totals.dispensingFeesPence)}</strong>
+              <small className="summary-tile__detail">Retained by this pharmacy</small>
+              <ReceiptText className="summary-tile__arrow" size={16} aria-hidden="true" />
+            </div>
+            <div className="summary-tile summary-tile--accent">
+              <span className="summary-tile__label">Estimated contribution</span>
+              <strong className="summary-tile__value">{pounds(totals.totalContributionPence)}</strong>
+              <small className="summary-tile__detail">
+                {totals.wholesalePendingForCount
+                  ? `${totals.wholesaleKnownForCount} of ${totals.paidPrescriptionCount} paid orders costed`
+                  : 'Revenue + fees − quoted products and shipping'}
+              </small>
+              <BadgePoundSterling className="summary-tile__arrow" size={16} aria-hidden="true" />
+            </div>
+          </section>
 
-        {financialOrders.length === 0 ? (
-          <div className="empty-state">
-            <BadgePoundSterling size={32} />
-            <h3>No paid prescriptions in this period</h3>
-            <p>Results appear here after a patient payment is confirmed.</p>
-          </div>
-        ) : (
-          <div className="pharmacy-finance__table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Prescription</th>
-                  <th>Patient products</th>
-                  <th>Wholesale</th>
-                  <th>Product margin</th>
-                  <th>Dispensing fees</th>
-                  <th>Contribution</th>
-                </tr>
-              </thead>
-              <tbody>
-                {financialOrders.map(record => (
-                  <tr key={record.order.backendId ?? record.order.id}>
-                    <td>
-                      <strong title={record.patientName}>{compactPatientName(record.patientName)}</strong>
-                      <span>{record.paidAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} · {orderReference(record.order)}</span>
-                    </td>
-                    <td data-label="Patient products"><FinancialValue value={record.productRevenue} /></td>
-                    <td data-label="Wholesale"><FinancialValue value={record.wholesale} /></td>
-                    <td data-label="Product margin"><FinancialValue value={record.productMargin} /></td>
-                    <td data-label="Dispensing fees"><FinancialValue value={record.dispensingFees} /></td>
-                    <td data-label="Contribution" className="pharmacy-finance__contribution"><FinancialValue value={record.contribution} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+          {(totals.refundedPrescriptionCount > 0 || totals.refundPendingCount > 0) && (
+            <div className="pharmacy-finance__exclusions" role="status">
+              <AlertCircle size={17} aria-hidden="true" />
+              <div>
+                <strong>Refunded orders are excluded</strong>
+                <span>
+                  {totals.refundedPrescriptionCount > 0
+                    ? `${totals.refundedPrescriptionCount} completed refund${totals.refundedPrescriptionCount === 1 ? '' : 's'} (${pounds(totals.refundedPatientPence)})`
+                    : 'No completed refunds'}
+                  {totals.refundPendingCount > 0
+                    ? ` and ${totals.refundPendingCount} pending refund${totals.refundPendingCount === 1 ? '' : 's'} (${pounds(totals.refundPendingPatientPence)})`
+                    : ''}
+                  {' '}do not contribute to revenue, quoted cost, margin, fees or contribution.
+                </span>
+              </div>
+            </div>
+          )}
 
-      <p className="pharmacy-finance__footnote">
-        Operational view for this pharmacy only — not a settlement statement.
-        Patient total for the period: <strong>{money(totals.patientTotal)}</strong>.
-      </p>
+          {totals.wholesalePendingForCount > 0 && (
+            <div className="alert-warning pharmacy-finance__notice" role="status">
+              <AlertCircle size={17} aria-hidden="true" />
+              <div>
+                <strong>{totals.wholesalePendingForCount} paid order{totals.wholesalePendingForCount === 1 ? '' : 's'} awaiting wholesale data</strong>
+                <span>Revenue includes these payments; margin and estimated contribution wait until Curaleaf supplies a quote.</span>
+              </div>
+            </div>
+          )}
+
+          <section className="card card-flush pharmacy-finance__ledger">
+            <div className="section-heading section-heading--padded">
+              <div>
+                <p className="section-label">Prescription ledger</p>
+                <h3>{financialOrders.length} retained paid order{financialOrders.length === 1 ? '' : 's'} · {periodLabel}</h3>
+              </div>
+              <span>Refunded and refund-pending orders excluded</span>
+            </div>
+
+            {financialOrders.length === 0 ? (
+              <div className="empty-state">
+                <BadgePoundSterling size={32} aria-hidden="true" />
+                <h3>No retained paid prescriptions in this period</h3>
+                <p>Results appear here after payment is confirmed and remain excluded after a refund is opened.</p>
+              </div>
+            ) : (
+              <div className="pharmacy-finance__table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Prescription</th>
+                      <th>Patient products</th>
+                      <th>Quoted cost</th>
+                      <th>Product margin</th>
+                      <th>Dispensing fees</th>
+                      <th>Est. contribution</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {financialOrders.map(record => (
+                      <tr key={record.orderId}>
+                        <td>
+                          <strong title={record.patientName}>{compactPatientName(record.patientName)}</strong>
+                          <span>{recognisedDate(record).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} · {record.orderId}</span>
+                        </td>
+                        <td data-label="Patient products"><FinancialValue value={record.productRevenuePence} /></td>
+                        <td data-label="Quoted cost"><FinancialValue value={record.wholesalePence} /></td>
+                        <td data-label="Product margin"><FinancialValue value={record.productMarginPence} /></td>
+                        <td data-label="Dispensing fees"><FinancialValue value={record.dispensingFeePence} /></td>
+                        <td data-label="Est. contribution" className="pharmacy-finance__contribution"><FinancialValue value={record.totalContributionPence} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <p className="pharmacy-finance__footnote">
+            Operational estimate for this pharmacy only—not a Curaleaf settlement statement. Curaleaf costs come from accepted quotes, not supplier invoices or payment records.
+            Patient total retained for the period: <strong>{pounds(totals.patientRevenuePence)}</strong>.
+          </p>
+        </>
+      )}
     </div>
   );
 }

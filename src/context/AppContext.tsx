@@ -267,6 +267,7 @@ export interface EligibilitySubmission {
   submittedAt: Date;
   organisationId: string;
   pharmacyName: string;
+  trainingSubmission?: boolean;
   referralToken: string;
 }
 
@@ -291,9 +292,10 @@ export interface PharmacyTenant {
   curaleafPharmacyCode?: string;
   address: string;
   websiteDomains: string[];
-  status: 'live' | 'onboarding' | 'paused';
+  status: 'live' | 'intake_live' | 'onboarding' | 'paused';
   testAccount?: boolean;
   gdprExempt?: boolean;
+  workspaceClassification?: 'standard' | 'training' | 'allocation_holding';
   staffCount: number;
   platformFeeMonthly: number | null;
   defaultPaymentRoute: 'manual' | 'worldpay';
@@ -356,7 +358,7 @@ export type NavigationTarget =
   | null;
 
 export type PortalMode = 'gateway' | 'admin' | 'clinician';
-export type WorkspaceMode = 'training' | 'live';
+export type WorkspaceMode = 'training' | 'intake' | 'live';
 
 export interface StaffSession {
   email: string;
@@ -437,6 +439,7 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     address: 'Primary Training Branch, United Kingdom', websiteDomains: ['training-pharm1.co.uk'],
     status: 'live', staffCount: 2,
     testAccount: true, gdprExempt: true,
+    workspaceClassification: 'allocation_holding',
     platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
     brand: { primary: '#0f766e', portalName: 'Primary Branch' },
@@ -1267,9 +1270,7 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
     case 'SYNC_CRM_PATIENTS': {
-      const retained = state.workspaceMode === 'training'
-        ? state.crm
-        : state.crm.filter(patient => patient.organisationId !== action.organisationId);
+      const retained = state.workspaceMode === 'training' ? state.crm : state.crm.filter(patient => patient.organisationId !== action.organisationId);
       const byId = new Map(retained.map(patient => [patient.id, patient]));
       action.patients.forEach(patient => byId.set(patient.id, patient));
       return { ...state, crm: [...byId.values()] };
@@ -1330,9 +1331,10 @@ function reducer(state: AppState, action: Action): AppState {
       if (state.workspaceMode === action.mode) return state;
       return {
         ...state,
-        workspaceMode: 'live',
+        workspaceMode: action.mode,
         navigationTarget: null,
-        catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
+        catalogue: action.mode === 'live' && state.catalogueSource === 'curaleaf' ? state.catalogue : [],
+        catalogueSource: action.mode === 'live' && state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
         crm: [],
         submissions: [],
         orders: [],
@@ -2009,7 +2011,9 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const catalogueOrganisationStatus = state.organisations.find(organisation => organisation.id === state.currentOrganisationId)?.status;
+  const currentOrganisation = state.organisations.find(organisation => organisation.id === state.currentOrganisationId);
+  const catalogueOrganisationStatus = currentOrganisation?.status;
+  const currentOrganisationIsTest = currentOrganisation?.testAccount === true;
 
   useEffect(() => {
     if (!usePrototypeState) return;
@@ -2023,7 +2027,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       && isApiConfigured
       && Boolean(state.staffSession)
       && Boolean(catalogueOrganisationStatus);
-    if (!useLocalSandbox && !useAuthenticatedPortal) return;
+    if (!useLocalSandbox && !useAuthenticatedPortal || catalogueOrganisationStatus === 'intake_live') return;
     let cancelled = false;
     dispatch({ type: 'SET_CATALOGUE_LOADING' });
     const request = useLocalSandbox
@@ -2055,7 +2059,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.catalogueSource, state.staffSession, state.workspaceMode]);
 
   useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId) return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || (state.workspaceMode === 'training' && !currentOrganisationIsTest)) return;
     let cancelled = false;
     const organisationId = state.currentOrganisationId;
     getPortalPatients(organisationId).then(records => {
@@ -2080,7 +2084,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }).catch(error => console.warn('Patient directory sync unavailable:', error));
     return () => { cancelled = true; };
-  }, [state.currentOrganisationId, state.staffSession, state.workspaceMode]);
+  }, [currentOrganisationIsTest, state.currentOrganisationId, state.staffSession, state.workspaceMode]);
 
   useEffect(() => {
     if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || state.workspaceMode !== 'live') return;
@@ -2130,14 +2134,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [state.currentOrganisationId, state.organisations, state.staffSession, state.workspaceMode]);
 
-  // Cross-domain intake sync. In production, the access token comes from staff authentication.
+  // Eligibility intake is HHH-admin only. Pharmacy workspaces receive a person
+  // only after HHH activates the corresponding patient record.
   useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || (state.portalMode !== 'admin' && state.workspaceMode !== 'live')) return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.portalMode !== 'admin') return;
     let cancelled = false;
     const sync = async () => {
-      const organisations = state.portalMode === 'admin'
-        ? state.organisations
-        : state.organisations.filter(org => org.id === state.currentOrganisationId);
+      const organisations = state.organisations;
       try {
         const groups = await Promise.all(organisations.map(async organisation => ({
           organisation,
@@ -2176,6 +2179,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             submittedAt: new Date(record.submittedAt),
             organisationId: record.organisationId,
             pharmacyName: record.pharmacyName,
+            trainingSubmission: record.trainingSubmission,
             referralToken: organisation.referralToken,
           },
         })));
@@ -2186,7 +2190,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void sync();
     const interval = window.setInterval(() => void sync(), 15000);
     return () => { cancelled = true; window.clearInterval(interval); };
-  }, [state.currentOrganisationId, state.organisations, state.portalMode, state.staffSession, state.workspaceMode]);
+  }, [state.organisations, state.portalMode, state.staffSession]);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { z } from 'zod';
-import { config, secureSessionCookies } from './config.js';
+import { config, portalAppHostnames, portalAppOrigins, secureSessionCookies } from './config.js';
 import { auth, firestore } from './firebase.js';
 import { HttpError, nowIso } from './http.js';
 import {
@@ -29,14 +29,9 @@ export function cookieOptions(httpOnly: boolean, maxAge = SESSION_ABSOLUTE_MS) {
   return { httpOnly, secure: secureSessionCookies, sameSite: 'strict' as const, path: '/', maxAge };
 }
 
-function expectedOrigin() {
-  return config.PORTAL_APP_ORIGIN;
-}
-
 export function protectedSurface(request: Request) {
   const host = requestHostname(request);
-  const portalHost = new URL(config.PORTAL_APP_ORIGIN).hostname;
-  if (host === portalHost) {
+  if (portalAppHostnames.has(host)) {
     const pathSurface = surfaceFromPortalApiPath(request.originalUrl);
     if (pathSurface) return pathSurface;
     const requested = request.query.__hhh_surface;
@@ -103,7 +98,7 @@ function requestOriginAllowed(request: Request) {
   if (!source) return config.NODE_ENV !== 'production';
   try {
     const origin = new URL(source).origin;
-    if (origin === expectedOrigin()) return true;
+    if (portalAppOrigins.has(origin)) return true;
     if (config.NODE_ENV !== 'production' && ['http://localhost:5173', 'http://127.0.0.1:5173'].includes(origin)) return true;
     return false;
   } catch { return false; }

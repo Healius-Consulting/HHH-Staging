@@ -9,7 +9,8 @@ test('patient profile URLs preserve unrelated query parameters without patient d
 });
 
 test('directory context accepts only the supported filter and sort values', () => {
-  const context = { search: 'pain', filter: 'enquiries', sort: 'status', scrollTop: 280, pageScrollY: 120, focusPatientId: 'sub-abc' };
+  const context = { search: 'pain', filter: 'active', sort: 'status', scrollTop: 280, pageScrollY: 120, focusPatientId: 'patient-abc' };
   assert.deepEqual(directoryContextFromHistory({ patientDirectoryContext: context }), context);
+  assert.equal(directoryContextFromHistory({ patientDirectoryContext: { ...context, filter: 'enquiries' } }), null);
   assert.equal(directoryContextFromHistory({ patientDirectoryContext: { ...context, filter: 'other' } }), null);
 });

@@ -1,0 +1,439 @@
+# Server-only SQL Connect queries for HHH Platform.
+# Fail-closed boundary: client operations default to NO_ACCESS.
+
+query GetPortalAdmission(
+  $sessionHash: String!
+  $staffUid: String!
+) @auth(level: NO_ACCESS) {
+  staffSession(key: { sessionHash: $sessionHash }) {
+    sessionHash
+    staffUid
+    organisationId
+    surface
+    role
+    userAgentHash
+    createdAt
+    lastActivityAt
+    idleExpiresAt
+    absoluteExpiresAt
+    revokedAt
+    revokeReason
+  }
+  staffUser(key: { uid: $staffUid }) {
+    uid
+    organisationId
+    email
+    displayName
+    role
+    status
+    disabled
+  }
+}
+
+query GetStaffUserByUid($uid: String!) @auth(level: NO_ACCESS) {
+  staffUser(key: { uid: $uid }) {
+    uid
+    organisationId
+    email
+    displayName
+    role
+    status
+    disabled
+    preferences
+    invitedAt
+    activatedAt
+    lastSignedInAt
+    version
+  }
+}
+
+query GetStaffSessionByHash($sessionHash: String!) @auth(level: NO_ACCESS) {
+  staffSession(key: { sessionHash: $sessionHash }) {
+    sessionHash
+    staffUid
+    organisationId
+    surface
+    role
+    userAgentHash
+    createdAt
+    lastActivityAt
+    idleExpiresAt
+    absoluteExpiresAt
+    revokedAt
+    revokeReason
+  }
+}
+
+query GetOrganisationById($id: UUID!) @auth(level: NO_ACCESS) {
+  organisation(key: { id: $id }) {
+    id
+    companyId
+    name
+    tradingName
+    gphcNumber
+    superintendentName
+    mainContactName
+    mainContactPhone
+    mainContactEmail
+    address
+    primaryColour
+    logoText
+    status
+    classification
+    platformFeeMonthlyPence
+    portalName
+    intakeEnabled
+    prescriptionEnabled
+    paymentsEnabled
+    supplierOrdersEnabled
+    patientsEnabled
+    resourcesEnabled
+    worldpayEnabled
+    defaultPaymentRoute
+    autoPlacementEnabled
+    gdprComplianceFlag
+    pausedReason
+    pausedAt
+    version
+    createdAt
+    updatedAt
+  }
+}
+
+query GetOrganisationDomainByHost($hostname: String!) @auth(level: NO_ACCESS) {
+  organisationDomains(where: { hostname: { eq: $hostname } }, limit: 1) {
+    id
+    organisationId
+    hostname
+    verifiedAt
+  }
+}
+
+query GetPharmacyDirectoryByToken($tokenHash: String!) @auth(level: NO_ACCESS) {
+  referralTokens(where: { tokenHash: { eq: $tokenHash }, revokedAt: { isNull: true } }, limit: 1) {
+    id
+    organisationId
+    intakeVersion
+    organisation {
+      id
+      name
+      tradingName
+      gphcNumber
+      superintendentName
+      address
+      primaryColour
+      logoText
+      status
+    }
+  }
+}
+
+query ListSetupTasksByOrg($organisationId: UUID!) @auth(level: NO_ACCESS) {
+  setupTasks(where: { organisationId: { eq: $organisationId } }) {
+    id
+    organisationId
+    taskCode
+    required
+    completed
+    evidence
+    completedByUid
+    completedAt
+    createdAt
+    updatedAt
+  }
+}
+
+query GetEligibilitySubmissionById($id: UUID!) @auth(level: NO_ACCESS) {
+  eligibilitySubmission(key: { id: $id }) {
+    id
+    sourceOrganisationId
+    assignedOrganisationId
+    sourceType
+    firstName
+    surname
+    dob
+    mobile
+    email
+    emailHash
+    postcode
+    triedTwoTreatments
+    psychiatricExclusion
+    heardAbout
+    idempotencyKeyHash
+    assignmentStatus
+    assignmentVersion
+    pharmacyAccessStatus
+    followUpStatus
+    pharmacyReviewStatus
+    outcomeStatus
+    onboardingDecision
+    assignmentReason
+    privateAllocationNote
+    privateOnboardingNote
+    consentVersion
+    referralConsent
+    dataSharingConsent
+    marketingConsent
+    privacyNoticeVersion
+    submittedAt
+    allocationCompletedAt
+    operationalStartedAt
+    reviewedAt
+    completedAt
+    updatedAt
+  }
+}
+
+query ListTenantEligibilityQueue($organisationId: UUID!, $limit: Int!) @auth(level: NO_ACCESS) {
+  eligibilitySubmissions(
+    where: {
+      assignedOrganisationId: { eq: $organisationId }
+      pharmacyAccessStatus: { eq: ACTIVATED }
+    }
+    limit: $limit
+  ) {
+    id
+    firstName
+    surname
+    dob
+    mobile
+    email
+    postcode
+    assignmentStatus
+    pharmacyReviewStatus
+    outcomeStatus
+    followUpStatus
+    submittedAt
+    updatedAt
+  }
+}
+
+query GetPatientIdentity(
+  $organisationId: UUID!
+  $emailHash: String!
+  $dob: Date!
+) @auth(level: NO_ACCESS) {
+  patientIdentities(
+    where: {
+      organisationId: { eq: $organisationId }
+      emailHash: { eq: $emailHash }
+      dob: { eq: $dob }
+    }
+    limit: 1
+  ) {
+    id
+    patientId
+    organisationId
+    emailHash
+    dob
+    patient {
+      id
+      firstName
+      surname
+      dob
+      email
+      mobile
+      address
+      postcode
+      status
+      version
+    }
+  }
+}
+
+query GetPrescriptionFileById(
+  $id: UUID!
+  $organisationId: UUID!
+) @auth(level: NO_ACCESS) {
+  prescriptionFiles(
+    where: {
+      id: { eq: $id }
+      organisationId: { eq: $organisationId }
+    }
+    limit: 1
+  ) {
+    id
+    organisationId
+    patientId
+    storagePath
+    originalFilename
+    contentType
+    sizeBytes
+    status
+    verifiedAt
+  }
+}
+
+query ListActivePrescribers @auth(level: NO_ACCESS) {
+  prescribers(where: { active: { eq: true } }, limit: 200) {
+    id
+    name
+    initials
+    pin
+    gmcNumber
+    gphcNumber
+    active
+  }
+}
+
+query ListTenantPrescriptions(
+  $organisationId: UUID!
+  $limit: Int!
+) @auth(level: NO_ACCESS) {
+  prescriptions(
+    where: { organisationId: { eq: $organisationId } }
+    limit: $limit
+  ) {
+    id
+    patientId
+    prescriberId
+    fileId
+    serialNumber
+    issueDate
+    expiryDate
+    status
+    patientNameSnapshot
+    patientDobSnapshot
+    verifiedAt
+    createdAt
+  }
+}
+
+query GetOrderDraftById(
+  $id: UUID!
+  $organisationId: UUID!
+) @auth(level: NO_ACCESS) {
+  orderDrafts(
+    where: {
+      id: { eq: $id }
+      organisationId: { eq: $organisationId }
+    }
+    limit: 1
+  ) {
+    id
+    organisationId
+    patientId
+    status
+    paymentStatus
+    payload
+    version
+    createdAt
+    updatedAt
+  }
+}
+
+query GetOrderById(
+  $id: UUID!
+  $organisationId: UUID!
+) @auth(level: NO_ACCESS) {
+  orders(
+    where: {
+      id: { eq: $id }
+      organisationId: { eq: $organisationId }
+    }
+    limit: 1
+  ) {
+    id
+    organisationId
+    patientId
+    draftId
+    orderNumber
+    status
+    paymentStatus
+    fulfilmentStatus
+    paymentRoute
+    currency
+    medicineTotalPence
+    dispensingFeePence
+    deliveryPence
+    taxPence
+    totalPence
+    quoteSnapshot
+    version
+    submittedAt
+    paidAt
+    collectedAt
+    cancelledAt
+    createdAt
+    updatedAt
+  }
+}
+
+query ListTenantOrders(
+  $organisationId: UUID!
+  $limit: Int!
+) @auth(level: NO_ACCESS) {
+  orders(
+    where: { organisationId: { eq: $organisationId } }
+    limit: $limit
+  ) {
+    id
+    patientId
+    orderNumber
+    status
+    paymentStatus
+    fulfilmentStatus
+    paymentRoute
+    totalPence
+    version
+    submittedAt
+    createdAt
+    updatedAt
+  }
+}
+
+query GetPaymentByReceiptHash($receiptHash: String!) @auth(level: NO_ACCESS) {
+  payments(where: { receiptHash: { eq: $receiptHash } }, limit: 1) {
+    id
+    organisationId
+    orderId
+    status
+    amountPence
+    currency
+    route
+    receiptHash
+    version
+    createdAt
+    updatedAt
+  }
+}
+
+query ListTenantPayments($organisationId: UUID!, $limit: Int!) @auth(level: NO_ACCESS) {
+  payments(where: { organisationId: { eq: $organisationId } }, limit: $limit) {
+    id
+    orderId
+    status
+    amountPence
+    currency
+    route
+    receiptHash
+    version
+    createdAt
+  }
+}
+
+query ListTenantShipments($organisationId: UUID!, $limit: Int!) @auth(level: NO_ACCESS) {
+  shipments(where: { organisationId: { eq: $organisationId } }, limit: $limit) {
+    id
+    orderId
+    supplierPurchaseOrderId
+    supplierShipmentId
+    supplierCustomerReference
+    status
+    dispatchedAt
+    expectedAt
+    createdAt
+  }
+}
+
+query ListTenantGoodsReceipts($organisationId: UUID!, $limit: Int!) @auth(level: NO_ACCESS) {
+  goodsReceipts(where: { organisationId: { eq: $organisationId } }, limit: $limit) {
+    id
+    shipmentId
+    status
+    receivedByUid
+    receivedAt
+    notes
+  }
+}
+

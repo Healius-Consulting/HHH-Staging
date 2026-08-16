@@ -1,4 +1,4 @@
-export type PatientDirectoryFilter = 'all' | 'enquiries' | 'active' | 'on-order';
+export type PatientDirectoryFilter = 'all' | 'active' | 'on-order';
 export type PatientDirectorySort = 'name' | 'status' | 'id';
 
 export interface PatientDirectoryContext {
@@ -27,7 +27,7 @@ export function directoryContextFromHistory(value: unknown): PatientDirectoryCon
   if (!candidate || typeof candidate !== 'object') return null;
   const context = candidate as Partial<PatientDirectoryContext>;
   if (typeof context.search !== 'string') return null;
-  if (!['all', 'enquiries', 'active', 'on-order'].includes(String(context.filter))) return null;
+  if (!['all', 'active', 'on-order'].includes(String(context.filter))) return null;
   if (!['name', 'status', 'id'].includes(String(context.sort))) return null;
   if (typeof context.scrollTop !== 'number' || !Number.isFinite(context.scrollTop) || context.scrollTop < 0) return null;
   if (typeof context.pageScrollY !== 'number' || !Number.isFinite(context.pageScrollY) || context.pageScrollY < 0) return null;

@@ -54,6 +54,8 @@ Start with [`specs/README.md`](specs/README.md). Important documents include:
 - [`specs/production-architecture.md`](specs/production-architecture.md) — production topology, security, tenant isolation, integrations and onboarding.
 - [`specs/separate-form-deployment.md`](specs/separate-form-deployment.md) — separate-domain form, shared API/database, environment variables and deployment outputs.
 - [`specs/firebase-vercel-runbook.md`](specs/firebase-vercel-runbook.md) — the current Firebase/Vercel configuration and go-live checklist.
+- [`specs/sql-connect-backend-rewrite.md`](specs/sql-connect-backend-rewrite.md) — the relational redesign, security boundary and staged Firestore migration plan.
+- [`services/api-sql/README.md`](services/api-sql/README.md) — the isolated API rewrite workspace, implementation plan and route-by-route SQL cutover matrix.
 - [`specs/project-manager-playbook.md`](specs/project-manager-playbook.md) — pre-live and per-pharmacy delivery checklist.
 - [`specs/uk-compliance-register.md`](specs/uk-compliance-register.md) — UK GDPR, ICO and GPhC requirements register.
 - [`specs/Rocky-API-Reference.md`](specs/Rocky-API-Reference.md) — confirmed Rocky endpoints, schemas and corrections to earlier assumptions.

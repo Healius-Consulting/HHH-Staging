@@ -23,6 +23,26 @@
 }
 
 .hhh-focusable:focus-visible { outline: 3px solid var(--hhh-colour-focus); outline-offset: 2px; }
+.hhh-public-button{ display:inline-flex; min-height:44px; align-items:center; justify-content:center; gap:.5rem; padding:.7rem 1rem; border:1px solid transparent; border-radius:var(--hhh-radius-sm); font:inherit; font-weight:700; cursor:pointer; }
+.hhh-public-button--primary{ color:#fff; background:#124f3b; }
+.hhh-public-button--secondary{ color:#124f3b; background:#fff; border-color:#a9c4b6; }
+.hhh-public-button--quiet{ color:#124f3b; background:transparent; }
+.hhh-field-shell{ display:grid; gap:var(--hhh-space-2); color:var(--hhh-colour-ink); font-weight:650; }
+.hhh-field-shell > small{ color:var(--hhh-colour-muted); font-weight:400; }
+.hhh-field-shell > strong{ color:var(--hhh-status-danger-text); }
+.hhh-notice{ padding:var(--hhh-space-3) var(--hhh-space-4); border:1px solid var(--hhh-colour-border); border-radius:var(--hhh-radius-sm); }
+.hhh-notice--success{ color:var(--hhh-status-success-text); background:var(--hhh-status-success-surface); }
+.hhh-notice--warning{ color:var(--hhh-status-warning-text); background:var(--hhh-status-warning-surface); }
+.hhh-notice--danger{ color:var(--hhh-status-danger-text); background:var(--hhh-status-danger-surface); }
+.hhh-status-badge{ display:inline-flex; min-height:24px; align-items:center; padding:0 .55rem; border-radius:999px; font-size:.75rem; font-weight:750; }
+.hhh-status-badge--success{ color:var(--hhh-status-success-text); background:var(--hhh-status-success-surface); }
+.hhh-status-badge--warning{ color:var(--hhh-status-warning-text); background:var(--hhh-status-warning-surface); }
+.hhh-status-badge--danger{ color:var(--hhh-status-danger-text); background:var(--hhh-status-danger-surface); }
+.hhh-status-badge--neutral{ color:var(--hhh-colour-muted); background:var(--hhh-colour-surface-subtle); }
+.hhh-public-card{ padding:var(--hhh-space-6); background:var(--hhh-colour-surface); border:1px solid var(--hhh-colour-border); border-radius:var(--hhh-radius-md); box-shadow:var(--hhh-elevation-1); }
+.hhh-page-container{ width:min(100% - 2rem, 72rem); margin-inline:auto; }
+.hhh-skip-link{ position:fixed; z-index:9999; top:.5rem; left:.5rem; padding:.75rem 1rem; color:#fff; background:#124f3b; transform:translateY(-150%); }
+.hhh-skip-link:focus{ transform:none; }
 
 @media (prefers-reduced-motion: reduce) {
   :root { scroll-behavior: auto; }

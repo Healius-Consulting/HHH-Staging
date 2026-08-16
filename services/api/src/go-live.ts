@@ -17,6 +17,34 @@ export function isExplicitCuraleafTestAccount(organisation: RecordLike) {
     && /^TRAINING-[A-Z0-9_-]+$/i.test(String(organisation.gphcNumber ?? ''));
 }
 
+/**
+ * A real-patient allocation holding workspace can keep an approved Curaleaf
+ * TEST connection for its historic synthetic cases without being presented as
+ * a training tenant. It is excluded from the public directory, but its existing
+ * dedicated link remains a fixed destination. New cases stay HHH-only until an
+ * administrator completes and activates the referral.
+ */
+export function isAllocationHoldingAccount(organisation: RecordLike) {
+  return organisation.workspaceClassification === 'allocation_holding'
+    && isExplicitCuraleafTestAccount(organisation);
+}
+
+export function canAcceptPublicIntake(organisation: RecordLike) {
+  const status = String(organisation.status ?? '');
+  return isExplicitCuraleafTestAccount(organisation)
+    ? status === 'live'
+    : status === 'intake_live' || status === 'live';
+}
+
+export function canAutoActivateIntake(organisation: RecordLike) {
+  if (isExplicitCuraleafTestAccount(organisation)) return false;
+  const status = String(organisation.status ?? '');
+  if (status === 'onboarding') return true;
+  if (status !== 'paused') return false;
+  return organisation.gdprComplianceFlag === true
+    || ['go_live_gate_audit_failed', 'intake_gdpr_gate_audit_failed'].includes(String(organisation.pausedReason ?? ''));
+}
+
 export function goLiveGateState(
   organisation: RecordLike,
   companyGdprPassed: boolean,
@@ -36,6 +64,7 @@ export function goLiveGateState(
 
   return {
     testAccount,
+    allocationHolding: isAllocationHoldingAccount(organisation),
     gdprPassed: testAccount || companyGdprPassed,
     gdprExempt: testAccount,
     curaleafPassed,

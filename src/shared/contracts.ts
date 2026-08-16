@@ -31,6 +31,7 @@ export type EligibilitySubmissionRecord = Omit<EligibilitySubmissionInput, 'refe
   id: string;
   organisationId: string;
   pharmacyName: string;
+  trainingSubmission?: boolean;
   status: 'New' | 'Under HHH review' | 'Approved' | 'Declined' | 'Rejected';
   reviewedAt: string | null;
   reviewerDisplay: string | null;
@@ -67,6 +68,94 @@ export interface EligibilitySubmissionReceipt {
   organisationId: string;
   pharmacyName: string;
   submittedAt: string;
+}
+
+export interface PublicDirectoryResult {
+  id: string;
+  tradingName: string;
+  gphcNumber: string;
+  addressSummary: string;
+  approximateMiles: number;
+  deliveryCapability: 'none' | 'nationwide' | 'postcode_areas' | 'radius_miles';
+  collectionAvailable: boolean;
+  deliverySummary: string | null;
+  intakeAvailability: 'available' | 'limited';
+  /** Server-projected relative position for the privacy-safe result map. Never coordinates. */
+  mapPosition: { xPercent: number; yPercent: number };
+}
+
+export interface PostcodeSearchReceipt {
+  searchId: string;
+  expiresAt: string;
+  status: 'matched' | 'no_match' | 'not_found' | 'provider_unavailable';
+  postcode: string;
+  mapOrigin: { xPercent: number; yPercent: number };
+  results: PublicDirectoryResult[];
+}
+
+export interface ReferralTokenResolution {
+  type: 'legacy_pharmacy_qr' | 'future_pharmacy_qr';
+  intakeVersion: 'v1' | 'v2';
+  pharmacy: PublicPharmacy;
+}
+
+export interface V2IntakeAnswers {
+  firstName: string;
+  surname: string;
+  dob: string;
+  mobile: string;
+  email: string;
+  postcode: string;
+  conditions: string[];
+  primaryCondition: string;
+  tried2: boolean;
+  psychExclusion: boolean;
+  consentReferral: true;
+  consentShare: true;
+  marketing: boolean;
+  heardAbout: string;
+  consentVersion: 'general-public-v2.0' | 'pharmacy-qr-v2.0' | 'general-public-v2.1' | 'pharmacy-qr-v2.1';
+  idempotencyKey: string;
+}
+
+export type V2IntakeInput = V2IntakeAnswers & (
+  | { type: 'general_hhh_website'; searchId: string; selectedDirectoryProfileId: string | null }
+  | { type: 'future_pharmacy_qr'; referralToken: string }
+);
+
+export interface V2IntakeReceipt {
+  caseReference: string;
+  submittedAt: string;
+  assignmentStatus: 'awaiting_hhh_allocation' | 'provisional';
+  provisionalPharmacyName: string | null;
+  warning: 'SELECTED_PHARMACY_UNAVAILABLE' | null;
+}
+
+export interface V2EligibilityQueueItem {
+  id: string;
+  caseReference: string;
+  patientDisplayName: string;
+  submittedAt: string;
+  displayStatus: string;
+  assignmentStatus: string;
+  pharmacyReviewStatus: string;
+  outcomeStatus: string;
+  version: number;
+  legacy: boolean;
+  sourceType?: string;
+  sourceOrganisationId?: string | null;
+  assignedOrganisationId?: string | null;
+  firstName?: string;
+  surname?: string;
+  mobile?: string;
+  email?: string;
+  postcode?: string;
+  followUpStatus?: string;
+  nextFollowUpAt?: string | null;
+  locationPreferenceOrganisationId?: string | null;
+  locationPreferenceDistanceMetres?: number | null;
+  pharmacyActivated?: boolean;
+  destinationLocked?: boolean;
 }
 
 export interface CuraleafValidationCheck {
@@ -517,8 +606,10 @@ export interface GoLiveReadiness {
   organisationId: string;
   companyId: string | null;
   testAccount?: boolean;
+  allocationHolding?: boolean;
+  intakeReady: boolean;
   ready: boolean;
-  status: 'onboarding' | 'live' | 'paused';
+  status: 'onboarding' | 'intake_live' | 'live' | 'paused';
   gates: {
     gdprEvidence: {
       passed: boolean;
@@ -760,7 +851,7 @@ export interface UpdateOrganisationInput {
   primaryColour?: string;
   logoText?: string;
   websiteDomains?: string[];
-  status?: 'onboarding' | 'live' | 'paused';
+  status?: 'onboarding' | 'intake_live' | 'live' | 'paused';
   platformFeeMonthly?: number | null;
   portalName?: string;
   modules?: OrganisationModules;
@@ -830,11 +921,12 @@ export interface PharmacyOverview {
   organisation: {
     id: string;
     tradingName: string;
-    status: 'onboarding' | 'live' | 'paused';
+    status: 'onboarding' | 'intake_live' | 'live' | 'paused';
     trainingMode: boolean;
+    allocationHoldingMode: boolean;
   };
   summary: {
-    patientReview: number;
+    activePatients: number;
     awaitingPayment: number;
     supplierFulfilment: number;
     readyForCollection: number;
@@ -842,10 +934,10 @@ export interface PharmacyOverview {
   };
   priorityItems: Array<{
     id: string;
-    kind: 'eligibility' | 'payment' | 'supplier' | 'collection' | 'repeat' | 'cancellation';
+    kind: 'payment' | 'supplier' | 'collection' | 'repeat' | 'cancellation';
     ageDays: number;
     maskedPatientLabel: string;
-    recordTarget: { kind: 'patient' | 'order' | 'submission'; id: string };
+    recordTarget: { kind: 'patient' | 'order'; id: string };
     summary: string;
   }>;
   recentSessions: Array<{
@@ -856,7 +948,7 @@ export interface PharmacyOverview {
     status: string;
   }>;
   handover: {
-    onboardingWaiting: number;
+    activePatients: number;
     activePaymentLinks: number;
     supplierOrdersInProgress: number;
     agedCollections: number;
@@ -865,6 +957,64 @@ export interface PharmacyOverview {
     integration: 'curaleaf' | 'worldpay';
     state: 'connected' | 'degraded' | 'unavailable' | 'not-configured';
     checkedAt: string | null;
+  }>;
+}
+
+export interface PharmacyPrescriptionFinanceReport {
+  organisationId: string;
+  currency: 'GBP';
+  range: { from: string | null; to: string | null };
+  periodCounts: { '30': number; '90': number; '365': number; all: number };
+  totals: {
+    prescriptionCount: number;
+    paidPrescriptionCount: number;
+    pendingPrescriptionCount: number;
+    refundedPrescriptionCount: number;
+    refundedPatientPence: number;
+    refundPendingCount: number;
+    refundPendingPatientPence: number;
+    patientRevenuePence: number;
+    productRevenuePence: number;
+    dispensingFeesPence: number;
+    wholesaleKnownForCount: number;
+    wholesalePendingForCount: number;
+    wholesaleProductPence: number;
+    shippingPence: number;
+    wholesalePence: number;
+    productMarginPence: number;
+    totalContributionPence: number;
+  };
+  rows: Array<{
+    orderId: string;
+    patientId: string;
+    patientName: string;
+    createdAt: string;
+    updatedAt: string;
+    recognisedAt: string | null;
+    refundedAt: string | null;
+    financialEventAt: string;
+    paymentStatus: string;
+    fulfilmentStatus: string;
+    recognised: boolean;
+    refunded: boolean;
+    refundPending: boolean;
+    productRevenuePence: number;
+    dispensingFeePence: number;
+    patientRevenuePence: number;
+    wholesaleProductPence: number | null;
+    shippingPence: number | null;
+    wholesalePence: number | null;
+    productMarginPence: number | null;
+    totalContributionPence: number | null;
+    wholesaleComplete: boolean;
+    lines: Array<{
+      packId: string;
+      name: string;
+      quantity: number;
+      unitPricePence: number;
+      wholesaleUnitPence: number | null;
+      productMarginPence: number | null;
+    }>;
   }>;
 }
 
@@ -992,7 +1142,7 @@ export interface PortalOrganisation {
   address: string;
   websiteDomains?: string[];
   primaryColour: string;
-  status: 'onboarding' | 'live' | 'paused';
+  status: 'onboarding' | 'intake_live' | 'live' | 'paused';
   referralToken?: string;
   platformFeeMonthly?: number | null;
   portalName?: string;
@@ -1005,6 +1155,7 @@ export interface PortalOrganisation {
   curaleafLiveSecretStoredAt?: string | null;
   testAccount?: boolean;
   gdprExempt?: boolean;
+  workspaceClassification?: 'standard' | 'training' | 'allocation_holding';
 }
 
 export interface OrganisationLogoUploadTarget {

@@ -79,7 +79,7 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
           <h2>{organisation.brand.portalName}</h2>
           <p>{organisation.name} · GPhC {organisation.gphcNumber}</p>
         </div>
-        <span className={`pill ${organisation.status === 'live' ? 'pill-green' : 'pill-amber'}`}>{organisation.status}</span>
+        <span className={`pill ${organisation.status === 'live' ? 'pill-green' : organisation.status === 'intake_live' ? 'pill-info' : 'pill-amber'}`}>{organisation.status.replace('_', ' ')}</span>
       </section>
 
       <div className="filter-grid settings-tabs" role="group" aria-label="Settings views">
@@ -180,7 +180,7 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
               </div>
               <div className="settings-meta-grid">
                 <div><span>Modules enabled</span><strong>{enabledModules} of {Object.keys(MODULE_LABELS).length}</strong></div>
-                <div><span>Account status</span><strong className="text-capitalize">{organisation.status}</strong></div>
+                <div><span>Account status</span><strong className="text-capitalize">{organisation.status.replace('_', ' ')}</strong></div>
               </div>
               <p className="settings-copy">HHH administrators can review connection status and go-live evidence from the pharmacy readiness screen.</p>
             </section>

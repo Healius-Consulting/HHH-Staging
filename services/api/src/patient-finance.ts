@@ -63,23 +63,40 @@ async function existingPatientId(submission: DocumentData) {
 
 export async function completeReferral(submissionId: string, actorUid: string, notes: string | null) {
   const submissionRef = firestore.collection('eligibilitySubmissions').doc(submissionId);
-  const initial = await submissionRef.get();
+  const overlayRef = firestore.collection('eligibilityAllocationOverlays').doc(submissionId);
+  const [initial, initialOverlay] = await Promise.all([submissionRef.get(), overlayRef.get()]);
   if (!initial.exists) throw new HttpError(404, 'Eligibility submission not found.', 'NOT_FOUND');
   const submission = initial.data()!;
-  const existingId = await existingPatientId(submission);
-  const organisationId = String(submission.organisationId);
+  const isV2 = submission.schemaVersion === 2 || submission.intakeVersion === 'v2';
+  const initialWorkflow = isV2 ? submission : (initialOverlay.data() ?? submission);
+  const organisationId = String(isV2 ? submission.assignedOrganisationId : (initialOverlay.data()?.assignedOrganisationId ?? submission.organisationId));
+  if (!organisationId) throw new HttpError(409, 'HHH must confirm a pharmacy assignment first.', 'ASSIGNMENT_REQUIRED');
+  if (isV2 && (
+    initialWorkflow.assignmentStatus !== 'confirmed'
+    || initialWorkflow.followUpStatus !== 'completed'
+  )) throw new HttpError(409, 'HHH must complete and activate the pharmacy referral first.', 'ASSIGNMENT_NOT_CONFIRMED');
+  const existingId = await existingPatientId({ ...submission, organisationId });
   const identityId = patientIdentityId(organisationId, submission.email, submission.dob);
   const identityRef = firestore.collection('patientIdentities').doc(identityId);
   const defaultPatientRef = firestore.collection('patients').doc(stableId('referral-patient', identityId));
   const completedAt = nowIso();
 
   const result = await firestore.runTransaction(async transaction => {
-    const [freshSubmission, identitySnapshot] = await Promise.all([
+    const [freshSubmission, freshOverlay, identitySnapshot] = await Promise.all([
       transaction.get(submissionRef),
+      transaction.get(overlayRef),
       transaction.get(identityRef),
     ]);
     if (!freshSubmission.exists) throw new HttpError(404, 'Eligibility submission not found.', 'NOT_FOUND');
     const current = freshSubmission.data()!;
+    const currentIsV2 = current.schemaVersion === 2 || current.intakeVersion === 'v2';
+    const currentWorkflow = currentIsV2 ? current : (freshOverlay.data() ?? current);
+    const currentOrganisationId = String(currentIsV2 ? current.assignedOrganisationId : (freshOverlay.data()?.assignedOrganisationId ?? current.organisationId));
+    if (currentOrganisationId !== organisationId) throw new HttpError(409, 'This case was reassigned. Refresh before continuing.', 'VERSION_CONFLICT');
+    if (currentIsV2 && (
+      currentWorkflow.assignmentStatus !== 'confirmed'
+      || currentWorkflow.followUpStatus !== 'completed'
+    )) throw new HttpError(409, 'HHH must complete and activate the pharmacy referral first.', 'ASSIGNMENT_NOT_CONFIRMED');
     if (current.recordsCheck?.status !== 'completed') {
       throw new HttpError(409, 'Complete the call and records check before recording the referral.', 'RECORDS_CHECK_REQUIRED');
     }
@@ -139,6 +156,13 @@ export async function completeReferral(submissionId: string, actorUid: string, n
     }, { merge: true });
     transaction.set(submissionRef, {
       status: 'approved',
+      outcomeStatus: 'completed',
+      programmeOnboardingDecision: 'approved',
+      programmeOnboardingDecidedAt: effectiveCompletedAt,
+      programmeOnboardingDecidedBy: actorUid,
+      pharmacyAccessStatus: 'activated',
+      pharmacyActivatedAt: effectiveCompletedAt,
+      pharmacyActivatedBy: actorUid,
       patientId,
       referral: {
         status: 'completed',

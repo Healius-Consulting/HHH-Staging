@@ -1,0 +1,1000 @@
+# HHH SQL Connect application schema.
+#
+# Security boundary:
+# - This file defines storage and relational integrity only.
+# - Client access is exposed exclusively by reviewed connector operations.
+# - With no connector deployed, operations default to NO_ACCESS.
+# - Every tenant-owned operation must derive organisationId from auth.token,
+#   never from a caller-controlled variable.
+# - Organisations and clinical/financial records are soft-deleted. Required
+#   relations therefore remain intact and are never exposed through delete ops.
+
+enum StaffRole {
+  HHH_ADMIN
+  PHARMACY_STAFF
+}
+
+enum StaffStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+  REMOVED
+}
+
+enum OrganisationStatus {
+  ONBOARDING
+  INTAKE_LIVE
+  LIVE
+  PAUSED
+}
+
+enum WorkspaceClassification {
+  STANDARD
+  TRAINING
+  ALLOCATION_HOLDING
+}
+
+enum DirectoryLifecycle {
+  DRAFT
+  READY_FOR_REVIEW
+  PUBLISHED
+  PAUSED
+  UNPUBLISHED
+}
+
+enum IntakeState {
+  AVAILABLE
+  LIMITED
+  FULL
+}
+
+enum DeliveryCapability {
+  NONE
+  NATIONWIDE
+  POSTCODE_AREAS
+  RADIUS_MILES
+}
+
+enum ReferralSourceType {
+  GENERAL_HHH_WEBSITE
+  PHARMACY_QR
+  LEGACY_PHARMACY_QR
+}
+
+enum AssignmentStatus {
+  AWAITING_HHH_ALLOCATION
+  PROVISIONAL
+  REASSIGNMENT_PENDING
+  CONFIRMED
+}
+
+enum AccessStatus {
+  WITHHELD
+  ACTIVATED
+  REVOKED
+}
+
+enum FollowUpStatus {
+  NOT_STARTED
+  DUE
+  ATTEMPTED
+  IN_PROGRESS
+  COMPLETED
+  UNABLE_TO_CONTACT
+}
+
+enum ReviewStatus {
+  NOT_OPENED
+  OPENED
+  REVIEWING
+  ELIGIBLE
+  INELIGIBLE
+  NEEDS_INFORMATION
+  COMPLETED
+}
+
+enum OutcomeStatus {
+  OPEN
+  COMPLETED
+  DECLINED
+  WITHDRAWN
+}
+
+enum OnboardingDecision {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+enum PatientStatus {
+  REFERRED
+  ACTIVE
+  INACTIVE
+}
+
+enum FileStatus {
+  PENDING_UPLOAD
+  UPLOADED
+  QUARANTINED
+  REJECTED
+  RETAINED
+  DELETED
+}
+
+enum PrescriptionStatus {
+  DRAFT
+  VERIFIED
+  AWAITING_PAYMENT
+  PAID
+  PENDING_PLACEMENT
+  PLACED
+  HELD_FOR_RENEWAL
+  CANCELLED
+  EXPIRED
+}
+
+enum OrderStatus {
+  DRAFT
+  SUBMITTED
+  PROCESSING
+  COMPLETED
+  CANCELLED
+  EXCEPTION
+}
+
+enum DraftStatus {
+  DRAFT
+  PROMOTED
+  ABANDONED
+}
+
+enum PaymentRoute {
+  MANUAL
+  WORLDPAY
+}
+
+enum PaymentStatus {
+  NONE
+  PENDING
+  AWAITING_MANUAL_PAYMENT
+  PAID
+  FAILED
+  CANCELLED
+  EXPIRED
+  REFUND_REQUIRED
+  REFUNDED
+  RECONCILIATION_REQUIRED
+}
+
+enum FulfilmentStatus {
+  SUPPLIER_PENDING
+  SUPPLIER_PROCESSING
+  SUPPLIER_ALLOCATED
+  PARTIALLY_DISPATCHED_TO_PHARMACY
+  DISPATCHED_TO_PHARMACY
+  PARTIALLY_RECEIVED
+  RECEIVED
+  READY_FOR_COLLECTION
+  COLLECTED
+  EXCEPTION
+}
+
+enum PlacementState {
+  PENDING_PLACEMENT
+  HELD_PRICE
+  HELD_STOCK
+  CANCELLATION_PENDING_REFUND
+  PLACED
+  HELD_FOR_RENEWAL
+  CANCELLED_REFUNDED
+}
+
+enum IntegrationName {
+  CURALEAF
+  WORLDPAY
+}
+
+enum IntegrationEnvironment {
+  TEST
+  PRODUCTION
+}
+
+enum IntegrationStatus {
+  DISCONNECTED
+  PENDING_VALIDATION
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+enum OperationStatus {
+  PENDING
+  IN_PROGRESS
+  SUCCEEDED
+  FAILED
+  ABANDONED
+  RECONCILIATION_REQUIRED
+}
+
+enum ShipmentStatus {
+  PENDING
+  DISPATCHED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  READY_FOR_COLLECTION
+  COLLECTED
+  EXCEPTION
+}
+
+enum ReceiptStatus {
+  COMPLETE
+  PARTIAL
+  EXCEPTION
+}
+
+enum ReceiptIssue {
+  NONE
+  SHORT
+  DAMAGED
+  INCORRECT
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  INTERNAL
+}
+
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum RefundStatus {
+  PENDING_CONFIRMATION
+  COMPLETED
+  FAILED
+}
+
+enum FeeEventKind {
+  NEW_REFERRAL
+  ANNUAL_PATIENT
+  DISPENSE
+}
+
+type Company @table {
+  id: UUID! @default(expr: "uuidV4()")
+  legalName: String!
+  companyNumber: String! @unique
+  registeredAddress: String!
+  ownerName: String!
+  ownerEmail: String!
+  ownerPhone: String
+  superintendentName: String!
+  superintendentGphcNumber: String!
+  gdprConfirmed: Boolean! @default(value: false)
+  gdprEvidenceMethod: String
+  gdprEvidenceStoragePath: String
+  gdprConfirmedAt: Timestamp
+  gdprConfirmedByUid: String
+  complianceFlag: Boolean! @default(value: true)
+  notes: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  archivedAt: Timestamp
+}
+
+type Organisation @table {
+  id: UUID! @default(expr: "uuidV4()")
+  company: Company @ref(fields: "companyId")
+  companyId: UUID @index
+  name: String!
+  tradingName: String!
+  gphcNumber: String! @unique
+  superintendentName: String!
+  mainContactName: String
+  mainContactPhone: String
+  mainContactEmail: String
+  address: String!
+  primaryColour: String!
+  logoText: String!
+  status: OrganisationStatus! @default(value: ONBOARDING)
+  classification: WorkspaceClassification! @default(value: STANDARD)
+  platformFeeMonthlyPence: Int64
+  portalName: String!
+  intakeEnabled: Boolean! @default(value: false)
+  prescriptionEnabled: Boolean! @default(value: false)
+  paymentsEnabled: Boolean! @default(value: false)
+  supplierOrdersEnabled: Boolean! @default(value: false)
+  patientsEnabled: Boolean! @default(value: false)
+  resourcesEnabled: Boolean! @default(value: false)
+  worldpayEnabled: Boolean! @default(value: false)
+  defaultPaymentRoute: PaymentRoute! @default(value: MANUAL)
+  autoPlacementEnabled: Boolean! @default(value: false)
+  gdprComplianceFlag: Boolean! @default(value: true)
+  pausedReason: String
+  pausedAt: Timestamp
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  archivedAt: Timestamp
+}
+
+type OrganisationDomain @table @unique(fields: ["hostname"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  hostname: String!
+  verifiedAt: Timestamp
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type StaffUser @table(key: "uid") {
+  uid: String!
+  organisation: Organisation @ref(fields: "organisationId")
+  organisationId: UUID @index
+  email: String! @unique
+  displayName: String!
+  role: StaffRole!
+  status: StaffStatus! @default(value: INVITED)
+  disabled: Boolean! @default(value: false)
+  preferences: Any
+  invitedAt: Timestamp
+  activatedAt: Timestamp
+  lastSignedInAt: Timestamp
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type StaffSession @table(key: "sessionHash") {
+  sessionHash: String!
+  staff: StaffUser! @ref(fields: "staffUid", references: "uid")
+  staffUid: String! @index
+  organisation: Organisation @ref(fields: "organisationId")
+  organisationId: UUID @index
+  surface: String!
+  role: StaffRole!
+  userAgentHash: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  lastActivityAt: Timestamp!
+  idleExpiresAt: Timestamp!
+  absoluteExpiresAt: Timestamp!
+  revokedAt: Timestamp
+  revokeReason: String
+}
+
+type AuditLog @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation @ref(fields: "organisationId")
+  organisationId: UUID @index
+  actor: StaffUser @ref(fields: "actorUid", references: "uid")
+  actorUid: String @index
+  actorRole: StaffRole
+  event: String! @index
+  recordType: String
+  recordId: String
+  requestId: String
+  sessionHashPrefix: String
+  ipHash: String
+  surface: String
+  details: Any
+  occurredAt: Timestamp! @default(expr: "request.time") @index
+}
+
+type SetupTask @table @unique(fields: ["organisationId", "taskCode"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  taskCode: String!
+  required: Boolean! @default(value: true)
+  completed: Boolean! @default(value: false)
+  evidence: String
+  completedBy: StaffUser @ref(fields: "completedByUid", references: "uid")
+  completedByUid: String @index
+  completedAt: Timestamp
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type PharmacyDirectoryProfile @table(key: "organisation") {
+  organisation: Organisation!
+  tradingName: String!
+  gphcNumber: String!
+  addressLine1: String!
+  addressLine2: String
+  locality: String!
+  postcode: String!
+  publicEmail: String!
+  publicPhone: String
+  deliveryCapability: DeliveryCapability! @default(value: NONE)
+  deliveryPostcodeAreas: [String!]
+  deliveryRadiusMiles: Float
+  deliverySummary: String
+  collectionAvailable: Boolean! @default(value: true)
+  serviceTags: [String!]
+  restrictions: [String!]
+  intakeState: IntakeState! @default(value: AVAILABLE)
+  weeklyCapacity: Int
+  acceptingNewPatients: Boolean! @default(value: false)
+  latitude: Float
+  longitude: Float
+  lifecycle: DirectoryLifecycle! @default(value: DRAFT)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type ReferralToken @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  tokenHash: String! @unique
+  intakeVersion: String!
+  createdBy: StaffUser @ref(fields: "createdByUid", references: "uid")
+  createdByUid: String @index
+  createdAt: Timestamp! @default(expr: "request.time")
+  revokedAt: Timestamp
+}
+
+type Condition @table(key: "code") {
+  code: String!
+  label: String!
+  active: Boolean! @default(value: true)
+  displayOrder: Int!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type EligibilitySubmission @table {
+  id: UUID! @default(expr: "uuidV4()")
+  sourceOrganisation: Organisation @ref(fields: "sourceOrganisationId")
+  sourceOrganisationId: UUID @index
+  assignedOrganisation: Organisation @ref(fields: "assignedOrganisationId")
+  assignedOrganisationId: UUID @index
+  sourceType: ReferralSourceType!
+  firstName: String!
+  surname: String!
+  dob: Date!
+  mobile: String!
+  email: String!
+  emailHash: String! @index
+  postcode: String!
+  triedTwoTreatments: Boolean!
+  psychiatricExclusion: Boolean!
+  heardAbout: String
+  idempotencyKeyHash: String! @unique
+  assignmentStatus: AssignmentStatus! @default(value: AWAITING_HHH_ALLOCATION)
+  assignmentVersion: Int! @default(value: 0)
+  pharmacyAccessStatus: AccessStatus! @default(value: WITHHELD)
+  followUpStatus: FollowUpStatus! @default(value: NOT_STARTED)
+  pharmacyReviewStatus: ReviewStatus! @default(value: NOT_OPENED)
+  outcomeStatus: OutcomeStatus! @default(value: OPEN)
+  onboardingDecision: OnboardingDecision! @default(value: PENDING)
+  assignmentReason: String
+  privateAllocationNote: String
+  privateOnboardingNote: String
+  consentVersion: String!
+  referralConsent: Boolean!
+  dataSharingConsent: Boolean!
+  marketingConsent: Boolean! @default(value: false)
+  privacyNoticeVersion: String!
+  submittedAt: Timestamp! @default(expr: "request.time")
+  allocationCompletedAt: Timestamp
+  operationalStartedAt: Timestamp
+  reviewedAt: Timestamp
+  completedAt: Timestamp
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type EligibilityCondition @table(key: ["submission", "condition"]) {
+  submission: EligibilitySubmission!
+  condition: Condition!
+  primary: Boolean! @default(value: false)
+}
+
+type EligibilityAssignmentEvent @table {
+  id: UUID! @default(expr: "uuidV4()")
+  submission: EligibilitySubmission! @ref(fields: "submissionId")
+  submissionId: UUID! @index
+  previousOrganisation: Organisation @ref(fields: "previousOrganisationId")
+  previousOrganisationId: UUID @index
+  newOrganisation: Organisation @ref(fields: "newOrganisationId")
+  newOrganisationId: UUID @index
+  action: String!
+  reasonCode: String!
+  actor: StaffUser! @ref(fields: "actorUid", references: "uid")
+  actorUid: String! @index
+  previousAssignmentVersion: Int!
+  newAssignmentVersion: Int!
+  pharmacyReviewStarted: Boolean! @default(value: false)
+  notePresent: Boolean! @default(value: false)
+  occurredAt: Timestamp! @default(expr: "request.time")
+}
+
+type Patient @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  sourceSubmission: EligibilitySubmission @unique @ref(fields: "sourceSubmissionId")
+  sourceSubmissionId: UUID
+  firstName: String!
+  surname: String!
+  dob: Date!
+  email: String!
+  mobile: String!
+  address: String
+  postcode: String!
+  status: PatientStatus! @default(value: REFERRED)
+  activatedAt: Timestamp
+  statusChangedAt: Timestamp
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  archivedAt: Timestamp
+}
+
+type PatientIdentity @table @unique(fields: ["organisationId", "emailHash", "dob"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  patient: Patient! @unique @ref(fields: "patientId")
+  patientId: UUID!
+  emailHash: String!
+  dob: Date!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type PatientCondition @table(key: ["patient", "condition"]) {
+  patient: Patient!
+  condition: Condition!
+  primary: Boolean! @default(value: false)
+}
+
+type Prescriber @table {
+  id: UUID! @default(expr: "uuidV4()")
+  name: String!
+  initials: String!
+  pin: String! @unique
+  gmcNumber: Int64 @unique
+  gphcNumber: String @unique
+  active: Boolean! @default(value: true)
+  supplierIdentifiers: Any
+  createdBy: StaffUser @ref(fields: "createdByUid", references: "uid")
+  createdByUid: String @index
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type PrescriptionFile @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  patient: Patient @ref(fields: "patientId")
+  patientId: UUID @index
+  storagePath: String! @unique
+  originalFilename: String!
+  contentType: String!
+  sizeBytes: Int64!
+  sha256: String
+  status: FileStatus! @default(value: PENDING_UPLOAD)
+  uploadedBy: StaffUser @ref(fields: "uploadedByUid", references: "uid")
+  uploadedByUid: String @index
+  uploadedAt: Timestamp
+  verifiedAt: Timestamp
+  retentionUntil: Date
+  deletedAt: Timestamp
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type Prescription @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  patient: Patient! @ref(fields: "patientId")
+  patientId: UUID! @index
+  prescriber: Prescriber @ref(fields: "prescriberId")
+  prescriberId: UUID @index
+  file: PrescriptionFile! @unique @ref(fields: "fileId")
+  fileId: UUID!
+  supplierPrescriptionId: String @unique
+  serialNumber: String! @unique
+  issueDate: Date!
+  expiryDate: Date!
+  status: PrescriptionStatus! @default(value: DRAFT)
+  patientNameSnapshot: String!
+  patientDobSnapshot: Date!
+  prescriberSnapshot: Any!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  verifiedAt: Timestamp
+  cancelledAt: Timestamp
+}
+
+type PrescriptionLine @table @unique(fields: ["prescriptionId", "formulaId", "packId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  prescription: Prescription! @ref(fields: "prescriptionId")
+  prescriptionId: UUID! @index
+  formulaId: String!
+  formulaName: String
+  unit: String
+  unitsNeededCount: Int!
+  packId: String!
+  quantity: Int!
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type OrderDraft @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  patient: Patient @ref(fields: "patientId")
+  patientId: UUID @index
+  status: DraftStatus! @default(value: DRAFT)
+  paymentStatus: PaymentStatus! @default(value: NONE)
+  payload: Any!
+  createdBy: StaffUser! @ref(fields: "createdByUid", references: "uid")
+  createdByUid: String! @index
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  promotedAt: Timestamp
+}
+
+type Order @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  patient: Patient! @ref(fields: "patientId")
+  patientId: UUID! @index
+  draft: OrderDraft @unique @ref(fields: "draftId")
+  draftId: UUID
+  redoOf: Order @ref(fields: "redoOfId")
+  redoOfId: UUID @index
+  orderNumber: String @unique
+  status: OrderStatus! @default(value: SUBMITTED)
+  paymentStatus: PaymentStatus! @default(value: PENDING)
+  fulfilmentStatus: FulfilmentStatus! @default(value: SUPPLIER_PENDING)
+  paymentRoute: PaymentRoute!
+  currency: String! @default(value: "GBP")
+  medicineTotalPence: Int64! @default(value: 0)
+  dispensingFeePence: Int64! @default(value: 0)
+  deliveryPence: Int64! @default(value: 0)
+  taxPence: Int64! @default(value: 0)
+  totalPence: Int64! @default(value: 0)
+  quoteSnapshot: Any
+  createdBy: StaffUser! @ref(fields: "createdByUid", references: "uid")
+  createdByUid: String! @index
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  submittedAt: Timestamp
+  paidAt: Timestamp
+  collectedAt: Timestamp
+  cancelledAt: Timestamp
+}
+
+type OrderPrescription @table(key: ["order", "prescription"]) {
+  order: Order!
+  prescription: Prescription!
+  placementState: PlacementState! @default(value: PENDING_PLACEMENT)
+  supplierPurchaseOrderId: String
+  placedAt: Timestamp
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type OrderLine @table {
+  id: UUID! @default(expr: "uuidV4()")
+  order: Order! @ref(fields: "orderId")
+  orderId: UUID! @index
+  prescription: Prescription @ref(fields: "prescriptionId")
+  prescriptionId: UUID @index
+  formulaId: String
+  formulaName: String
+  packId: String!
+  quantity: Int!
+  fixedPatientPricePence: Int64!
+  wholesalePackPricePence: Int64
+  allocatedDispensingFeePence: Int64! @default(value: 0)
+  lineMedicineRevenuePence: Int64! @default(value: 0)
+  placementState: PlacementState! @default(value: PENDING_PLACEMENT)
+  rejectionReason: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type PlacementEvent @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  order: Order! @ref(fields: "orderId")
+  orderId: UUID! @index
+  orderLine: OrderLine @ref(fields: "orderLineId")
+  orderLineId: UUID @index
+  fromState: PlacementState
+  toState: PlacementState!
+  reason: String
+  externalReference: String
+  actor: StaffUser @ref(fields: "actorUid", references: "uid")
+  actorUid: String @index
+  occurredAt: Timestamp! @default(expr: "request.time")
+}
+
+type Payment @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  order: Order! @ref(fields: "orderId")
+  orderId: UUID! @index
+  patient: Patient! @ref(fields: "patientId")
+  patientId: UUID! @index
+  route: PaymentRoute!
+  status: PaymentStatus! @default(value: PENDING) @index
+  amountPence: Int64!
+  currency: String! @default(value: "GBP")
+  transactionReference: String @unique
+  providerPaymentId: String @unique
+  receiptHash: String @unique
+  hostedPaymentUrl: String
+  linkExpiresAt: Timestamp
+  manualTender: String
+  manualReference: String
+  providerPayload: Any
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  paidAt: Timestamp
+  failedAt: Timestamp
+  reconciledAt: Timestamp
+}
+
+type Refund @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  order: Order! @ref(fields: "orderId")
+  orderId: UUID! @index
+  payment: Payment! @ref(fields: "paymentId")
+  paymentId: UUID! @index
+  orderLine: OrderLine @ref(fields: "orderLineId")
+  orderLineId: UUID @index
+  amountPence: Int64!
+  currency: String! @default(value: "GBP")
+  cause: String!
+  route: PaymentRoute!
+  status: RefundStatus! @default(value: PENDING_CONFIRMATION)
+  idempotencyKey: String! @unique
+  externalReference: String
+  confirmedBy: StaffUser @ref(fields: "confirmedByUid", references: "uid")
+  confirmedByUid: String @index
+  createdAt: Timestamp! @default(expr: "request.time")
+  confirmedAt: Timestamp
+}
+
+type IntegrationConnection @table @unique(fields: ["organisationId", "integration", "environment"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  integration: IntegrationName!
+  environment: IntegrationEnvironment!
+  status: IntegrationStatus! @default(value: DISCONNECTED)
+  secretResourceName: String
+  externalCustomerId: String
+  maskedCredential: String
+  validatedAt: Timestamp
+  lastSuccessfulAt: Timestamp
+  lastErrorCode: String
+  leaseUntil: Timestamp
+  consecutiveFailures: Int @default(value: 0)
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type IntegrationOperation @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  connection: IntegrationConnection! @ref(fields: "connectionId")
+  connectionId: UUID! @index
+  order: Order @ref(fields: "orderId")
+  orderId: UUID @index
+  prescription: Prescription @ref(fields: "prescriptionId")
+  prescriptionId: UUID @index
+  operationType: String!
+  idempotencyKey: String! @unique
+  status: OperationStatus! @default(value: PENDING) @index
+  attemptCount: Int! @default(value: 0)
+  customerReference: String
+  supplierPurchaseOrderId: String
+  requestPayload: Any
+  responsePayload: Any
+  lastErrorCode: String
+  nextAttemptAt: Timestamp
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  completedAt: Timestamp
+}
+
+type IntegrationWebhookEvent @table(key: "eventKey") {
+  eventKey: String!
+  integration: IntegrationName!
+  organisation: Organisation @ref(fields: "organisationId")
+  organisationId: UUID @index
+  transactionReference: String
+  payloadHash: String!
+  status: OperationStatus! @default(value: PENDING)
+  receivedAt: Timestamp! @default(expr: "request.time")
+  processedAt: Timestamp
+  failureCode: String
+}
+
+type Shipment @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  order: Order! @ref(fields: "orderId")
+  orderId: UUID! @index
+  supplierPurchaseOrderId: String!
+  supplierShipmentId: String @unique
+  supplierCustomerReference: String
+  status: ShipmentStatus! @default(value: PENDING)
+  dispatchedAt: Timestamp
+  expectedAt: Timestamp
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type ShipmentLine @table @unique(fields: ["shipmentId", "orderLineId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  shipment: Shipment! @ref(fields: "shipmentId")
+  shipmentId: UUID! @index
+  orderLine: OrderLine! @ref(fields: "orderLineId")
+  orderLineId: UUID! @index
+  productId: String!
+  expectedQuantity: Int!
+  dispatchedQuantity: Int!
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type GoodsReceipt @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  shipment: Shipment! @ref(fields: "shipmentId")
+  shipmentId: UUID! @index
+  status: ReceiptStatus!
+  receivedBy: StaffUser! @ref(fields: "receivedByUid", references: "uid")
+  receivedByUid: String! @index
+  notes: String
+  version: Int! @default(value: 1)
+  receivedAt: Timestamp! @default(expr: "request.time")
+}
+
+type GoodsReceiptLine @table @unique(fields: ["receiptId", "shipmentLineId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  receipt: GoodsReceipt! @ref(fields: "receiptId")
+  receiptId: UUID! @index
+  shipmentLine: ShipmentLine! @ref(fields: "shipmentLineId")
+  shipmentLineId: UUID!
+  expectedQuantity: Int!
+  receivedQuantity: Int!
+  batchNumber: String
+  expiryDate: Date
+  issue: ReceiptIssue! @default(value: NONE)
+  notes: String
+}
+
+type DispenseEvent @table @unique(fields: ["orderId", "dispenseKey"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  patient: Patient! @ref(fields: "patientId")
+  patientId: UUID! @index
+  order: Order! @ref(fields: "orderId")
+  orderId: UUID! @index
+  dispenseKey: String!
+  recordedBy: StaffUser! @ref(fields: "recordedByUid", references: "uid")
+  recordedByUid: String! @index
+  dispensedAt: Timestamp! @default(expr: "request.time")
+}
+
+type ReferralFeeEvent @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  patient: Patient! @ref(fields: "patientId")
+  patientId: UUID! @index
+  order: Order @ref(fields: "orderId")
+  orderId: UUID @index
+  kind: FeeEventKind!
+  amountPence: Int64!
+  dueDate: Date!
+  status: String!
+  idempotencyKey: String! @unique
+  createdAt: Timestamp! @default(expr: "request.time")
+  settledAt: Timestamp
+}
+
+type NotificationOutbox @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation @ref(fields: "organisationId")
+  organisationId: UUID @index
+  patient: Patient @ref(fields: "patientId")
+  patientId: UUID @index
+  order: Order @ref(fields: "orderId")
+  orderId: UUID @index
+  eligibilitySubmission: EligibilitySubmission @ref(fields: "eligibilitySubmissionId")
+  eligibilitySubmissionId: UUID @index
+  channel: NotificationChannel!
+  templateCode: String!
+  recipientHash: String!
+  encryptedRecipient: String
+  payload: Any!
+  idempotencyKey: String! @unique
+  status: NotificationStatus! @default(value: PENDING) @index
+  attemptCount: Int! @default(value: 0)
+  nextAttemptAt: Timestamp
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  sentAt: Timestamp
+  failedAt: Timestamp
+  failureCode: String
+}
+
+type StaffTask @table {
+  id: UUID! @default(expr: "uuidV4()")
+  organisation: Organisation @ref(fields: "organisationId")
+  organisationId: UUID @index
+  assignedTo: StaffUser @ref(fields: "assignedToUid", references: "uid")
+  assignedToUid: String @index
+  taskType: String!
+  status: TaskStatus! @default(value: OPEN)
+  priority: Int! @default(value: 0)
+  title: String!
+  details: Any
+  dueAt: Timestamp
+  version: Int! @default(value: 1)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  completedAt: Timestamp
+}
+
+type MigrationLedger @table {
+  id: UUID! @default(expr: "uuidV4()")
+  sourceCollection: String! @index
+  sourceDocumentId: String! @index
+  targetTable: String!
+  targetId: String!
+  transformVersion: Int!
+  sourceHash: String!
+  status: String!
+  skipReason: String
+  errorMessage: String
+  migratedAt: Timestamp! @default(expr: "request.time")
+}
+
+type MigrationOutbox @table {
+  id: UUID! @default(expr: "uuidV4()")
+  eventKey: String! @unique
+  aggregateType: String!
+  aggregateId: String!
+  payload: Any!
+  status: String! @default(value: "PENDING")
+  processedAt: Timestamp
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+

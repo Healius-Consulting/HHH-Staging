@@ -1,0 +1,13 @@
+serviceId: hhh-platform-service
+location: europe-west2
+schema:
+  source: ./schema
+  datasource:
+    postgresql:
+      database: hhh-platform-db
+      cloudSql:
+        instanceId: hhh-platform-prod-pg
+      # Preserve unknown database objects during the staged Firestore migration.
+      schemaValidation: COMPATIBLE
+connectorDirs:
+  - ./connectors/server
