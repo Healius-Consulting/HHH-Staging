@@ -1,15 +1,15 @@
 [
   {
     "origin": [
-      "https://hhh.thinktimeless.co.uk",
-      "https://portal.hhh.thinktimeless.co.uk",
-      "http://127.0.0.1:5173",
-      "http://localhost:5173"
+      "*"
     ],
     "method": [
       "GET",
       "HEAD",
-      "PUT"
+      "PUT",
+      "POST",
+      "DELETE",
+      "OPTIONS"
     ],
     "responseHeader": [
       "Content-Type",

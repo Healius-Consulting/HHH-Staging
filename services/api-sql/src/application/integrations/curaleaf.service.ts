@@ -109,3 +109,88 @@ export async function fetchCuraleafCatalogue(connection: IntegrationConnectionRe
     productTotal: products.totalRecordCount,
   };
 }
+
+export async function curaleafApiRequest<T = any>(
+  connection: IntegrationConnectionRecord,
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const credential = await credentialFor(connection);
+  const method = (init.method || 'GET').toUpperCase();
+  const apiKey = method === 'GET' ? (credential.readApiKey || credential.writeApiKey) : credential.writeApiKey;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(new URL(path.replace(/^\//, ''), `${config.CURALEAF_BASE_URL}/`), {
+      ...init,
+      method,
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey,
+        ...init.headers,
+      },
+    });
+
+    const text = await response.text();
+    let body: any = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = text;
+    }
+
+    if (!response.ok) {
+      throw new HttpError(
+        response.status === 429 ? 429 : 502,
+        body?.message || `Curaleaf rejected the request (${response.status}).`,
+        'CURALEAF_REQUEST_FAILED'
+      );
+    }
+
+    const unexpectedCustomer = customerIds(body).find(id => id !== credential.customerId);
+    if (unexpectedCustomer) {
+      throw new HttpError(502, 'Curaleaf returned data for a different pharmacy.', 'CURALEAF_TENANT_MISMATCH');
+    }
+
+    return body as T;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new HttpError(504, 'Curaleaf request timed out.', 'CURALEAF_TIMEOUT');
+    }
+    throw new HttpError(502, 'Curaleaf could not be reached.', 'CURALEAF_UNAVAILABLE');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function fetchCuraleafQuote(
+  connection: IntegrationConnectionRecord,
+  items: Array<{ packId: string; quantity: number }>
+) {
+  return await curaleafApiRequest(connection, '/v1/quotes/', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  });
+}
+
+export async function fetchCuraleafActivity(connection: IntegrationConnectionRecord) {
+  const [prescribers, prescriptions, purchaseOrders, shipments] = await Promise.all([
+    curaleafApiRequest(connection, '/v1/prescribers/').catch(() => ({ prescribers: [] })),
+    curaleafApiRequest(connection, '/v1/prescriptions/').catch(() => ({ prescriptions: [] })),
+    curaleafApiRequest(connection, '/v1/purchase-orders/').catch(() => ({ purchaseOrders: [] })),
+    curaleafApiRequest(connection, '/v1/shipments/').catch(() => ({ shipments: [] })),
+  ]);
+
+  return {
+    environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' as const : 'production' as const,
+    checkedAt: new Date().toISOString(),
+    prescribers: (prescribers as any)?.prescribers || [],
+    prescriptions: (prescriptions as any)?.prescriptions || [],
+    purchaseOrders: (purchaseOrders as any)?.purchaseOrders || [],
+    shipments: (shipments as any)?.shipments || [],
+  };
+}
