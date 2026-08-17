@@ -314,7 +314,6 @@ export interface PharmacyTenant {
     primary: string;
     portalName: string;
   };
-  modules: Record<TenantModule, boolean>;
   worldpay: {
     enabled: boolean;
     status: 'not-connected' | 'onboarding' | 'connected' | 'action-required';
@@ -335,8 +334,6 @@ export const PLATFORM_OPERATOR = {
   website: 'www.healiusconsulting.com',
   contactEmail: 'spatel@healiusconsulting.com',
 } as const;
-
-export type TenantModule = 'intake' | 'rx' | 'payments' | 'supplierOrders' | 'patients' | 'resources';
 
 export type ComplianceStatus = 'not-started' | 'in-progress' | 'ready' | 'not-applicable' | 'blocked';
 
@@ -428,7 +425,6 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     status: 'live', staffCount: 4,
     defaultPaymentRoute: 'worldpay',
     brand: { primary: '#0f766e', portalName: 'Primary Branch' },
-    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: true, status: 'connected', environment: 'sandbox', merchantId: 'WP-PRIMARY-BRANCH', merchantName: 'Primary Branch', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
   },
   {
@@ -439,7 +435,6 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     status: 'live', staffCount: 2,
     defaultPaymentRoute: 'manual',
     brand: { primary: '#1e40af', portalName: 'Eastwood Health Pharmacy' },
-    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
   {
@@ -452,7 +447,6 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     workspaceClassification: 'allocation_holding',
     defaultPaymentRoute: 'manual',
     brand: { primary: '#0f766e', portalName: 'Primary Branch' },
-    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
   {
@@ -464,7 +458,6 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     testAccount: true, gdprExempt: true,
     defaultPaymentRoute: 'manual',
     brand: { primary: '#1e40af', portalName: 'Alternate Branch' },
-    modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
   },
 ];

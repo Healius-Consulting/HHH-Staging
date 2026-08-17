@@ -65,7 +65,6 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
     staffCount: 0,
     defaultPaymentRoute: record.defaultPaymentRoute ?? 'manual',
     brand: { primary: record.primaryColour, portalName: record.portalName ?? record.name },
-    modules: record.modules ?? { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
     worldpay: {
       enabled: record.defaultPaymentRoute === 'worldpay',
       status: record.defaultPaymentRoute === 'worldpay' ? 'connected' : 'not-connected',

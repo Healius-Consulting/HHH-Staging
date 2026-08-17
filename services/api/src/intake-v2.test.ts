@@ -35,7 +35,7 @@ test('directory map positions are projected server-side without exposing coordin
 
 test('directory publication rejects training and incomplete readiness', () => {
   const profile = { realClassification: 'training', acceptingNewPatients: false, intakeState: 'full', gdprEvidenceState: 'missing', curaleafIntegrationState: 'test_verified' };
-  const organisation = { status: 'live', testAccount: true, gdprExempt: true, gphcNumber: 'TRAINING-ONE', modules: { intake: true } };
+  const organisation = { status: 'live', testAccount: true, gdprExempt: true, gphcNumber: 'TRAINING-ONE' };
   const issues = directoryPublicationIssues(profile, organisation);
   assert.ok(issues.includes('TRAINING_OR_NON_REAL_ORGANISATION'));
   assert.ok(issues.includes('GDPR_EVIDENCE_REQUIRED'));

@@ -78,7 +78,6 @@ function assertPending(record: PlatformSubmissionRecord) {
 export function canReceiveReferral(organisation: OrganisationRecord | null) {
   return Boolean(
     organisation
-    && organisation.intakeEnabled
     && ['INTAKE_LIVE', 'LIVE'].includes(organisation.status),
   );
 }

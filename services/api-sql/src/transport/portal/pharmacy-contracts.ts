@@ -55,14 +55,6 @@ export function toPortalOrganisation(organisation: OrganisationRecord) {
     primaryColour: organisation.primaryColour,
     status: lower(organisation.status),
     portalName: organisation.portalName,
-    modules: {
-      intake: organisation.intakeEnabled,
-      rx: organisation.prescriptionEnabled,
-      payments: organisation.paymentsEnabled,
-      supplierOrders: organisation.supplierOrdersEnabled,
-      patients: organisation.patientsEnabled,
-      resources: organisation.resourcesEnabled,
-    },
     worldpayEnabled: organisation.worldpayEnabled,
     defaultPaymentRoute: lower(organisation.defaultPaymentRoute),
     autoPlacementEnabled: organisation.autoPlacementEnabled,
@@ -428,8 +420,8 @@ export function buildSqlPharmacyOverview(params: {
       agedCollections: priorityItems.filter(item => item.kind === 'collection').length,
     },
     integrations: [
-      { integration: 'curaleaf' as const, state: organisation.supplierOrdersEnabled ? 'unavailable' as const : 'not-configured' as const, checkedAt: null },
-      { integration: 'worldpay' as const, state: organisation.worldpayEnabled ? 'unavailable' as const : 'not-configured' as const, checkedAt: null },
+      { integration: 'curaleaf' as const, state: 'not-configured' as const, checkedAt: null },
+      { integration: 'worldpay' as const, state: 'not-configured' as const, checkedAt: null },
     ],
   };
 }

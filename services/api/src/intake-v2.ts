@@ -114,7 +114,6 @@ function isDirectoryReady(profile: Record<string, unknown>, organisation: Record
     && typeof profile.longitude === 'number'
     && organisation.status === 'live'
     && !isExplicitCuraleafTestAccount(organisation)
-    && (organisation.modules as Record<string, unknown> | undefined)?.intake !== false
     && profile.realClassification === 'real'
     && profile.gdprEvidenceState === 'verified'
     && profile.curaleafIntegrationState === 'production_verified';
@@ -124,7 +123,6 @@ export function directoryPublicationIssues(profile: Record<string, unknown>, org
   const issues: string[] = [];
   if (isExplicitCuraleafTestAccount(organisation) || profile.realClassification !== 'real') issues.push('TRAINING_OR_NON_REAL_ORGANISATION');
   if (organisation.status !== 'live') issues.push('ORGANISATION_NOT_LIVE');
-  if ((organisation.modules as Record<string, unknown> | undefined)?.intake === false) issues.push('INTAKE_DISABLED');
   if (profile.acceptingNewPatients !== true) issues.push('NOT_ACCEPTING_NEW_PATIENTS');
   if (profile.intakeState === 'full') issues.push('INTAKE_FULL');
   if (typeof profile.latitude !== 'number' || typeof profile.longitude !== 'number') issues.push('COORDINATES_REQUIRED');
@@ -825,8 +823,7 @@ async function assignCase(request: Request, caseId: string, input: z.infer<typeo
     const organisation = organisationSnapshot.data();
     const dedicatedDestinationReady = dedicatedSource
       && organisation
-      && canAcceptPublicIntake(organisation)
-      && (organisation.modules as Record<string, unknown> | undefined)?.intake !== false;
+      && canAcceptPublicIntake(organisation);
     if (dedicatedSource ? !dedicatedDestinationReady : !profile || !organisation || !isDirectoryReady(profile, organisation, true)) {
       throw new HttpError(409, 'The selected pharmacy is not available for referral.', 'DESTINATION_UNAVAILABLE');
     }

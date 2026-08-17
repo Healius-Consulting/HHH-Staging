@@ -15,7 +15,7 @@ import {
   ShieldCheck,
   Tags,
 } from 'lucide-react';
-import { useApp, type TenantModule } from '../context/AppContext';
+import { useApp } from '../context/AppContext';
 import { brandSwatchStyle } from '../utils/tenantTheme';
 import { getCuraleafConnectionStatus, getReferralLink, isApiConfigured, updatePaymentSettings } from '../shared/api';
 import type { CuraleafConnectionStatus } from '../shared/contracts';
@@ -24,15 +24,6 @@ import { downloadContentPack, downloadDataUrl, eligibilityUrl, qrDataUrl } from 
 import { PharmacySetupWizard } from '../onboarding/PharmacySetupWizard';
 import type { usePharmacySetup } from '../onboarding/usePharmacySetup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-
-const MODULE_LABELS: Record<TenantModule, { name: string; description: string }> = {
-  intake: { name: 'Eligibility enquiries', description: 'Pharmacy-attributed links with all enquiry review handled by HHH admin' },
-  rx: { name: 'Prescription workspace', description: 'Prescription verification and order preparation' },
-  payments: { name: 'Payments', description: 'Worldpay checkout and pharmacy-managed payment records' },
-  supplierOrders: { name: 'Supplier orders', description: 'Curaleaf ordering, invoices, dispatch status and pharmacy goods-in' },
-  patients: { name: 'Patient directory', description: 'Tenant-scoped patient records and activity history' },
-  resources: { name: 'Form and content pack', description: 'Pharmacy link, QR code and developer assets' },
-};
 
 interface PharmacySettingsProps {
   setup: ReturnType<typeof usePharmacySetup>;
@@ -49,7 +40,6 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
   const [linkRefresh, setLinkRefresh] = useState(0);
   const [curaleafStatus, setCuraleafStatus] = useState<CuraleafConnectionStatus | null>(null);
   const organisation = useMemo(() => state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0], [state]);
-  const enabledModules = (Object.keys(MODULE_LABELS) as TenantModule[]).filter(key => organisation.modules[key]).length;
 
   useEffect(() => {
     let cancelled = false;
@@ -135,7 +125,7 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
       <div className="filter-grid settings-tabs" role="group" aria-label="Settings views">
         <button type="button" aria-pressed={activeTab === 'settings'} className={`filter-card ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
           <div className="filter-card__head"><span>Organisation</span><Building2 size={14} className={activeTab === 'settings' ? 'text-primary' : 'text-muted'} /></div>
-          <span className="filter-card__value filter-card__value--text">Payments, modules & readiness</span>
+          <span className="filter-card__value filter-card__value--text">Payments & readiness</span>
         </button>
         <button type="button" aria-pressed={activeTab === 'assets'} className={`filter-card ${activeTab === 'assets' ? 'active' : ''}`} onClick={() => setActiveTab('assets')}>
           <div className="filter-card__head"><span>Assets</span><QrCode size={14} className={activeTab === 'assets' ? 'text-primary' : 'text-muted'} /></div>
@@ -230,31 +220,12 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
                 <CheckCircle2 size={20} className="text-green" />
               </div>
               <div className="settings-meta-grid">
-                <div><span>Modules enabled</span><strong>{enabledModules} of {Object.keys(MODULE_LABELS).length}</strong></div>
                 <div><span>Account status</span><strong className="text-capitalize">{organisation.status.replace('_', ' ')}</strong></div>
               </div>
               <p className="settings-copy">HHH administrators can review connection status and go-live evidence from the pharmacy readiness screen.</p>
             </section>
           </div>
 
-          <section className="card settings-panel">
-            <div className="section-heading">
-              <div>
-                <p className="section-label">Workspace configuration</p>
-                <h3><Building2 size={17} /> Enabled modules</h3>
-              </div>
-              <span>{enabledModules} enabled</span>
-            </div>
-            <div className="module-grid">
-              {(Object.keys(MODULE_LABELS) as TenantModule[]).map(key => (
-                <div className={`module-row ${organisation.modules[key] ? 'enabled' : ''}`} key={key}>
-                  <span>{organisation.modules[key] ? <CheckCircle2 size={17} /> : <span className="module-dot" />}</span>
-                  <div><strong>{MODULE_LABELS[key].name}</strong><small>{MODULE_LABELS[key].description}</small></div>
-                  <span className="module-state">{organisation.modules[key] ? 'Enabled' : 'Off'}</span>
-                </div>
-              ))}
-            </div>
-          </section>
         </div>
       ) : activeTab === 'assets' ? (
         <div className="settings-stack">

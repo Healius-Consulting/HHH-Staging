@@ -34,7 +34,6 @@ import {
 import {
   useApp,
   type PharmacyTenant,
-  type TenantModule,
 } from '../context/AppContext';
 import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources';
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
@@ -141,24 +140,6 @@ function csvCell(value: unknown) {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-const MODULE_LABELS: Record<TenantModule, string> = {
-  intake: 'Patient intake',
-  rx: 'Prescription workspace',
-  payments: 'Payments',
-  supplierOrders: 'Supplier orders',
-  patients: 'Patient directory',
-  resources: 'Form and content pack',
-};
-
-const defaultModules: PharmacyTenant['modules'] = {
-  intake: true,
-  rx: true,
-  payments: true,
-  supplierOrders: true,
-  patients: true,
-  resources: true,
-};
-
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
 }
@@ -225,7 +206,7 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
       const organisation: PharmacyTenant = {
         id: created.id, slug, referralToken: created.referralToken, name, tradingName, logoText, gphcNumber, superintendent, companyNumber, mainContactName, mainContactPhone, mainContactEmail, address, websiteDomains,
         status: 'onboarding', staffCount: 0, defaultPaymentRoute: 'manual',
-        brand: { primary, portalName: name }, modules: defaultModules,
+        brand: { primary, portalName: name },
         worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
       };
       dispatch({ type: 'ADD_ORGANISATION', organisation });
@@ -288,7 +269,6 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
   const [pendingLogo, setPendingLogo] = useState<File | null>(null);
   const [removeLogo, setRemoveLogo] = useState(false);
   const [primaryColour, setPrimaryColour] = useState(organisation.brand.primary);
-  const [modules, setModules] = useState({ ...organisation.modules });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -327,7 +307,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
     const websiteDomains = [...new Set(domains.split(/[\n,]+/).map(value => value.trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase()).filter(Boolean))];
     const input: UpdateOrganisationInput = {
       name, tradingName, gphcNumber, superintendent, companyNumber, mainContactName, mainContactPhone, mainContactEmail, address, websiteDomains, status, logoText: logoText.toUpperCase(),
-      primaryColour, portalName: name.trim(), modules,
+      primaryColour, portalName: name.trim(),
     };
     try {
       if (!isLocalPortalPreview) await updateOrganisation(organisation.id, input);
@@ -354,7 +334,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
       onSaved({
         name: name.trim(), tradingName: tradingName.trim(), gphcNumber: gphcNumber.trim(), superintendent: superintendent.trim(), companyNumber: companyNumber.trim(), mainContactName: mainContactName.trim(), mainContactPhone: mainContactPhone.trim(), mainContactEmail: mainContactEmail.trim(), address: address.trim(),
         websiteDomains, status, logoText: logoText.trim().toUpperCase(),
-        brand: { primary: primaryColour, portalName: name.trim() }, modules,
+        brand: { primary: primaryColour, portalName: name.trim() },
         slug: slugify(tradingName || name),
         ...logoUpdates,
       });
@@ -404,11 +384,6 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
             </div>
           </section>
           <div className="brand-colour-field"><input type="color" value={primaryColour} onChange={event => setPrimaryColour(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primaryColour.toUpperCase()} · accessible palette generated automatically</small></div><div className="onboarding-palette"><i style={{ background: editTheme.primary }} /><i style={{ background: editTheme.secondary }} /><i style={{ background: editTheme.primarySoft }} /></div></div>
-
-          <div className="form-section-heading"><span>03</span><div><strong>Available modules</strong><small>Choose the areas pharmacy staff can access.</small></div></div>
-          <div className="admin-module-list edit-pharmacy-modules">
-            {(Object.keys(MODULE_LABELS) as TenantModule[]).map(module => <label key={module}><span><strong>{MODULE_LABELS[module]}</strong><small>{modules[module] ? 'Available to pharmacy staff' : 'Hidden from navigation'}</small></span><input type="checkbox" checked={modules[module]} onChange={() => setModules(current => ({ ...current, [module]: !current[module] }))} /></label>)}
-          </div>
 
           <div className="setup-security-note"><ShieldCheck size={16} /><span>Curaleaf customer IDs and integration credentials are not changed here. Use the secure Integrations workflow to update those values.</span></div>
           {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
@@ -1076,7 +1051,7 @@ export default function AdminPortal() {
           <SummaryTiles className="summary-tiles--compact admin-detail-summary" label="Pharmacy account summary" items={[
             { label: 'Patients', value: new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size, detail: 'attributed records' },
             { label: 'Access', value: selectedOrganisation.staffCount, detail: 'staff accounts' },
-            { label: 'Intake route', value: selectedOrganisation.modules.intake ? 'Active' : 'Off', detail: 'HHH-managed enquiries' },
+            { label: 'Intake route', value: ['live', 'intake_live'].includes(selectedOrganisation.status) ? 'Active' : 'Off', detail: 'HHH-managed enquiries' },
           ]} />
 
           <div className="filter-grid admin-detail-tabs admin-segment-tabs" role="tablist" aria-label="Pharmacy detail sections">
@@ -1132,14 +1107,6 @@ export default function AdminPortal() {
               </div>
 
               <div className="admin-detail-grid admin-config-grid">
-                <section className="card admin-detail-card">
-                  <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Pharmacy modules</h2></div>
-                  <p className="admin-card-intro">Enable only the capabilities included in this pharmacy’s service.</p>
-                  <div className="admin-module-list">
-                    {(Object.keys(MODULE_LABELS) as TenantModule[]).map(module => <label key={module}><span><strong>{MODULE_LABELS[module]}</strong><small>{selectedOrganisation.modules[module] ? 'Available to pharmacy staff' : 'Hidden from navigation'}</small></span><input type="checkbox" checked={selectedOrganisation.modules[module]} disabled /></label>)}
-                  </div>
-                </section>
-
                 <section className="card admin-detail-card admin-detail-assets">
                   <div className="admin-detail-card-title"><Link2 size={18} /><h2>Eligibility form and content assets</h2></div>
                   <p>Every submission through this hosted URL is permanently attributed to this pharmacy token.</p>

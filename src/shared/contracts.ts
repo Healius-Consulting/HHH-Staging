@@ -871,15 +871,6 @@ export interface CreateOrganisationInput {
   status: 'onboarding';
 }
 
-export interface OrganisationModules {
-  intake: boolean;
-  rx: boolean;
-  payments: boolean;
-  supplierOrders: boolean;
-  patients: boolean;
-  resources: boolean;
-}
-
 export interface UpdateOrganisationInput {
   name?: string;
   tradingName?: string;
@@ -895,7 +886,6 @@ export interface UpdateOrganisationInput {
   websiteDomains?: string[];
   status?: 'onboarding' | 'intake_live' | 'live' | 'paused';
   portalName?: string;
-  modules?: OrganisationModules;
 }
 
 export interface CreatedOrganisation extends CreateOrganisationInput {
@@ -1191,7 +1181,6 @@ export interface PortalOrganisation {
   status: 'onboarding' | 'intake_live' | 'live' | 'paused';
   referralToken?: string;
   portalName?: string;
-  modules?: OrganisationModules;
   worldpayEnabled?: boolean;
   defaultPaymentRoute?: 'manual' | 'worldpay';
   autoPlacementEnabled?: boolean;

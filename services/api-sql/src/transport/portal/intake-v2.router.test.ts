@@ -27,12 +27,12 @@ describe('admin intake queue query', () => {
     assert.throws(() => queueQuerySchema.parse({ __hhh_surface: 'pharmacy' }));
   });
 
-  it('offers every currently intake-enabled live workspace as a destination', () => {
+  it('offers every live workspace as a destination', () => {
     assert.equal(canReceiveReferral(eligibleOrganisation), true);
     assert.equal(canReceiveReferral({ ...eligibleOrganisation, classification: 'TRAINING' }), true);
     assert.equal(canReceiveReferral({ ...eligibleOrganisation, classification: 'ALLOCATION_HOLDING' }), true);
     assert.equal(canReceiveReferral({ ...eligibleOrganisation, gdprComplianceFlag: false }), true);
     assert.equal(canReceiveReferral({ ...eligibleOrganisation, status: 'PAUSED' }), false);
-    assert.equal(canReceiveReferral({ ...eligibleOrganisation, intakeEnabled: false }), false);
+    assert.equal(canReceiveReferral({ ...eligibleOrganisation, status: 'ONBOARDING' }), false);
   });
 });

@@ -280,7 +280,7 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
     if (!match || !match.organisation) return null;
 
     const org = match.organisation;
-    if (org.archivedAt || !org.intakeEnabled || !['INTAKE_LIVE', 'LIVE'].includes(org.status)) return null;
+    if (org.archivedAt || !['INTAKE_LIVE', 'LIVE'].includes(org.status)) return null;
     return {
       type: match.intakeVersion === 'v1' ? 'legacy_pharmacy_qr' : 'future_pharmacy_qr',
       intakeVersion: match.intakeVersion === 'v1' ? 'v1' : 'v2',

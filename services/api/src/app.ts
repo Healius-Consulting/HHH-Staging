@@ -88,15 +88,6 @@ async function withEmailLogoUrl<T extends Record<string, unknown>>(organisation:
   }
 }
 
-const tenantModulesSchema = z.object({
-  intake: z.boolean(),
-  rx: z.boolean(),
-  payments: z.boolean(),
-  supplierOrders: z.boolean(),
-  patients: z.boolean(),
-  resources: z.boolean(),
-});
-
 const organisationDetailsSchema = z.object({
   name: z.string().trim().min(1).max(200),
   tradingName: z.string().trim().min(1).max(200),
@@ -113,7 +104,6 @@ const organisationDetailsSchema = z.object({
   status: organisationStatusSchema,
   platformFeeMonthly: z.number().nonnegative().max(100_000).nullable(),
   portalName: z.string().trim().min(1).max(200),
-  modules: tenantModulesSchema,
   worldpayEnabled: z.boolean(),
   defaultPaymentRoute: z.enum(['manual', 'worldpay']),
   autoPlacementEnabled: z.boolean().optional(),
@@ -4154,7 +4144,6 @@ app.post('/v1/portal/admin/organisations', requireRole('hhh_admin'), async (requ
       mainContactEmail: input.mainContactEmail ?? '',
       platformFeeMonthly: null,
       portalName: input.name,
-      modules: tenantModulesSchema.parse({ intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true }),
       worldpayEnabled: false,
       defaultPaymentRoute: 'manual',
       autoPlacementEnabled: FLOW_CONFIG.autoPlacementEnabled,

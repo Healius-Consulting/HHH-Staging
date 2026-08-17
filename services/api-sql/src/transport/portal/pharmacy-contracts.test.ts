@@ -91,13 +91,13 @@ const order: OrderRecord = {
 };
 
 describe('SQL pharmacy compatibility contracts', () => {
-  it('maps SQL organisation enums and module flags to the portal contract', () => {
+  it('maps SQL organisation enums to the portal contract', () => {
     const mapped = toPortalOrganisation(organisation);
     assert.equal(mapped.status, 'live');
     assert.equal(mapped.workspaceClassification, 'standard');
     assert.equal(mapped.defaultPaymentRoute, 'manual');
     assert.equal('platformFeeMonthly' in mapped, false);
-    assert.equal(mapped.modules.patients, true);
+    assert.equal('modules' in mapped, false);
   });
 
   it('maps a tenant patient without exposing another tenant selector', () => {

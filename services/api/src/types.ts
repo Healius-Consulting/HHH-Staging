@@ -81,7 +81,6 @@ export interface PortalOrganisation {
   referralToken?: string;
   platformFeeMonthly?: number | null;
   portalName?: string;
-  modules?: Record<string, boolean>;
   worldpayEnabled?: boolean;
   defaultPaymentRoute?: 'manual' | 'worldpay';
   curaleafTestValidation?: CuraleafValidationRecord | null;
