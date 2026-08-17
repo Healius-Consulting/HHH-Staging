@@ -496,6 +496,9 @@ export interface PortalOrderRecord {
   paymentId?: string;
   worldpayPaymentId?: string;
   paymentTransactionReference?: string;
+  paidAt?: string;
+  manualTender?: string;
+  manualReference?: string;
   refund?: OrderRefundState;
   cancellation?: OrderCancellationState;
   curaleafCancellation?: CuraleafCancellationState;

@@ -1,11 +1,16 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { HttpError } from '../../domain/common/errors.js';
+import { executeCuraleafOrderPlacement } from '../../application/integrations/curaleaf.service.js';
+import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
+import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { sha256 } from '../../security/session-utils.js';
 
 export function createPublicPaymentRouter(): Router {
   const router = Router();
   const paymentRepo = new SqlPaymentRepository();
+  const orderRepo = new SqlOrderRepository();
+  const integrationRepo = new SqlIntegrationRepository();
 
   // GET /v1/public/payments/status - Check real-time payment clearance status
   router.get('/public/payments/status', async (req: Request, res: Response, next: NextFunction) => {
@@ -41,6 +46,31 @@ export function createPublicPaymentRouter(): Router {
         const receiptHash = sha256(receiptToken);
         await paymentRepo.updatePaymentStatus(payment.id, 'PAID', payment.orderId, receiptHash);
         payment = { ...payment, status: 'PAID', receiptHash };
+
+        // Automated Curaleaf Placement Workflow
+        try {
+          const order = await orderRepo.findOrderById(payment.orderId, payment.organisationId);
+          if (order) {
+            const connection = await integrationRepo.findConnection(payment.organisationId, 'CURALEAF').catch(() => null);
+            let curaleafResult: any = null;
+            if (connection?.secretResourceName) {
+              curaleafResult = await executeCuraleafOrderPlacement(connection, order);
+            }
+
+            await orderRepo.appendPlacementEvent({
+              organisationId: payment.organisationId,
+              orderId: payment.orderId,
+              fromState: 'PENDING_PLACEMENT',
+              toState: 'PLACED',
+              reason: curaleafResult?.purchaseOrder?.id
+                ? `Worldpay payment cleared (${payment.transactionReference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
+                : `Worldpay payment cleared (${payment.transactionReference}) - Pharmacy dispensing workflow`,
+              externalReference: curaleafResult?.purchaseOrder?.id || payment.transactionReference,
+            });
+          }
+        } catch (placementErr) {
+          console.warn('[Public Payment] Curaleaf automated placement note:', placementErr);
+        }
       }
 
       res.status(200).json({

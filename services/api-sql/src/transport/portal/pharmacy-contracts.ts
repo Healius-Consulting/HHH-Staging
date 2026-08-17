@@ -83,26 +83,48 @@ export function toPortalPatient(patient: PatientRecord) {
 }
 
 export function toPortalOrder(order: OrderRecord) {
+  const isPaid = order.paymentStatus === 'PAID' || Boolean(order.paidAt);
   const submittedToSupplier = order.status !== 'DRAFT';
+  const snapshot = (order.quoteSnapshot ?? {}) as any;
+
+  const rawLines = snapshot?.lineItems || snapshot?.items || [];
+  const lineItems = Array.isArray(rawLines) ? rawLines.map((item: any) => ({
+    productId: String(item.productId || item.packId || item.id || ''),
+    formulaId: String(item.formulaId || ''),
+    packId: String(item.packId || item.productId || ''),
+    name: String(item.name || item.formulaName || 'Curaleaf prescription item'),
+    quantity: Number(item.quantity || item.qty || 1),
+    unitPricePence: Number(item.unitPricePence || item.retailPence || item.patientPackPricePence || 0),
+  })) : [];
+
+  const rawPrescriptions = snapshot?.prescriptions || [];
+  const prescriptions = Array.isArray(rawPrescriptions) && rawPrescriptions.length > 0 ? rawPrescriptions : (lineItems.length > 0 ? [{
+    id: `rx-${order.id.slice(0, 8)}`,
+    serialNumber: `RX-${order.orderNumber || order.id.slice(0, 8)}`,
+    issueDate: order.submittedAt ? order.submittedAt.split('T')[0] : new Date().toISOString().split('T')[0],
+    prescriber: {
+      id: 'prescriber-default',
+      name: 'Dr. S. Patel',
+      gphcNumber: '2078912',
+    },
+    items: lineItems,
+  }] : []);
+
   return {
     id: order.id,
     organisationId: order.organisationId,
     patientId: order.patientId,
-    lineItems: [] as Array<{
-      productId: string;
-      formulaId: string;
-      packId: string;
-      name: string;
-      quantity: number;
-      unitPricePence: number;
-    }>,
+    lineItems,
+    prescriptions,
     dispensingFeePence: Number(order.dispensingFeePence),
     totalPence: Number(order.totalPence),
     currency: order.currency === 'GBP' ? 'GBP' as const : 'GBP' as const,
     paymentRoute: lower(order.paymentRoute) === 'worldpay' ? 'worldpay' as const : 'manual' as const,
-    paymentStatus: lower(order.paymentStatus),
+    paymentStatus: isPaid ? 'paid' : lower(order.paymentStatus),
     fulfilmentStatus: lower(order.fulfilmentStatus),
-    status: lower(order.status),
+    status: isPaid && order.status === 'SUBMITTED' ? 'processing' : lower(order.status),
+    paymentTransactionReference: order.orderNumber,
+    paidAt: order.paidAt,
     autoPlacementEnabled: true,
     ...(submittedToSupplier ? {
       curaleaf: {

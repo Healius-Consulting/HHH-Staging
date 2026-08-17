@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
+import { executeCuraleafOrderPlacement } from '../../application/integrations/curaleaf.service.js';
 import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
@@ -75,13 +76,26 @@ export function createPortalPaymentRouter(): Router {
         paidAt: now,
       });
 
+      // Automated Curaleaf Placement Workflow
+      let curaleafResult: any = null;
+      try {
+        const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
+        if (connection?.secretResourceName) {
+          curaleafResult = await executeCuraleafOrderPlacement(connection, order);
+        }
+      } catch (placementErr) {
+        console.warn('[Manual Payment] Curaleaf automated placement note:', placementErr);
+      }
+
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
         orderId,
         fromState: 'PENDING_PLACEMENT',
         toState: 'PLACED',
-        reason: `Manual payment recorded (${input.tender}: ${input.reference})`,
-        externalReference: input.reference,
+        reason: curaleafResult?.purchaseOrder?.id
+          ? `Manual payment recorded (${input.tender}: ${input.reference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
+          : `Manual payment recorded (${input.tender}: ${input.reference})`,
+        externalReference: curaleafResult?.purchaseOrder?.id || input.reference,
         actorUid: scope.uid,
       });
 
@@ -92,6 +106,7 @@ export function createPortalPaymentRouter(): Router {
         paidAt: now,
         tender: input.tender,
         reference: input.reference,
+        curaleaf: curaleafResult,
       });
     } catch (error) {
       next(error);

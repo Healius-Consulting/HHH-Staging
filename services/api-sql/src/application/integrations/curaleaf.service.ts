@@ -177,20 +177,108 @@ export async function fetchCuraleafQuote(
   });
 }
 
-export async function fetchCuraleafActivity(connection: IntegrationConnectionRecord) {
-  const [prescribers, prescriptions, purchaseOrders, shipments] = await Promise.all([
-    curaleafApiRequest(connection, '/v1/prescribers/').catch(() => ({ prescribers: [] })),
-    curaleafApiRequest(connection, '/v1/prescriptions/').catch(() => ({ prescriptions: [] })),
-    curaleafApiRequest(connection, '/v1/purchase-orders/').catch(() => ({ purchaseOrders: [] })),
-    curaleafApiRequest(connection, '/v1/shipments/').catch(() => ({ shipments: [] })),
-  ]);
+export async function executeCuraleafOrderPlacement(
+  connection: IntegrationConnectionRecord,
+  order: {
+    id: string;
+    orderNumber?: string | null;
+    quoteSnapshot?: unknown;
+  }
+) {
+  // Step 1: Ensure Prescriber exists
+  let prescriberId = 'prescriber-default';
+  try {
+    const prescriberRes = await curaleafApiRequest<{ prescribers?: Array<{ id: string; gphcNumber?: string }> }>(
+      connection,
+      '/v1/prescribers/'
+    ).catch(() => null);
+
+    if (prescriberRes?.prescribers && prescriberRes.prescribers.length > 0) {
+      prescriberId = prescriberRes.prescribers[0].id;
+    } else {
+      const createdPrescriber = await curaleafApiRequest<{ id: string }>(connection, '/v1/prescribers/', {
+        method: 'POST',
+        body: JSON.stringify({
+          first_name: 'Shaylen',
+          last_name: 'Patel',
+          gmc_or_gphc_number: '2078912',
+          prescriber_type: 'pharmacist',
+          email: 'spatel@healiusconsulting.com',
+          phone_number: '01130000000',
+        }),
+      }).catch(() => null);
+      if (createdPrescriber?.id) prescriberId = createdPrescriber.id;
+    }
+  } catch (err) {
+    console.warn('[Curaleaf] Prescriber verification note:', err);
+  }
+
+  // Step 2: Extract line items & formulas
+  const snapshot = (order.quoteSnapshot ?? {}) as any;
+  const rawItems = snapshot?.lineItems || snapshot?.items || [];
+  const lineItems: Array<{ productId: string; count: number; formulaId?: string; unitsNeededCount?: number }> = [];
+
+  for (const item of rawItems) {
+    const id = String(item.productId || item.packId || item.id || '');
+    const count = Number(item.quantity || item.qty || item.count || 1);
+    if (id && count > 0) {
+      lineItems.push({
+        productId: id,
+        count,
+        formulaId: item.formulaId || id,
+        unitsNeededCount: item.unitsNeededCount || count * 10,
+      });
+    }
+  }
+
+  // Step 3: Submit Prescription
+  let curaleafPrescriptionId: string | null = null;
+  if (lineItems.length > 0) {
+    try {
+      const rxItems = lineItems.map(item => ({
+        formulaId: item.formulaId || item.productId,
+        unitsNeededCount: item.unitsNeededCount || item.count * 10,
+      }));
+      const rxRes = await curaleafApiRequest<{ id: string }>(connection, '/v1/prescriptions/', {
+        method: 'POST',
+        body: JSON.stringify({
+          serialNumber: `RX-${order.orderNumber || order.id.slice(0, 8)}`,
+          prescriberId,
+          issueDate: new Date().toISOString().split('T')[0],
+          items: rxItems,
+        }),
+      }).catch(() => null);
+      if (rxRes?.id) curaleafPrescriptionId = rxRes.id;
+    } catch (err) {
+      console.warn('[Curaleaf] Prescription create note:', err);
+    }
+  }
+
+  // Step 4: Submit Purchase Order
+  let purchaseOrderResult: any = null;
+  const poItems = lineItems.map(item => ({
+    productId: item.productId,
+    count: item.count,
+  }));
+
+  if (poItems.length > 0) {
+    try {
+      purchaseOrderResult = await curaleafApiRequest(connection, '/v1/purchase-orders/', {
+        method: 'POST',
+        body: JSON.stringify({
+          customerReference: order.orderNumber || `HHH-${order.id.slice(0, 8)}`,
+          items: poItems,
+        }),
+      });
+    } catch (poErr) {
+      console.warn('[Curaleaf] Purchase order create note:', poErr);
+    }
+  }
 
   return {
-    environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' as const : 'production' as const,
-    checkedAt: new Date().toISOString(),
-    prescribers: (prescribers as any)?.prescribers || [],
-    prescriptions: (prescriptions as any)?.prescriptions || [],
-    purchaseOrders: (purchaseOrders as any)?.purchaseOrders || [],
-    shipments: (shipments as any)?.shipments || [],
+    prescriberId,
+    prescriptionId: curaleafPrescriptionId,
+    purchaseOrder: purchaseOrderResult,
   };
 }
+

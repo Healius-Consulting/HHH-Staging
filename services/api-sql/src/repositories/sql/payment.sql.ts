@@ -136,13 +136,16 @@ const UPDATE_PAYMENT_STATUS_GQL = `
       data: {
         status: $status
         receiptHash: $receiptHash
+        paidAt_expr: "request.time"
         updatedAt_expr: "request.time"
       }
     )
     order_update(
       key: { id: $orderId }
       data: {
+        status: PROCESSING
         paymentStatus: $status
+        fulfilmentStatus: SUPPLIER_PROCESSING
         paidAt_expr: "request.time"
         updatedAt_expr: "request.time"
       }
