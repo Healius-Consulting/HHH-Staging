@@ -47,6 +47,13 @@ import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
 import { hasDispatchedRemainder, orderCancellationResolution, orderHasPartialPharmacyReceipt, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../utils/orderStage';
 import { buildOrderTimelineEvents } from '../utils/orderTimeline';
+import {
+  collectOrderConsignments,
+  orderCourierLabel,
+  orderDeliveryDestination,
+  orderFinancialTotal,
+  shortConsignmentId,
+} from '../utils/orderDetailsLedger';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
 type GoodsReceiptDraft = { quantities: Record<string, number>; batches: Record<string, string>; expiries: Record<string, string>; note: string };
 
@@ -1342,241 +1349,18 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
             </section>
           ) : null}
 
-          {/* Bottom Accordion for Order Details, Customer, Delivery & Audit History */}
-          <div className="order-details-drawer">
-            <button
-              type="button"
-              className="order-details-drawer__toggle-btn"
-              onClick={() => setShowOrderDetails(prev => !prev)}
-              aria-expanded={showOrderDetails}
-            >
-              <div className="order-details-drawer__toggle-left">
-                <span className="order-details-drawer__toggle-icon">
-                  <FileText size={16} />
-                </span>
-                <div className="order-details-drawer__toggle-text">
-                  <strong>{showOrderDetails ? 'Hide Order Details & History' : 'Order Details & Audit History'}</strong>
-                  <small>PO & Serial references · Courier logistics · Customer details · Financial breakdown · Timeline</small>
-                </div>
-              </div>
-              <div className="order-details-drawer__toggle-right">
-                <span className="order-details-drawer__toggle-pill">
-                  {showOrderDetails ? 'Collapse' : 'Expand details'}
-                </span>
-                {showOrderDetails ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-              </div>
-            </button>
-
-            {showOrderDetails ? (
-              <div className="order-details-drawer__content">
-                <div className="order-details-drawer__grid">
-                  {/* Card 1: Curaleaf & Prescription Technical Identifiers */}
-                  <section className="order-crm-card">
-                    <div className="order-crm-section-heading">
-                      <span><small>Curaleaf Rocky API</small><strong>Prescription & PO references</strong></span>
-                      <FileCode2 size={15} />
-                    </div>
-                    <dl className="order-crm-facts">
-                      {order.prescriptions.map((rx, rxIdx) => (
-                        <div key={rx.id} style={{ display: 'contents' }}>
-                          {order.prescriptions.length > 1 ? (
-                            <div style={{ borderTop: rxIdx > 0 ? '1px solid var(--border)' : undefined, paddingTop: rxIdx > 0 ? '6px' : undefined, marginTop: rxIdx > 0 ? '4px' : undefined }}>
-                              <dt><strong style={{ color: 'var(--tenant-primary-strong)' }}>Prescription {rxIdx + 1}</strong></dt>
-                              <dd><strong>{rx.prescriber || 'Prescriber pending'}</strong></dd>
-                            </div>
-                          ) : null}
-                          <div>
-                            <dt>PO reference</dt>
-                            <dd style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
-                              <code style={{ fontSize: '11px', background: 'var(--bg-elevated)', padding: '2px 6px', borderRadius: '4px' }}>{rx.poRef ?? 'Pending placement'}</code>
-                              {rx.poRef ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-xs"
-                                  onClick={() => handleCopy(`po_${rx.id}`, rx.poRef!)}
-                                  title="Copy PO reference"
-                                  style={{ padding: '2px 5px', height: '22px' }}
-                                >
-                                  {copiedDetailKey === `po_${rx.id}` ? <Check size={11} style={{ color: 'var(--color-success)' }} /> : <Copy size={11} />}
-                                </button>
-                              ) : null}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Serial number</dt>
-                            <dd style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
-                              <code style={{ fontSize: '11px', background: 'var(--bg-elevated)', padding: '2px 6px', borderRadius: '4px' }}>{rx.serialNumber ?? 'Not recorded'}</code>
-                              {rx.serialNumber ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-xs"
-                                  onClick={() => handleCopy(`serial_${rx.id}`, rx.serialNumber!)}
-                                  title="Copy serial number"
-                                  style={{ padding: '2px 5px', height: '22px' }}
-                                >
-                                  {copiedDetailKey === `serial_${rx.id}` ? <Check size={11} style={{ color: 'var(--color-success)' }} /> : <Copy size={11} />}
-                                </button>
-                              ) : null}
-                            </dd>
-                          </div>
-                          {rx.curaleafPrescriptionId ? (
-                            <div>
-                              <dt>Curaleaf Rx ID</dt>
-                              <dd><code>{rx.curaleafPrescriptionId}</code></dd>
-                            </div>
-                          ) : null}
-                          <div>
-                            <dt>Curaleaf PO state</dt>
-                            <dd><strong>{rx.purchaseOrderState ?? (rx.placed ? 'ACTIVE' : 'DRAFT')}</strong></dd>
-                          </div>
-                          {rx.placedAt ? (
-                            <div>
-                              <dt>Placed with Curaleaf</dt>
-                              <dd>{formatDate(rx.placedAt, true)}</dd>
-                            </div>
-                          ) : null}
-                          {rx.prescriberGmcNumber || rx.prescriberGphcNumber ? (
-                            <div>
-                              <dt>Prescriber Reg</dt>
-                              <dd>{rx.prescriberGmcNumber ? `GMC #${rx.prescriberGmcNumber}` : `GPhC #${rx.prescriberGphcNumber}`}</dd>
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </dl>
-                  </section>
-
-                  {/* Card 2: Courier Logistics & Consignments */}
-                  <section className="order-crm-card">
-                    <div className="order-crm-section-heading">
-                      <span><small>Courier & Logistics</small><strong>Consignment & destination</strong></span>
-                      <Truck size={15} />
-                    </div>
-                    <dl className="order-crm-facts">
-                      <div>
-                        <dt>Courier service</dt>
-                        <dd><strong>{order.prescriptions.find(p => p.carrier)?.carrier || (order.prescriptions.some(p => p.placed) ? 'Assigned by Curaleaf on dispatch' : 'Pending dispatch')}</strong></dd>
-                      </div>
-                      {order.prescriptions.some(p => p.trackingNumber) ? (
-                        <div>
-                          <dt>Tracking number</dt>
-                          <dd style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
-                            <code>{order.prescriptions.find(p => p.trackingNumber)?.trackingNumber}</code>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-xs"
-                              onClick={() => handleCopy('tracking', order.prescriptions.find(p => p.trackingNumber)!.trackingNumber!)}
-                              style={{ padding: '2px 5px', height: '22px' }}
-                            >
-                              {copiedDetailKey === 'tracking' ? <Check size={11} style={{ color: 'var(--color-success)' }} /> : <Copy size={11} />}
-                            </button>
-                          </dd>
-                        </div>
-                      ) : null}
-                      {order.prescriptions.flatMap(p => p.shipmentIds ?? (p.shipmentId ? [p.shipmentId] : [])).length > 0 ? (
-                        <div>
-                          <dt>Consignments</dt>
-                          <dd style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'flex-end' }}>
-                            {Array.from(new Set(order.prescriptions.flatMap(p => p.shipmentIds ?? (p.shipmentId ? [p.shipmentId] : [])))).map(shpId => (
-                              <span key={shpId} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'var(--bg-elevated)', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}>
-                                <code>{shpId}</code>
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-xs"
-                                  onClick={() => handleCopy(`shp_${shpId}`, shpId)}
-                                  style={{ padding: '0 2px', height: '18px' }}
-                                >
-                                  {copiedDetailKey === `shp_${shpId}` ? <Check size={10} style={{ color: 'var(--color-success)' }} /> : <Copy size={10} />}
-                                </button>
-                              </span>
-                            ))}
-                          </dd>
-                        </div>
-                      ) : null}
-                      <div>
-                        <dt>Receiving pharmacy</dt>
-                        <dd><strong>{state.currentOrganisation?.tradingName || state.currentOrganisation?.name || 'Pharmacy Dispensary'}</strong></dd>
-                      </div>
-                      <div>
-                        <dt>Fulfilment model</dt>
-                        <dd><small style={{ color: 'var(--text-secondary)' }}>Curaleaf → Dispensary Goods-In → In-person collection</small></dd>
-                      </div>
-                    </dl>
-                  </section>
-
-                  {/* Card 3: Customer & Patient Details */}
-                  <section className="order-crm-card">
-                    <div className="order-crm-section-heading">
-                      <span><small>Customer</small><strong>Contact details</strong></span>
-                      <UserRound size={15} />
-                    </div>
-                    <dl className="order-crm-facts">
-                      <div><dt><Mail size={12} /> Email</dt><dd>{patient?.email ?? 'Not recorded'}</dd></div>
-                      <div><dt><Phone size={12} /> Mobile</dt><dd>{patient?.mobile ?? 'Not recorded'}</dd></div>
-                      <div><dt><UserRound size={12} /> Date of birth</dt><dd>{patient?.dob ? formatPatientDob(patient.dob) : 'Not recorded'}</dd></div>
-                      <div><dt><MapPin size={12} /> Address</dt><dd>{cleanStreetAddress || 'Not recorded'}</dd></div>
-                      {patientPostcode ? <div><dt><MapPin size={12} /> Postcode</dt><dd><strong style={{ letterSpacing: '0.04em' }}>{patientPostcode}</strong></dd></div> : null}
-                    </dl>
-                  </section>
-
-                  {/* Card 4: Financial Breakdown */}
-                  <section className="order-crm-card">
-                    <div className="order-crm-section-heading">
-                      <span><small>Financial breakdown</small><strong>{order.payment.status === 'paid' ? 'Payment Cleared' : 'Payment Outstanding'}</strong></span>
-                      {order.payment.route === 'worldpay' ? <CreditCard size={15} /> : <Banknote size={15} />}
-                    </div>
-                    <dl className="order-crm-facts">
-                      {order.prescriptions.flatMap(rx => rx.items).map(item => (
-                        <div key={item.productId}>
-                          <dt>{resolveProductName(item)} <small>({item.qty} × {money(item.retail)})</small></dt>
-                          <dd>{money(item.retail * item.qty)}</dd>
-                        </div>
-                      ))}
-                      {order.dispensingFee ? (
-                        <div><dt>Dispensing fee</dt><dd>{money(order.dispensingFee)}</dd></div>
-                      ) : null}
-                      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '6px', marginTop: '4px' }}>
-                        <dt><strong>Total {order.payment.status === 'paid' ? 'Paid' : 'Due'}</strong></dt>
-                        <dd><strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{money(order.payment.amount)}</strong></dd>
-                      </div>
-                      <div><dt>Payment route</dt><dd>{order.payment.route === 'worldpay' ? 'Worldpay' : 'Pharmacy managed'}</dd></div>
-                      <div><dt>Requested</dt><dd>{formatDate(order.payment.sentAt, true)}</dd></div>
-                      {order.payment.paidAt ? <div><dt>Paid at</dt><dd>{formatDate(order.payment.paidAt, true)}</dd></div> : null}
-                      <div>
-                        <dt>Reference</dt>
-                        <dd style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
-                          <code style={{ fontSize: '11px', background: 'var(--bg-elevated)', padding: '2px 6px', borderRadius: '4px' }}>
-                            {order.payment.manualReference ?? order.payment.ref ?? 'Pending'}
-                          </code>
-                          {(order.payment.manualReference || order.payment.ref) ? (
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-xs"
-                              onClick={() => handleCopy('pay_ref', (order.payment.manualReference ?? order.payment.ref)!)}
-                              style={{ padding: '2px 5px', height: '22px' }}
-                            >
-                              {copiedDetailKey === 'pay_ref' ? <Check size={11} style={{ color: 'var(--color-success)' }} /> : <Copy size={11} />}
-                            </button>
-                          ) : null}
-                        </dd>
-                      </div>
-                    </dl>
-                  </section>
-                </div>
-
-                {/* Card 5: Audit Trail full width */}
-                <div style={{ marginTop: '16px' }}>
-                  <section className="order-crm-card">
-                    <div className="order-crm-section-heading">
-                      <span><small>Audit trail</small><strong>Activity & Event history</strong></span>
-                      <Clock3 size={15} />
-                    </div>
-                    <OrderTimeline order={order} />
-                  </section>
-                </div>
-              </div>
-            ) : null}
-          </div>
+          <OrderDetailsDrawer
+            order={order}
+            patient={patient}
+            cleanStreetAddress={cleanStreetAddress}
+            patientPostcode={patientPostcode}
+            pharmacyName={state.currentOrganisation?.tradingName || state.currentOrganisation?.name || null}
+            showOrderDetails={showOrderDetails}
+            onToggle={() => setShowOrderDetails(prev => !prev)}
+            copiedDetailKey={copiedDetailKey}
+            onCopy={handleCopy}
+            resolveProductName={resolveProductName}
+          />
         </section>
       </div>
     </article>
@@ -2440,7 +2224,333 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   );
 }
 
+function LedgerCopyButton({ detailKey, copyKey, value, copiedDetailKey, onCopy, compact = false }: {
+  detailKey: string;
+  copyKey: string;
+  value: string;
+  copiedDetailKey: string | null;
+  onCopy: (key: string, text: string) => void;
+  compact?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`order-ledger__copy-btn ${compact ? 'order-ledger__copy-btn--compact' : ''}`}
+      onClick={() => onCopy(copyKey, value)}
+      title="Copy"
+      aria-label="Copy value"
+    >
+      {copiedDetailKey === detailKey ? <Check size={compact ? 10 : 11} aria-hidden="true" /> : <Copy size={compact ? 10 : 11} aria-hidden="true" />}
+    </button>
+  );
+}
+
+function LedgerValue({ children, mono = false, muted = false, title }: {
+  children: React.ReactNode;
+  mono?: boolean;
+  muted?: boolean;
+  title?: string;
+}) {
+  return (
+    <span
+      className={`order-ledger__value ${mono ? 'order-ledger__value--mono' : ''} ${muted ? 'order-ledger__value--muted' : ''}`}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+function OrderDetailsDrawer({ order, patient, cleanStreetAddress, patientPostcode, pharmacyName, showOrderDetails, onToggle, copiedDetailKey, onCopy, resolveProductName }: {
+  order: PatientOrder;
+  patient: CRMPatient | null | undefined;
+  cleanStreetAddress: string;
+  patientPostcode: string | null;
+  pharmacyName: string | null;
+  showOrderDetails: boolean;
+  onToggle: () => void;
+  copiedDetailKey: string | null;
+  onCopy: (key: string, text: string) => void;
+  resolveProductName: (item: { name?: string; productId: string; formulaId?: string }) => string;
+}) {
+  const consignments = collectOrderConsignments(order);
+  const courierLabel = orderCourierLabel(order);
+  const deliveryDestination = orderDeliveryDestination(order, pharmacyName);
+  const computedTotal = orderFinancialTotal(order);
+  const paymentReference = order.payment.manualReference ?? order.payment.ref ?? null;
+
+  return (
+    <div className="order-details-drawer">
+      <button
+        type="button"
+        className="order-details-drawer__toggle-btn"
+        onClick={onToggle}
+        aria-expanded={showOrderDetails}
+      >
+        <div className="order-details-drawer__toggle-left">
+          <span className="order-details-drawer__toggle-icon">
+            <FileText size={16} />
+          </span>
+          <div className="order-details-drawer__toggle-text">
+            <strong>{showOrderDetails ? 'Hide order details & history' : 'Order details & audit history'}</strong>
+            <small>References, consignments, contact, payment, and timeline</small>
+          </div>
+        </div>
+        <div className="order-details-drawer__toggle-right">
+          <span className="order-details-drawer__toggle-pill">
+            {showOrderDetails ? 'Collapse' : 'Expand details'}
+          </span>
+          {showOrderDetails ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+        </div>
+      </button>
+
+      {showOrderDetails ? (
+        <div className="order-details-drawer__content">
+          <div className="order-details-drawer__grid">
+            <section className="order-ledger__card">
+              <header className="order-ledger__card-head">
+                <span><small>Curaleaf Rocky API</small><strong>Prescription & PO references</strong></span>
+                <FileCode2 size={15} aria-hidden="true" />
+              </header>
+              <div className="order-ledger__stack">
+                {order.prescriptions.map((rx, rxIdx) => (
+                  <div key={rx.id} className="order-ledger__group">
+                    {order.prescriptions.length > 1 ? (
+                      <p className="order-ledger__group-label">Prescription {rxIdx + 1}</p>
+                    ) : null}
+                    <dl className="order-ledger__facts">
+                      <div className="order-ledger__row">
+                        <dt>Prescriber</dt>
+                        <dd><LedgerValue>{rx.prescriber || 'Prescriber pending'}</LedgerValue></dd>
+                      </div>
+                      <div className="order-ledger__row">
+                        <dt>PO reference</dt>
+                        <dd className="order-ledger__row-value">
+                          <LedgerValue mono>{rx.poRef ?? 'Pending placement'}</LedgerValue>
+                          {rx.poRef ? <LedgerCopyButton detailKey={`po_${rx.id}`} copyKey={`po_${rx.id}`} value={rx.poRef} copiedDetailKey={copiedDetailKey} onCopy={onCopy} /> : null}
+                        </dd>
+                      </div>
+                      <div className="order-ledger__row">
+                        <dt>Serial number</dt>
+                        <dd className="order-ledger__row-value">
+                          <LedgerValue mono>{rx.serialNumber ?? 'Not recorded'}</LedgerValue>
+                          {rx.serialNumber ? <LedgerCopyButton detailKey={`serial_${rx.id}`} copyKey={`serial_${rx.id}`} value={rx.serialNumber} copiedDetailKey={copiedDetailKey} onCopy={onCopy} /> : null}
+                        </dd>
+                      </div>
+                      {rx.curaleafPrescriptionId ? (
+                        <div className="order-ledger__row">
+                          <dt>Curaleaf Rx ID</dt>
+                          <dd><LedgerValue mono>{rx.curaleafPrescriptionId}</LedgerValue></dd>
+                        </div>
+                      ) : null}
+                      <div className="order-ledger__row">
+                        <dt>Curaleaf PO state</dt>
+                        <dd><LedgerValue>{rx.purchaseOrderState ?? (rx.placed ? 'ACTIVE' : 'DRAFT')}</LedgerValue></dd>
+                      </div>
+                      {rx.placedAt ? (
+                        <div className="order-ledger__row">
+                          <dt>Placed with Curaleaf</dt>
+                          <dd><LedgerValue>{formatDate(rx.placedAt, true)}</LedgerValue></dd>
+                        </div>
+                      ) : null}
+                      {rx.prescriberGmcNumber || rx.prescriberGphcNumber ? (
+                        <div className="order-ledger__row">
+                          <dt>Prescriber registration</dt>
+                          <dd><LedgerValue>{rx.prescriberGmcNumber ? `GMC #${rx.prescriberGmcNumber}` : `GPhC #${rx.prescriberGphcNumber}`}</LedgerValue></dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="order-ledger__card">
+              <header className="order-ledger__card-head">
+                <span><small>Courier & logistics</small><strong>Consignment & destination</strong></span>
+                <Truck size={15} aria-hidden="true" />
+              </header>
+              <dl className="order-ledger__facts">
+                <div className="order-ledger__row">
+                  <dt>Courier service</dt>
+                  <dd><LedgerValue>{courierLabel ?? 'Not yet dispatched'}</LedgerValue></dd>
+                </div>
+                <div className="order-ledger__row">
+                  <dt>Delivery destination</dt>
+                  <dd><LedgerValue>{deliveryDestination ?? 'Not yet dispatched'}</LedgerValue></dd>
+                </div>
+                <div className="order-ledger__row">
+                  <dt>Fulfilment model</dt>
+                  <dd><LedgerValue muted>Curaleaf dispatch → dispensary goods-in → in-person collection</LedgerValue></dd>
+                </div>
+              </dl>
+              {consignments.length ? (
+                <ul className="order-ledger__consignments">
+                  {consignments.map((consignment, index) => (
+                    <li key={consignment.id} className="order-ledger__consignment">
+                      <div className="order-ledger__consignment-head">
+                        <strong>Consignment {index + 1}</strong>
+                        <span className={`order-ledger__status order-ledger__status--${consignment.status.replace(/_/g, '-')}`}>{consignment.statusLabel}</span>
+                      </div>
+                      <dl className="order-ledger__facts order-ledger__facts--nested">
+                        <div className="order-ledger__row">
+                          <dt>Shipment ID</dt>
+                          <dd className="order-ledger__row-value">
+                            <LedgerValue mono title={consignment.id}>{shortConsignmentId(consignment.id)}</LedgerValue>
+                            <LedgerCopyButton detailKey={`shp_${consignment.id}`} copyKey={`shp_${consignment.id}`} value={consignment.id} copiedDetailKey={copiedDetailKey} onCopy={onCopy} compact />
+                          </dd>
+                        </div>
+                        {consignment.poRef ? (
+                          <div className="order-ledger__row">
+                            <dt>PO reference</dt>
+                            <dd><LedgerValue mono>{consignment.poRef}</LedgerValue></dd>
+                          </div>
+                        ) : null}
+                        <div className="order-ledger__row">
+                          <dt>Packs in consignment</dt>
+                          <dd><LedgerValue>{consignment.packCount} pack{consignment.packCount === 1 ? '' : 's'}</LedgerValue></dd>
+                        </div>
+                        {consignment.createdAt ? (
+                          <div className="order-ledger__row">
+                            <dt>Dispatched</dt>
+                            <dd><LedgerValue>{formatDate(consignment.createdAt, true)}</LedgerValue></dd>
+                          </div>
+                        ) : null}
+                        {consignment.shipmentCharge ? (
+                          <div className="order-ledger__row">
+                            <dt>Shipment charge</dt>
+                            <dd><LedgerValue>£{consignment.shipmentCharge}</LedgerValue></dd>
+                          </div>
+                        ) : null}
+                        {consignment.shippingAddress ? (
+                          <div className="order-ledger__row">
+                            <dt>Ship-to address</dt>
+                            <dd><LedgerValue>{consignment.shippingAddress}</LedgerValue></dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="order-ledger__empty">Not yet dispatched — consignment details appear when Curaleaf creates a shipment.</p>
+              )}
+            </section>
+
+            <section className="order-ledger__card">
+              <header className="order-ledger__card-head">
+                <span><small>Customer</small><strong>Contact details</strong></span>
+                <UserRound size={15} aria-hidden="true" />
+              </header>
+              <dl className="order-ledger__facts">
+                <div className="order-ledger__row">
+                  <dt><Mail size={12} aria-hidden="true" /> Email</dt>
+                  <dd><LedgerValue>{patient?.email ?? 'Not recorded'}</LedgerValue></dd>
+                </div>
+                <div className="order-ledger__row">
+                  <dt><Phone size={12} aria-hidden="true" /> Mobile</dt>
+                  <dd><LedgerValue>{patient?.mobile ?? 'Not recorded'}</LedgerValue></dd>
+                </div>
+                <div className="order-ledger__row">
+                  <dt><UserRound size={12} aria-hidden="true" /> Date of birth</dt>
+                  <dd><LedgerValue>{patient?.dob ? formatPatientDob(patient.dob) : 'Not recorded'}</LedgerValue></dd>
+                </div>
+                <div className="order-ledger__row">
+                  <dt><MapPin size={12} aria-hidden="true" /> Address</dt>
+                  <dd><LedgerValue>{cleanStreetAddress || 'Not recorded'}</LedgerValue></dd>
+                </div>
+                {patientPostcode ? (
+                  <div className="order-ledger__row">
+                    <dt><MapPin size={12} aria-hidden="true" /> Postcode</dt>
+                    <dd><LedgerValue>{patientPostcode}</LedgerValue></dd>
+                  </div>
+                ) : null}
+              </dl>
+            </section>
+
+            <section className="order-ledger__card">
+              <header className="order-ledger__card-head">
+                <span><small>Financial breakdown</small><strong>{order.payment.status === 'paid' ? 'Payment cleared' : 'Payment outstanding'}</strong></span>
+                {order.payment.route === 'worldpay' ? <CreditCard size={15} aria-hidden="true" /> : <Banknote size={15} aria-hidden="true" />}
+              </header>
+              <dl className="order-ledger__facts">
+                {order.prescriptions.flatMap(rx => rx.items).map(item => (
+                  <div key={item.productId} className="order-ledger__row">
+                    <dt>{resolveProductName(item)} <span className="order-ledger__meta">{item.qty} × {money(item.retail)}</span></dt>
+                    <dd><LedgerValue>{money(item.retail * item.qty)}</LedgerValue></dd>
+                  </div>
+                ))}
+                {order.dispensingFee ? (
+                  <div className="order-ledger__row">
+                    <dt>Dispensing fee</dt>
+                    <dd><LedgerValue>{money(order.dispensingFee)}</LedgerValue></dd>
+                  </div>
+                ) : null}
+                <div className="order-ledger__row order-ledger__row--total">
+                  <dt>Total {order.payment.status === 'paid' ? 'paid' : 'due'}</dt>
+                  <dd><LedgerValue>{money(order.payment.amount)}</LedgerValue></dd>
+                </div>
+                {Math.abs(computedTotal - order.payment.amount) > 0.009 ? (
+                  <div className="order-ledger__row">
+                    <dt>Line-item subtotal</dt>
+                    <dd><LedgerValue muted>{money(computedTotal)}</LedgerValue></dd>
+                  </div>
+                ) : null}
+                <div className="order-ledger__row">
+                  <dt>Payment route</dt>
+                  <dd><LedgerValue>{order.payment.route === 'worldpay' ? 'Worldpay' : 'Pharmacy managed'}</LedgerValue></dd>
+                </div>
+                <div className="order-ledger__row">
+                  <dt>Requested</dt>
+                  <dd><LedgerValue>{formatDate(order.payment.sentAt, true)}</LedgerValue></dd>
+                </div>
+                {order.payment.paidAt ? (
+                  <div className="order-ledger__row">
+                    <dt>Paid at</dt>
+                    <dd><LedgerValue>{formatDate(order.payment.paidAt, true)}</LedgerValue></dd>
+                  </div>
+                ) : null}
+                <div className="order-ledger__row">
+                  <dt>Reference</dt>
+                  <dd className="order-ledger__row-value">
+                    <LedgerValue mono>{paymentReference ?? 'Pending'}</LedgerValue>
+                    {paymentReference ? <LedgerCopyButton detailKey="pay_ref" copyKey="pay_ref" value={paymentReference} copiedDetailKey={copiedDetailKey} onCopy={onCopy} /> : null}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          </div>
+
+          <section className="order-ledger__card order-ledger__card--timeline">
+            <header className="order-ledger__card-head">
+              <span><small>Audit trail</small><strong>Activity timeline</strong></span>
+              <Clock3 size={15} aria-hidden="true" />
+            </header>
+            <OrderTimeline order={order} />
+          </section>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function OrderTimeline({ order }: { order: PatientOrder & { handoutAt?: Date | string | null; handoutRecipient?: string | null } }) {
   const events = buildOrderTimelineEvents(order);
-  return <section className="order-crm-activity"><div className="order-crm-section-heading"><span><small>Activity</small><strong>Order timeline</strong></span><Clock3 size={15} /></div><ol className="order-crm-timeline">{events.map((event, index) => <li key={`${event.label}-${index}`}><span /><div><strong>{event.label}</strong><small>{event.detail}</small><time>{formatDate(event.date, true)}</time></div></li>)}</ol></section>;
+  if (!events.length) {
+    return <p className="order-ledger__empty">No activity recorded yet.</p>;
+  }
+  return (
+    <ol className="order-crm-timeline order-ledger__timeline">
+      {events.map((event, index) => (
+        <li key={`${event.label}-${index}`}>
+          <span aria-hidden="true" />
+          <div>
+            <strong>{event.label}</strong>
+            <small>{event.detail}</small>
+            <time dateTime={event.date ? new Date(event.date).toISOString() : undefined}>{formatDate(event.date, true)}</time>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
 }

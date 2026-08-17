@@ -8,6 +8,7 @@ import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPrev
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
+import { formatShippingAddress } from '../utils/shippingAddress';
 import { nextDraftIdAfterDeletion, preferredDraftIndex, preferredDraftPaymentRoute } from '../utils/createOrderDraft';
 import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeEligibilityStatus } from '../utils/eligibilityPresentation';
 
@@ -122,6 +123,7 @@ export interface Prescription {
   invoiceRef: string | null;
   trackingNumber: string | null;
   carrier: string | null;
+  deliveryAddress?: string | null;
   shipmentId?: string;
   shipmentIds?: string[];
   shipmentStates?: Record<string, string>;
@@ -134,7 +136,13 @@ export interface Prescription {
   fulfilmentLines?: PrescriptionFulfilmentLine[];
   supplierItems?: Array<{ productId: string | null; packsOrderedCount: number; packsAllocatedCount: number; packsReturnedCount: number }>;
   latestShipmentAt?: string | null;
-  shipments?: Array<{ id: string; createdAt?: string | null; items?: Array<{ productId?: string | null; packCount?: number }> }>;
+  shipments?: Array<{
+    id: string;
+    createdAt?: string | null;
+    shipmentCharge?: string | null;
+    shippingAddress?: Array<{ line1?: string; line2?: string; city?: string; county?: string; postcode?: string; country?: string; name?: string } | string>;
+    items?: Array<{ productId?: string | null; packCount?: number }>;
+  }>;
 }
 
 export type PaymentStatus = 'none' | 'sent' | 'paid' | 'cancelled';
@@ -839,6 +847,25 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
             ?? flow?.latestShipmentAt
             ?? null
           : null;
+        const mappedShipments = isPaid
+          ? (curaleaf?.shipments ?? []).map(shipment => ({
+            id: shipment.id,
+            createdAt: shipment.createdAt ?? null,
+            shipmentCharge: shipment.shipmentCharge ?? null,
+            shippingAddress: shipment.shippingAddress,
+            items: (shipment.items ?? []).map(item => ({
+              productId: item.productId ?? null,
+              packCount: Number(item.packCount ?? 0),
+            })),
+          }))
+          : undefined;
+        const deliveryAddress = isPaid
+          ? (
+            formatShippingAddress(mappedShipments?.find(shipment => shipment.shippingAddress)?.shippingAddress)
+            ?? formatShippingAddress(curaleaf?.shippingAddress)
+            ?? null
+          )
+          : null;
         return {
           id: orderId * 100 + rxIndex + 1,
           backendId: flowKey,
@@ -866,7 +893,8 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           status: flowStatus ?? portalPrescriptionStatus({ curaleaf: isPaid ? curaleaf : undefined, fulfilmentStatus: isPaid ? record.fulfilmentStatus : 'supplier_pending' }),
           invoiceRef: null,
           trackingNumber: null,
-          carrier: curaleaf?.courier ?? null,
+          carrier: curaleaf?.courier ? String(curaleaf.courier) : null,
+          deliveryAddress,
           shipmentId: shipmentIds[0],
           shipmentIds,
           shipmentStates: isPaid ? (flow?.shipmentStates ?? curaleaf?.shipmentStates) : undefined,
@@ -892,7 +920,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           })) : undefined,
           supplierItems: isPaid ? (curaleaf?.supplierItems ?? []) : undefined,
           latestShipmentAt,
-          shipments: isPaid ? (curaleaf?.shipments ?? []) : undefined,
+          shipments: mappedShipments,
         };
       })
     : [{

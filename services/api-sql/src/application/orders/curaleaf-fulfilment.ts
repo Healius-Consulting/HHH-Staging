@@ -23,6 +23,16 @@ export interface CuraleafPoItem {
   count?: number | string | null;
 }
 
+export interface CuraleafShippingAddressLike {
+  line1?: string | null;
+  line2?: string | null;
+  city?: string | null;
+  county?: string | null;
+  postcode?: string | null;
+  country?: string | null;
+  name?: string | null;
+}
+
 export interface CuraleafPurchaseOrderLike {
   id?: string | null;
   purchaseOrderId?: string | null;
@@ -32,6 +42,7 @@ export interface CuraleafPurchaseOrderLike {
   customerReference?: string | null;
   issuedDate?: string | null;
   createdAt?: string | null;
+  shippingAddress?: Array<CuraleafShippingAddressLike | string> | null;
   items?: CuraleafPoItem[] | null;
 }
 
@@ -52,6 +63,9 @@ export interface CuraleafShipmentLike {
   purchaseOrderCustomerReference?: string | null;
   customerReference?: string | null;
   createdAt?: string | null;
+  shipmentCharge?: string | null;
+  taxRate?: string | null;
+  shippingAddress?: Array<CuraleafShippingAddressLike | string> | null;
   items?: CuraleafShipmentItemLike[] | null;
 }
 
@@ -454,7 +468,8 @@ export function buildCuraleafSnapshot(input: {
     customerReference: purchaseOrder?.customerReference || input.order.orderNumber || input.order.id,
     purchaseOrderId: purchaseOrder?.id ?? null,
     purchaseOrderState: (purchaseOrder?.state as 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | undefined) ?? null,
-    courier: purchaseOrder?.courier || 'POLAR_SPEED',
+    courier: purchaseOrder?.courier ?? null,
+    shippingAddress: purchaseOrder?.shippingAddress ?? null,
     issuedDate: purchaseOrder?.issuedDate ?? null,
     createdAt: purchaseOrder?.createdAt ?? null,
     shipments,

@@ -261,6 +261,16 @@ export interface CuraleafPurchaseOrderItem {
   unit: string;
 }
 
+export interface CuraleafShippingAddress {
+  line1?: string;
+  line2?: string;
+  city?: string;
+  county?: string;
+  postcode?: string;
+  country?: string;
+  name?: string;
+}
+
 export interface CuraleafPurchaseOrder {
   id: string;
   state: string;
@@ -268,6 +278,7 @@ export interface CuraleafPurchaseOrder {
   customerReference: string | null;
   issuedDate: string;
   createdAt: string;
+  shippingAddress?: Array<CuraleafShippingAddress | string>;
   items: CuraleafPurchaseOrderItem[];
 }
 
@@ -295,6 +306,7 @@ export interface CuraleafShipment {
   shipmentCharge: string;
   taxRate: string;
   createdAt: string;
+  shippingAddress?: Array<CuraleafShippingAddress | string>;
   items: CuraleafShipmentItem[];
 }
 
@@ -487,6 +499,7 @@ export interface PortalCuraleafOrderState {
   purchaseOrderId?: string | null;
   purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
   courier?: string;
+  shippingAddress?: Array<{ line1?: string; line2?: string; city?: string; county?: string; postcode?: string; country?: string; name?: string } | string>;
   issuedDate?: string | null;
   createdAt?: string | null;
   shipmentIds?: string[];
