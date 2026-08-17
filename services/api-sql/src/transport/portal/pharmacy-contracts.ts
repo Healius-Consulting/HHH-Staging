@@ -197,11 +197,17 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     priorLines,
   }) : [];
   const dispatchStatus = dispatchStatusFromLines(shipments, lines);
-  const computedFulfilment = advanceFulfilmentStatus(
+  const hasCheckedInPacks = lines.some(line => line.received > 0 || line.collected > 0);
+  const hasInTransitPacks = lines.some(line => line.shipped > line.received);
+  const supplierComputed = supplierFulfilmentStatus({ purchaseOrder: po, shipments, lines });
+  const rawComputedFulfilment = advanceFulfilmentStatus(
     order.fulfilmentStatus,
-    supplierFulfilmentStatus({ purchaseOrder: po, shipments, lines }),
+    supplierComputed,
   );
-  const remainingOpenAfterGoodsIn = lines.some(line => line.received > 0 || line.collected > 0)
+  const computedFulfilment = !hasCheckedInPacks && hasInTransitPacks
+    ? (lines.some(line => line.remaining > 0) ? 'PARTIALLY_DISPATCHED_TO_PHARMACY' : 'DISPATCHED_TO_PHARMACY')
+    : rawComputedFulfilment;
+  const remainingOpenAfterGoodsIn = hasCheckedInPacks
     && lines.some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered);
   const shipmentIds = (po?.shipmentIds ?? persistedCuraleaf?.shipmentIds ?? shipments.map((s: any) => s.id)).filter(Boolean);
   const shipmentStates = {
@@ -218,10 +224,10 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
       orderId: rxKey,
       state: isCancelledOrder ? 'CANCELLED_PURCHASE_ORDER'
         : remainingOpenAfterGoodsIn ? 'PARTIALLY_RECEIVED'
-        : order.fulfilmentStatus === 'COLLECTED' ? 'COLLECTED'
-        : order.fulfilmentStatus === 'READY_FOR_COLLECTION' ? 'READY_FOR_COLLECTION'
-        : order.fulfilmentStatus === 'RECEIVED' ? 'RECEIVED'
-        : order.fulfilmentStatus === 'PARTIALLY_RECEIVED' || computedFulfilment === 'PARTIALLY_RECEIVED' ? 'PARTIALLY_RECEIVED'
+        : hasCheckedInPacks && order.fulfilmentStatus === 'COLLECTED' ? 'COLLECTED'
+        : hasCheckedInPacks && order.fulfilmentStatus === 'READY_FOR_COLLECTION' ? 'READY_FOR_COLLECTION'
+        : hasCheckedInPacks && order.fulfilmentStatus === 'RECEIVED' ? 'RECEIVED'
+        : hasCheckedInPacks && (order.fulfilmentStatus === 'PARTIALLY_RECEIVED' || computedFulfilment === 'PARTIALLY_RECEIVED') ? 'PARTIALLY_RECEIVED'
         : isSupplierFlowActive ? 'PLACED' : 'AWAITING_PAYMENT',
       lines,
       shipmentIds,
@@ -237,10 +243,17 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
   const portalFulfilment = isCancelledOrder
     ? 'cancelled'
     : remainingOpenAfterGoodsIn ? 'partially_received'
+    : hasCheckedInPacks && order.fulfilmentStatus === 'READY_FOR_COLLECTION' ? 'ready_for_collection'
+    : hasCheckedInPacks && order.fulfilmentStatus === 'RECEIVED' ? 'received'
+    : hasCheckedInPacks && (order.fulfilmentStatus === 'PARTIALLY_RECEIVED' || computedFulfilment === 'PARTIALLY_RECEIVED') ? 'partially_received'
     : computedFulfilment === 'PARTIALLY_DISPATCHED_TO_PHARMACY' ? 'partially_dispatched_to_pharmacy'
     : computedFulfilment === 'DISPATCHED_TO_PHARMACY' ? 'dispatched_to_pharmacy'
-    : computedFulfilment === 'PARTIALLY_RECEIVED' ? 'partially_received'
+    : computedFulfilment === 'PARTIALLY_RECEIVED' && hasCheckedInPacks ? 'partially_received'
     : computedFulfilment === 'SUPPLIER_ALLOCATED' ? 'supplier_allocated'
+    : !hasCheckedInPacks && hasInTransitPacks
+      ? (lines.some(line => line.remaining > 0) ? 'partially_dispatched_to_pharmacy' : 'dispatched_to_pharmacy')
+    : !hasCheckedInPacks && ['ready_for_collection', 'received', 'partially_received'].includes(lower(order.fulfilmentStatus))
+      ? (lines.some(line => line.remaining > 0) ? 'partially_dispatched_to_pharmacy' : 'dispatched_to_pharmacy')
     : lower(order.fulfilmentStatus);
 
   return {

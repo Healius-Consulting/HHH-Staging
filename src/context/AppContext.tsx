@@ -815,21 +815,25 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
         const flowKey = prescription.id ?? prescription.fileId;
         const flow = isMatchedPO ? record.prescriptionFlow?.[flowKey] : undefined;
         const isFlowPlaced = isPaid && flow?.state === 'PLACED';
-        const flowStatus: RxStatus | null = !isPaid ? 'draft'
-          : flow?.state === 'CANCELLED_PURCHASE_ORDER' ? 'cancelled'
-          : flow?.state === 'COLLECTED' ? 'collected'
-          : flow?.state === 'READY_FOR_COLLECTION' ? 'ready'
-          : flow?.state === 'RECEIVED' ? 'received'
-          : flow?.state === 'PARTIALLY_RECEIVED' ? 'partially-received'
-          : isFlowPlaced && curaleaf?.purchaseOrderState === 'CANCELLED' ? 'cancelled'
-          : isFlowPlaced && (flow?.shipmentIds?.length || curaleaf?.shipmentIds?.length) ? 'dispatched'
-          : isFlowPlaced ? 'processing'
-          : null;
-        const shipmentIds = (isPaid && flow?.shipmentIds?.length) ? flow.shipmentIds : (isPaid ? (curaleaf?.shipmentIds ?? []) : []);
         const flowLines = (isPaid && flow?.lines?.length && flow.state !== 'AWAITING_PAYMENT') ? flow.lines : [];
+        const totalReceivedPacks = flowLines.reduce((sum, line) => sum + (line.received ?? 0), 0);
+        const totalShippedPacks = flowLines.reduce((sum, line) => sum + (line.shipped ?? 0), 0);
+        const hasCheckedInPacks = totalReceivedPacks > 0;
         const receivedItems = flowLines.length
           ? flowLines.filter(line => line.received > 0).map(line => ({ productId: line.productId, quantityReceived: line.received }))
           : undefined;
+        const flowStatus: RxStatus | null = !isPaid ? 'draft'
+          : flow?.state === 'CANCELLED_PURCHASE_ORDER' ? 'cancelled'
+          : flow?.state === 'COLLECTED' ? 'collected'
+          : flow?.state === 'READY_FOR_COLLECTION' && hasCheckedInPacks ? 'ready'
+          : flow?.state === 'RECEIVED' && hasCheckedInPacks ? 'received'
+          : flow?.state === 'PARTIALLY_RECEIVED' && hasCheckedInPacks ? 'partially-received'
+          : !hasCheckedInPacks && totalShippedPacks > 0 ? 'dispatched'
+          : isFlowPlaced && curaleaf?.purchaseOrderState === 'CANCELLED' ? 'cancelled'
+          : isFlowPlaced && (totalShippedPacks > 0 || flow?.shipmentIds?.length || curaleaf?.shipmentIds?.length) ? 'dispatched'
+          : isFlowPlaced ? 'processing'
+          : null;
+        const shipmentIds = (isPaid && flow?.shipmentIds?.length) ? flow.shipmentIds : (isPaid ? (curaleaf?.shipmentIds ?? []) : []);
         return {
           id: orderId * 100 + rxIndex + 1,
           backendId: flowKey,

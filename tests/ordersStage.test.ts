@@ -50,7 +50,71 @@ test('mixed ready and in-flight prescriptions do not classify the order as ready
   const order = {
     date: new Date(),
     payment: { status: 'paid' },
-    prescriptions: [{ status: 'ready' }, { status: 'dispatched' }],
+    prescriptions: [
+      {
+        status: 'ready',
+        fulfilmentLines: [{ productId: 'p1', ordered: 2, shipped: 2, received: 2, remaining: 0, collected: 0, requested: 2, sent: null, supplierReportedOrdered: 2, allocated: 2, returned: 0, backordered: false, quantityMismatch: false }],
+      },
+      {
+        status: 'dispatched',
+        fulfilmentLines: [{ productId: 'p2', ordered: 2, shipped: 1, received: 0, remaining: 1, collected: 0, requested: 2, sent: null, supplierReportedOrdered: 2, allocated: 1, returned: 0, backordered: false, quantityMismatch: false }],
+      },
+    ],
+  } as PatientOrder;
+  assert.equal(orderStage(order).stage, 'dispatched');
+});
+
+test('partial dispatch with zero check-in stays in transit despite stale ready shipment state', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{
+      status: 'dispatched',
+      dispatchStatus: 'partial',
+      shipmentStates: { 'ship-1': 'ready_for_collection' },
+      fulfilmentLines: [{
+        productId: 'p1',
+        ordered: 4,
+        shipped: 2,
+        received: 0,
+        remaining: 2,
+        collected: 0,
+        requested: 4,
+        sent: null,
+        supplierReportedOrdered: 4,
+        allocated: 2,
+        returned: 0,
+        backordered: true,
+        quantityMismatch: false,
+      }],
+    }],
+  } as PatientOrder;
+  assert.equal(orderStage(order).stage, 'dispatched');
+});
+
+test('ready to collect requires checked-in packs', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{
+      status: 'ready',
+      shipmentStates: { 'ship-1': 'ready_for_collection' },
+      fulfilmentLines: [{
+        productId: 'p1',
+        ordered: 4,
+        shipped: 2,
+        received: 0,
+        remaining: 2,
+        collected: 0,
+        requested: 4,
+        sent: null,
+        supplierReportedOrdered: 4,
+        allocated: 2,
+        returned: 0,
+        backordered: true,
+        quantityMismatch: false,
+      }],
+    }],
   } as PatientOrder;
   assert.equal(orderStage(order).stage, 'dispatched');
 });

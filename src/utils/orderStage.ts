@@ -21,6 +21,55 @@ export function hasDispatchedRemainder(line: { ordered: number; shipped: number 
   return line.shipped > 0 && line.shipped < line.ordered;
 }
 
+type OrderPrescription = PatientOrder['prescriptions'][number];
+
+function prescriptionPackTotals(prescription: OrderPrescription) {
+  const lines = prescription.fulfilmentLines ?? [];
+  return lines.reduce((totals, line) => ({
+    ordered: totals.ordered + line.ordered,
+    shipped: totals.shipped + line.shipped,
+    received: totals.received + line.received,
+    collected: totals.collected + line.collected,
+  }), { ordered: 0, shipped: 0, received: 0, collected: 0 });
+}
+
+function prescriptionUsesPackProgress(prescription: OrderPrescription) {
+  return (prescription.fulfilmentLines ?? []).length > 0;
+}
+
+function prescriptionHasCheckedInPacks(prescription: OrderPrescription) {
+  if (prescriptionUsesPackProgress(prescription)) {
+    return prescriptionPackTotals(prescription).received > 0;
+  }
+  return ['received', 'partially-received', 'ready', 'collected'].includes(prescription.status);
+}
+
+function prescriptionHasInTransitPacks(prescription: OrderPrescription) {
+  if (prescriptionUsesPackProgress(prescription)) {
+    const { shipped, received } = prescriptionPackTotals(prescription);
+    return shipped > received;
+  }
+  if (prescription.status === 'dispatched') return true;
+  return Boolean(prescription.shipmentIds?.length)
+    && !['received', 'partially-received', 'ready', 'collected'].includes(prescription.status);
+}
+
+function prescriptionReadyForCollection(prescription: OrderPrescription) {
+  if (!prescriptionHasCheckedInPacks(prescription)) return false;
+  return prescription.status === 'ready'
+    || Object.values(prescription.shipmentStates ?? {}).includes('ready_for_collection');
+}
+
+function prescriptionDeliveredAtPharmacy(prescription: OrderPrescription) {
+  if (!prescriptionHasCheckedInPacks(prescription)) return false;
+  if (prescriptionReadyForCollection(prescription)) return false;
+  return prescription.status === 'received'
+    || prescription.status === 'partially-received'
+    || Object.values(prescription.shipmentStates ?? {}).some(state =>
+      state === 'received' || state === 'partially_received',
+    );
+}
+
 /**
  * Cancellation is an order outcome, not a patient status. Keep unfinished
  * supplier/refund work operational while demoting closed cancellations.
@@ -68,14 +117,19 @@ export function orderStage(order: PatientOrder, now = new Date()): { stage: Orde
   const remainingOpen = order.prescriptions.some(prescription =>
     (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
   );
-  const readyForCollection = order.prescriptions.some(prescription =>
-    prescription.status === 'ready'
-    || Object.values(prescription.shipmentStates ?? {}).includes('ready_for_collection'),
-  );
+  const hasInTransitPacks = order.prescriptions.some(prescription => prescriptionHasInTransitPacks(prescription));
+  const readyForCollection = !hasInTransitPacks
+    && order.prescriptions.some(prescription => prescriptionReadyForCollection(prescription));
+  const deliveredAtPharmacy = !hasInTransitPacks
+    && order.prescriptions.some(prescription => prescriptionDeliveredAtPharmacy(prescription));
   if (statuses.length && statuses.every(status => status === 'cancelled')) return { stage: 'cancelled', unresolvedReason };
   if (statuses.length && statuses.every(status => status === 'collected') && !remainingOpen) return { stage: 'collected', unresolvedReason };
+  if (hasInTransitPacks) return { stage: 'dispatched', unresolvedReason };
   if (readyForCollection) return { stage: 'ready', unresolvedReason };
-  if (statuses.some(status => status === 'received' || status === 'partially-received')) return { stage: 'delivered', unresolvedReason };
+  const usesPackProgress = order.prescriptions.some(prescriptionUsesPackProgress);
+  if (deliveredAtPharmacy || (!usesPackProgress && statuses.some(status => status === 'received' || status === 'partially-received'))) {
+    return { stage: 'delivered', unresolvedReason };
+  }
   if (statuses.some(status => status === 'dispatched')) return { stage: 'dispatched', unresolvedReason };
   if (statuses.length && statuses.every(status => ['processing', 'approved', 'dispatched', 'partially-received', 'received', 'ready', 'collected', 'cancelled'].includes(status))) return { stage: 'curaleaf-approved', unresolvedReason };
   if (order.prescriptions.some(prescription => prescription.placed || prescription.status === 'awaiting-approval')) return { stage: 'curaleaf-pending', unresolvedReason };
