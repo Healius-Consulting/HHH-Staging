@@ -187,8 +187,7 @@ export function syncSnapshotLineItemsFromPurchaseOrder(
 ) {
   if (!purchaseOrder?.items?.length) return snapshot;
   const ref = String(purchaseOrder.customerReference || '').trim();
-  const orderId = String(order.id || '').trim();
-  if (!ref || !orderId || !ref.startsWith(`HHH-${orderId}`)) return snapshot;
+  if (!ref || !customerReferenceMatchesOrder(ref, order)) return snapshot;
 
   const poByProduct = new Map(
     purchaseOrder.items.flatMap(item => item.productId

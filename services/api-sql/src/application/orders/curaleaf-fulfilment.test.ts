@@ -410,4 +410,16 @@ describe('Curaleaf fulfilment mapping', () => {
     assert.equal(lines[0]?.shipped, 1);
     assert.equal(lines[0]?.remaining, 9);
   });
+
+  it('repairs line-item quantities when the SQL order id is stored as compact hex', () => {
+    const compactOrder = {
+      id: 'a55ee7d464664e95bf7f88a95241e60f',
+      orderNumber: 'HHH-a55ee7d4-6466-4e95-bf7f-88a95241e60f-383b50e0f9',
+    };
+    const snapshot = {
+      items: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 1 }],
+    };
+    const repaired = syncSnapshotLineItemsFromPurchaseOrder(snapshot, tenPackPo, compactOrder);
+    assert.equal((repaired.items as Array<{ quantity: number }>)[0]?.quantity, 10);
+  });
 });
