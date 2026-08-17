@@ -25,6 +25,8 @@ export interface CuraleafPoItem {
 
 export interface CuraleafPurchaseOrderLike {
   id?: string | null;
+  purchaseOrderId?: string | null;
+  purchaseOrderState?: string | null;
   state?: string | null;
   courier?: string | null;
   customerReference?: string | null;
@@ -112,20 +114,118 @@ export function customerReferenceMatchesOrder(
   return false;
 }
 
+export function purchaseOrderMatchScore(
+  order: { id: string; orderNumber?: string | null },
+  purchaseOrder: CuraleafPurchaseOrderLike,
+) {
+  const ref = String(purchaseOrder.customerReference || '').trim();
+  const orderId = String(order.id || '').trim();
+  const orderNum = String(order.orderNumber || '').trim();
+  const poId = String(purchaseOrder.id || '').trim();
+  if (orderId && ref.startsWith(`HHH-${orderId}-`)) return 1_000;
+  if (orderId && ref === `HHH-${orderId}`) return 900;
+  if (orderId && ref.includes(orderId)) return 800;
+  if (orderId && poId === orderId) return 700;
+  if (orderNum && ref === orderNum) return 500;
+  if (orderNum && ref === `ORD-${orderNum}`) return 500;
+  if (orderNum && orderNum === `ORD-${ref}`) return 500;
+  if (orderNum && ref === `HHH-${orderNum}`) return 400;
+  if (orderNum && orderNum === `HHH-${ref}`) return 400;
+  if (orderNum && poId === orderNum) return 300;
+  return 0;
+}
+
+export function priorPurchaseOrderMatchesOrder(
+  prior: CuraleafPurchaseOrderLike | null | undefined,
+  order: { id: string; orderNumber?: string | null },
+) {
+  if (!prior || typeof prior !== 'object') return false;
+  const ref = prior.customerReference;
+  if (ref && customerReferenceMatchesOrder(ref, order)) return true;
+  const priorId = String(prior.purchaseOrderId || prior.id || '').trim();
+  if (!priorId) return false;
+  return priorId === String(order.id || '').trim() || priorId === String(order.orderNumber || '').trim();
+}
+
 export function matchPurchaseOrder(
   order: { id: string; orderNumber?: string | null },
   purchaseOrders: CuraleafPurchaseOrderLike[],
+  prior?: CuraleafPurchaseOrderLike | null,
 ) {
-  return purchaseOrders.find(po => {
-    if (!po) return false;
-    const poId = String(po.id || '').trim();
-    const orderNum = String(order.orderNumber || '').trim();
-    const orderId = String(order.id || '').trim();
-    if (customerReferenceMatchesOrder(po.customerReference, order)) return true;
-    if (orderNum && poId && poId === orderNum) return true;
-    if (orderId && poId && poId === orderId) return true;
-    return false;
-  }) ?? null;
+  const ranked = purchaseOrders
+    .map(purchaseOrder => ({ purchaseOrder, score: purchaseOrderMatchScore(order, purchaseOrder) }))
+    .filter(entry => entry.score > 0)
+    .sort((left, right) => right.score - left.score);
+  if (ranked.length > 0) return ranked[0]!.purchaseOrder;
+
+  const priorId = String(prior?.purchaseOrderId || prior?.id || '').trim();
+  const priorRef = prior?.customerReference;
+  if (priorId && priorRef && customerReferenceMatchesOrder(priorRef, order)) {
+    return purchaseOrders.find(purchaseOrder => String(purchaseOrder.id || '') === priorId) ?? null;
+  }
+  return null;
+}
+
+export function resolveLivePurchaseOrder(
+  order: { id: string; orderNumber?: string | null },
+  purchaseOrders: CuraleafPurchaseOrderLike[],
+  prior?: CuraleafPurchaseOrderLike | null,
+) {
+  const matched = matchPurchaseOrder(order, purchaseOrders, prior);
+  if (matched) return matched;
+  if (!priorPurchaseOrderMatchesOrder(prior, order)) return null;
+  const priorId = String(prior?.purchaseOrderId || prior?.id || '').trim();
+  return priorId
+    ? purchaseOrders.find(purchaseOrder => String(purchaseOrder.id || '') === priorId) ?? null
+    : null;
+}
+
+export function syncSnapshotLineItemsFromPurchaseOrder(
+  snapshot: Record<string, unknown>,
+  purchaseOrder: CuraleafPurchaseOrderLike | null,
+  order: { id: string; orderNumber?: string | null },
+) {
+  if (!purchaseOrder?.items?.length) return snapshot;
+  const ref = String(purchaseOrder.customerReference || '').trim();
+  const orderId = String(order.id || '').trim();
+  if (!ref || !orderId || !ref.startsWith(`HHH-${orderId}`)) return snapshot;
+
+  const poByProduct = new Map(
+    purchaseOrder.items.flatMap(item => item.productId
+      ? [[String(item.productId), count(item.packsOrderedCount ?? item.count)] as const]
+      : []),
+  );
+  if (!poByProduct.size) return snapshot;
+
+  const patchItems = (items: unknown) => {
+    if (!Array.isArray(items)) return items;
+    return items.map(raw => {
+      const item = raw as Record<string, unknown>;
+      const productId = String(item.packId || item.productId || '');
+      const poQty = poByProduct.get(productId);
+      if (!productId || !poQty) return item;
+      const currentQty = count(item.quantity ?? item.qty);
+      if (currentQty === poQty) return item;
+      return { ...item, quantity: poQty, qty: poQty };
+    });
+  };
+
+  const next = { ...snapshot };
+  if (Array.isArray(next.lineItems)) next.lineItems = patchItems(next.lineItems);
+  if (Array.isArray(next.items)) next.items = patchItems(next.items);
+  if (next.prescriptionFlow && typeof next.prescriptionFlow === 'object') {
+    const flows = { ...(next.prescriptionFlow as Record<string, unknown>) };
+    for (const [key, flow] of Object.entries(flows)) {
+      if (!flow || typeof flow !== 'object') continue;
+      const typed = flow as Record<string, unknown>;
+      flows[key] = {
+        ...typed,
+        ...(Array.isArray(typed.items) ? { items: patchItems(typed.items) } : {}),
+      };
+    }
+    next.prescriptionFlow = flows;
+  }
+  return next;
 }
 
 export function matchShipments(

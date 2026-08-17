@@ -11,12 +11,15 @@ import {
   mergePriorPharmacyLines,
   normalisedFulfilmentLines,
   pharmacyCountsKey,
+  priorPurchaseOrderMatchesOrder,
+  resolveLivePurchaseOrder,
   supplierFulfilmentStatus,
+  syncSnapshotLineItemsFromPurchaseOrder,
 } from '../../application/orders/curaleaf-fulfilment.js';
 import { SqlFulfilmentRepository } from '../../repositories/sql/fulfilment.sql.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
-import type { OrderRecord } from '../../repositories/ports/order.port.js';
+import type { OrderRecord, CreateOrderInput } from '../../repositories/ports/order.port.js';
 import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
@@ -89,13 +92,21 @@ async function attachCuraleafToOrder(
   shipments: any[],
   repos?: { orderRepo: SqlOrderRepository; fulfilmentRepo: SqlFulfilmentRepository },
 ) {
-  const matchedPO = matchPurchaseOrder(order, purchaseOrders);
-  const matchedShipments = matchShipments(order, matchedPO, shipments);
   const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
   const prior = snapshot.curaleaf && typeof snapshot.curaleaf === 'object' ? snapshot.curaleaf : {};
-  const requestedItems = snapshot.lineItems || snapshot.items || [];
+  const matchedPO = resolveLivePurchaseOrder(order, purchaseOrders, prior);
+  const matchedShipments = matchShipments(order, matchedPO, shipments);
+  const alignedSnapshot = syncSnapshotLineItemsFromPurchaseOrder(snapshot, matchedPO, order);
+  const requestedItems = (alignedSnapshot.lineItems || alignedSnapshot.items || []) as Array<{
+    packId?: string;
+    productId?: string;
+    quantity?: number;
+    qty?: number;
+    count?: number;
+  }>;
   const liveShipments = matchedShipments.length ? matchedShipments : (Array.isArray(prior.shipments) ? prior.shipments : []);
-  const livePo = matchedPO || prior;
+  const livePo = matchedPO;
+  const priorValid = priorPurchaseOrderMatchesOrder(prior, order);
   const lines = normalisedFulfilmentLines({
     purchaseOrder: livePo,
     shipments: liveShipments,
@@ -105,9 +116,9 @@ async function attachCuraleafToOrder(
       Object.values(snapshot.prescriptionFlow || {}).flatMap((flow: any) => Array.isArray(flow?.lines) ? flow.lines : []),
     ),
   });
-  const curaleaf = (matchedPO || liveShipments.length || prior.purchaseOrderId || prior.id)
+  const curaleaf = matchedPO || (priorValid && liveShipments.length)
     ? {
-      ...livePo,
+      ...(livePo || {}),
       shipments: liveShipments,
       shipmentIds: liveShipments.map((shipment: any) => shipment.id).filter(Boolean),
       shipmentStates: prior.shipmentStates || {},
@@ -115,25 +126,32 @@ async function attachCuraleafToOrder(
     }
     : null;
 
-  if (repos && curaleaf) {
-    const nextStatus = advanceFulfilmentStatus(
-      order.fulfilmentStatus,
-      supplierFulfilmentStatus({ purchaseOrder: livePo, shipments: liveShipments, lines }),
-    );
-    const nextSnapshot = {
-      ...snapshot,
-      curaleaf: {
-        ...buildCuraleafSnapshot({
-          purchaseOrder: livePo,
-          shipments: liveShipments,
+  if (repos && (curaleaf || (!matchedPO && !priorValid && (prior.purchaseOrderId || prior.id)))) {
+    const nextStatus = curaleaf
+      ? advanceFulfilmentStatus(
+        order.fulfilmentStatus,
+        supplierFulfilmentStatus({ purchaseOrder: livePo, shipments: liveShipments, lines }),
+      )
+      : order.fulfilmentStatus;
+    const nextSnapshot = curaleaf
+      ? {
+        ...alignedSnapshot,
+        curaleaf: {
+          ...buildCuraleafSnapshot({
+            purchaseOrder: livePo,
+            shipments: liveShipments,
+            lines,
+            shipmentStates: prior.shipmentStates || {},
+            order,
+          }),
           lines,
           shipmentStates: prior.shipmentStates || {},
-          order,
-        }),
-        lines,
-        shipmentStates: prior.shipmentStates || {},
-      },
-    };
+        },
+      }
+      : (() => {
+        const { curaleaf: _removed, ...rest } = alignedSnapshot;
+        return rest;
+      })();
     const previousKey = JSON.stringify({
       status: order.fulfilmentStatus,
       po: prior.purchaseOrderId || prior.id || null,
@@ -145,19 +163,22 @@ async function attachCuraleafToOrder(
     });
     const nextKey = JSON.stringify({
       status: nextStatus,
-      po: matchedPO?.id || prior.purchaseOrderId || prior.id || null,
-      state: matchedPO?.state || prior.purchaseOrderState || prior.state || null,
-      shipments: liveShipments.map((shipment: any) => shipment.id),
-      shipped: lines.map(line => [line.productId, line.shipped, line.allocated]),
-      pharmacy: pharmacyCountsKey(lines),
-      shipmentStates: prior.shipmentStates || {},
+      po: curaleaf ? (matchedPO?.id || null) : null,
+      state: curaleaf ? (matchedPO?.state || null) : null,
+      shipments: curaleaf ? liveShipments.map((shipment: any) => shipment.id) : [],
+      shipped: curaleaf ? lines.map(line => [line.productId, line.shipped, line.allocated]) : [],
+      pharmacy: curaleaf ? pharmacyCountsKey(lines) : [],
+      shipmentStates: curaleaf ? (prior.shipmentStates || {}) : {},
+      lineItems: alignedSnapshot.lineItems || alignedSnapshot.items || [],
     });
     if (previousKey !== nextKey) {
       await repos.orderRepo.updateQuoteSnapshot({
         id: order.id,
         organisationId: order.organisationId,
         quoteSnapshot: nextSnapshot,
-        fulfilmentStatus: nextStatus,
+        fulfilmentStatus: curaleaf
+          ? nextStatus as CreateOrderInput['fulfilmentStatus']
+          : undefined,
       }).catch(err => console.warn('Curaleaf snapshot persist warning:', err));
       order.fulfilmentStatus = nextStatus;
       order.quoteSnapshot = nextSnapshot;
@@ -696,7 +717,7 @@ export function createPortalOrderRouter(): Router {
       if (connection?.secretResourceName) {
         try {
           const pos = await fetchCuraleafPurchaseOrders(connection);
-          const po = matchPurchaseOrder(order, pos);
+          const po = resolveLivePurchaseOrder(order, pos, (order.quoteSnapshot as any)?.curaleaf);
           if (po?.id) {
             await curaleafApiRequest(connection, `/v1/purchase-orders/${po.id}`, {
               method: 'DELETE',

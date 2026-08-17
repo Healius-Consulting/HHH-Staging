@@ -11,7 +11,10 @@ import {
   matchShipments,
   mergePriorPharmacyLines,
   normalisedFulfilmentLines,
+  priorPurchaseOrderMatchesOrder,
+  resolveLivePurchaseOrder,
   supplierFulfilmentStatus,
+  syncSnapshotLineItemsFromPurchaseOrder,
 } from './curaleaf-fulfilment.js';
 
 const beachWeddingPo = {
@@ -352,5 +355,59 @@ describe('Curaleaf fulfilment mapping', () => {
       shipments: [],
       lines,
     }), 'SUPPLIER_ALLOCATED');
+  });
+
+  it('prefers the exact HHH-{orderId} purchase order over weaker order-number matches', () => {
+    const otherOrder = { id: '11111111-1111-4111-8111-111111111111', orderNumber: '5' };
+    const weakPo = {
+      id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      customerReference: 'HHH-5',
+      items: [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', packsOrderedCount: 10 }],
+    };
+    assert.equal(
+      matchPurchaseOrder(otherOrder, [weakPo, beachWeddingPo])?.id,
+      weakPo.id,
+    );
+    assert.equal(
+      matchPurchaseOrder(order, [weakPo, beachWeddingPo])?.id,
+      beachWeddingPo.id,
+    );
+  });
+
+  it('ignores migrated purchase-order snapshots that belong to a different order', () => {
+    const migratedOrder = { id: '22222222-2222-4222-8222-222222222222', orderNumber: '5' };
+    const stalePrior = {
+      purchaseOrderId: tenPackPo.id,
+      customerReference: tenPackPo.customerReference,
+      items: tenPackPo.items,
+    };
+    assert.equal(priorPurchaseOrderMatchesOrder(stalePrior, migratedOrder), false);
+    assert.equal(resolveLivePurchaseOrder(migratedOrder, [tenPackPo, beachWeddingPo], stalePrior), null);
+    const lines = normalisedFulfilmentLines({
+      purchaseOrder: resolveLivePurchaseOrder(migratedOrder, [tenPackPo, beachWeddingPo], stalePrior),
+      shipments: [],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 1 }],
+    });
+    assert.equal(lines[0]?.quantityMismatch, false);
+    assert.equal(lines[0]?.supplierReportedOrdered, 0);
+  });
+
+  it('repairs migrated line-item quantities from the live Curaleaf purchase order', () => {
+    const tenPackOrder = { id: 'a55ee7d4-6466-4e95-bf7f-88a95241e60f', orderNumber: '12' };
+    const snapshot = {
+      lineItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 1 }],
+      curaleaf: { purchaseOrderId: tenPackPo.id, customerReference: tenPackPo.customerReference },
+    };
+    const repaired = syncSnapshotLineItemsFromPurchaseOrder(snapshot, tenPackPo, tenPackOrder);
+    assert.equal((repaired.lineItems as Array<{ quantity: number }>)[0]?.quantity, 10);
+    const lines = normalisedFulfilmentLines({
+      purchaseOrder: tenPackPo,
+      shipments: [tenPackShipment],
+      requestedItems: repaired.lineItems as Array<{ packId: string; quantity: number }>,
+    });
+    assert.equal(lines[0]?.quantityMismatch, false);
+    assert.equal(lines[0]?.ordered, 10);
+    assert.equal(lines[0]?.shipped, 1);
+    assert.equal(lines[0]?.remaining, 9);
   });
 });
