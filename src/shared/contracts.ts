@@ -906,10 +906,14 @@ export interface UpdatePharmacyProfileInput {
   tradingName?: string;
   gphcNumber?: string;
   superintendent?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  locality?: string;
+  county?: string;
+  postcode?: string;
   mainContactName?: string;
   mainContactPhone?: string;
   mainContactEmail?: string;
-  address?: string;
 }
 
 export interface CreatedOrganisation extends CreateOrganisationInput {
@@ -1200,6 +1204,11 @@ export interface PortalOrganisation {
   mainContactEmail?: string;
   curaleafPharmacyCode?: string;
   address: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  locality?: string;
+  county?: string;
+  postcode?: string;
   websiteDomains?: string[];
   primaryColour: string;
   status: 'onboarding' | 'intake_live' | 'live' | 'paused';

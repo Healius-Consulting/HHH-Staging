@@ -6,6 +6,7 @@ import {
   normalisedFulfilmentLines,
   supplierFulfilmentStatus,
 } from '../../application/orders/curaleaf-fulfilment.js';
+import { organisationAddressSummary } from '../../repositories/ports/directory.port.js';
 import type { OrderDraftRecord, OrderRecord } from '../../repositories/ports/order.port.js';
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
 import type { PatientRecord } from '../../repositories/ports/patient.port.js';
@@ -51,7 +52,12 @@ export function toPortalOrganisation(organisation: OrganisationRecord) {
     mainContactName: organisation.mainContactName ?? undefined,
     mainContactPhone: organisation.mainContactPhone ?? undefined,
     mainContactEmail: organisation.mainContactEmail ?? undefined,
-    address: organisation.address,
+    address: organisationAddressSummary(organisation),
+    addressLine1: organisation.addressLine1 ?? undefined,
+    addressLine2: organisation.addressLine2 ?? undefined,
+    locality: organisation.locality ?? undefined,
+    county: organisation.county ?? undefined,
+    postcode: organisation.postcode ?? undefined,
     primaryColour: organisation.primaryColour,
     status: lower(organisation.status),
     portalName: organisation.portalName,

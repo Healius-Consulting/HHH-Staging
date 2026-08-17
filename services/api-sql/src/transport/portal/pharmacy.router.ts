@@ -1,8 +1,10 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { buildOrganisationProfileUpdate, syncDirectoryProfileFromOrganisation } from '../../application/organisation/profile-sync.js';
 import { HttpError } from '../../domain/common/errors.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
+import { SqlDirectoryRepository } from '../../repositories/sql/directory.sql.js';
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
@@ -16,7 +18,11 @@ const pharmacyProfileInputSchema = z.object({
   name: z.string().trim().min(2).max(160).optional(),
   gphcNumber: z.string().trim().min(3).max(40).optional(),
   superintendent: z.string().trim().min(2).max(160).optional(),
-  address: z.string().trim().min(5).max(500).optional(),
+  addressLine1: z.string().trim().min(1).max(250).optional(),
+  addressLine2: z.string().trim().max(250).optional(),
+  locality: z.string().trim().min(1).max(120).optional(),
+  county: z.string().trim().max(120).optional(),
+  postcode: z.string().trim().min(2).max(16).optional(),
   mainContactName: z.string().trim().max(160).optional(),
   mainContactPhone: z.string().trim().max(40).optional(),
   mainContactEmail: z.string().trim().email().max(254).optional().or(z.literal('')),
@@ -27,6 +33,7 @@ export function createPortalPharmacyRouter(): Router {
   const patientRepo = new SqlPatientRepository();
   const orderRepo = new SqlOrderRepository();
   const organisationRepo = new SqlOrganisationRepository();
+  const directoryRepo = new SqlDirectoryRepository();
   const intakeRepo = new SqlIntakeRepository();
   const identityRepo = new SqlIdentityRepository();
 
@@ -92,16 +99,9 @@ export function createPortalPharmacyRouter(): Router {
       if (!current) {
         throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
       }
-      await organisationRepo.updateOrganisationProfile(scope.organisationId, {
-        tradingName: input.tradingName ?? current.tradingName,
-        name: input.name ?? current.name,
-        gphcNumber: input.gphcNumber ?? current.gphcNumber,
-        superintendentName: input.superintendent ?? current.superintendentName,
-        address: input.address ?? current.address,
-        mainContactName: input.mainContactName ?? current.mainContactName,
-        mainContactPhone: input.mainContactPhone ?? current.mainContactPhone,
-        mainContactEmail: input.mainContactEmail === '' ? null : (input.mainContactEmail ?? current.mainContactEmail),
-      });
+      const profileUpdate = await buildOrganisationProfileUpdate(current, input);
+      await organisationRepo.updateOrganisationProfile(scope.organisationId, profileUpdate);
+      await syncDirectoryProfileFromOrganisation(directoryRepo, scope.organisationId, profileUpdate);
       const updated = await organisationRepo.findOrganisationById(scope.organisationId);
       if (!updated) {
         throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');

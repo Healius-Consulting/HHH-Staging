@@ -7,6 +7,7 @@ const eligibleOrganisation: OrganisationRecord = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', companyId: null, name: 'Eligible Pharmacy',
   tradingName: 'Eligible Pharmacy', gphcNumber: '9012345', superintendentName: 'Test Pharmacist',
   mainContactName: null, mainContactPhone: null, mainContactEmail: null, address: 'Test address',
+  addressLine1: null, addressLine2: null, locality: null, county: null, postcode: null, latitude: null, longitude: null,
   primaryColour: '#12372d', logoText: 'EP', status: 'LIVE', classification: 'STANDARD',
   portalName: 'Eligible Pharmacy', intakeEnabled: true, prescriptionEnabled: true, paymentsEnabled: true,
   supplierOrdersEnabled: true, patientsEnabled: true, resourcesEnabled: true, worldpayEnabled: false,

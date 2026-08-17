@@ -8,6 +8,7 @@ import type {
   SetupTaskRecord,
   UpdateOrganisationProfileInput,
 } from '../ports/organisation.port.js';
+import { organisationAddressSummary } from '../ports/directory.port.js';
 
 const GET_ORGANISATION_BY_ID_GQL = `
   query GetOrganisationById($id: UUID!) {
@@ -22,6 +23,13 @@ const GET_ORGANISATION_BY_ID_GQL = `
       mainContactPhone
       mainContactEmail
       address
+      addressLine1
+      addressLine2
+      locality
+      county
+      postcode
+      latitude
+      longitude
       primaryColour
       logoText
       status
@@ -61,6 +69,13 @@ const LIST_ORGANISATIONS_GQL = `
       mainContactPhone
       mainContactEmail
       address
+      addressLine1
+      addressLine2
+      locality
+      county
+      postcode
+      latitude
+      longitude
       primaryColour
       logoText
       status
@@ -97,6 +112,13 @@ const GET_PHARMACY_DIRECTORY_BY_TOKEN_GQL = `
         gphcNumber
         superintendentName
         address
+        addressLine1
+        addressLine2
+        locality
+        county
+        postcode
+        latitude
+        longitude
         primaryColour
         logoText
         status
@@ -233,6 +255,13 @@ const UPDATE_ORGANISATION_PROFILE_GQL = `
     $gphcNumber: String!
     $superintendentName: String!
     $address: String!
+    $addressLine1: String
+    $addressLine2: String
+    $locality: String
+    $county: String
+    $postcode: String
+    $latitude: Float
+    $longitude: Float
     $mainContactName: String
     $mainContactPhone: String
     $mainContactEmail: String
@@ -245,6 +274,13 @@ const UPDATE_ORGANISATION_PROFILE_GQL = `
         gphcNumber: $gphcNumber
         superintendentName: $superintendentName
         address: $address
+        addressLine1: $addressLine1
+        addressLine2: $addressLine2
+        locality: $locality
+        county: $county
+        postcode: $postcode
+        latitude: $latitude
+        longitude: $longitude
         mainContactName: $mainContactName
         mainContactPhone: $mainContactPhone
         mainContactEmail: $mainContactEmail
@@ -292,6 +328,13 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
         gphcNumber: input.gphcNumber,
         superintendentName: input.superintendentName,
         address: input.address,
+        addressLine1: input.addressLine1 ?? null,
+        addressLine2: input.addressLine2 ?? null,
+        locality: input.locality ?? null,
+        county: input.county ?? null,
+        postcode: input.postcode ?? null,
+        latitude: input.latitude ?? null,
+        longitude: input.longitude ?? null,
         mainContactName: input.mainContactName,
         mainContactPhone: input.mainContactPhone,
         mainContactEmail: input.mainContactEmail,
@@ -312,6 +355,13 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
           gphcNumber: string;
           superintendentName: string;
           address: string;
+          addressLine1: string | null;
+          addressLine2: string | null;
+          locality: string | null;
+          county: string | null;
+          postcode: string | null;
+          latitude: number | null;
+          longitude: number | null;
           primaryColour: string;
           logoText: string;
           status: string;
@@ -336,7 +386,7 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
         logoText: org.logoText,
         gphcNumber: org.gphcNumber,
         superintendent: org.superintendentName,
-        address: org.address,
+        address: organisationAddressSummary(org),
         primaryColour: org.primaryColour,
       },
     };

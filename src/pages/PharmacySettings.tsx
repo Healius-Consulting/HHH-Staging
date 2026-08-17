@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { organisationAddressFields } from '../utils/organisationAddress';
 import {
   AlertTriangle,
   Building2,
@@ -46,7 +47,11 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
     name: '',
     gphcNumber: '',
     superintendent: '',
-    address: '',
+    addressLine1: '',
+    addressLine2: '',
+    locality: '',
+    county: '',
+    postcode: '',
     mainContactName: '',
     mainContactPhone: '',
     mainContactEmail: '',
@@ -54,12 +59,17 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
   const organisation = useMemo(() => state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0], [state]);
 
   useEffect(() => {
+    const address = organisationAddressFields(organisation);
     setProfileForm({
       tradingName: organisation.tradingName,
       name: organisation.name,
       gphcNumber: organisation.gphcNumber,
       superintendent: organisation.superintendent,
-      address: organisation.address,
+      addressLine1: address.addressLine1,
+      addressLine2: address.addressLine2,
+      locality: address.locality,
+      county: address.county,
+      postcode: address.postcode,
       mainContactName: organisation.mainContactName ?? '',
       mainContactPhone: organisation.mainContactPhone ?? '',
       mainContactEmail: organisation.mainContactEmail ?? '',
@@ -129,7 +139,12 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
           name: profileForm.name,
           gphcNumber: profileForm.gphcNumber,
           superintendent: profileForm.superintendent,
-          address: profileForm.address,
+          addressLine1: profileForm.addressLine1,
+          addressLine2: profileForm.addressLine2 || undefined,
+          locality: profileForm.locality,
+          county: profileForm.county || undefined,
+          postcode: profileForm.postcode.toUpperCase(),
+          address: [profileForm.addressLine1, profileForm.addressLine2, profileForm.locality, profileForm.county, profileForm.postcode.toUpperCase()].filter(Boolean).join(', '),
           mainContactName: profileForm.mainContactName || undefined,
           mainContactPhone: profileForm.mainContactPhone || undefined,
           mainContactEmail: profileForm.mainContactEmail || undefined,
@@ -216,7 +231,11 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
                 <label>Registered company name<input className="input" value={profileForm.name} onChange={event => setProfileForm(current => ({ ...current, name: event.target.value }))} required /></label>
                 <label>GPhC number<input className="input" value={profileForm.gphcNumber} onChange={event => setProfileForm(current => ({ ...current, gphcNumber: event.target.value }))} required /></label>
                 <label>Superintendent pharmacist<input className="input" value={profileForm.superintendent} onChange={event => setProfileForm(current => ({ ...current, superintendent: event.target.value }))} required /></label>
-                <label className="settings-profile-grid__wide">Address<textarea className="input" rows={3} value={profileForm.address} onChange={event => setProfileForm(current => ({ ...current, address: event.target.value }))} required /></label>
+                <label>Address line 1<input className="input" value={profileForm.addressLine1} onChange={event => setProfileForm(current => ({ ...current, addressLine1: event.target.value }))} autoComplete="address-line1" required /></label>
+                <label>Address line 2<input className="input" value={profileForm.addressLine2} onChange={event => setProfileForm(current => ({ ...current, addressLine2: event.target.value }))} autoComplete="address-line2" /></label>
+                <label>Town or city<input className="input" value={profileForm.locality} onChange={event => setProfileForm(current => ({ ...current, locality: event.target.value }))} autoComplete="address-level2" required /></label>
+                <label>County<input className="input" value={profileForm.county} onChange={event => setProfileForm(current => ({ ...current, county: event.target.value }))} autoComplete="address-level1" /></label>
+                <label>Postcode<input className="input" value={profileForm.postcode} onChange={event => setProfileForm(current => ({ ...current, postcode: event.target.value.toUpperCase() }))} autoComplete="postal-code" required /></label>
                 <label>Main contact name<input className="input" value={profileForm.mainContactName} onChange={event => setProfileForm(current => ({ ...current, mainContactName: event.target.value }))} /></label>
                 <label>Main contact phone<input className="input" type="tel" value={profileForm.mainContactPhone} onChange={event => setProfileForm(current => ({ ...current, mainContactPhone: event.target.value }))} /></label>
                 <label className="settings-profile-grid__wide">Main contact email<input className="input" type="email" value={profileForm.mainContactEmail} onChange={event => setProfileForm(current => ({ ...current, mainContactEmail: event.target.value }))} /></label>

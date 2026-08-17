@@ -311,6 +311,11 @@ export interface PharmacyTenant {
   mainContactEmail?: string;
   curaleafPharmacyCode?: string;
   address: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  locality?: string;
+  county?: string;
+  postcode?: string;
   websiteDomains: string[];
   status: 'live' | 'intake_live' | 'onboarding' | 'paused';
   testAccount?: boolean;

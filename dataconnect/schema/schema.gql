@@ -306,6 +306,13 @@ type Organisation @table {
   mainContactPhone: String
   mainContactEmail: String
   address: String!
+  addressLine1: String
+  addressLine2: String
+  locality: String
+  county: String
+  postcode: String
+  latitude: Float
+  longitude: Float
   primaryColour: String!
   logoText: String!
   status: OrganisationStatus! @default(value: ONBOARDING)
@@ -432,6 +439,17 @@ type PharmacyDirectoryProfile @table(key: "organisation") {
   lifecycle: DirectoryLifecycle! @default(value: DRAFT)
   createdAt: Timestamp! @default(expr: "request.time")
   updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type PostcodeSearchSession @table {
+  id: UUID! @default(expr: "uuidV4()")
+  postcode: String!
+  status: String!
+  latitude: Float
+  longitude: Float
+  resultOrganisationIds: [UUID!]
+  expiresAt: Timestamp!
+  createdAt: Timestamp! @default(expr: "request.time")
 }
 
 type ReferralToken @table {

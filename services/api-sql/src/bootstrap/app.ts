@@ -14,6 +14,7 @@ import { createPublicPaymentRouter } from '../transport/public/payment.router.js
 import { createPortalPaymentRouter } from '../transport/portal/payment.router.js';
 import { createPortalFulfilmentRouter } from '../transport/portal/fulfilment.router.js';
 import { createPortalPharmacyRouter } from '../transport/portal/pharmacy.router.js';
+import { createPublicPostcodeSearchRouter } from '../transport/public/postcode-search.router.js';
 import { createPublicIntakeV2Router } from '../transport/public/intake-v2.router.js';
 import { createPortalIntakeV2Router } from '../transport/portal/intake-v2.router.js';
 import { createAdminPatientRouter } from '../transport/portal/admin-patient.router.js';
@@ -101,6 +102,7 @@ export function createApp(): Express {
   app.use('/v1', createPortalIntegrationRouter());
   app.use('/v1', createPortalFinanceRouter());
   app.use('/v2', createPublicIntakeV2Router());
+  app.use('/v2', createPublicPostcodeSearchRouter());
   app.use('/v2', createPortalIntakeV2Router());
 
   // Health check endpoint (storage neutral)
