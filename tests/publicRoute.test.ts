@@ -25,14 +25,14 @@ test('unknown root modes remain on the public site', () => {
 test('legacy eligibility URLs redirect to the rehearsal domain without changing pharmacy tokens', () => {
   assert.equal(
     canonicalEligibilityRedirect(
-      'hhh.thinktimeless.co.uk',
+      'holistichealthhub.live',
       '/',
       '?mode=eligibility&token=bbd8fc4749934797a49398c0b95e68cf873d4868c33c42a2949d6f65359d44c5',
     ),
     'https://holistichealthhub.cc/eligibility?token=bbd8fc4749934797a49398c0b95e68cf873d4868c33c42a2949d6f65359d44c5',
   );
   assert.equal(
-    canonicalEligibilityRedirect('hhh.thinktimeless.co.uk', '/eligibility', '?token=eastwood&source=qr&postcode=SW1A1AA&email=person%40example.com&utm_campaign=poster'),
+    canonicalEligibilityRedirect('holistichealthhub.live', '/eligibility', '?token=eastwood&source=qr&postcode=SW1A1AA&email=person%40example.com&utm_campaign=poster'),
     'https://holistichealthhub.cc/eligibility?token=eastwood&source=qr&utm_campaign=poster',
   );
 });
@@ -47,13 +47,13 @@ test('all protected production tokens retain every supported URL shape', () => {
   for (const token of tokens) {
     assert.equal(resolvePublicView('/', `?mode=eligibility&token=${token}`), 'eligibility');
     assert.equal(resolvePublicView('/eligibility', `?token=${token}`), 'eligibility');
-    assert.equal(canonicalEligibilityRedirect('hhh.thinktimeless.co.uk', '/eligibility', `?token=${token}`), `https://holistichealthhub.cc/eligibility?token=${token}`);
+    assert.equal(canonicalEligibilityRedirect('holistichealthhub.live', '/eligibility', `?token=${token}`), `https://holistichealthhub.cc/eligibility?token=${token}`);
   }
   for (const token of ['kchem-7x4p9k', 'eastwood-3m8q2v']) assert.equal(resolvePublicView('/eligibility', `?token=${token}`), 'eligibility');
 });
 
 test('the canonical and unrelated public hosts never redirect themselves', () => {
   assert.equal(canonicalEligibilityRedirect('holistichealthhub.cc', '/eligibility', '?token=value'), null);
-  assert.equal(canonicalEligibilityRedirect('hhh.thinktimeless.co.uk', '/about', '?token=value'), null);
-  assert.equal(canonicalEligibilityRedirect('hhh.thinktimeless.co.uk', '/eligibility', ''), null);
+  assert.equal(canonicalEligibilityRedirect('holistichealthhub.live', '/about', '?token=value'), null);
+  assert.equal(canonicalEligibilityRedirect('holistichealthhub.live', '/eligibility', ''), null);
 });

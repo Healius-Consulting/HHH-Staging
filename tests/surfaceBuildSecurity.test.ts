@@ -31,7 +31,7 @@ test('only the public site and combined portal are deployable surfaces', () => {
 test('portal builds reject malformed eligibility form URLs before Settings can render', () => {
   assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'not-a-url' }), ['VITE_ELIGIBILITY_FORM_URL']);
   assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'http://example.test/eligibility' }), ['VITE_ELIGIBILITY_FORM_URL']);
-  assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'https://hhh.thinktimeless.co.uk/eligibility' }), []);
+  assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'https://holistichealthhub.live/eligibility' }), []);
   assert.throws(
     () => assertSurfaceBuildEnvironment('portal', { ...configuredEnvironment, VITE_ELIGIBILITY_FORM_URL: 'broken-url' }),
     /VITE_ELIGIBILITY_FORM_URL/,

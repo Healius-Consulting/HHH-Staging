@@ -10,13 +10,13 @@ const configSchema = z.object({
   IP_HASH_SECRET: z.string().optional(),
   SECURE_SESSION_COOKIES: z.string().default('true'),
   ALLOWED_ORIGINS: z.string().default(
-    'https://holistichealthhub.cc,https://holistichealthhub.live,https://holistichealthhub.co.uk,https://hhh.thinktimeless.co.uk,' +
-    'https://portal.holistichealthhub.cc,https://portal.holistichealthhub.live,https://portal.holistichealthhub.co.uk,https://portal.hhh.thinktimeless.co.uk,' +
+    'https://holistichealthhub.cc,https://holistichealthhub.live,' +
+    'https://portal.holistichealthhub.cc,https://portal.holistichealthhub.live,' +
     'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174'
   ),
   ALLOWED_HOSTS: z.string().default(
-    'holistichealthhub.cc,holistichealthhub.live,holistichealthhub.co.uk,hhh.thinktimeless.co.uk,' +
-    'portal.holistichealthhub.cc,portal.holistichealthhub.live,portal.holistichealthhub.co.uk,portal.hhh.thinktimeless.co.uk,' +
+    'holistichealthhub.cc,holistichealthhub.live,' +
+    'portal.holistichealthhub.cc,portal.holistichealthhub.live,' +
     'localhost,127.0.0.1'
   ),
   // Domain feature flags

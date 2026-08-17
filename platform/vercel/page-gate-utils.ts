@@ -78,12 +78,8 @@ export function requestHost(request: Request) {
 export const DEFAULT_ALLOWED_HOSTS = [
   'portal.holistichealthhub.cc',
   'portal.holistichealthhub.live',
-  'portal.holistichealthhub.co.uk',
-  'portal.hhh.thinktimeless.co.uk',
   'holistichealthhub.cc',
   'holistichealthhub.live',
-  'holistichealthhub.co.uk',
-  'hhh.thinktimeless.co.uk',
   'localhost',
   '127.0.0.1',
 ];

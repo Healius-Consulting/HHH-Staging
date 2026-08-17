@@ -30,9 +30,7 @@ export function isOriginPermitted(origin: string | undefined): boolean {
     if (host === 'localhost' || host === '127.0.0.1') return true;
     if (
       host === 'holistichealthhub.cc' || host.endsWith('.holistichealthhub.cc') ||
-      host === 'holistichealthhub.live' || host.endsWith('.holistichealthhub.live') ||
-      host === 'holistichealthhub.co.uk' || host.endsWith('.holistichealthhub.co.uk') ||
-      host === 'thinktimeless.co.uk' || host.endsWith('.thinktimeless.co.uk')
+      host === 'holistichealthhub.live' || host.endsWith('.holistichealthhub.live')
     ) return true;
   } catch {
     return false;

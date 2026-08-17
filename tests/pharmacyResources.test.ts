@@ -5,7 +5,7 @@ import { DEFAULT_ELIGIBILITY_FORM_URL, safeEligibilityFormBase } from '../src/ut
 test('invalid or insecure eligibility configuration falls back without crashing Settings', () => {
   assert.equal(safeEligibilityFormBase('not-a-url', false).toString(), DEFAULT_ELIGIBILITY_FORM_URL);
   assert.equal(safeEligibilityFormBase('http://example.test/eligibility', false).toString(), DEFAULT_ELIGIBILITY_FORM_URL);
-  assert.equal(safeEligibilityFormBase('https://hhh.thinktimeless.co.uk/eligibility', false).toString(), 'https://hhh.thinktimeless.co.uk/eligibility');
+  assert.equal(safeEligibilityFormBase('https://holistichealthhub.live/eligibility', false).toString(), 'https://holistichealthhub.live/eligibility');
 });
 
 test('only loopback HTTP is accepted for local eligibility development', () => {

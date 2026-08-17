@@ -1,7 +1,7 @@
 export type PublicView = 'site' | 'eligibility' | 'payment-complete' | 'payment-cancelled';
 
 export const CANONICAL_ELIGIBILITY_ORIGIN = 'https://holistichealthhub.cc';
-export const LEGACY_PUBLIC_HOST = 'hhh.thinktimeless.co.uk';
+export const LEGACY_PUBLIC_HOST = 'holistichealthhub.live';
 const ALLOWED_ATTRIBUTION_PARAMETERS = new Set(['source', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']);
 
 export function resolvePublicView(pathname: string, search: string): PublicView {
