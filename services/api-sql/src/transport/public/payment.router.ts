@@ -7,6 +7,48 @@ export function createPublicPaymentRouter(): Router {
   const router = Router();
   const paymentRepo = new SqlPaymentRepository();
 
+  // GET /v1/public/payments/status - Check real-time payment clearance status
+  router.get('/public/payments/status', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const ref = String(req.query.ref || req.query.transactionReference || req.query.orderCode || '').trim();
+      const receipt = String(req.query.receipt || req.query.receiptHash || '').trim();
+
+      if (!ref && !receipt) {
+        throw new HttpError(400, 'Missing reference or receipt parameter.', 'INVALID_PARAMETERS');
+      }
+
+      let payment = ref ? await paymentRepo.findPaymentByWorldpayCode(ref) : null;
+      if (!payment && receipt) {
+        payment = await paymentRepo.findPaymentByReceiptHash(receipt);
+        if (!payment && receipt.length !== 64) {
+          payment = await paymentRepo.findPaymentByReceiptHash(sha256(receipt));
+        }
+      }
+
+      if (!payment) {
+        res.status(200).json({
+          status: 'pending',
+          transactionReference: ref || null,
+          message: 'Payment verification is processing...',
+        });
+        return;
+      }
+
+      res.status(200).json({
+        id: payment.id,
+        orderId: payment.orderId,
+        transactionReference: payment.transactionReference,
+        status: payment.status.toLowerCase(), // 'paid', 'pending', 'failed', 'cancelled'
+        amountPence: payment.amountPence,
+        currency: payment.currency,
+        createdAt: payment.createdAt,
+        updatedAt: payment.updatedAt,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // GET /v1/public/receipts/:receiptHash - Look up public receipt token
   router.get('/public/receipts/:receiptHash', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -24,7 +66,7 @@ export function createPublicPaymentRouter(): Router {
         id: payment.id,
         amountPence: payment.amountPence,
         currency: payment.currency,
-        status: payment.status,
+        status: payment.status.toLowerCase(),
         createdAt: payment.createdAt,
       });
     } catch (error) {

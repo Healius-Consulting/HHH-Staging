@@ -13,8 +13,22 @@ export function resolvePublicView(pathname: string, search: string): PublicView 
   // printed codes do not need to be recalled or replaced.
   if (path === '/' && query.get('mode') === 'eligibility') return 'eligibility';
   if (path === '/eligibility') return 'eligibility';
-  if (path === '/payments/complete') return 'payment-complete';
-  if (path === '/payments/cancelled') return 'payment-cancelled';
+  if (
+    path === '/payment/success' ||
+    path === '/payments/complete' ||
+    path === '/payment/complete' ||
+    path === '/payment-success' ||
+    path === '/payment/status' ||
+    path === '/order/confirmed'
+  ) return 'payment-complete';
+  if (
+    path === '/payment/cancelled' ||
+    path === '/payments/cancelled' ||
+    path === '/payment-cancelled' ||
+    path === '/payment/declined' ||
+    path === '/payment-declined' ||
+    path === '/payment/failed'
+  ) return 'payment-cancelled';
   return 'site';
 }
 

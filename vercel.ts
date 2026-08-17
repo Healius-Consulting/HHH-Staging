@@ -44,6 +44,8 @@ export const config = {
   } : undefined,
   redirects: portalSurface ? [
     { source: '/', destination: '/login', permanent: false },
+    { source: '/payment/(.*)', destination: 'https://holistichealthhub.cc/payment/$1', permanent: false },
+    { source: '/payments/(.*)', destination: 'https://holistichealthhub.cc/payments/$1', permanent: false },
     { source: '/pharmacy/login', destination: '/login', permanent: true },
     { source: '/admin/login', destination: '/login', permanent: true },
     { source: '/pharmacy/reset-password', destination: '/reset-password', permanent: true },

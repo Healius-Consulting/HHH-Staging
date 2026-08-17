@@ -14,7 +14,9 @@ test('the canonical eligibility path and payment return paths retain their views
   assert.equal(resolvePublicView('/eligibility', ''), 'eligibility');
   assert.equal(resolvePublicView('/eligibility', '?token=value'), 'eligibility');
   assert.equal(resolvePublicView('/payments/complete', ''), 'payment-complete');
+  assert.equal(resolvePublicView('/payment/success', ''), 'payment-complete');
   assert.equal(resolvePublicView('/payments/cancelled/', ''), 'payment-cancelled');
+  assert.equal(resolvePublicView('/payment/cancelled', ''), 'payment-cancelled');
 });
 
 test('unknown root modes remain on the public site', () => {

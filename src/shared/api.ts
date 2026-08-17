@@ -500,8 +500,28 @@ export function resendWorldpayPaymentLink(orderId: string, input: { organisation
   });
 }
 
+export type PublicPaymentStatusResponse = {
+  status: 'paid' | 'pending' | 'failed' | 'cancelled';
+  id?: string;
+  orderId?: string;
+  transactionReference?: string;
+  amountPence?: number;
+  currency?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  message?: string;
+};
+
+export function getPublicPaymentStatus(params: { ref?: string; receipt?: string; order?: string }): Promise<PublicPaymentStatusResponse> {
+  const query = new URLSearchParams();
+  if (params.ref) query.set('ref', params.ref);
+  if (params.receipt) query.set('receipt', params.receipt);
+  if (params.order) query.set('order', params.order);
+  return apiRequest<PublicPaymentStatusResponse>(`/v1/public/payments/status?${query.toString()}`);
+}
+
 export function getPublicPaymentReceipt(token: string) {
-  return apiRequest<{ status: 'pending' | 'paid' | 'failed' | 'expired'; message: string }>(`/v1/public/payment-receipts/${encodeURIComponent(token)}`);
+  return apiRequest<{ status: 'pending' | 'paid' | 'failed' | 'expired'; message: string }>(`/v1/public/receipts/${encodeURIComponent(token)}`);
 }
 
 export function recordCuraleafRejection(orderId: string, input: { organisationId: string; prescriptionId: string; reason: string; rejectedAt?: string; supportCaseId?: string }) {
