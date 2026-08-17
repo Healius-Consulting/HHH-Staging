@@ -419,17 +419,27 @@ export class SqlOrderRepository implements OrderRepositoryPort {
     externalReference?: string | null;
     actorUid?: string | null;
   }): Promise<void> {
-    await dataConnect.executeGraphql<any, any>(APPEND_PLACEMENT_EVENT_GQL, {
-      variables: {
-        organisationId: data.organisationId,
-        orderId: data.orderId,
-        orderLineId: data.orderLineId ?? null,
-        fromState: data.fromState ?? null,
-        toState: data.toState,
-        reason: data.reason ?? null,
-        externalReference: data.externalReference ?? null,
-        actorUid: data.actorUid ?? null,
-      },
-    });
+    try {
+      const isUuid = (val?: string | null) => Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+      const orderLineId = isUuid(data.orderLineId) ? data.orderLineId : null;
+      const validStates = new Set(['PENDING_PLACEMENT', 'HELD_PRICE', 'HELD_STOCK', 'CANCELLATION_PENDING_REFUND', 'PLACED', 'HELD_FOR_RENEWAL', 'CANCELLED_REFUNDED']);
+      const toState = validStates.has(data.toState) ? data.toState : 'PENDING_PLACEMENT';
+      const fromState = data.fromState && validStates.has(data.fromState) ? data.fromState : null;
+
+      await dataConnect.executeGraphql<any, any>(APPEND_PLACEMENT_EVENT_GQL, {
+        variables: {
+          organisationId: data.organisationId,
+          orderId: data.orderId,
+          orderLineId,
+          fromState,
+          toState,
+          reason: data.reason ?? null,
+          externalReference: data.externalReference ?? null,
+          actorUid: data.actorUid ?? null,
+        },
+      });
+    } catch (err) {
+      console.warn('Placement event logging note:', err);
+    }
   }
 }

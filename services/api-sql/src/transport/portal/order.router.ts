@@ -248,8 +248,8 @@ export function createPortalOrderRouter(): Router {
         organisationId: scope.organisationId,
         orderId,
         orderLineId: prescriptionId,
-        fromState: 'SUPPLIER_PENDING',
-        toState: 'SUPPLIER_PROCESSING',
+        fromState: 'PENDING_PLACEMENT',
+        toState: 'PLACED',
         reason: 'Prescription placed manually with Curaleaf / pharmacy dispensing',
         actorUid: scope.uid,
       });
@@ -287,8 +287,8 @@ export function createPortalOrderRouter(): Router {
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
         orderId,
-        fromState: order.status,
-        toState: 'CANCELLED',
+        fromState: 'PENDING_PLACEMENT',
+        toState: 'CANCELLED_REFUNDED',
         reason: `Cancelled: ${input.reason}${input.note ? ` (${input.note})` : ''}`,
         actorUid: scope.uid,
       });
@@ -317,8 +317,8 @@ export function createPortalOrderRouter(): Router {
         organisationId: scope.organisationId,
         orderId,
         orderLineId: input.prescriptionId,
-        fromState: 'SUPPLIER_PROCESSING',
-        toState: 'EXCEPTION',
+        fromState: 'PENDING_PLACEMENT',
+        toState: 'HELD_STOCK',
         reason: `Curaleaf rejected: ${input.reason} [Support case: ${supportCaseId}]`,
         actorUid: scope.uid,
       });

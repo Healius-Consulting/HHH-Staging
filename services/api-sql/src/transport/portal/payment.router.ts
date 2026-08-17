@@ -78,8 +78,8 @@ export function createPortalPaymentRouter(): Router {
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
         orderId,
-        fromState: 'SUBMITTED',
-        toState: 'PROCESSING',
+        fromState: 'PENDING_PLACEMENT',
+        toState: 'PLACED',
         reason: `Manual payment recorded (${input.tender}: ${input.reference})`,
         externalReference: input.reference,
         actorUid: scope.uid,
@@ -189,8 +189,8 @@ export function createPortalPaymentRouter(): Router {
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
         orderId,
-        fromState: 'SUBMITTED',
-        toState: 'SUBMITTED',
+        fromState: 'PENDING_PLACEMENT',
+        toState: 'PENDING_PLACEMENT',
         reason: `Re-issued Worldpay checkout link (${session.transactionReference})`,
         externalReference: session.transactionReference,
         actorUid: scope.uid,
