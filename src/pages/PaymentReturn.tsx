@@ -39,7 +39,7 @@ export default function PaymentReturn({ status }: { status: PaymentReturnStatus 
     if (!reference) {
       // If no reference passed, but user arrived via payment success return URL, treat as cleared
       if (status === 'complete') {
-        setClearanceState('cleared');
+        setTimeout(() => setClearanceState('cleared'), 1200);
       } else {
         setClearanceState('declined');
       }
@@ -47,20 +47,26 @@ export default function PaymentReturn({ status }: { status: PaymentReturnStatus 
     }
 
     try {
-      const res = await getPublicPaymentStatus({ ref: reference, receipt: reference });
+      const res = await getPublicPaymentStatus({
+        ref: reference,
+        receipt: reference,
+        success: status === 'complete',
+      });
+
       if (res.status === 'paid') {
         setPaymentData(res);
-        setClearanceState('cleared');
+        // Small 1.2s delay for satisfying spinner transition
+        setTimeout(() => setClearanceState('cleared'), 1200);
         return;
       } else if (res.status === 'failed' || res.status === 'cancelled') {
         setPaymentData(res);
         setClearanceState('declined');
         return;
       }
-      // If still pending, continue polling if under attempt limit
+
+      // If still pending, poll a couple times
       setPollCount(count => {
-        if (count >= 12) {
-          // After 25+ seconds, if arrived on success route, default to cleared with pending note
+        if (count >= 3) {
           if (status === 'complete') {
             setClearanceState('cleared');
           } else {
@@ -71,9 +77,8 @@ export default function PaymentReturn({ status }: { status: PaymentReturnStatus 
         return count + 1;
       });
     } catch {
-      // If API check fails momentarily, keep polling unless at threshold
       setPollCount(count => {
-        if (count >= 10) {
+        if (count >= 2) {
           if (status === 'complete') {
             setClearanceState('cleared');
           } else {

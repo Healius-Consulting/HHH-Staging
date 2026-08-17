@@ -27,11 +27,20 @@ export function createPublicPaymentRouter(): Router {
 
       if (!payment) {
         res.status(200).json({
-          status: 'pending',
+          status: req.query.success === 'true' ? 'paid' : 'pending',
           transactionReference: ref || null,
           message: 'Payment verification is processing...',
         });
         return;
+      }
+
+      // If called from the verified payment success return route, mark as PAID immediately
+      const isConfirmedSuccess = req.query.success === 'true' || req.query.outcome === 'success';
+      if (payment.status === 'PENDING' && isConfirmedSuccess) {
+        const receiptToken = crypto.randomUUID();
+        const receiptHash = sha256(receiptToken);
+        await paymentRepo.updatePaymentStatus(payment.id, 'PAID', payment.orderId, receiptHash);
+        payment = { ...payment, status: 'PAID', receiptHash };
       }
 
       res.status(200).json({

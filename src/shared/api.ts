@@ -512,11 +512,12 @@ export type PublicPaymentStatusResponse = {
   message?: string;
 };
 
-export function getPublicPaymentStatus(params: { ref?: string; receipt?: string; order?: string }): Promise<PublicPaymentStatusResponse> {
+export function getPublicPaymentStatus(params: { ref?: string; receipt?: string; order?: string; success?: boolean }): Promise<PublicPaymentStatusResponse> {
   const query = new URLSearchParams();
   if (params.ref) query.set('ref', params.ref);
   if (params.receipt) query.set('receipt', params.receipt);
   if (params.order) query.set('order', params.order);
+  if (params.success) query.set('success', 'true');
   return apiRequest<PublicPaymentStatusResponse>(`/v1/public/payments/status?${query.toString()}`);
 }
 
