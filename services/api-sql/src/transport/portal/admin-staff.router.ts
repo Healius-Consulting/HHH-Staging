@@ -8,7 +8,7 @@ import { SqlOrganisationRepository } from '../../repositories/sql/organisation.s
 import { requireCsrf } from '../../security/csrf.js';
 import { assertPlatformScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
-import { resolveOwnerUid, toPortalPharmacyStaffAccounts } from './admin-staff-contracts.js';
+import { resolveOwnerUid, toPortalPharmacyStaffAccounts, toPortalPlatformAdminAccounts } from './admin-staff-contracts.js';
 
 const organisationIdSchema = z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
 const staffUidSchema = z.string().min(8).max(128);
@@ -30,6 +30,11 @@ const inviteStaffSchema = z.object({
     organisationId,
   };
 });
+
+const invitePlatformAdminSchema = z.object({
+  email: z.email().transform(value => value.toLowerCase()),
+  displayName: z.string().trim().min(1).max(200),
+}).strict();
 
 function portalAppOrigin() {
   for (const origin of portalAppOrigins) {
@@ -201,6 +206,137 @@ export function createAdminStaffRouter(): Router {
         sessionHashPrefix: scope.sessionHash.slice(0, 12),
         surface: scope.surface,
         details: { retainedForAudit: true },
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/portal/admin/platform-admins', requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      assertPlatformScope(req.context!);
+      const admins = await identityRepo.listPlatformAdmins();
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json(toPortalPlatformAdminAccounts(admins));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/portal/admin/platform-admins/invitations', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const input = invitePlatformAdminSchema.parse(req.body);
+
+      let user;
+      let existingProfile = null;
+      try {
+        user = await auth.createUser({
+          email: input.email,
+          displayName: input.displayName,
+          emailVerified: false,
+          disabled: false,
+        });
+      } catch (error) {
+        if (firebaseAuthErrorCode(error) !== 'auth/email-already-exists') throw error;
+        user = await auth.getUserByEmail(input.email);
+        existingProfile = await identityRepo.findStaffUser(user.uid);
+        const existingRole = existingProfile?.role ?? (typeof user.customClaims?.role === 'string' ? user.customClaims.role.toUpperCase() : null);
+        const existingOrganisationId = existingProfile?.organisationId ?? (typeof user.customClaims?.organisationId === 'string' ? user.customClaims.organisationId : null);
+        if (existingRole !== 'HHH_ADMIN' || existingOrganisationId !== null) {
+          throw new HttpError(409, 'This email address already belongs to a different HHH account.', 'EMAIL_ALREADY_IN_USE');
+        }
+        if (existingProfile?.status === 'ACTIVE') {
+          throw new HttpError(409, 'This admin account is already active. Use password reset if they cannot sign in.', 'STAFF_ALREADY_ACTIVE');
+        }
+      }
+
+      await auth.setCustomUserClaims(user.uid, {
+        role: 'hhh_admin',
+        organisationId: null,
+      });
+
+      const createdAt = existingProfile?.createdAt ?? new Date().toISOString();
+
+      await identityRepo.upsertStaffUser({
+        uid: user.uid,
+        organisationId: null,
+        email: input.email,
+        displayName: input.displayName,
+        role: 'HHH_ADMIN',
+        status: 'INVITED',
+        disabled: false,
+      });
+
+      const firebaseLink = await auth.generatePasswordResetLink(input.email, {
+        url: new URL('/reset-password', portalAppOrigin()).toString(),
+        handleCodeInApp: true,
+      });
+      const actionLink = firstPartyPasswordResetLink(firebaseLink, portalAppOrigin());
+
+      await identityRepo.appendAudit({
+        organisationId: null,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'staff.invited',
+        recordType: 'StaffUser',
+        recordId: user.uid,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+        details: { role: 'hhh_admin', deliveryMode: 'firebase_client' },
+      });
+
+      res.status(201).json({
+        uid: user.uid,
+        email: input.email,
+        displayName: input.displayName,
+        role: 'hhh_admin',
+        status: 'invited',
+        createdAt,
+        invitationQueued: false,
+        actionLink,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.delete('/portal/admin/platform-admins/:uid', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const uid = staffUidSchema.parse(req.params.uid);
+      if (uid === scope.uid) {
+        throw new HttpError(409, 'You cannot remove your own admin access.', 'SELF_REMOVAL_BLOCKED');
+      }
+
+      const profile = await identityRepo.findStaffUser(uid);
+      if (!profile || profile.role !== 'HHH_ADMIN') {
+        throw new HttpError(404, 'Admin account not found.', 'ADMIN_NOT_FOUND');
+      }
+
+      const activeAdmins = await identityRepo.listPlatformAdmins();
+      if (activeAdmins.length <= 1) {
+        throw new HttpError(409, 'At least one HHH admin account must remain active.', 'LAST_ADMIN_PROTECTED');
+      }
+
+      await auth.updateUser(uid, { disabled: true });
+      await auth.revokeRefreshTokens(uid);
+      await identityRepo.updateStaffUserStatus(uid, 'REMOVED', true);
+
+      await identityRepo.appendAudit({
+        organisationId: null,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'staff.removed',
+        recordType: 'StaffUser',
+        recordId: uid,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+        details: { role: 'hhh_admin', retainedForAudit: true },
       });
 
       res.status(204).send();

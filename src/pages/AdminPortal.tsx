@@ -41,8 +41,8 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacyStaff, getReferralLink, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
-import type { AdminReferralFinanceReport, CuraleafConnectionStatus, PatientRegisterExportResult, PatientRegisterExportRow, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
+import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacyStaff, getPlatformAdmins, getReferralLink, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import type { AdminReferralFinanceReport, CuraleafConnectionStatus, PatientRegisterExportResult, PatientRegisterExportRow, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, PlatformAdminAccount, PlatformAdminInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -61,7 +61,7 @@ import { surfaceRelativePath, surfaceRoutePath } from '../routing/surfaceRoute';
 import { ADMIN_VIEW_PATHS, parseAdminRelativePath, type AdminView } from '@hhh/domain/portal-route';
 import AdminIntakeV2 from '../components/AdminIntakeV2';
 
-type PlatformTab = 'setup' | 'curaleaf' | 'directory';
+type PlatformTab = 'setup' | 'curaleaf' | 'access' | 'directory';
 type PharmacyDetailTab = 'access' | 'config' | 'patients';
 
 function adminViewFromPath(): AdminView {
@@ -391,6 +391,127 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
         </form>
       </aside>
     </div>
+  );
+}
+
+function PlatformAdminManager() {
+  const { dispatch } = useApp();
+  const { state: authState } = useAuth();
+  const currentUid = authState.staff?.uid ?? null;
+  const [admins, setAdmins] = useState<PlatformAdminAccount[]>([]);
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [invitation, setInvitation] = useState<PlatformAdminInvitation | null>(null);
+  const [emailDelivery, setEmailDelivery] = useState<'sent' | 'failed' | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [deletingUid, setDeletingUid] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    if (isLocalPortalPreview) {
+      const records: PlatformAdminAccount[] = [
+        { uid: 'preview-admin', email: 'admin@hhh.example', displayName: 'Jordan Lee', role: 'hhh_admin', status: 'active', createdAt: new Date().toISOString() },
+      ];
+      setAdmins(records);
+      setLoading(false);
+      return;
+    }
+    void getPlatformAdmins()
+      .then(records => { if (!cancelled) setAdmins(records); })
+      .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : 'Admin accounts could not be loaded.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const invite = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setInvitation(null);
+    setEmailDelivery(null);
+    try {
+      const created = isLocalPortalPreview
+        ? { uid: `preview-admin-${Date.now()}`, displayName, email, role: 'hhh_admin' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: false, actionLink: '#local-preview' }
+        : await createPlatformAdminInvitation({ displayName, email });
+
+      const updated = [...admins, created];
+      setAdmins(updated);
+      setInvitation(created);
+      setDisplayName('');
+      setEmail('');
+      try {
+        if (isLocalPortalPreview) {
+          setEmailDelivery('sent');
+          dispatch({ type: 'ADD_TOAST', message: 'Local preview account created. No email was sent.', toastType: 'success' });
+          return;
+        }
+        await sendPasswordResetEmail(requireFirebaseAuth(), created.email, passwordResetActionSettings());
+        setEmailDelivery('sent');
+        dispatch({ type: 'ADD_TOAST', message: `${created.displayName} was added and Firebase sent their setup email.`, toastType: 'success' });
+      } catch {
+        setEmailDelivery('failed');
+        dispatch({ type: 'ADD_TOAST', message: 'Account created, but Firebase could not send the email. Copy the setup link instead.', toastType: 'warning' });
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The admin account could not be created.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyInvitation = async () => {
+    if (!invitation) return;
+    await navigator.clipboard.writeText(invitation.actionLink);
+    dispatch({ type: 'ADD_TOAST', message: 'Secure account setup link copied.', toastType: 'success' });
+  };
+
+  const removeAdmin = async (account: PlatformAdminAccount) => {
+    if (account.uid === currentUid || !window.confirm(`Remove ${account.displayName}'s admin access? Their account history will be retained in the audit trail.`)) return;
+    setDeletingUid(account.uid);
+    setError(null);
+    try {
+      if (!isLocalPortalPreview) await removePlatformAdmin(account.uid);
+      setAdmins(admins.filter(item => item.uid !== account.uid));
+      dispatch({ type: 'ADD_TOAST', message: `${account.displayName}'s admin access was removed. Audit history was retained.`, toastType: 'success' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The admin account could not be removed.');
+    } finally {
+      setDeletingUid(null);
+    }
+  };
+
+  return (
+    <section className="card admin-staff-card">
+      <div className="admin-directory-head"><div><p className="section-label">Platform access</p><h2>HHH administrators</h2><p>Invite colleagues who need full admin portal access. Admin accounts are separate from pharmacy staff and are not tied to a pharmacy organisation.</p></div><span className="pill pill-info"><ShieldCheck size={13} /> {admins.length} admin{admins.length === 1 ? '' : 's'}</span></div>
+      <form className="admin-staff-invite-form" onSubmit={invite}>
+        <label>Admin name<input className="input" value={displayName} onChange={event => setDisplayName(event.target.value)} autoComplete="off" required /></label>
+        <label>Work email address<input className="input" type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="off" required /></label>
+        <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Invite admin'}</button>
+      </form>
+      {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
+      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>Admin account created · {emailDelivery === 'sent' ? 'Email sent' : emailDelivery === 'failed' ? 'Email not sent' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? `Firebase sent a password setup email to ${invitation.email}.` : `Send this one-time Firebase setup link to ${invitation.email}.`} They will choose a password and verify their email before entering the admin portal.</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
+      <div className="admin-staff-list">
+        {loading && <div className="empty-state">Loading admin accounts…</div>}
+        {!loading && admins.length === 0 && <div className="empty-state">No HHH admin accounts yet. Invite the first administrator above.</div>}
+        {admins.map(account => {
+          const isSelf = account.uid === currentUid;
+          const isLastAdmin = admins.length <= 1;
+          return (
+            <div className="admin-staff-row" key={account.uid}>
+              <div className="staff-avatar">{account.displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()}</div>
+              <div><strong>{account.displayName}{isSelf ? ' (you)' : ''}</strong><span>{account.email}</span></div>
+              <span className="pill pill-info">Admin</span>
+              <span className={`pill ${account.status === 'active' ? 'pill-green' : account.status === 'disabled' ? 'pill-red' : 'pill-amber'}`}>{account.status}</span>
+              <button className="icon-btn" type="button" disabled={isSelf || isLastAdmin || deletingUid === account.uid} title={isSelf ? 'You cannot remove your own access' : isLastAdmin ? 'At least one admin must remain' : 'Remove admin access'} aria-label={isSelf ? `${account.displayName} is your account` : `Remove ${account.displayName}`} onClick={() => void removeAdmin(account)}><UserX size={16} /></button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -982,6 +1103,7 @@ export default function AdminPortal() {
     { label: 'Referral finance', detail: '£50 first dispenses and £40 annual fees', group: 'Navigate', icon: <PoundSterling size={16} />, run: () => { setSelectedOrganisationId(null); setView('finance'); } },
     { label: 'Platform readiness', detail: 'Setup progress and Curaleaf activation', group: 'Navigate', icon: <ClipboardCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('setup'); } },
     { label: 'Activate Curaleaf', detail: 'Connect a pharmacy Curaleaf API account', group: 'Actions', icon: <LockKeyhole size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('curaleaf'); } },
+    { label: 'Invite admin', detail: 'Add another HHH administrator account', group: 'Actions', icon: <UserPlus size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('access'); } },
     { label: 'Onboard pharmacy', detail: 'Create a new pharmacy workspace', group: 'Actions', icon: <Plus size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); setShowOnboarding(true); } },
     ...state.organisations.map((organisation): CommandDefinition => ({
       label: organisation.tradingName,
@@ -1508,6 +1630,10 @@ export default function AdminPortal() {
           <div className="filter-card__head"><span>Curaleaf</span></div>
           <span className="filter-card__value filter-card__value--text">Connections</span>
         </button>
+        <button type="button" role="tab" aria-selected={platformTab === 'access'} className={`filter-card${platformTab === 'access' ? ' active' : ''}`} onClick={() => setPlatformTab('access')}>
+          <div className="filter-card__head"><span>Access</span></div>
+          <span className="filter-card__value filter-card__value--text">Admins</span>
+        </button>
       </div>
 
       {platformTab === 'setup' && (
@@ -1575,6 +1701,8 @@ export default function AdminPortal() {
           </section>
         </>
       )}
+
+      {platformTab === 'access' && <PlatformAdminManager />}
     </>
   );
 

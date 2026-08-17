@@ -81,6 +81,28 @@ const LIST_PHARMACY_STAFF_BY_ORG_GQL = `
   }
 `;
 
+const LIST_PLATFORM_ADMINS_GQL = `
+  query ListPlatformAdmins {
+    staffUsers(
+      where: {
+        role: { eq: HHH_ADMIN }
+        status: { ne: REMOVED }
+      }
+      orderBy: { createdAt: ASC }
+      limit: 500
+    ) {
+      uid
+      organisationId
+      email
+      displayName
+      role
+      status
+      disabled
+      createdAt
+    }
+  }
+`;
+
 const UPSERT_STAFF_USER_GQL = `
   mutation UpsertStaffUser(
     $uid: String!
@@ -252,6 +274,13 @@ export class SqlIdentityRepository implements IdentityRepositoryPort {
     const result = await dataConnect.executeGraphql<{ staffUsers: StaffUserRecord[] }, any>(
       LIST_PHARMACY_STAFF_BY_ORG_GQL,
       { variables: { organisationId } },
+    );
+    return result.data.staffUsers ?? [];
+  }
+
+  async listPlatformAdmins(): Promise<StaffUserRecord[]> {
+    const result = await dataConnect.executeGraphql<{ staffUsers: StaffUserRecord[] }, any>(
+      LIST_PLATFORM_ADMINS_GQL,
     );
     return result.data.staffUsers ?? [];
   }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { StaffUserRecord } from '../../repositories/ports/identity.port.js';
-import { resolveOwnerUid, toPortalPharmacyStaffAccounts } from './admin-staff-contracts.js';
+import { resolveOwnerUid, toPortalPharmacyStaffAccounts, toPortalPlatformAdminAccounts } from './admin-staff-contracts.js';
 
 const organisationId = '70913a3071c34a41952ed532927af58c';
 
@@ -26,6 +26,18 @@ const staffMember: StaffUserRecord = {
   status: 'INVITED',
   disabled: false,
   createdAt: '2026-01-02T10:00:00.000Z',
+  version: 1,
+};
+
+const adminMember: StaffUserRecord = {
+  uid: 'admin-uid',
+  organisationId: null,
+  email: 'admin@example.test',
+  displayName: 'Taylor Admin',
+  role: 'HHH_ADMIN',
+  status: 'ACTIVE',
+  disabled: false,
+  createdAt: '2026-01-01T09:00:00.000Z',
   version: 1,
 };
 
@@ -58,6 +70,20 @@ describe('admin staff contracts', () => {
         contactRole: 'staff',
         status: 'invited',
         createdAt: staffMember.createdAt,
+      },
+    ]);
+  });
+
+  it('maps SQL admin records to the portal contract', () => {
+    const mapped = toPortalPlatformAdminAccounts([adminMember]);
+    assert.deepEqual(mapped, [
+      {
+        uid: adminMember.uid,
+        email: adminMember.email,
+        displayName: adminMember.displayName,
+        role: 'hhh_admin',
+        status: 'active',
+        createdAt: adminMember.createdAt,
       },
     ]);
   });

@@ -1310,3 +1310,22 @@ export interface PharmacyStaffInvitation extends PharmacyStaffAccount {
   invitationQueued: boolean;
   actionLink: string;
 }
+
+export interface PlatformAdminAccount {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: 'hhh_admin';
+  status: 'invited' | 'active' | 'disabled';
+  createdAt: string;
+}
+
+export interface CreatePlatformAdminInput {
+  email: string;
+  displayName: string;
+}
+
+export interface PlatformAdminInvitation extends PlatformAdminAccount {
+  invitationQueued: boolean;
+  actionLink: string;
+}

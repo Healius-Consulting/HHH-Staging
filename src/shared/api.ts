@@ -9,6 +9,9 @@ import type {
   PharmacyStaffAccount,
   PharmacyStaffInvitation,
   CreatePharmacyStaffInput,
+  PlatformAdminAccount,
+  PlatformAdminInvitation,
+  CreatePlatformAdminInput,
   PortalOrganisation,
   PublicPharmacy,
   SetupTaskId,
@@ -770,6 +773,21 @@ export function createPharmacyStaffInvitation(input: CreatePharmacyStaffInput) {
 
 export function removePharmacyStaff(uid: string) {
   return apiRequest<void>(`/v1/portal/admin/staff/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+}
+
+export function getPlatformAdmins() {
+  return apiRequest<PlatformAdminAccount[]>('/v1/portal/admin/platform-admins');
+}
+
+export function createPlatformAdminInvitation(input: CreatePlatformAdminInput) {
+  return apiRequest<PlatformAdminInvitation>('/v1/portal/admin/platform-admins/invitations', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function removePlatformAdmin(uid: string) {
+  return apiRequest<void>(`/v1/portal/admin/platform-admins/${encodeURIComponent(uid)}`, { method: 'DELETE' });
 }
 
 export function getPharmacySetupStatus(organisationId: string) {

@@ -74,6 +74,7 @@ export interface IdentityRepositoryPort {
   findAdmission(sessionHash: string, staffUid: string): Promise<PortalAdmissionResult>;
   findStaffUser(uid: string): Promise<StaffUserRecord | null>;
   listPharmacyStaffByOrganisationId(organisationId: string): Promise<StaffUserRecord[]>;
+  listPlatformAdmins(): Promise<StaffUserRecord[]>;
   upsertStaffUser(input: UpsertStaffUserInput): Promise<void>;
   updateStaffUserStatus(uid: string, status: 'INVITED' | 'ACTIVE' | 'DISABLED' | 'REMOVED', disabled: boolean): Promise<void>;
   findStaffSession(sessionHash: string): Promise<StaffSessionRecord | null>;

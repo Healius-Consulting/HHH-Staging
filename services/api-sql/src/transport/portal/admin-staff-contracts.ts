@@ -12,6 +12,15 @@ export interface PortalPharmacyStaffAccount {
   createdAt: string;
 }
 
+export interface PortalPlatformAdminAccount {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: 'hhh_admin';
+  status: 'invited' | 'active' | 'disabled';
+  createdAt: string;
+}
+
 function lowerStaffStatus(status: StaffUserRecord['status']): PortalPharmacyStaffAccount['status'] {
   if (status === 'ACTIVE') return 'active';
   if (status === 'DISABLED') return 'disabled';
@@ -36,6 +45,17 @@ export function toPortalPharmacyStaffAccounts(
     pharmacyId: organisationId,
     organisationId,
     contactRole: record.uid === ownerUid ? 'owner' : 'staff',
+    status: lowerStaffStatus(record.status),
+    createdAt: record.createdAt ?? new Date(0).toISOString(),
+  }));
+}
+
+export function toPortalPlatformAdminAccounts(staff: StaffUserRecord[]): PortalPlatformAdminAccount[] {
+  return staff.map(record => ({
+    uid: record.uid,
+    email: record.email,
+    displayName: record.displayName,
+    role: 'hhh_admin',
     status: lowerStaffStatus(record.status),
     createdAt: record.createdAt ?? new Date(0).toISOString(),
   }));
