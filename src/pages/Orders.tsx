@@ -1163,10 +1163,17 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   const remainingOpen = order.prescriptions.some(prescription =>
     (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
   );
-  const readyArrivedPacks = order.prescriptions.reduce((sum, prescription) =>
-    sum + (prescription.fulfilmentLines ?? []).reduce((lineSum, line) => lineSum + Math.max(0, line.received - line.collected), 0), 0);
+  const readyNotCollectedPacks = order.prescriptions.reduce((sum, prescription) => {
+    const prescriptionReady = prescription.status === 'ready'
+      || Object.values(prescription.shipmentStates ?? {}).includes('ready_for_collection');
+    if (!prescriptionReady) return sum;
+    return sum + (prescription.fulfilmentLines ?? []).reduce(
+      (lineSum, line) => lineSum + Math.max(0, (line.received ?? 0) - (line.collected ?? 0)),
+      0,
+    );
+  }, 0);
   const canFullHandout = stage === 'ready' && !remainingOpen;
-  const canPartialHandout = readyArrivedPacks > 0 && remainingOpen && ['dispatched', 'delivered', 'ready'].includes(stage);
+  const canPartialHandout = readyNotCollectedPacks > 0 && remainingOpen;
 
   const handleCopy = (key: string, text: string) => {
     void navigator.clipboard.writeText(text);
@@ -1219,7 +1226,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
           </div>
           <div className="order-crm-record__actions" role="group" aria-label="Order actions">
             {canFullHandout ? <button type="button" className="btn btn-primary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(false)}><Check size={13} /> Hand over</button> : null}
-            {canPartialHandout ? <button type="button" className="btn btn-secondary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(true)}><Check size={13} /> Hand over partial ({readyArrivedPacks} pk)</button> : null}
+            {canPartialHandout ? <button type="button" className="btn btn-secondary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(true)}><Check size={13} /> Hand over partial ({readyNotCollectedPacks} pk)</button> : null}
             {mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={hasCuraleafOrder ? onCallCuraleaf : onOpenCancellation}>{hasCuraleafOrder ? <PhoneCall size={13} /> : <XCircle size={13} />} {hasCuraleafOrder ? 'Call Curaleaf to cancel' : 'Cancel order'}</button> : null}
             <button type="button" className="btn btn-secondary btn-sm" onClick={onPrint}><Printer size={13} /> Print</button>
           </div>
@@ -2014,7 +2021,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   const partialReadyControl = (isPartiallyDelivered || (isDelivered && remainingOpen)) && !selectedConsignmentReady && !selectedConsignmentCollected;
   const partialHandoutControl = remainingOpen
     && arrivedNotCollectedPacks > 0
-    && (isPartiallyDelivered || isDelivered || isReady || selectedConsignmentReady || selectedConsignmentReceived);
+    && (selectedConsignmentReady || prescription.status === 'ready');
   const fullHandoutControl = (prescription.status === 'ready' || selectedConsignmentReady) && !remainingOpen;
   const collectionControl = isReady && !remainingOpen;
   const deliveryGuidance = (prescription.latestShipmentAt || prescription.placedAt)
