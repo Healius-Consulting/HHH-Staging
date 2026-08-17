@@ -1197,16 +1197,32 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   return (
     <article className="order-crm-record">
       <header className="order-crm-record__header">
-        <div className="order-crm-record__identity">
-          <span className={`order-crm-record__stage order-tone--${meta.tone}`}><Icon size={18} /></span>
-          <span><small>{order.redoContext ? 'Replacement' : 'Order'} {orderReference(order)} · opened {formatDate(order.date)}{order.redoContext ? ` · replaces #${order.redoContext.originalOrderId}` : ''}</small><strong>{patient?.name ?? 'Unknown patient'}</strong><em>{meta.description}</em></span>
+        <div className="order-crm-record__hero">
+          <div className="order-crm-record__identity">
+            <span className={`order-crm-record__stage order-tone--${meta.tone}`}><Icon size={20} aria-hidden="true" /></span>
+            <div className="order-crm-record__titles">
+              <strong>{patient?.name ?? 'Unknown patient'}</strong>
+              <span className="order-crm-record__ref">
+                {order.redoContext ? 'Replacement' : 'Order'} {orderReference(order)}
+                {order.redoContext ? ` · replaces #${order.redoContext.originalOrderId}` : ''}
+              </span>
+              <em>{meta.description}</em>
+            </div>
+          </div>
+          <span className={`order-stage-pill order-tone--${meta.tone}`}>{meta.label}</span>
         </div>
-        <div className="order-crm-record__value"><small>Patient total</small><strong>{money(order.payment.amount)}</strong><span className={`order-stage-pill order-tone--${meta.tone}`}>{meta.label}</span></div>
-        <div className="order-crm-record__actions">
-          {canFullHandout ? <button type="button" className="btn btn-primary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(false)}><Check size={13} /> Hand over</button> : null}
-          {canPartialHandout ? <button type="button" className="btn btn-secondary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(true)}><Check size={13} /> Hand over partial ({readyArrivedPacks} pk)</button> : null}
-          {mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={hasCuraleafOrder ? onCallCuraleaf : onOpenCancellation}>{hasCuraleafOrder ? <PhoneCall size={13} /> : <XCircle size={13} />} {hasCuraleafOrder ? 'Call Curaleaf to cancel' : 'Cancel order'}</button> : null}
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onPrint}><Printer size={13} /> Print</button>
+        <div className="order-crm-record__toolbar">
+          <div className="order-crm-record__value">
+            <small>Patient total</small>
+            <strong>{money(order.payment.amount)}</strong>
+            <span className="order-crm-record__opened">Opened {formatDate(order.date)}</span>
+          </div>
+          <div className="order-crm-record__actions" role="group" aria-label="Order actions">
+            {canFullHandout ? <button type="button" className="btn btn-primary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(false)}><Check size={13} /> Hand over</button> : null}
+            {canPartialHandout ? <button type="button" className="btn btn-secondary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(true)}><Check size={13} /> Hand over partial ({readyArrivedPacks} pk)</button> : null}
+            {mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={hasCuraleafOrder ? onCallCuraleaf : onOpenCancellation}>{hasCuraleafOrder ? <PhoneCall size={13} /> : <XCircle size={13} />} {hasCuraleafOrder ? 'Call Curaleaf to cancel' : 'Cancel order'}</button> : null}
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onPrint}><Printer size={13} /> Print</button>
+          </div>
         </div>
       </header>
 
@@ -1892,7 +1908,16 @@ function JourneyRail({ stage, paymentPaid }: { stage: OrderStage; paymentPaid: b
       { label: 'Delivery', detail: 'Stopped', complete: false },
       { label: 'Ready to collect', detail: 'Not required', complete: false },
     ];
-    return <ol className="order-journey-rail">{phases.map((phase, index) => <li key={phase.label} className={phase.complete ? 'complete' : ''}><span>{phase.complete ? <Check size={12} /> : index + 1}</span><div><strong>{phase.label}</strong><small>{phase.detail}</small></div></li>)}</ol>;
+    return (
+      <ol className="order-journey-rail order-journey-rail--premium" aria-label="Order journey">
+        {phases.map((phase, index) => (
+          <li key={phase.label} className={phase.complete ? 'is-complete' : 'is-pending'} aria-current={undefined}>
+            <span className="order-journey-rail__marker" aria-hidden="true">{phase.complete ? <Check size={12} /> : index + 1}</span>
+            <div className="order-journey-rail__copy"><strong>{phase.label}</strong><small>{phase.detail}</small></div>
+          </li>
+        ))}
+      </ol>
+    );
   }
   const curaleafComplete = ['curaleaf-approved', 'dispatched', 'delivered', 'ready', 'collected'].includes(stage);
   const deliveryComplete = ['delivered', 'ready', 'collected'].includes(stage);
@@ -1903,7 +1928,21 @@ function JourneyRail({ stage, paymentPaid }: { stage: OrderStage; paymentPaid: b
     { label: 'Delivery', detail: deliveryComplete ? 'Received' : stage === 'dispatched' ? 'In transit' : 'Pending', complete: deliveryComplete, active: stage === 'curaleaf-approved' || stage === 'dispatched' },
     { label: 'Ready to collect', detail: collectionComplete ? 'Handed out' : stage === 'ready' ? 'Ready' : 'Pending', complete: collectionComplete, active: stage === 'delivered' || stage === 'ready' },
   ];
-  return <ol className="order-journey-rail">{phases.map((phase, index) => <li key={phase.label} className={phase.complete ? 'complete' : phase.active ? 'active' : ''}><span>{phase.complete ? <Check size={12} /> : index + 1}</span><div><strong>{phase.label}</strong><small>{phase.detail}</small></div></li>)}</ol>;
+  return (
+    <ol className="order-journey-rail order-journey-rail--premium" aria-label="Order journey">
+      {phases.map((phase, index) => {
+        let stateClass = 'is-pending';
+        if (phase.complete) stateClass = 'is-complete';
+        else if (phase.active) stateClass = 'is-active';
+        return (
+          <li key={phase.label} className={stateClass} aria-current={phase.active ? 'step' : undefined}>
+            <span className="order-journey-rail__marker" aria-hidden="true">{phase.complete ? <Check size={12} /> : index + 1}</span>
+            <div className="order-journey-rail__copy"><strong>{phase.label}</strong><small>{phase.detail}</small></div>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, onManualPlace, onChaseCuraleaf, onOpenHandout }: {

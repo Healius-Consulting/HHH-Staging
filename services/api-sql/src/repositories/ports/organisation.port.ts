@@ -83,9 +83,21 @@ export interface SetupTaskRecord {
   updatedAt: string;
 }
 
+export interface UpdateOrganisationProfileInput {
+  tradingName: string;
+  name: string;
+  gphcNumber: string;
+  superintendentName: string;
+  address: string;
+  mainContactName: string | null;
+  mainContactPhone: string | null;
+  mainContactEmail: string | null;
+}
+
 export interface OrganisationRepositoryPort {
   findOrganisationById(id: string): Promise<OrganisationRecord | null>;
   listOrganisations(): Promise<OrganisationRecord[]>;
+  updateOrganisationProfile(id: string, input: UpdateOrganisationProfileInput): Promise<void>;
   findDirectoryByTokenHash(tokenHash: string): Promise<PublicPharmacyResolution | null>;
   findReferralTokenByHash(tokenHash: string): Promise<ReferralTokenRecord | null>;
   createReferralToken(params: {

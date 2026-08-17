@@ -196,6 +196,16 @@ function PatientJourneyTrack({ stage, compact = false }: { stage: JourneyStage; 
   );
 }
 
+function PatientDirectoryTag({ status }: { status: ReturnType<typeof deriveStatus> }) {
+  const tone = patientIndicatorTone(status);
+  return (
+    <span className={`patient-directory-tag patient-directory-tag--${tone}`}>
+      <i className={`patient-status-dot is-${tone}`} aria-hidden="true" />
+      <span>{status.compactLabel}</span>
+    </span>
+  );
+}
+
 function directoryEmptyCopy(tab: PatientDirectoryFilter, hasSearch: boolean): { title: string; detail: string; icon: typeof Users } {
   if (hasSearch) {
     return tab === 'enquiries'
@@ -598,7 +608,7 @@ export default function Patients() {
           <>
         <header className="patient-directory-key">
           <div className="patient-directory-key__title"><span>Patient directory</span><strong>{processedPatients.length}</strong></div>
-          <p className="patient-directory-key__lead">Browse referred and active patients. Journey shows Enquiry → Referred → Active care.</p>
+          <p className="patient-directory-key__lead">Browse referred and active patients. Status tags reflect current care stage and any action needed.</p>
           <div className="patient-status-key" aria-hidden="true">
             <span><i className="patient-status-dot is-journey" />In journey</span>
             <span><i className="patient-status-dot is-active" />Approved / active</span>
@@ -617,8 +627,6 @@ export default function Patients() {
           <ul className="patient-directory-list">
             {processedPatients.map(p => {
               const status = deriveStatus(p);
-              const journeyStage = deriveJourneyStage(p);
-              const indicatorTone = patientIndicatorTone(status);
               const eligibilityLabel = p.submission ? onboardingStatusLabel(p.submission.status) : null;
               const negativeReason = p.submission ? pharmacyDecisionReason(p.submission) : null;
               const operationalStatusIsDistinct = !p.submission || p.orders.length > 0 || Boolean(p.crmPatient && status.label !== eligibilityLabel);
@@ -662,19 +670,11 @@ export default function Patients() {
                       </div>
                     </div>
 
-                    <div className="patient-directory-card__journey">
-                      <PatientJourneyTrack stage={journeyStage} compact />
-                    </div>
-
                     <div className="patient-directory-card__status">
                       <div className="patient-directory-status">
-                        {p.submission ? (
+                        <PatientDirectoryTag status={status} />
+                        {p.submission && operationalStatusIsDistinct ? (
                           <span className={`pill ${onboardingStatusPillClass(p.submission.status)}`}>{eligibilityLabel}</span>
-                        ) : (
-                          <span className={`pill ${status.pill}`}>{status.label}</span>
-                        )}
-                        {operationalStatusIsDistinct && p.submission ? (
-                          <small><i className={`patient-status-dot is-${indicatorTone}`} aria-hidden="true" />Care: {status.label}</small>
                         ) : null}
                         {negativeReason ? <span className="patient-directory-reason" title={negativeReason}>{negativeReason}</span> : null}
                         {hasUncollectedWarning ? (

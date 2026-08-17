@@ -1,12 +1,26 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
+import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
-import { buildPharmacyPatientDirectory, buildSqlPharmacyOverview, toPortalPatient, toPortalPendingEnquiry } from './pharmacy-contracts.js';
+import { buildPharmacyPatientDirectory, buildSqlPharmacyOverview, toPortalOrganisation, toPortalPatient, toPortalPendingEnquiry } from './pharmacy-contracts.js';
+
+const pharmacyProfileInputSchema = z.object({
+  tradingName: z.string().trim().min(2).max(160).optional(),
+  name: z.string().trim().min(2).max(160).optional(),
+  gphcNumber: z.string().trim().min(3).max(40).optional(),
+  superintendent: z.string().trim().min(2).max(160).optional(),
+  address: z.string().trim().min(5).max(500).optional(),
+  mainContactName: z.string().trim().max(160).optional(),
+  mainContactPhone: z.string().trim().max(40).optional(),
+  mainContactEmail: z.string().trim().email().max(254).optional().or(z.literal('')),
+}).strict().refine(value => Object.keys(value).length > 0, { message: 'At least one pharmacy detail must be supplied.' });
 
 export function createPortalPharmacyRouter(): Router {
   const router = Router();
@@ -14,6 +28,7 @@ export function createPortalPharmacyRouter(): Router {
   const orderRepo = new SqlOrderRepository();
   const organisationRepo = new SqlOrganisationRepository();
   const intakeRepo = new SqlIntakeRepository();
+  const identityRepo = new SqlIdentityRepository();
 
   router.get('/portal/patient-directory', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -64,6 +79,47 @@ export function createPortalPharmacyRouter(): Router {
       }
       res.setHeader('Cache-Control', 'private, no-store');
       res.status(200).json(buildSqlPharmacyOverview({ organisation, patients, orders, pendingEnquiries }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch('/portal/organisation/profile', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const input = pharmacyProfileInputSchema.parse(req.body);
+      const current = await organisationRepo.findOrganisationById(scope.organisationId);
+      if (!current) {
+        throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      }
+      await organisationRepo.updateOrganisationProfile(scope.organisationId, {
+        tradingName: input.tradingName ?? current.tradingName,
+        name: input.name ?? current.name,
+        gphcNumber: input.gphcNumber ?? current.gphcNumber,
+        superintendentName: input.superintendent ?? current.superintendentName,
+        address: input.address ?? current.address,
+        mainContactName: input.mainContactName ?? current.mainContactName,
+        mainContactPhone: input.mainContactPhone ?? current.mainContactPhone,
+        mainContactEmail: input.mainContactEmail === '' ? null : (input.mainContactEmail ?? current.mainContactEmail),
+      });
+      const updated = await organisationRepo.findOrganisationById(scope.organisationId);
+      if (!updated) {
+        throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      }
+      await identityRepo.appendAudit({
+        organisationId: scope.organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'organisation.profile_updated',
+        recordType: 'Organisation',
+        recordId: scope.organisationId,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+        details: { changedFields: Object.keys(input) },
+      });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.status(200).json(toPortalOrganisation(updated));
     } catch (error) {
       next(error);
     }

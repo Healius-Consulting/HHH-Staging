@@ -5,10 +5,17 @@ import { HttpError } from '../../domain/common/errors.js';
 import { assertPlatformScope, assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 
-const querySchema = z.object({
+const organisationIdSchema = z.string().regex(/^(?:[a-f\d]{32}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i);
+
+const financeDateRangeSchema = z.object({
   from: z.iso.date().optional(),
   to: z.iso.date().optional(),
-  organisationId: z.string().uuid().optional(),
+}).strict();
+
+const adminFinanceQuerySchema = z.object({
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  organisationId: organisationIdSchema.optional(),
 }).strict();
 
 const LIST_REFERRAL_FEES_GQL = `
@@ -107,10 +114,9 @@ export function createPortalFinanceRouter(): Router {
       const scope = assertTenantScope(req.context!);
       const organisationId = scope.organisationId;
 
-      const filters = querySchema.parse({
+      const filters = financeDateRangeSchema.parse({
         from: req.query.from,
         to: req.query.to,
-        organisationId,
       });
 
       const [ordersResult, patientsResult] = await Promise.all([
@@ -254,7 +260,7 @@ export function createPortalFinanceRouter(): Router {
   router.get('/portal/admin/finance/referrals', requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       assertPlatformScope(req.context!);
-      const filters = querySchema.parse({
+      const filters = adminFinanceQuerySchema.parse({
         from: req.query.from,
         to: req.query.to,
         organisationId: req.query.organisationId,

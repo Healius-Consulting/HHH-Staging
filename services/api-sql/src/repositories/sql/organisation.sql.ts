@@ -6,6 +6,7 @@ import type {
   ReferralTokenRecord,
   CreateOrganisationRecordInput,
   SetupTaskRecord,
+  UpdateOrganisationProfileInput,
 } from '../ports/organisation.port.js';
 
 const GET_ORGANISATION_BY_ID_GQL = `
@@ -224,6 +225,34 @@ const UPSERT_SETUP_TASK_GQL = `
   }
 `;
 
+const UPDATE_ORGANISATION_PROFILE_GQL = `
+  mutation UpdateOrganisationProfile(
+    $id: UUID!
+    $tradingName: String!
+    $name: String!
+    $gphcNumber: String!
+    $superintendentName: String!
+    $address: String!
+    $mainContactName: String
+    $mainContactPhone: String
+    $mainContactEmail: String
+  ) {
+    organisation_update(
+      key: { id: $id }
+      data: {
+        tradingName: $tradingName
+        name: $name
+        gphcNumber: $gphcNumber
+        superintendentName: $superintendentName
+        address: $address
+        mainContactName: $mainContactName
+        mainContactPhone: $mainContactPhone
+        mainContactEmail: $mainContactEmail
+      }
+    )
+  }
+`;
+
 const UPDATE_STAFF_PREFERENCES_GQL = `
   mutation UpdateStaffPreferences(
     $uid: String!
@@ -252,6 +281,22 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
       LIST_ORGANISATIONS_GQL
     );
     return result.data.organisations ?? [];
+  }
+
+  async updateOrganisationProfile(id: string, input: UpdateOrganisationProfileInput): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(UPDATE_ORGANISATION_PROFILE_GQL, {
+      variables: {
+        id,
+        tradingName: input.tradingName,
+        name: input.name,
+        gphcNumber: input.gphcNumber,
+        superintendentName: input.superintendentName,
+        address: input.address,
+        mainContactName: input.mainContactName,
+        mainContactPhone: input.mainContactPhone,
+        mainContactEmail: input.mainContactEmail,
+      },
+    });
   }
 
   async findDirectoryByTokenHash(tokenHash: string): Promise<PublicPharmacyResolution | null> {

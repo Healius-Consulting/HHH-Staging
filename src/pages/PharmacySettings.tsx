@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
   Building2,
@@ -12,12 +12,13 @@ import {
   Link2,
   QrCode,
   RefreshCw,
+  Save,
   ShieldCheck,
   Tags,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { brandSwatchStyle } from '../utils/tenantTheme';
-import { getCuraleafConnectionStatus, getReferralLink, isApiConfigured, updatePaymentSettings } from '../shared/api';
+import { getCuraleafConnectionStatus, getReferralLink, isApiConfigured, updatePaymentSettings, updatePharmacyProfile } from '../shared/api';
 import type { CuraleafConnectionStatus } from '../shared/contracts';
 import WorldpayConnectionPanel from '../components/WorldpayConnectionPanel';
 import { downloadContentPack, downloadDataUrl, eligibilityUrl, qrDataUrl } from '../utils/pharmacyResources';
@@ -39,7 +40,31 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
   const [linkError, setLinkError] = useState('');
   const [linkRefresh, setLinkRefresh] = useState(0);
   const [curaleafStatus, setCuraleafStatus] = useState<CuraleafConnectionStatus | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    tradingName: '',
+    name: '',
+    gphcNumber: '',
+    superintendent: '',
+    address: '',
+    mainContactName: '',
+    mainContactPhone: '',
+    mainContactEmail: '',
+  });
   const organisation = useMemo(() => state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0], [state]);
+
+  useEffect(() => {
+    setProfileForm({
+      tradingName: organisation.tradingName,
+      name: organisation.name,
+      gphcNumber: organisation.gphcNumber,
+      superintendent: organisation.superintendent,
+      address: organisation.address,
+      mainContactName: organisation.mainContactName ?? '',
+      mainContactPhone: organisation.mainContactPhone ?? '',
+      mainContactEmail: organisation.mainContactEmail ?? '',
+    });
+  }, [organisation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +112,35 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
     if (!formUrl) return;
     await navigator.clipboard.writeText(formUrl);
     notify('Pharmacy eligibility link copied to clipboard.');
+  };
+
+  const saveProfile = async (event: FormEvent) => {
+    event.preventDefault();
+    setProfileSaving(true);
+    try {
+      if (!isLocalPortalPreview && isApiConfigured) {
+        await updatePharmacyProfile(profileForm);
+      }
+      dispatch({
+        type: 'UPDATE_ORGANISATION',
+        organisationId: organisation.id,
+        updates: {
+          tradingName: profileForm.tradingName,
+          name: profileForm.name,
+          gphcNumber: profileForm.gphcNumber,
+          superintendent: profileForm.superintendent,
+          address: profileForm.address,
+          mainContactName: profileForm.mainContactName || undefined,
+          mainContactPhone: profileForm.mainContactPhone || undefined,
+          mainContactEmail: profileForm.mainContactEmail || undefined,
+        },
+      });
+      notify('Pharmacy details saved.');
+    } catch (error) {
+      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'Pharmacy details could not be saved.', toastType: 'error' });
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   const setPaymentRoute = async (route: 'manual' | 'worldpay') => {
@@ -148,6 +202,31 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
               <button type="button" className="btn btn-sm" onClick={() => setActiveTab('activation')}>Review activation</button>
             </div>
           ) : null}
+          <section className="card settings-panel settings-panel--profile">
+            <div className="section-heading">
+              <div>
+                <p className="section-label">Pharmacy details</p>
+                <h3><Building2 size={17} /> Public profile & contact</h3>
+              </div>
+            </div>
+            <p className="settings-copy">Update trading name, GPhC registration, address and contact details if anything is incorrect. Branding and go-live status remain managed by HHH.</p>
+            <form className="settings-profile-form" onSubmit={event => void saveProfile(event)}>
+              <div className="settings-profile-grid">
+                <label>Trading name<input className="input" value={profileForm.tradingName} onChange={event => setProfileForm(current => ({ ...current, tradingName: event.target.value }))} required /></label>
+                <label>Registered company name<input className="input" value={profileForm.name} onChange={event => setProfileForm(current => ({ ...current, name: event.target.value }))} required /></label>
+                <label>GPhC number<input className="input" value={profileForm.gphcNumber} onChange={event => setProfileForm(current => ({ ...current, gphcNumber: event.target.value }))} required /></label>
+                <label>Superintendent pharmacist<input className="input" value={profileForm.superintendent} onChange={event => setProfileForm(current => ({ ...current, superintendent: event.target.value }))} required /></label>
+                <label className="settings-profile-grid__wide">Address<textarea className="input" rows={3} value={profileForm.address} onChange={event => setProfileForm(current => ({ ...current, address: event.target.value }))} required /></label>
+                <label>Main contact name<input className="input" value={profileForm.mainContactName} onChange={event => setProfileForm(current => ({ ...current, mainContactName: event.target.value }))} /></label>
+                <label>Main contact phone<input className="input" type="tel" value={profileForm.mainContactPhone} onChange={event => setProfileForm(current => ({ ...current, mainContactPhone: event.target.value }))} /></label>
+                <label className="settings-profile-grid__wide">Main contact email<input className="input" type="email" value={profileForm.mainContactEmail} onChange={event => setProfileForm(current => ({ ...current, mainContactEmail: event.target.value }))} /></label>
+              </div>
+              <div className="settings-actions">
+                <button type="submit" className="btn btn-primary" disabled={profileSaving}><Save size={14} /> {profileSaving ? 'Saving…' : 'Save pharmacy details'}</button>
+              </div>
+            </form>
+          </section>
+
           <section className="card settings-panel">
             <div className="section-heading">
               <div>

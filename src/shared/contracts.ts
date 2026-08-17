@@ -888,6 +888,17 @@ export interface UpdateOrganisationInput {
   portalName?: string;
 }
 
+export interface UpdatePharmacyProfileInput {
+  name?: string;
+  tradingName?: string;
+  gphcNumber?: string;
+  superintendent?: string;
+  mainContactName?: string;
+  mainContactPhone?: string;
+  mainContactEmail?: string;
+  address?: string;
+}
+
 export interface CreatedOrganisation extends CreateOrganisationInput {
   id: string;
   referralToken: string;

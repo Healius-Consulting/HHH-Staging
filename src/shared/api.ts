@@ -16,6 +16,7 @@ import type {
   PortalSession,
   UpdatePharmacySetupTaskInput,
   UpdateOrganisationInput,
+  UpdatePharmacyProfileInput,
   PaymentSettings,
   CuraleafDevCatalogue,
   CuraleafCatalogue,
@@ -727,6 +728,13 @@ export function getAdminPatientRegister(input: { query: string; organisationId: 
 
 export function updateOrganisation(organisationId: string, input: UpdateOrganisationInput) {
   return apiRequest<PortalOrganisation>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updatePharmacyProfile(input: UpdatePharmacyProfileInput) {
+  return apiRequest<PortalOrganisation>('/v1/portal/organisation/profile', {
     method: 'PATCH',
     body: JSON.stringify(input),
   });
