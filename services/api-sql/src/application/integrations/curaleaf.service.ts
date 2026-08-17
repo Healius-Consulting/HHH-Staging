@@ -193,7 +193,7 @@ export async function executeCuraleafOrderPlacement(
       '/v1/prescribers/'
     ).catch(() => null);
 
-    if (prescriberRes?.prescribers && prescriberRes.prescribers.length > 0) {
+    if (prescriberRes?.prescribers && prescriberRes.prescribers.length > 0 && prescriberRes.prescribers[0]) {
       prescriberId = prescriberRes.prescribers[0].id;
     } else {
       const createdPrescriber = await curaleafApiRequest<{ id: string }>(connection, '/v1/prescribers/', {
@@ -266,7 +266,7 @@ export async function executeCuraleafOrderPlacement(
       purchaseOrderResult = await curaleafApiRequest(connection, '/v1/purchase-orders/', {
         method: 'POST',
         body: JSON.stringify({
-          customerReference: order.orderNumber || `HHH-${order.id.slice(0, 8)}`,
+          customerReference: order.orderNumber || `HHH-${(order.id || 'ORDER').slice(0, 8)}`,
           items: poItems,
         }),
       });
@@ -281,4 +281,23 @@ export async function executeCuraleafOrderPlacement(
     purchaseOrder: purchaseOrderResult,
   };
 }
+
+export async function fetchCuraleafActivity(connection: IntegrationConnectionRecord) {
+  const [prescribers, prescriptions, purchaseOrders, shipments] = await Promise.all([
+    curaleafApiRequest(connection, '/v1/prescribers/').catch(() => ({ prescribers: [] })),
+    curaleafApiRequest(connection, '/v1/prescriptions/').catch(() => ({ prescriptions: [] })),
+    curaleafApiRequest(connection, '/v1/purchase-orders/').catch(() => ({ purchaseOrders: [] })),
+    curaleafApiRequest(connection, '/v1/shipments/').catch(() => ({ shipments: [] })),
+  ]);
+
+  return {
+    environment: config.CURALEAF_BASE_URL.includes('.dev') ? 'test' as const : 'production' as const,
+    checkedAt: new Date().toISOString(),
+    prescribers: (prescribers as any)?.prescribers || [],
+    prescriptions: (prescriptions as any)?.prescriptions || [],
+    purchaseOrders: (purchaseOrders as any)?.purchaseOrders || [],
+    shipments: (shipments as any)?.shipments || [],
+  };
+}
+
 
