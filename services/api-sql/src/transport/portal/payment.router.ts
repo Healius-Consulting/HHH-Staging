@@ -110,7 +110,7 @@ export function createPortalPaymentRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const connection = await integrationRepo.findConnection(scope.organisationId, 'worldpay').catch(() => null);
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY').catch(() => null);
       const transactionReference = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
       const session = await createWorldpayHostedSession(connection, scope.organisationId, {
@@ -163,7 +163,7 @@ export function createPortalPaymentRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const connection = await integrationRepo.findConnection(scope.organisationId, 'worldpay').catch(() => null);
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY').catch(() => null);
       const transactionReference = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
       const session = await createWorldpayHostedSession(connection, scope.organisationId, {
@@ -221,7 +221,12 @@ export function createPortalPaymentRouter(): Router {
       const orderId = String(req.params.id || '');
       const input = createPaymentSchema.parse(req.body);
 
-      const worldpayOrderCode = input.route === 'WORLDPAY' ? `WP-${Date.now().toString(36).toUpperCase()}` : null;
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) {
+        throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      }
+
+      const transactionReference = input.route === 'WORLDPAY' ? `WP-${Date.now().toString(36).toUpperCase()}` : null;
       const receiptToken = input.route === 'MANUAL' ? crypto.randomUUID() : null;
       const receiptHash = receiptToken ? sha256(receiptToken) : null;
       const initialStatus = input.route === 'MANUAL' ? 'PAID' : 'PENDING';
@@ -229,18 +234,19 @@ export function createPortalPaymentRouter(): Router {
       const paymentResult = await paymentRepo.createPayment({
         organisationId: scope.organisationId,
         orderId,
+        patientId: order.patientId,
         status: initialStatus,
         amountPence: input.amountPence,
         currency: input.currency,
         route: input.route,
-        worldpayOrderCode,
+        transactionReference,
         receiptHash,
       });
 
       res.status(201).json({
         id: paymentResult.id,
         status: initialStatus,
-        worldpayOrderCode,
+        worldpayOrderCode: transactionReference,
         receiptToken,
       });
     } catch (error) {
