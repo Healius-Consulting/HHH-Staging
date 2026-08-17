@@ -107,8 +107,8 @@ export async function createWorldpayHostedSession(
           value: { currency: input.currency || 'GBP', amount: input.amountPence },
           expiry: String(expirySeconds),
           resultURLs: {
-            successURL: input.successUrl || `https://portal.holistichealthhub.co.uk/orders?paid=${encodeURIComponent(input.transactionReference)}`,
-            cancelURL: input.cancelUrl || `https://portal.holistichealthhub.co.uk/orders?cancelled=${encodeURIComponent(input.transactionReference)}`,
+            successURL: input.successUrl || `https://portal.holistichealthhub.cc/orders?paid=${encodeURIComponent(input.transactionReference)}`,
+            cancelURL: input.cancelUrl || `https://portal.holistichealthhub.cc/orders?cancelled=${encodeURIComponent(input.transactionReference)}`,
           },
         }),
       });
