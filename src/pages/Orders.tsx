@@ -1128,6 +1128,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   const receiving = ['partially_dispatched_to_pharmacy', 'dispatched_to_pharmacy', 'partially_received'].includes(selectedShipmentState ?? '') || !selectedShipmentState && (shipmentIds.length > 1 || prescription.status === 'dispatched' || prescription.status === 'partially-received');
   const readyControl = selectedShipmentState === 'received' || !selectedShipmentState && prescription.status === 'received';
   const collectionControl = selectedShipmentState === 'ready_for_collection' || !selectedShipmentState && prescription.status === 'ready';
+  const deliveryGuidance = prescription.placedAt ? curaleafDeliveryGuidance(prescription.placedAt) : null;
   return (
     <article className="order-rx-card">
       <header><span><small>Prescription {index + 1}</small><strong>{prescription.prescriber || 'Prescriber pending'}</strong></span><span className={`rx-status-chip rx-status-chip--${prescription.status}`}>{statusLabel}</span>{prescription.placed && prescription.status !== 'collected' ? <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onRecordRejection}>Record Curaleaf rejection</button> : null}</header>
@@ -1136,13 +1137,81 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
       {shipmentIds.length ? <label className="order-shipment-selector"><span>Shipment</span><select className="input select" value={selectedShipmentId} onChange={event => setSelectedShipmentId(event.target.value)}>{shipmentIds.map((id, shipmentIndex) => <option key={id} value={id}>Shipment {shipmentIndex + 1} · {prescription.shipmentStates?.[id]?.replaceAll('_', ' ') ?? 'supplier synced'}</option>)}</select></label> : null}
       <div className="order-rx-lines">{prescription.items.map(item => <div key={item.productId}><span><strong>{item.name}</strong><small>{item.qty} pack{item.qty === 1 ? '' : 's'}</small></span></div>)}</div>
       {prescription.purchaseOrderState === 'CANCELLED' ? <div className="order-cancellation-warning"><XCircle size={16} /><span><strong>Cancelled purchase order</strong><small>Curaleaf cancelled this PO. Review the pharmacy’s Curaleaf call or case reference for the reason before refunding or replacing it.</small></span></div> : null}
-      {prescription.fulfilmentLines?.length ? <div className="order-supplier-fulfilment">
-        <header><span><small>Supplier quantities</small><strong>{prescription.dispatchStatus === 'partial' ? 'Partial dispatch — remainder stays open' : prescription.purchaseOrderState === 'PROCESSING' ? 'Processing while Curaleaf picks' : 'Purchase-order response'}</strong></span></header>
-        {prescription.fulfilmentLines.map(line => {
-          const product = prescription.items.find(item => item.productId === line.productId);
-          return <div key={line.productId} className={line.quantityMismatch ? 'has-mismatch' : ''}><span><strong>{product?.name ?? line.productId}</strong><small>{line.quantityMismatch ? 'Supplier quantity differs from the pharmacy request' : line.remaining > 0 && line.shipped > 0 ? 'Remainder remains open for a later shipment' : 'Live Curaleaf quantities'}</small></span><dl><div><dt>Ordered</dt><dd>{line.requested || line.ordered}</dd></div><div><dt>Sent</dt><dd>{line.sent ?? 'Legacy'}</dd></div><div><dt>PO reports</dt><dd>{line.supplierReportedOrdered}</dd></div><div><dt>Allocated</dt><dd>{line.allocated}</dd></div><div><dt>Dispatched</dt><dd>{line.shipped}</dd></div><div><dt>Remaining</dt><dd>{line.remaining}</dd></div></dl></div>;
-        })}
-      </div> : null}
+      {prescription.fulfilmentLines?.length ? (
+        <div className="order-supplier-fulfilment">
+          <header className="order-supplier-fulfilment__header">
+            <div>
+              <small>Curaleaf Live Allocation & Progress</small>
+              <strong>
+                {prescription.dispatchStatus === 'complete'
+                  ? 'Fulfilled by Curaleaf — Checked In'
+                  : prescription.dispatchStatus === 'partial'
+                    ? 'Partial Dispatch — Remainder Awaiting Dispatch'
+                    : prescription.purchaseOrderState === 'FULLY_ALLOCATED'
+                      ? 'Fully Allocated in Curaleaf Cleanroom'
+                      : prescription.purchaseOrderState === 'PROCESSING'
+                        ? 'Picking in Curaleaf Cleanroom'
+                        : 'Curaleaf Purchase Order Active'}
+              </strong>
+            </div>
+            {deliveryGuidance ? (
+              <span className="order-delivery-estimate-badge">
+                <Truck size={12} /> {deliveryRange(deliveryGuidance)}
+              </span>
+            ) : null}
+          </header>
+          <div className="order-supplier-fulfilment__body">
+            {prescription.fulfilmentLines.map(line => {
+              const product = prescription.items.find(item => item.productId === line.productId);
+              const orderedPacks = line.requested || line.ordered;
+              const allocatedPacks = line.allocated;
+              const awaitingPacks = line.remaining;
+              const receivedPacks = line.received;
+              const percentReceived = orderedPacks > 0 ? Math.min(100, Math.round((receivedPacks / orderedPacks) * 100)) : 0;
+              const percentAllocated = orderedPacks > 0 ? Math.min(100, Math.round((allocatedPacks / orderedPacks) * 100)) : 0;
+
+              return (
+                <div key={line.productId} className={`order-fulfilment-row ${line.quantityMismatch ? 'has-mismatch' : ''}`}>
+                  <div className="order-fulfilment-row__header">
+                    <div>
+                      <strong>{product?.name ?? line.productId}</strong>
+                      {line.quantityMismatch ? (
+                        <span className="mismatch-tag">
+                          PO reports {line.supplierReportedOrdered} pack{line.supplierReportedOrdered === 1 ? '' : 's'} (Mismatch)
+                        </span>
+                      ) : (
+                        <small>Live Curaleaf Lab Allocation</small>
+                      )}
+                    </div>
+                  </div>
+                  <div className="order-fulfilment-metrics">
+                    <div className="metric-box">
+                      <span className="metric-label">Ordered</span>
+                      <span className="metric-value">{orderedPacks}</span>
+                    </div>
+                    <div className="metric-box metric-box--allocated">
+                      <span className="metric-label">Curaleaf Picked</span>
+                      <span className="metric-value">{allocatedPacks}</span>
+                    </div>
+                    <div className="metric-box metric-box--awaiting">
+                      <span className="metric-label">Awaiting Dispatch</span>
+                      <span className="metric-value">{awaitingPacks}</span>
+                    </div>
+                    <div className="metric-box metric-box--received">
+                      <span className="metric-label">Checked In</span>
+                      <span className="metric-value">{receivedPacks}</span>
+                    </div>
+                  </div>
+                  <div className="order-fulfilment-bar">
+                    <div className="order-fulfilment-bar__fill--allocated" style={{ width: `${percentAllocated}%` }} />
+                    <div className="order-fulfilment-bar__fill--received" style={{ width: `${percentReceived}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       {receiving ? (
         <div className="order-goods-in">
           <header><span><small>Pharmacy delivery check</small><strong>{prescription.status === 'partially-received' ? 'Update the partial receipt' : 'Confirm what arrived from Curaleaf'}</strong></span><PackageCheck size={15} /></header>

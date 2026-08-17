@@ -10495,22 +10495,157 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-rx-lines span strong, .order-rx-lines span small{ display: block; }
 .order-rx-lines span strong, .order-rx-lines > div > strong{ color: var(--text-primary); font-size: 11px; }
 .order-rx-lines span small{ margin-top: 2px; color: var(--text-tertiary); font-size: 9px; }
-.order-supplier-fulfilment{ margin: 0 12px 12px; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface-subtle); }
-.order-supplier-fulfilment > header{ padding: 10px 11px; border-bottom: 1px solid var(--border); }
-.order-supplier-fulfilment > header small, .order-supplier-fulfilment > header strong{ display: block; }
-.order-supplier-fulfilment > header small{ color: var(--text-tertiary); font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
-.order-supplier-fulfilment > header strong{ margin-top: 2px; color: var(--text-primary); font-size: 10px; }
-.order-supplier-fulfilment > div{ display: grid; grid-template-columns: minmax(160px, 1fr) minmax(300px, 1.5fr); gap: 12px; align-items: center; padding: 10px 11px; border-bottom: 1px solid var(--border); }
-.order-supplier-fulfilment > div:last-child{ border-bottom: 0; }
-.order-supplier-fulfilment > div.has-mismatch{ background: color-mix(in srgb, var(--color-warning) 8%, transparent); }
-.order-supplier-fulfilment > div > span strong, .order-supplier-fulfilment > div > span small{ display: block; }
-.order-supplier-fulfilment > div > span strong{ color: var(--text-primary); font-size: 10px; }
-.order-supplier-fulfilment > div > span small{ margin-top: 2px; color: var(--text-secondary); font-size: 8px; line-height: 1.4; }
-.order-supplier-fulfilment dl{ display: grid; grid-template-columns: repeat(6, minmax(44px, 1fr)); gap: 6px; margin: 0; }
-.order-supplier-fulfilment dl div{ min-width: 0; }
-.order-supplier-fulfilment dt{ color: var(--text-tertiary); font-size: 7px; text-transform: uppercase; letter-spacing: .04em; }
-.order-supplier-fulfilment dd{ margin: 2px 0 0; color: var(--text-primary); font-size: 10px; font-weight: 700; }
-@media (max-width: 760px){ .order-supplier-fulfilment > div{ grid-template-columns: 1fr; } .order-supplier-fulfilment dl{ grid-template-columns: repeat(3, 1fr); } }
+.order-supplier-fulfilment {
+  margin: 0 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-subtle);
+}
+.order-supplier-fulfilment__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.order-supplier-fulfilment__header small {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.order-supplier-fulfilment__header strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+}
+.order-delivery-estimate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--tenant-primary) 10%, transparent);
+  color: var(--tenant-primary-strong);
+  font-size: 9.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.order-supplier-fulfilment__body {
+  display: grid;
+  gap: 0;
+}
+.order-fulfilment-row {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+}
+.order-fulfilment-row:last-child {
+  border-bottom: 0;
+}
+.order-fulfilment-row.has-mismatch {
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+}
+.order-fulfilment-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.order-fulfilment-row__header strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+}
+.order-fulfilment-row__header small {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-tertiary);
+  font-size: 8.5px;
+}
+.mismatch-tag {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  color: var(--color-warning-text, #b45309);
+  font-size: 8.5px;
+  font-weight: 600;
+}
+.order-fulfilment-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.metric-box {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.metric-box .metric-label {
+  color: var(--text-tertiary);
+  font-size: 7.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.metric-box .metric-value {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.metric-box--allocated .metric-value {
+  color: var(--color-info, #2563eb);
+}
+.metric-box--awaiting .metric-value {
+  color: var(--color-warning, #d97706);
+}
+.metric-box--received .metric-value {
+  color: var(--color-success, #16a34a);
+}
+.order-fulfilment-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+  position: relative;
+}
+.order-fulfilment-bar__fill--allocated {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--color-info, #3b82f6);
+  opacity: 0.5;
+  transition: width 0.3s ease;
+}
+.order-fulfilment-bar__fill--received {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--color-success, #10b981);
+  transition: width 0.3s ease;
+}
+@media (max-width: 600px) {
+  .order-fulfilment-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 
 .order-goods-in{ display: grid; gap: 11px; padding: 13px 12px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--color-info, var(--tenant-primary)) 4%, var(--bg-surface)); }
 .order-goods-in > header{ display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--tenant-primary-strong); }
