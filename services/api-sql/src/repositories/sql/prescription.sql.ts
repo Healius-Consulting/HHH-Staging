@@ -66,6 +66,7 @@ const LIST_TENANT_PRESCRIPTIONS_GQL = `
 
 const CREATE_PRESCRIPTION_FILE_GQL = `
   mutation CreatePrescriptionFile(
+    $id: UUID
     $organisationId: UUID!
     $patientId: UUID
     $storagePath: String!
@@ -75,6 +76,7 @@ const CREATE_PRESCRIPTION_FILE_GQL = `
     $uploadedByUid: String
   ) {
     prescriptionFile_insert(data: {
+      id: $id
       organisationId: $organisationId
       patientId: $patientId
       storagePath: $storagePath
@@ -85,6 +87,24 @@ const CREATE_PRESCRIPTION_FILE_GQL = `
       status: UPLOADED
       uploadedAt_expr: "request.time"
     })
+  }
+`;
+
+const COMPLETE_PRESCRIPTION_FILE_GQL = `
+  mutation CompletePrescriptionFile($id: UUID!) {
+    prescriptionFile_update(
+      key: { id: $id }
+      data: {
+        status: UPLOADED
+        verifiedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const DELETE_PRESCRIPTION_FILE_GQL = `
+  mutation DeletePrescriptionFile($id: UUID!) {
+    prescriptionFile_delete(key: { id: $id })
   }
 `;
 
@@ -126,6 +146,7 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
       CREATE_PRESCRIPTION_FILE_GQL,
       {
         variables: {
+          id: data.id ?? null,
           organisationId: data.organisationId,
           patientId: data.patientId ?? null,
           storagePath: data.storagePath,
@@ -136,6 +157,26 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
         },
       }
     );
-    return { id: result.data.prescriptionFile_insert?.id };
+    return { id: result.data.prescriptionFile_insert?.id ?? data.id };
+  }
+
+  async completeFile(id: string, organisationId: string): Promise<boolean> {
+    const existing = await this.findFileById(id, organisationId);
+    if (!existing) return false;
+    await dataConnect.executeGraphql<any, any>(
+      COMPLETE_PRESCRIPTION_FILE_GQL,
+      { variables: { id } }
+    );
+    return true;
+  }
+
+  async deleteFile(id: string, organisationId: string): Promise<boolean> {
+    const existing = await this.findFileById(id, organisationId);
+    if (!existing) return false;
+    await dataConnect.executeGraphql<any, any>(
+      DELETE_PRESCRIPTION_FILE_GQL,
+      { variables: { id } }
+    );
+    return true;
   }
 }

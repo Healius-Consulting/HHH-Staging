@@ -1,11 +1,11 @@
 import type { NextFunction, Request, Response } from 'express';
 import { portalAppOrigins, secureSessionCookies } from '../bootstrap/config.js';
 import { HttpError } from '../domain/common/errors.js';
-import { constantTimeEqual, parseCookies, randomToken } from './session-utils.js';
+import { constantTimeEqual, parseCookies, randomToken, SESSION_ABSOLUTE_MS } from './session-utils.js';
 
 export const csrfCookieName = secureSessionCookies ? '__Host-hhh_csrf' : 'hhh_csrf';
 
-export function cookieOptions(httpOnly: boolean, maxAge = 12 * 60 * 60 * 1000) {
+export function cookieOptions(httpOnly: boolean, maxAge = SESSION_ABSOLUTE_MS) {
   return {
     httpOnly,
     secure: secureSessionCookies,

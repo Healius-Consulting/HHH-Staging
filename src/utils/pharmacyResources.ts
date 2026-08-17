@@ -16,14 +16,26 @@ export function safeEligibilityFormBase(configuredBase: string | undefined, deve
   }
 }
 
-export function eligibilityUrl(org: PharmacyTenant) {
+export function eligibilityUrl(referralToken: string) {
+  const token = referralToken.trim();
+  if (!/^[A-Za-z0-9_-]{12,160}$/.test(token)) throw new Error('A valid pharmacy eligibility token is required.');
   const url = safeEligibilityFormBase(import.meta.env.VITE_ELIGIBILITY_FORM_URL as string | undefined);
-  url.searchParams.set('token', org.referralToken);
+  url.searchParams.set('token', token);
   return url.toString();
 }
 
-export async function qrDataUrl(org: PharmacyTenant) {
-  return QRCode.toDataURL(eligibilityUrl(org), {
+export function assertEligibilityUrl(value: string) {
+  const url = new URL(value);
+  const expected = safeEligibilityFormBase(import.meta.env.VITE_ELIGIBILITY_FORM_URL as string | undefined);
+  const token = url.searchParams.get('token')?.trim() ?? '';
+  if (url.origin !== expected.origin || url.pathname !== expected.pathname || !/^[A-Za-z0-9_-]{12,160}$/.test(token)) {
+    throw new Error('The pharmacy eligibility link is invalid.');
+  }
+  return url.toString();
+}
+
+export async function qrDataUrl(formUrl: string) {
+  return QRCode.toDataURL(assertEligibilityUrl(formUrl), {
     width: 720,
     margin: 2,
     errorCorrectionLevel: 'H',
@@ -38,9 +50,9 @@ export function downloadDataUrl(dataUrl: string, filename: string) {
   anchor.click();
 }
 
-export async function downloadContentPack(org: PharmacyTenant) {
-  const url = eligibilityUrl(org);
-  const qr = await qrDataUrl(org);
+export async function downloadContentPack(org: PharmacyTenant, formUrl: string) {
+  const url = assertEligibilityUrl(formUrl);
+  const qr = await qrDataUrl(url);
   const theme = deriveTenantTheme(org.brand.primary);
   const zip = new JSZip();
   const folder = zip.folder(`${org.slug}-hhh-content-pack`)!;

@@ -46,6 +46,52 @@ const CREATE_ORDER_DRAFT_GQL = `
   }
 `;
 
+const UPDATE_ORDER_DRAFT_GQL = `
+  mutation UpdateOrderDraft(
+    $id: UUID!
+    $patientId: UUID
+    $payload: Any!
+  ) {
+    orderDraft_update(
+      key: { id: $id }
+      data: {
+        patientId: $patientId
+        payload: $payload
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const DELETE_ORDER_DRAFT_GQL = `
+  mutation DeleteOrderDraft($id: UUID!) {
+    orderDraft_delete(key: { id: $id })
+  }
+`;
+
+const LIST_TENANT_ORDER_DRAFTS_GQL = `
+  query ListTenantOrderDrafts($organisationId: UUID!, $limit: Int!) {
+    orderDrafts(
+      where: {
+        organisationId: { eq: $organisationId }
+        status: { eq: DRAFT }
+      }
+      orderBy: { updatedAt: DESC }
+      limit: $limit
+    ) {
+      id
+      organisationId
+      patientId
+      status
+      paymentStatus
+      payload
+      version
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
 const GET_ORDER_BY_ID_GQL = `
   query GetOrderById($id: UUID!, $organisationId: UUID!) {
     orders(
@@ -130,15 +176,26 @@ const LIST_TENANT_ORDERS_GQL = `
       limit: $limit
     ) {
       id
+      organisationId
       patientId
+      draftId
       orderNumber
       status
       paymentStatus
       fulfilmentStatus
       paymentRoute
+      currency
+      medicineTotalPence
+      dispensingFeePence
+      deliveryPence
+      taxPence
       totalPence
+      quoteSnapshot
       version
       submittedAt
+      paidAt
+      collectedAt
+      cancelledAt
       createdAt
       updatedAt
     }
@@ -196,6 +253,45 @@ export class SqlOrderRepository implements OrderRepositoryPort {
       }
     );
     return { id: result.data.orderDraft_insert?.id };
+  }
+
+  async updateDraft(data: {
+    id: string;
+    organisationId: string;
+    patientId?: string | null;
+    payload: unknown;
+  }): Promise<{ id: string } | null> {
+    const existing = await this.findDraftById(data.id, data.organisationId);
+    if (!existing) return null;
+    const result = await dataConnect.executeGraphql<{ orderDraft_update: { id: string } | null }, any>(
+      UPDATE_ORDER_DRAFT_GQL,
+      {
+        variables: {
+          id: data.id,
+          patientId: data.patientId || null,
+          payload: data.payload ?? {},
+        },
+      }
+    );
+    return result.data.orderDraft_update ? { id: result.data.orderDraft_update.id } : { id: data.id };
+  }
+
+  async deleteDraft(id: string, organisationId: string): Promise<boolean> {
+    const existing = await this.findDraftById(id, organisationId);
+    if (!existing) return false;
+    await dataConnect.executeGraphql<any, any>(
+      DELETE_ORDER_DRAFT_GQL,
+      { variables: { id } }
+    );
+    return true;
+  }
+
+  async listTenantDrafts(organisationId: string, limit = 200): Promise<OrderDraftRecord[]> {
+    const result = await dataConnect.executeGraphql<{ orderDrafts: OrderDraftRecord[] }, any>(
+      LIST_TENANT_ORDER_DRAFTS_GQL,
+      { variables: { organisationId, limit } },
+    );
+    return result.data.orderDrafts ?? [];
   }
 
   async findOrderById(id: string, organisationId: string): Promise<OrderRecord | null> {

@@ -42,8 +42,8 @@ import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboa
 import { useAuth } from '../auth/useAuth';
 import { requireFirebaseAuth } from '../auth/firebase';
 import { passwordResetActionSettings } from '../auth/passwordReset';
-import { activateCuraleafPharmacy, approveCuraleafPharmacy, completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminReferralFinance, getCuraleafConnectionStatus, getGoLiveReadiness, getPharmacySetupStatus, getPharmacyStaff, goLiveOrganisation, queueReferralPatientEmail, recordCompanyGdprEvidenceReceived, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
-import type { AdminReferralFinanceReport, CuraleafConnectionStatus, CuraleafValidationReport, GoLiveReadiness, PatientRegisterExportResult, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
+import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacyStaff, getReferralLink, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import type { AdminReferralFinanceReport, CuraleafConnectionStatus, PatientRegisterExportResult, PatientRegisterExportRow, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -61,7 +61,6 @@ import { appPathPrefix } from '../auth/surface-path';
 import { surfaceRelativePath, surfaceRoutePath } from '../routing/surfaceRoute';
 import { ADMIN_VIEW_PATHS, parseAdminRelativePath, type AdminView } from '@hhh/domain/portal-route';
 import AdminIntakeV2 from '../components/AdminIntakeV2';
-import DirectoryAdminV2 from '../components/DirectoryAdminV2';
 
 type PlatformTab = 'setup' | 'curaleaf' | 'directory';
 type PharmacyDetailTab = 'access' | 'config' | 'patients';
@@ -202,7 +201,10 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
   const [mainContactName, setMainContactName] = useState('');
   const [mainContactPhone, setMainContactPhone] = useState('');
   const [mainContactEmail, setMainContactEmail] = useState('');
-  const [address, setAddress] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+  const [addressLine2, setAddressLine2] = useState('');
+  const [addressLocality, setAddressLocality] = useState('');
+  const [addressPostcode, setAddressPostcode] = useState('');
   const [domain, setDomain] = useState('');
   const [primary, setPrimary] = useState('#0f766e');
   const [busy, setBusy] = useState(false);
@@ -217,11 +219,12 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
     const slug = slugify(tradingName || name);
     const logoText = (tradingName || name).split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
     const websiteDomains = domain ? [domain.replace(/^https?:\/\//, '').replace(/\/$/, '')] : [];
+    const address = [addressLine1, addressLine2, addressLocality, addressPostcode.toUpperCase()].map(value => value.trim()).filter(Boolean).join(', ');
     try {
       const created = await createOrganisation({ name, tradingName, gphcNumber, superintendent, companyNumber, mainContactName, mainContactPhone, mainContactEmail, address, websiteDomains, primaryColour: primary, logoText, status: 'onboarding' });
       const organisation: PharmacyTenant = {
         id: created.id, slug, referralToken: created.referralToken, name, tradingName, logoText, gphcNumber, superintendent, companyNumber, mainContactName, mainContactPhone, mainContactEmail, address, websiteDomains,
-        status: 'onboarding', staffCount: 0, platformFeeMonthly: null, defaultPaymentRoute: 'manual',
+        status: 'onboarding', staffCount: 0, defaultPaymentRoute: 'manual',
         brand: { primary, portalName: name }, modules: defaultModules,
         worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
       };
@@ -245,12 +248,18 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
           <label>Company name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
           <div className="form-grid-two"><label>GPhC number<input className="input" value={gphcNumber} onChange={event => setGphcNumber(event.target.value)} required /></label><label>Superintendent pharmacist<input className="input" value={superintendent} onChange={event => setSuperintendent(event.target.value)} required /></label></div>
           <label>Company registration number<input className="input" value={companyNumber} onChange={event => setCompanyNumber(event.target.value)} required /></label>
-          <label>Registered office address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
+          <div className="form-section-heading onboarding-address-heading"><span>02</span><div><strong>Registered address</strong><small>Stored in a consistent, matchable format for the public eligibility journey.</small></div></div>
+          <div className="onboarding-address-grid">
+            <label>Address line 1<input className="input" value={addressLine1} onChange={event => setAddressLine1(event.target.value)} autoComplete="address-line1" required /></label>
+            <label>Address line 2<input className="input" value={addressLine2} onChange={event => setAddressLine2(event.target.value)} autoComplete="address-line2" /></label>
+            <label>Town or city<input className="input" value={addressLocality} onChange={event => setAddressLocality(event.target.value)} autoComplete="address-level2" required /></label>
+            <label>Postcode<input className="input" value={addressPostcode} onChange={event => setAddressPostcode(event.target.value.toUpperCase())} autoComplete="postal-code" required /></label>
+          </div>
           <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
           <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
           <label>Approved website domain<input className="input" type="text" value={domain} onChange={event => setDomain(event.target.value)} placeholder="pharmacy.co.uk" /></label>
 
-          <div className="form-section-heading"><span>02</span><div><strong>Workspace identity</strong><small>The colour is applied consistently across that pharmacy’s workspace.</small></div></div>
+          <div className="form-section-heading"><span>03</span><div><strong>Workspace identity</strong><small>The colour is applied consistently across that pharmacy’s workspace.</small></div></div>
           <div className="brand-colour-field"><input type="color" value={primary} onChange={event => setPrimary(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primary.toUpperCase()} · secondary generated automatically</small></div><div className="onboarding-palette"><i style={{ background: onboardingTheme.primary }} /><i style={{ background: onboardingTheme.secondary }} /><i style={{ background: onboardingTheme.primarySoft }} /></div><div className="brand-preview-button" style={{ background: onboardingTheme.primary, color: onboardingTheme.onPrimary }}>Action</div></div>
 
           <div className="onboarding-callout"><ShieldCheck size={17} /><span>The pharmacy starts in onboarding status. Its six setup steps must be completed before live processing begins.</span></div>
@@ -279,7 +288,6 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
   const [pendingLogo, setPendingLogo] = useState<File | null>(null);
   const [removeLogo, setRemoveLogo] = useState(false);
   const [primaryColour, setPrimaryColour] = useState(organisation.brand.primary);
-  const [platformFee, setPlatformFee] = useState(organisation.platformFeeMonthly?.toString() ?? '');
   const [modules, setModules] = useState({ ...organisation.modules });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -319,7 +327,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
     const websiteDomains = [...new Set(domains.split(/[\n,]+/).map(value => value.trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase()).filter(Boolean))];
     const input: UpdateOrganisationInput = {
       name, tradingName, gphcNumber, superintendent, companyNumber, mainContactName, mainContactPhone, mainContactEmail, address, websiteDomains, status, logoText: logoText.toUpperCase(),
-      primaryColour, portalName: name.trim(), platformFeeMonthly: platformFee === '' ? null : Number(platformFee), modules,
+      primaryColour, portalName: name.trim(), modules,
     };
     try {
       if (!isLocalPortalPreview) await updateOrganisation(organisation.id, input);
@@ -345,7 +353,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
       }
       onSaved({
         name: name.trim(), tradingName: tradingName.trim(), gphcNumber: gphcNumber.trim(), superintendent: superintendent.trim(), companyNumber: companyNumber.trim(), mainContactName: mainContactName.trim(), mainContactPhone: mainContactPhone.trim(), mainContactEmail: mainContactEmail.trim(), address: address.trim(),
-        websiteDomains, status, logoText: logoText.trim().toUpperCase(), platformFeeMonthly: input.platformFeeMonthly,
+        websiteDomains, status, logoText: logoText.trim().toUpperCase(),
         brand: { primary: primaryColour, portalName: name.trim() }, modules,
         slug: slugify(tradingName || name),
         ...logoUpdates,
@@ -372,7 +380,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
           <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
           <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
           <label>Approved website domains<textarea className="input" value={domains} onChange={event => setDomains(event.target.value)} placeholder={'pharmacy.co.uk\nanother-domain.co.uk'} /><small>Enter one domain per line. Protocols and page paths are removed automatically.</small></label>
-          <div className="form-grid-two"><label>Account status<select className="input" value={status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option>{status === 'intake_live' && <option value="intake_live">Intake live</option>}{status === 'live' && <option value="live">Live</option>}<option value="paused">Paused</option></select><small>Use the audited readiness controls to enable intake or full live access.</small></label><label>Monthly HHH platform fee (£)<input className="input" type="number" min="0" max="100000" step="0.01" value={platformFee} onChange={event => setPlatformFee(event.target.value)} placeholder="Not set" /></label></div>
+          <div className="form-grid-two"><label>Account status<select className="input" value={status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option>{status === 'intake_live' && <option value="intake_live">Intake live</option>}{status === 'live' && <option value="live">Live</option>}<option value="paused">Paused</option></select><small>Use the audited readiness controls to enable intake or full live access.</small></label></div>
 
           <div className="form-section-heading"><span>02</span><div><strong>Brand Customisation</strong><small>The portal name follows the pharmacy name automatically.</small></div></div>
           <label>Pharmacy name<input className="input" value={name} readOnly /><small>Also used as the portal name.</small></label>
@@ -543,22 +551,19 @@ export default function AdminPortal() {
   const [patientExportError, setPatientExportError] = useState<string | null>(null);
   const [serverPatientRegister, setServerPatientRegister] = useState<PatientRegisterExportResult | null>(null);
   const [patientRegisterLoading, setPatientRegisterLoading] = useState(false);
+  const [selectedRegisterPatient, setSelectedRegisterPatient] = useState<PatientRegisterExportRow | null>(null);
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(organisationIdFromPath);
+  const [referralLink, setReferralLink] = useState('');
+  const [referralLinkLoading, setReferralLinkLoading] = useState(false);
+  const [referralLinkError, setReferralLinkError] = useState<string | null>(null);
+  const [referralLinkRefresh, setReferralLinkRefresh] = useState(0);
   const [directoryMode, setDirectoryMode] = useState<'flat' | 'by-company'>('flat');
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
   const [setupByOrganisation, setSetupByOrganisation] = useState<Record<string, PharmacySetupStatus>>({});
-  const [goLiveByOrganisation, setGoLiveByOrganisation] = useState<Record<string, GoLiveReadiness>>({});
-  const [goLiveBusy, setGoLiveBusy] = useState<string | null>(null);
-  const [gdprReceiptBusy, setGdprReceiptBusy] = useState<string | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [curaleafOrganisationId, setCuraleafOrganisationId] = useState(state.organisations[0]?.id ?? '');
-  const [curaleafCustomerId, setCuraleafCustomerId] = useState('');
-  const [curaleafWriteApiKey, setCuraleafWriteApiKey] = useState('');
-  const [curaleafReadApiKey, setCuraleafReadApiKey] = useState('');
-  const [curaleafBusy, setCuraleafBusy] = useState(false);
-  const [curaleafApproveBusy, setCuraleafApproveBusy] = useState(false);
   const [curaleafError, setCuraleafError] = useState<string | null>(null);
   const [curaleafResult, setCuraleafResult] = useState<CuraleafConnectionStatus | null>(null);
   const [showCuraleafDrawer, setShowCuraleafDrawer] = useState(false);
@@ -580,7 +585,36 @@ export default function AdminPortal() {
   const [referralBusy, setReferralBusy] = useState(false);
   const [referralError, setReferralError] = useState<string | null>(null);
 
+  // Operational state is read from the SQL-backed setup and integration APIs.
+  // GDPR evidence is intentionally not represented as a platform gate.
+  const goLiveByOrganisation = useMemo(() => Object.fromEntries(state.organisations.map(organisation => [organisation.id, {
+    allocationHolding: organisation.workspaceClassification === 'allocation_holding',
+    testAccount: organisation.testAccount === true,
+    gates: { curaleafLive: { passed: false, environment: 'production' as const, validatedAt: null, secretStored: false } },
+  }])), [state.organisations]);
+
   const selectedOrganisation = state.organisations.find(org => org.id === selectedOrganisationId);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedOrganisation || pharmacyDetailTab !== 'config') {
+      setReferralLink('');
+      setReferralLinkError(null);
+      setReferralLinkLoading(false);
+      return;
+    }
+    setReferralLink('');
+    setReferralLinkError(null);
+    setReferralLinkLoading(true);
+    const request = isLocalPortalPreview
+      ? Promise.resolve({ url: eligibilityUrl(selectedOrganisation.referralToken) })
+      : getReferralLink(selectedOrganisation.id);
+    void request
+      .then(result => { if (!cancelled) setReferralLink(result.url); })
+      .catch(error => { if (!cancelled) setReferralLinkError(error instanceof Error ? error.message : 'The eligibility link could not be loaded.'); })
+      .finally(() => { if (!cancelled) setReferralLinkLoading(false); });
+    return () => { cancelled = true; };
+  }, [pharmacyDetailTab, selectedOrganisation?.id, selectedOrganisation?.referralToken, referralLinkRefresh]);
 
   const runReferralAction = async (redactPharmacyReason = false) => {
     if (!referralDialog) return;
@@ -707,14 +741,12 @@ export default function AdminPortal() {
         };
       });
       setSetupByOrganisation(Object.fromEntries(statuses.map(status => [status.organisationId, status])));
-      setGoLiveByOrganisation(Object.fromEntries(state.organisations.map((organisation, index) => [organisation.id, { organisationId: organisation.id, companyId: null, testAccount: organisation.testAccount, allocationHolding: organisation.workspaceClassification === 'allocation_holding', intakeReady: organisation.testAccount === true || index === 0, ready: index === 0, status: organisation.status, gates: { gdprEvidence: { passed: index === 0, evidenceUrl: index === 0 ? 'https://drive.google.com/preview' : null }, curaleafLive: { passed: index === 0, validatedAt: index === 0 ? new Date().toISOString() : null, secretStored: index === 0 } } }])));
       return;
     }
-    void Promise.all(state.organisations.map(async organisation => ({ setup: await getPharmacySetupStatus(organisation.id), goLive: await getGoLiveReadiness(organisation.id) })))
-      .then(results => {
+    void getAdminPharmacySetupStatuses()
+      .then(result => {
         if (!cancelled) {
-          setSetupByOrganisation(Object.fromEntries(results.map(result => [result.setup.organisationId, result.setup])));
-          setGoLiveByOrganisation(Object.fromEntries(results.map(result => [result.goLive.organisationId, result.goLive])));
+          setSetupByOrganisation(Object.fromEntries(result.records.map(status => [status.organisationId, status])));
         }
       })
       .catch(error => {
@@ -723,44 +755,6 @@ export default function AdminPortal() {
     return () => { cancelled = true; };
   }, [state.organisations]);
 
-  const activateGoLive = async (organisationId: string) => {
-    setGoLiveBusy(organisationId);
-    setSetupError(null);
-    try {
-      const readiness = await goLiveOrganisation(organisationId);
-      setGoLiveByOrganisation(current => ({ ...current, [organisationId]: readiness }));
-      dispatch({ type: 'UPDATE_ORGANISATION', organisationId, updates: { status: 'live' } });
-      dispatch({ type: 'ADD_TOAST', message: readiness.allocationHolding ? 'Primary allocation holding is active with its approved Curaleaf TEST connection.' : readiness.testAccount ? 'TEST-key gate passed. The test pharmacy and its test intake form are active.' : 'Both hard gates passed. The pharmacy is now live.', toastType: 'success' });
-    } catch (error) {
-      setSetupError(error instanceof Error ? error.message : 'The pharmacy could not go live.');
-    } finally {
-      setGoLiveBusy(null);
-    }
-  };
-
-  const recordGdprEvidenceReceived = async (organisationId: string) => {
-    const companyId = goLiveByOrganisation[organisationId]?.companyId;
-    if (!companyId) return;
-    setGdprReceiptBusy(companyId);
-    setSetupError(null);
-    try {
-      if (isLocalPortalPreview) {
-        setGoLiveByOrganisation(current => Object.fromEntries(Object.entries(current).map(([id, readiness]) => [id, readiness.companyId === companyId
-          ? { ...readiness, intakeReady: true, ready: readiness.gates.curaleafLive.passed, gates: { ...readiness.gates, gdprEvidence: { ...readiness.gates.gdprEvidence, passed: true, method: 'manual_receipt', receivedAt: new Date().toISOString(), evidenceUrl: null } } }
-          : readiness])));
-      } else {
-        const result = await recordCompanyGdprEvidenceReceived(companyId);
-        result.activatedOrganisationIds.forEach(organisationId => dispatch({ type: 'UPDATE_ORGANISATION', organisationId, updates: { status: 'intake_live' } }));
-        const results = await Promise.all(state.organisations.map(async organisation => getGoLiveReadiness(organisation.id)));
-        setGoLiveByOrganisation(current => ({ ...current, ...Object.fromEntries(results.map(result => [result.organisationId, result])) }));
-      }
-      dispatch({ type: 'ADD_TOAST', message: 'GDPR evidence recorded. Linked real pharmacies now accept eligibility intake automatically.', toastType: 'success' });
-    } catch (error) {
-      setSetupError(error instanceof Error ? error.message : 'GDPR evidence receipt could not be recorded.');
-    } finally {
-      setGdprReceiptBusy(null);
-    }
-  };
 
   useEffect(() => {
     if (!curaleafOrganisationId || !state.organisations.some(org => org.id === curaleafOrganisationId)) {
@@ -1044,25 +1038,8 @@ export default function AdminPortal() {
     return { ready, total, percent: total ? Math.round(ready / total * 100) : 0 };
   };
 
-  const gdprEvidenceLabel = (goLive: GoLiveReadiness | undefined) => {
-    if (goLive?.allocationHolding) return 'Allocation holding policy active';
-    if (goLive?.testAccount) return 'GDPR test exemption';
-    if (!goLive?.gates.gdprEvidence.passed) return 'GDPR evidence required';
-    return goLive.gates.gdprEvidence.method === 'manual_receipt' ? 'GDPR evidence received' : 'GDPR evidence confirmed';
-  };
-
   const statusLabel = (status: PharmacyTenant['status']) => status.replace('_', ' ');
   const statusPill = (status: PharmacyTenant['status']) => status === 'live' ? 'pill-green' : status === 'intake_live' ? 'pill-info' : status === 'paused' ? 'pill-red' : 'pill-amber';
-  const activationButtons = (organisation: PharmacyTenant, readiness: GoLiveReadiness | undefined) => (
-    <>
-      {organisation.status !== 'live' ? (
-        <button className="btn btn-primary btn-sm" disabled={!readiness?.ready || goLiveBusy === organisation.id} onClick={() => void activateGoLive(organisation.id)}>
-          {goLiveBusy === organisation.id ? 'Going live…' : 'Go live'}
-        </button>
-      ) : null}
-    </>
-  );
-
   useEffect(() => {
     if (!showCuraleafDrawer || !curaleafOrganisationId) return;
     let cancelled = false;
@@ -1081,7 +1058,7 @@ export default function AdminPortal() {
     const patients = crmByOrganisation.get(selectedOrganisation.id) ?? [];
     const setupStatus = setupByOrganisation[selectedOrganisation.id];
     const readiness = tenantReadiness(selectedOrganisation.id);
-    const formUrl = eligibilityUrl(selectedOrganisation);
+    const formUrl = referralLink;
     const tenantTheme = deriveTenantTheme(selectedOrganisation.brand.primary);
 
     return (
@@ -1099,7 +1076,7 @@ export default function AdminPortal() {
           <SummaryTiles className="summary-tiles--compact admin-detail-summary" label="Pharmacy account summary" items={[
             { label: 'Patients', value: new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size, detail: 'attributed records' },
             { label: 'Access', value: selectedOrganisation.staffCount, detail: 'staff accounts' },
-            { label: 'Platform fee', value: selectedOrganisation.platformFeeMonthly == null ? '—' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`, detail: 'per month' },
+            { label: 'Intake route', value: selectedOrganisation.modules.intake ? 'Active' : 'Off', detail: 'HHH-managed enquiries' },
           ]} />
 
           <div className="filter-grid admin-detail-tabs admin-segment-tabs" role="tablist" aria-label="Pharmacy detail sections">
@@ -1137,7 +1114,7 @@ export default function AdminPortal() {
                     <div><span>Main contact email</span><strong>{selectedOrganisation.mainContactEmail || 'Not supplied'}</strong></div>
                     <div><span>Registered office address</span><strong><MapPin size={13} /> {selectedOrganisation.address}</strong></div>
                     <div><span>Approved domains</span><strong><Globe2 size={13} /> {selectedOrganisation.websiteDomains.join(', ') || 'Not supplied'}</strong></div>
-                    <div><span>Monthly HHH platform fee</span><strong>{selectedOrganisation.platformFeeMonthly == null ? 'Not set' : `£${selectedOrganisation.platformFeeMonthly.toFixed(2)}`}</strong></div>
+                    <div><span>Eligibility handling</span><strong>Managed by HHH admin</strong></div>
                   </div>
                 </section>
 
@@ -1166,8 +1143,9 @@ export default function AdminPortal() {
                 <section className="card admin-detail-card admin-detail-assets">
                   <div className="admin-detail-card-title"><Link2 size={18} /><h2>Eligibility form and content assets</h2></div>
                   <p>Every submission through this hosted URL is permanently attributed to this pharmacy token.</p>
-                  <div className="resource-url">{formUrl}</div>
-                  <div className="flex gap-sm flex-wrap"><button className="btn btn-primary btn-sm" onClick={async () => { await navigator.clipboard.writeText(formUrl); dispatch({ type: 'ADD_TOAST', message: 'Eligibility link copied.', toastType: 'success' }); }}><Copy size={13} /> Copy link</button><a className="btn btn-sm" href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Preview form</a><button className="btn btn-sm" onClick={() => void downloadContentPack(selectedOrganisation)}><FileArchive size={13} /> Content pack</button></div>
+                  {referralLinkError ? <div className="banner banner-red" role="alert"><AlertCircle size={15} /><span>{referralLinkError}</span><button className="btn btn-sm" type="button" onClick={() => setReferralLinkRefresh(value => value + 1)}><RefreshCw size={13} /> Retry</button></div> : null}
+                  <div className="resource-url" aria-live="polite">{referralLinkLoading ? 'Loading the protected pharmacy link…' : formUrl || 'Link unavailable'}</div>
+                  <div className="flex gap-sm flex-wrap"><button className="btn btn-primary btn-sm" disabled={!formUrl} onClick={async () => { if (!formUrl) return; await navigator.clipboard.writeText(formUrl); dispatch({ type: 'ADD_TOAST', message: 'Eligibility link copied.', toastType: 'success' }); }}><Copy size={13} /> Copy link</button>{formUrl ? <a className="btn btn-sm" href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Preview form</a> : <button className="btn btn-sm" type="button" disabled><ExternalLink size={13} /> Preview form</button>}<button className="btn btn-sm" disabled={!formUrl} onClick={() => void downloadContentPack(selectedOrganisation, formUrl)}><FileArchive size={13} /> Content pack</button></div>
                 </section>
               </div>
             </>
@@ -1268,13 +1246,11 @@ export default function AdminPortal() {
                   <div className="readiness-cell">
                     <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
                     <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
-                    <div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.allocationHolding ? 'Allocation policy active' : goLive?.testAccount ? 'GDPR test exemption' : 'GDPR evidence'}</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.gates.curaleafLive.environment === 'test' ? 'TEST key' : 'LIVE key'}</span></div>
+                    <div className="go-live-gate-pills"><span className="pill pill-info">{goLive?.allocationHolding ? 'Allocation holding' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span></div>
                   </div>
                   <div className="admin-org-actions">
                     <span className={`pill ${statusPill(org.status)}`}>{statusLabel(org.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Allocation holding</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
-                    {!goLive?.testAccount && !goLive?.gates.gdprEvidence.passed && goLive?.companyId ? <button className="btn btn-sm" disabled={gdprReceiptBusy === goLive.companyId} onClick={() => void recordGdprEvidenceReceived(org.id)} title="Records that HHH received the pharmacy's GDPR evidence, which remains stored outside this platform.">{gdprReceiptBusy === goLive.companyId ? 'Recording receipt…' : 'Record GDPR receipt'}</button> : null}
                     <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button>
-                    {activationButtons(org, goLive)}
                   </div>
                 </article>
               );
@@ -1300,7 +1276,7 @@ export default function AdminPortal() {
                         <small>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
                       </div>
                       <div className="company-group-card__meta">
-                        <span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.allocationHolding ? 'Allocation intake policy' : goLive?.testAccount ? 'Test intake only' : gdprEvidenceLabel(goLive)}</span>
+                        <span className="pill pill-info">{goLive?.allocationHolding ? 'Allocation holding' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span>
                         <div>
                           <strong>{earningPatientsCount}</strong> earning patients · <strong>£{accruedCommission}</strong> accrued
                         </div>
@@ -1321,13 +1297,11 @@ export default function AdminPortal() {
                       <div className="readiness-cell">
                         <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
                         <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
-                        <div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.allocationHolding ? 'Allocation policy active' : goLive?.testAccount ? 'GDPR test exemption' : 'GDPR evidence'}</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.gates.curaleafLive.environment === 'test' ? 'TEST key' : 'LIVE key'}</span></div>
+                        <div className="go-live-gate-pills"><span className="pill pill-info">{goLive?.allocationHolding ? 'Allocation holding' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span></div>
                       </div>
                       <div className="admin-org-actions">
                         <span className={`pill ${statusPill(org.status)}`}>{statusLabel(org.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Allocation holding</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
-                        {!goLive?.testAccount && !goLive?.gates.gdprEvidence.passed && goLive?.companyId ? <button className="btn btn-sm" disabled={gdprReceiptBusy === goLive.companyId} onClick={() => void recordGdprEvidenceReceived(org.id)} title="Records that HHH received the pharmacy's GDPR evidence, which remains stored outside this platform.">{gdprReceiptBusy === goLive.companyId ? 'Recording receipt…' : 'Record GDPR receipt'}</button> : null}
                         <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage branch</button>
-                        {activationButtons(org, goLive)}
                       </div>
                     </article>
                   </div>
@@ -1341,7 +1315,7 @@ export default function AdminPortal() {
   );
 
 
-  const renderReferrals = () => {
+  const renderLegacyReferrals = () => {
     const pending = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review');
     const reviewed = state.submissions.filter(submission => submission.status === 'Approved' || isNegativeEligibilityStatus(submission.status));
     const referralCard = (submission: typeof state.submissions[number], section: 'queue' | 'history') => {
@@ -1412,6 +1386,17 @@ export default function AdminPortal() {
     );
   };
 
+  // Kept out of the rendered production surface while historic v1 rows remain
+  // readable through the SQL admin intake projection.
+  void renderLegacyReferrals;
+
+  const renderReferrals = () => (
+    <>
+      <AdminIntakeV2 />
+      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>HHH-only intake boundary</strong><p>Admin staff receive and manage every eligibility enquiry. A pharmacy receives only an aggregate “with HHH admin” notice until HHH completes the referral and activates a patient record.</p></div></section>
+    </>
+  );
+
   const renderPatients = () => (
     <>
       <div className="admin-page-actions">
@@ -1428,8 +1413,12 @@ export default function AdminPortal() {
           <button className="btn btn-sm" type="button" onClick={() => { setQuery(''); setPatientOrganisationId('all'); setPatientStatus('all'); setPatientFrom(''); setPatientTo(''); }}>Clear filters</button>
         </div>
         {patientExportError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {patientExportError}</div>}
-        {patientRegisterLoading && !isLocalPortalPreview ? <div className="empty-state">Loading the protected patient register…</div> : displayedPatients.length === 0 ? <div className="empty-state">No patient records match the current search and filters.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Last recorded</th></tr></thead><tbody>{displayedPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); const pharmacyName = 'pharmacyName' in patient ? patient.pharmacyName : org?.tradingName; const gphcNumber = 'gphcNumber' in patient ? patient.gphcNumber : org?.gphcNumber; return <tr key={`${patient.organisationId}-${patient.email}`}><td><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{pharmacyName ?? 'Unknown pharmacy'}</button><small>{gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—'}</td></tr>; })}</tbody></table></div>}
+        {patientRegisterLoading && !isLocalPortalPreview ? <div className="empty-state">Loading the protected patient register…</div> : displayedPatients.length === 0 ? <div className="empty-state">No patient records match the current search and filters.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Last recorded</th></tr></thead><tbody>{displayedPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); const pharmacyName = 'pharmacyName' in patient ? patient.pharmacyName : org?.tradingName; const gphcNumber = 'gphcNumber' in patient ? patient.gphcNumber : org?.gphcNumber; const patientDetail: PatientRegisterExportRow = { id: patient.id, name: patient.name, email: patient.email, mobile: patient.mobile, dob: patient.dob, organisationId: patient.organisationId, pharmacyName: pharmacyName ?? 'Unknown pharmacy', gphcNumber: gphcNumber ?? '', stage: patient.stage, date: patient.date ? new Date(patient.date).toISOString() : null }; return <tr key={`${patient.organisationId}-${patient.email}`}><td><button type="button" className="patient-register-open" onClick={() => setSelectedRegisterPatient(patientDetail)} aria-label={`Open details for ${patient.name}`}><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></button></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{pharmacyName ?? 'Unknown pharmacy'}</button><small>{gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—'}</td></tr>; })}</tbody></table></div>}
       </section>
+      {selectedRegisterPatient && <section className="card admin-patient-detail" aria-label="Patient and intake audit detail">
+        <div className="admin-directory-head"><div><p className="section-label">Patient profile</p><h2>{selectedRegisterPatient.name}</h2><p>The same core patient fields available to the attributed pharmacy, plus the protected HHH intake audit.</p></div><button className="icon-btn" type="button" onClick={() => setSelectedRegisterPatient(null)} aria-label="Close patient detail"><X size={18} /></button></div>
+        <div className="admin-patient-detail__grid"><section><h3>Patient details</h3><dl><div><dt>Date of birth</dt><dd>{formatPatientDob(selectedRegisterPatient.dob)}</dd></div><div><dt>Email</dt><dd>{selectedRegisterPatient.email}</dd></div><div><dt>Mobile</dt><dd>{selectedRegisterPatient.mobile || 'Not recorded'}</dd></div><div><dt>Current pharmacy</dt><dd>{selectedRegisterPatient.pharmacyName}</dd></div></dl></section><section><h3>HHH intake audit</h3><ol><li><strong>Attribution confirmed</strong><span>{selectedRegisterPatient.pharmacyName} · GPhC {selectedRegisterPatient.gphcNumber || 'not recorded'}</span></li><li><strong>Current outcome</strong><span>{onboardingStatusLabel(selectedRegisterPatient.stage)}</span></li><li><strong>Last recorded</strong><span>{selectedRegisterPatient.date ? new Date(selectedRegisterPatient.date).toLocaleString('en-GB') : 'Not recorded'}</span></li></ol></section></div>
+      </section>}
     </>
   );
 
@@ -1529,98 +1518,17 @@ export default function AdminPortal() {
 
   const openCuraleafDrawer = (organisationId: string) => {
     setCuraleafOrganisationId(organisationId);
-    setCuraleafCustomerId('');
-    setCuraleafWriteApiKey('');
-    setCuraleafReadApiKey('');
     setCuraleafResult(null);
     setCuraleafError(null);
     setShowCuraleafDrawer(true);
   };
 
   const closeCuraleafDrawer = () => {
-    if (curaleafBusy || curaleafApproveBusy) return;
     setShowCuraleafDrawer(false);
     setCuraleafError(null);
   };
 
-  const curaleafValidation: CuraleafValidationReport | undefined = curaleafResult?.validation;
-  const curaleafApproved = Boolean(curaleafResult?.approved || goLiveByOrganisation[curaleafOrganisationId]?.gates.curaleafLive.passed);
-
-  const submitCuraleafTestAndSave = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setCuraleafBusy(true);
-    setCuraleafError(null);
-    try {
-      const status = await activateCuraleafPharmacy({
-        organisationId: curaleafOrganisationId,
-        customerId: curaleafCustomerId.trim(),
-        writeApiKey: curaleafWriteApiKey.trim(),
-        ...(curaleafReadApiKey.trim() ? { readApiKey: curaleafReadApiKey.trim() } : {}),
-      });
-      setCuraleafResult(status);
-      const pharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
-      const updatedSetup = await getPharmacySetupStatus(curaleafOrganisationId);
-      setSetupByOrganisation(current => ({ ...current, [curaleafOrganisationId]: updatedSetup }));
-      dispatch({
-        type: 'ADD_TOAST',
-        message: status.validation?.passed
-          ? `${pharmacy?.tradingName ?? 'Pharmacy'} credentials validated. Approve Curaleaf to complete this setup step.`
-          : `${pharmacy?.tradingName ?? 'Pharmacy'} credentials saved, but validation did not pass.`,
-        toastType: status.validation?.passed ? 'success' : 'error',
-      });
-      setCuraleafWriteApiKey('');
-      setCuraleafReadApiKey('');
-    } catch (error) {
-      setCuraleafError(error instanceof Error ? error.message : 'Curaleaf test & save failed.');
-    } finally {
-      setCuraleafBusy(false);
-    }
-  };
-
   const curaleafPharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
-
-  const submitCuraleafApproval = async () => {
-    if (!curaleafOrganisationId) return;
-    setCuraleafApproveBusy(true);
-    setCuraleafError(null);
-    try {
-      const status = await approveCuraleafPharmacy(curaleafOrganisationId);
-      setCuraleafResult(status);
-      const pharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
-      const updatedSetup = status.setup ?? await getPharmacySetupStatus(curaleafOrganisationId);
-      setSetupByOrganisation(current => ({ ...current, [curaleafOrganisationId]: updatedSetup }));
-      const readiness = isLocalPortalPreview ? goLiveByOrganisation[curaleafOrganisationId] : await getGoLiveReadiness(curaleafOrganisationId);
-      if (readiness) setGoLiveByOrganisation(current => ({ ...current, [curaleafOrganisationId]: readiness }));
-      dispatch({
-        type: 'ADD_TOAST',
-        message: readiness?.gates.curaleafLive.passed
-          ? readiness.allocationHolding
-            ? `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf TEST key validated for allocation holding. New dedicated-link cases stay HHH-only until HHH completes the fixed-destination referral.`
-            : readiness.testAccount
-              ? `${pharmacy?.tradingName ?? 'Pharmacy'} TEST Curaleaf key validated. Its explicit test exemption is active and public intake is disabled.`
-            : `${pharmacy?.tradingName ?? 'Pharmacy'} LIVE Curaleaf key validated. The Go live button unlocks when company GDPR evidence also passes.`
-          : `${pharmacy?.tradingName ?? 'Pharmacy'} Curaleaf connection approved for UAT; LIVE validation is still required.`,
-        toastType: 'success',
-      });
-      setShowCuraleafDrawer(false);
-    } catch (error) {
-      setCuraleafError(error instanceof Error ? error.message : 'Curaleaf approval failed.');
-    } finally {
-      setCuraleafApproveBusy(false);
-    }
-  };
-
-  const curaleafStatusLabel = (organisationId: string) => {
-    const approved = Boolean(goLiveByOrganisation[organisationId]?.gates.curaleafLive.passed);
-    if (approved) return { label: 'Approved', pill: 'pill-green' as const };
-    if (curaleafOrganisationId === organisationId && curaleafValidation?.passed) {
-      return { label: 'Validated — pending approval', pill: 'pill-amber' as const };
-    }
-    if (curaleafOrganisationId === organisationId && curaleafResult?.status === 'attention') {
-      return { label: 'Attention', pill: 'pill-neutral' as const };
-    }
-    return { label: 'Pending', pill: 'pill-amber' as const };
-  };
 
   const renderPlatform = () => (
     <>
@@ -1631,12 +1539,9 @@ export default function AdminPortal() {
         </button>
         <button type="button" role="tab" aria-selected={platformTab === 'curaleaf'} className={`filter-card${platformTab === 'curaleaf' ? ' active' : ''}`} onClick={() => setPlatformTab('curaleaf')}>
           <div className="filter-card__head"><span>Curaleaf</span></div>
-          <span className="filter-card__value filter-card__value--text">Validate & approve</span>
+          <span className="filter-card__value filter-card__value--text">Connections</span>
         </button>
-        <button type="button" role="tab" aria-selected={platformTab === 'directory'} className={`filter-card${platformTab === 'directory' ? ' active' : ''}`} onClick={() => setPlatformTab('directory')}><div className="filter-card__head"><span>Directory</span></div><span className="filter-card__value filter-card__value--text">Profiles & QR</span></button>
       </div>
-
-      {platformTab === 'directory' && <DirectoryAdminV2 organisations={state.organisations} />}
 
       {platformTab === 'setup' && (
         <>
@@ -1646,37 +1551,10 @@ export default function AdminPortal() {
             { label: 'Completed', value: Object.values(setupByOrganisation).reduce((total, status) => total + status.completedCount, 0), detail: 'steps recorded' },
             { label: 'Waiting', value: remainingSetupSteps, detail: 'actions remaining' },
           ]} />
-          <section className="card admin-external-gates" aria-label="External Curaleaf gates">
-            <div className="admin-directory-head">
-              <div>
-                <p className="section-label">External gates</p>
-                <h2>Curaleaf production blockers</h2>
-                <p>Phil answered Q1–Q13 on 5 August 2026. These remaining items still block full Rocky production order flow.</p>
-              </div>
-            </div>
-            <div className="filter-grid admin-gate-grid">
-              {[
-                { label: 'Sandbox stocked products', detail: 'Quote / PO / shipment UAT', status: 'pending' as const },
-                { label: 'Second sandbox pharmacy key', detail: 'Multi-tenant isolation UAT', status: 'pending' as const },
-                { label: 'Ellis catalogue confirmation', detail: 'Customer-specific pricing N/A?', status: 'pending' as const },
-                { label: 'Direct-to-live written OK', detail: 'Onboarding runbook gate', status: 'pending' as const },
-                { label: 'Curaleaf DPA / scan retention', detail: 'Legal production gate', status: 'pending' as const },
-                { label: 'Partner master API key', detail: 'Not offered yet — per-pharmacy keys', status: 'blocked' as const },
-              ].map(gate => (
-                <div key={gate.label} className={`filter-card admin-gate-card${gate.status === 'blocked' ? ' is-blocked' : ''}`} aria-pressed={false}>
-                  <div className="filter-card__head">
-                    <span>{gate.label}</span>
-                    <span className={`pill ${gate.status === 'blocked' ? 'pill-neutral' : 'pill-amber'}`}>{gate.status === 'blocked' ? 'Unavailable' : 'Pending'}</span>
-                  </div>
-                  <span className="filter-card__value text-xs">{gate.detail}</span>
-                </div>
-              ))}
-            </div>
-          </section>
           <section className="card admin-patient-table compliance-register">
-            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Production pharmacies require company GDPR evidence and a validated LIVE Curaleaf key. Explicit TRAINING accounts use a TEST-key gate and cannot accept public intake.</p></div></div>
+            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Setup tasks are an operational checklist only. Live intake is controlled by each pharmacy's current status and is not blocked by off-platform evidence.</p></div></div>
             {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
-            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Operational checklist</th><th>Hard go-live gates</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const readiness = tenantReadiness(organisation.id); const goLive = goLiveByOrganisation[organisation.id]; return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>Useful for UAT; does not unlock live</small></td><td><div className="go-live-gate-pills"><span className={`pill ${goLive?.gates.gdprEvidence.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.allocationHolding ? 'Allocation policy active' : goLive?.testAccount ? 'GDPR test exemption' : 'GDPR evidence'}</span><span className={`pill ${goLive?.gates.curaleafLive.passed ? 'pill-green' : 'pill-amber'}`}>{goLive?.gates.curaleafLive.environment === 'test' ? 'TEST key' : 'LIVE key'}</span></div></td><td><span className={`pill ${statusPill(organisation.status)}`}>{statusLabel(organisation.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Allocation holding</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}</td><td><div className="flex gap-sm"><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button>{activationButtons(organisation, goLive)}</div></td></tr>; })}</tbody></table></div>}
+            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Operational checklist</th><th>Workspace</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const readiness = tenantReadiness(organisation.id); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>For the pharmacy's own operational handover</small></td><td><span className="pill pill-info">{organisation.workspaceClassification?.replaceAll('_', ' ') ?? 'standard'}</span></td><td><span className={`pill ${statusPill(organisation.status)}`}>{statusLabel(organisation.status)}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
           </section>
         </>
       )}
@@ -1686,8 +1564,8 @@ export default function AdminPortal() {
           <section className="integration-boundary card">
             <ShieldCheck size={20} />
             <div>
-              <strong>Validate LIVE Curaleaf access</strong>
-              <p>Test & save runs the read check and stores the key securely. The pharmacy goes live only after this LIVE gate and company GDPR evidence are both confirmed by the server.</p>
+              <strong>Curaleaf connection management</strong>
+              <p>Credentials remain server-side. Open a pharmacy connection to review its technical status without exposing a secret.</p>
             </div>
           </section>
 
@@ -1696,7 +1574,7 @@ export default function AdminPortal() {
               <div>
                 <p className="section-label">Per pharmacy</p>
                 <h2>Curaleaf connection status</h2>
-              <p>TEST validation supports UAT. Only a validated, securely stored LIVE key satisfies the technical Go-live gate.</p>
+              <p>Each pharmacy has its own securely stored connection and non-secret customer ID.</p>
               </div>
             </div>
             {state.organisations.length === 0 ? (
@@ -1704,22 +1582,20 @@ export default function AdminPortal() {
             ) : (
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>Pharmacy</th><th>Curaleaf</th><th /></tr></thead>
+                  <thead><tr><th>Pharmacy</th><th>Connection</th><th /></tr></thead>
                   <tbody>
                     {state.organisations.map(organisation => {
-                      const statusMeta = curaleafStatusLabel(organisation.id);
-                      const approved = Boolean(goLiveByOrganisation[organisation.id]?.gates.curaleafLive.passed);
                       return (
                         <tr key={organisation.id}>
                           <td><strong>{organisation.tradingName}</strong><small>{organisation.name}</small></td>
-                          <td><span className={`pill ${statusMeta.pill}`}>{statusMeta.label}</span></td>
+                          <td><span className="pill pill-neutral">Open to view</span></td>
                           <td>
                             <button
                               type="button"
                               className="btn btn-sm"
                               onClick={() => openCuraleafDrawer(organisation.id)}
                             >
-                              {approved ? 'Rotate keys' : 'Connect'}
+                              View connection
                             </button>
                           </td>
                         </tr>
@@ -1788,71 +1664,23 @@ export default function AdminPortal() {
             <div className="drawer-header">
               <div>
                 <p className="section-label">HHH administrator only</p>
-                <h2 id="curaleaf-drawer-title">{curaleafApproved ? 'Rotate Curaleaf keys' : 'Connect Curaleaf'}</h2>
+                <h2 id="curaleaf-drawer-title">Curaleaf connection</h2>
               </div>
-              <button className="icon-btn" disabled={curaleafBusy || curaleafApproveBusy} onClick={closeCuraleafDrawer} aria-label="Close"><X size={18} /></button>
+              <button className="icon-btn" onClick={closeCuraleafDrawer} aria-label="Close"><X size={18} /></button>
             </div>
-            <form className="drawer-body onboarding-form" onSubmit={submitCuraleafTestAndSave}>
+            <div className="drawer-body onboarding-form">
               <div className="integration-boundary">
                 <LockKeyhole size={17} />
                 <div>
                   <strong>{curaleafPharmacy?.tradingName ?? 'Pharmacy'}</strong>
-                  <p>Test & save runs API and PHAR-match checks. Approve Curaleaf completes that setup step only.</p>
+                  <p>Credentials are protected server-side and never returned to the portal.</p>
                 </div>
               </div>
-              <label>Curaleaf internal pharmacy / PHAR ID
-                <input className="input" autoComplete="off" value={curaleafCustomerId} onChange={event => setCuraleafCustomerId(event.target.value)} required />
-                <small className="field-help">Curaleaf’s internal customer UUID for this pharmacy — not the HHH organisation id.</small>
-              </label>
-              <label>Pharmacy read/write API key
-                <input className="input" type="password" autoComplete="new-password" value={curaleafWriteApiKey} onChange={event => setCuraleafWriteApiKey(event.target.value)} required />
-              </label>
-              <label>Pharmacy read-only API key (optional)
-                <input className="input" type="password" autoComplete="new-password" value={curaleafReadApiKey} onChange={event => setCuraleafReadApiKey(event.target.value)} />
-              </label>
-              <div className="setup-security-note">
-                <ShieldCheck size={16} />
-                <span>Keys are stored only in this pharmacy’s Europe-hosted Secret Manager secret. The portal never displays them after save.</span>
-              </div>
-              {curaleafError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div>}
-              {curaleafValidation && (
-                <div className={`banner ${curaleafValidation.passed ? 'banner-green' : 'banner-amber'}`} role="status">
-                  <ClipboardCheck size={16} />
-                  <span>
-                    <strong>{curaleafValidation.passed ? 'Validation passed' : 'Validation failed'}</strong>
-                    <small>{curaleafValidation.message}</small>
-                    {curaleafValidation.observedCustomerId && <small>Observed customer ID: {curaleafValidation.observedCustomerId}</small>}
-                  </span>
-                </div>
-              )}
-              {curaleafValidation?.checks?.length ? (
-                <div className="filter-grid admin-gate-grid" aria-label="Curaleaf validation checks">
-                  {curaleafValidation.checks.map(check => (
-                    <div key={check.id} className="filter-card admin-gate-card">
-                      <div className="filter-card__head">
-                        <span>{check.label}</span>
-                        <span className={`pill ${check.passed ? 'pill-green' : 'pill-amber'}`}>{check.passed ? 'Pass' : 'Fail'}</span>
-                      </div>
-                      <span className="filter-card__value text-xs">{check.detail}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+              {curaleafError ? <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div> : curaleafResult ? <div className="settings-meta-grid"><div><span>Connection</span><strong>{curaleafResult.connected ? 'Connected' : curaleafResult.status?.replaceAll('_', ' ') ?? 'Not configured'}</strong></div><div><span>Environment</span><strong>{curaleafResult.environment}</strong></div><div><span>Customer ID</span><strong>{curaleafResult.customerId ?? 'Not recorded'}</strong></div><div><span>Last checked</span><strong>{new Date(curaleafResult.checkedAt).toLocaleString('en-GB')}</strong></div></div> : <div className="empty-state">Loading the connection status…</div>}
               <div className="drawer-actions">
-                <button type="button" className="btn" disabled={curaleafBusy || curaleafApproveBusy} onClick={closeCuraleafDrawer}>Cancel</button>
-                <button className="btn btn-primary" type="submit" disabled={curaleafBusy || curaleafApproveBusy || !curaleafOrganisationId}>
-                  {curaleafBusy ? 'Testing…' : 'Test & save'}
-                </button>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={curaleafBusy || curaleafApproveBusy || !curaleafOrganisationId || !curaleafValidation?.passed || curaleafApproved}
-                  onClick={() => void submitCuraleafApproval()}
-                >
-                  {curaleafApproveBusy ? 'Approving…' : curaleafApproved ? 'Curaleaf approved' : 'Approve Curaleaf'}
-                </button>
+                <button type="button" className="btn btn-primary" onClick={closeCuraleafDrawer}>Close</button>
               </div>
-            </form>
+            </div>
           </aside>
         </div>
       )}

@@ -63,7 +63,6 @@ function toPharmacyTenant(record: PortalOrganisation): PharmacyTenant {
     gdprExempt: record.gdprExempt,
     workspaceClassification: record.workspaceClassification,
     staffCount: 0,
-    platformFeeMonthly: record.platformFeeMonthly ?? null,
     defaultPaymentRoute: record.defaultPaymentRoute ?? 'manual',
     brand: { primary: record.primaryColour, portalName: record.portalName ?? record.name },
     modules: record.modules ?? { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
@@ -300,7 +299,7 @@ function StaffWorkspace() {
         {state.workspaceMode === 'intake' && (
           <div className="intake-live-banner" role="status">
             <strong>Eligibility intake live</strong>
-            <span>Real patient submissions are stored in this pharmacy workspace. Prescriptions, payments and supplier actions remain locked until full activation.</span>
+            <span>New attributed enquiries remain with HHH for review. This pharmacy sees only a privacy-safe notice until HHH completes the referral and activates a patient record.</span>
           </div>
         )}
         <div id="pharmacy-main-content" className="page-container" tabIndex={-1}>{renderScreen()}</div>

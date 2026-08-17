@@ -36,6 +36,10 @@ function normalizeStaffRole(role: unknown): string {
   return clean;
 }
 
+function normalizeScopeId(value: string | null | undefined): string {
+  return (value ?? '').toLowerCase().replaceAll('-', '');
+}
+
 export function validatePortalAdmission(input: AdmissionValidationInput): AdmissionFailure | null {
   const { claims, admission, surface = 'any', now = Date.now() } = input;
   const { session, staff } = admission;
@@ -80,7 +84,11 @@ export function validatePortalAdmission(input: AdmissionValidationInput): Admiss
   // Verify tenant alignment for pharmacy staff
   if (staffRole === 'PHARMACY_STAFF') {
     const claimOrg = typeof claims.organisationId === 'string' ? claims.organisationId : typeof claims.pharmacyId === 'string' ? claims.pharmacyId : null;
-    if (claimOrg && (staff.organisationId !== claimOrg || session.organisationId !== claimOrg)) {
+    const normalizedClaimOrg = normalizeScopeId(claimOrg);
+    if (claimOrg && (
+      normalizeScopeId(staff.organisationId) !== normalizedClaimOrg
+      || normalizeScopeId(session.organisationId) !== normalizedClaimOrg
+    )) {
       return { status: 403, code: 'STAFF_SCOPE_INVALID', event: 'auth.tenant_mismatch' };
     }
   }

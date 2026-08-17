@@ -119,6 +119,18 @@ export default function PharmacyOverview() {
         </div>
       )}
 
+      {overview.enquiries.pendingCount > 0 && (
+        <section className="card overview-enquiry-notice" role="status" aria-label="HHH-managed eligibility enquiries">
+          <span className="overview-enquiry-notice__icon"><ShieldCheck size={20} aria-hidden="true" /></span>
+          <div>
+            <p className="section-label">Eligibility enquiry</p>
+            <h2>{overview.enquiries.pendingCount === 1 ? 'A new enquiry has been received' : `${overview.enquiries.pendingCount} new enquiries have been received`}</h2>
+            <p>HHH admin is reviewing {overview.enquiries.pendingCount === 1 ? 'the request' : 'these requests'}. Patient identity and health answers remain unavailable to the pharmacy unless HHH completes the referral and activates a patient record.</p>
+          </div>
+          <span className="status-badge status-badge--intake_live">With HHH admin</span>
+        </section>
+      )}
+
       <div className="overview-view-switcher" role="tablist" aria-label="Overview view">
         {views.map(item => (
           <button key={item.id} id={`overview-tab-${item.id}`} type="button" role="tab" tabIndex={view === item.id ? 0 : -1} aria-selected={view === item.id} aria-controls={`overview-${item.id}`} className={view === item.id ? 'is-active' : ''} onClick={() => selectView(item.id)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) event.preventDefault(); moveViewFocus(item.id, event.key); }}>

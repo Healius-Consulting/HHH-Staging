@@ -1,22 +1,15 @@
-import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { applicationDefault, getApps, initializeApp, type Credential } from 'firebase-admin/app';
-import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
-import { Firestore } from '@google-cloud/firestore';
+import { getDataConnect } from 'firebase-admin/data-connect';
 import { ExternalAccountClient } from 'google-auth-library';
 import {
   allowedHosts,
   parseCookieHeader,
   requestHost,
   safeReturnTo,
-  SESSION_IDLE_MS,
-  shouldTouchSession,
-  validateGateSession,
-  type SessionRecord,
-  type StaffRecord,
 } from '../platform/vercel/page-gate-utils.js';
 import { CONTENT_SECURITY_POLICY } from '../platform/vercel/security-headers.js';
 import { isSupportedPortalRelativePath } from '@hhh/domain/portal-route';
@@ -31,8 +24,25 @@ const csrfCookieName = '__Host-hhh_csrf';
 
 let activeVercelOidcToken: string | null = null;
 type ExternalAccessTokenClient = { getAccessToken(): Promise<{ token?: string | null }> };
-let externalAccountClient: ExternalAccessTokenClient | null = null;
-let federatedFirestore: Firestore | null = null;
+
+const APPEND_GATE_AUDIT_LOG_GQL = `
+  mutation AppendGateAuditLog(
+    $event: String!
+    $requestId: String
+    $ipHash: String
+    $surface: String
+    $details: Any
+  ) {
+    auditLog_insert(data: {
+      event: $event
+      recordType: "page-gate"
+      requestId: $requestId
+      ipHash: $ipHash
+      surface: $surface
+      details: $details
+    })
+  }
+`;
 
 function wifCredential(request: Request): Credential {
   const oidcToken = request.headers.get('x-vercel-oidc-token');
@@ -62,7 +72,6 @@ function wifCredential(request: Request): Credential {
     throw new Error('GCP_WIF_CLIENT_INITIALIZATION_FAILED');
   }
   if (!authClient) throw new Error('GCP_WIF_CLIENT_INITIALIZATION_FAILED');
-  externalAccountClient = authClient;
   return {
     async getAccessToken() {
       const accessToken = await authClient.getAccessToken();
@@ -70,20 +79,6 @@ function wifCredential(request: Request): Credential {
       return { access_token: accessToken.token, expires_in: 3_600 };
     },
   };
-}
-
-function firestoreForRequest(request: Request, app: ReturnType<typeof firebaseApp>) {
-  if (!process.env.GCP_WORKLOAD_IDENTITY_POOL_ID) return getFirestore(app);
-  if (!externalAccountClient) {
-    firebaseApp(request);
-    if (!externalAccountClient) throw new Error('GCP_WIF_CLIENT_INITIALIZATION_FAILED');
-  }
-  if (!federatedFirestore) {
-    const projectId = process.env.GCP_PROJECT_ID;
-    if (!projectId) throw new Error('GCP_WIF_CONFIGURATION_MISSING');
-    federatedFirestore = new Firestore({ projectId, authClient: externalAccountClient as never });
-  }
-  return federatedFirestore;
 }
 
 function firebaseApp(request: Request) {
@@ -101,19 +96,6 @@ function firebaseApp(request: Request) {
   } catch {
     throw new Error('FIREBASE_APP_INITIALIZATION_FAILED');
   }
-}
-
-function hash(value: string) {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function safeGateFailure(error: unknown) {
-  if (!(error instanceof Error)) return 'CREDENTIAL_INITIALIZATION_FAILED';
-  if (error.message === 'VERCEL_OIDC_TOKEN_MISSING') return error.message;
-  if (error.message === 'GCP_WIF_CONFIGURATION_MISSING') return error.message;
-  if (error.message === 'GCP_WIF_CLIENT_INITIALIZATION_FAILED') return error.message;
-  if (error.message === 'FIREBASE_APP_INITIALIZATION_FAILED') return error.message;
-  return 'CREDENTIAL_INITIALIZATION_FAILED';
 }
 
 function requestPath(request: Request) {
@@ -185,9 +167,24 @@ async function securityEvent(request: Request, event: string, details: Record<st
   console.warn(JSON.stringify(payload));
   try {
     const app = firebaseApp(request);
-    await firestoreForRequest(request, app).collection('auditLogs').add(payload);
-  } catch {
-    console.error(JSON.stringify({ event: 'security.audit_write_failed', requestId, originalEvent: event }));
+    const dataConnect = getDataConnect({
+      serviceId: process.env.DATA_CONNECT_SERVICE_ID ?? 'hhh-platform-service',
+      location: process.env.DATA_CONNECT_LOCATION ?? 'europe-west2',
+    }, app);
+    await dataConnect.executeGraphql(APPEND_GATE_AUDIT_LOG_GQL, {
+      variables: {
+        event,
+        requestId: typeof requestId === 'string' ? requestId : null,
+        ipHash: payload.ipHash,
+        surface: payload.surface,
+        details: { schemaVersion: 1, ...details },
+      },
+    });
+  } catch (error) {
+    const failure = error instanceof Error
+      ? { name: error.name, message: error.message.slice(0, 500) }
+      : { name: 'UnknownError', message: 'Audit persistence failed without an Error object.' };
+    console.error(JSON.stringify({ event: 'security.audit_write_failed', requestId, originalEvent: event, failure }));
   }
 }
 
@@ -207,7 +204,7 @@ async function gate(request: Request) {
 
   const permittedHosts = allowedHosts(process.env);
   if (!permittedHosts.size || !permittedHosts.has(requestHost(request))) {
-    void securityEvent(request, 'auth.origin_denied', { requestId, code: 'HOST_DENIED' });
+    await securityEvent(request, 'auth.origin_denied', { requestId, code: 'HOST_DENIED' });
     return new Response('Misdirected request', { status: 421, headers: responseHeaders(requestId) });
   }
 
@@ -233,7 +230,7 @@ async function gate(request: Request) {
 
   const sessionCookie = parseCookieHeader(request.headers.get('cookie'))[sessionCookieName];
   if (!sessionCookie) {
-    void securityEvent(request, 'auth.session_rejected', { requestId, code: 'UNAUTHENTICATED' });
+    await securityEvent(request, 'auth.session_rejected', { requestId, code: 'UNAUTHENTICATED' });
     return redirectToLogin(protectedSurface, requestedPath, requestId);
   }
 
@@ -243,4 +240,3 @@ async function gate(request: Request) {
 }
 
 export default { fetch: gate };
-

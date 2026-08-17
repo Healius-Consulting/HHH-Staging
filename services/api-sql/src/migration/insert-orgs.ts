@@ -1,7 +1,12 @@
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { createHash } from 'node:crypto';
 import { config } from '../bootstrap/config.js';
 import { dataConnect } from '../bootstrap/firebase.js';
+
+function tokenHash(rawToken: string): string {
+  return createHash('sha256').update(rawToken).digest('hex');
+}
 
 const CREATE_ORGANISATION_GQL = `
   mutation CreateOrganisation(
@@ -148,11 +153,11 @@ async function insertAllOrgs() {
           await dataConnect.executeGraphql<any, any>(CREATE_REFERRAL_TOKEN_GQL, {
             variables: {
               organisationId: doc.id,
-              tokenHash: data.referralToken,
+              tokenHash: tokenHash(data.referralToken),
               intakeVersion: 'v2',
             },
           });
-          console.log(`  ✔ Referral Token Hash: ${data.referralToken.slice(0, 10)}...`);
+          console.log('  ✔ Referral token stored as a one-way hash');
         } catch (e: any) {
           console.warn(`  - Referral token already exists:`, e?.message);
         }

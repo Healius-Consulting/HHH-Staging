@@ -4,6 +4,7 @@ import { CONDITIONS, conditionLabel } from '@hhh/domain';
 import { createEligibilitySubmission, createV2Intake, resolvePublicReferralToken, searchPublicPharmacies } from '../../../src/shared/api';
 import type { EligibilitySubmissionInput, PostcodeSearchReceipt, PublicDirectoryResult, PublicPharmacy, V2IntakeReceipt } from '../../../src/shared/contracts';
 import { tenantThemeVariables } from '../../../src/utils/tenantTheme';
+import { parseEligibilityReferralRoute } from './referralRoute';
 
 const LOCAL_PREVIEW_TOKEN = 'local-preview';
 const HHH_MARK = '/holistic-health-hub-mark.png';
@@ -23,7 +24,8 @@ const HHH_PUBLIC_IDENTITY: PublicPharmacy = {
 };
 
 export default function EligibilityApp() {
-  const token = new URLSearchParams(window.location.search).get('token') ?? '';
+  const [referralRoute] = useState(() => parseEligibilityReferralRoute(window.location.search));
+  const token = referralRoute.kind === 'token' ? referralRoute.token : '';
   const isLocalPreview = import.meta.env.DEV && token === LOCAL_PREVIEW_TOKEN;
   const [pharmacy, setPharmacy] = useState<PublicPharmacy | null>(null);
   const [intakeVersion, setIntakeVersion] = useState<'v1' | 'v2'>(token ? 'v1' : 'v2');
@@ -47,13 +49,18 @@ export default function EligibilityApp() {
   const themeStyle = tenantThemeVariables(pharmacy?.primaryColour ?? '#0f766e') as CSSProperties;
 
   useEffect(() => {
+    if (referralRoute.kind === 'invalid-token') {
+      setError('This pharmacy link is not valid or is no longer active.');
+      setLoading(false);
+      return;
+    }
     if (isLocalPreview) { setPharmacy(LOCAL_PREVIEW_PHARMACY); setLoading(false); return; }
-    if (!token) { setPharmacy(HHH_PUBLIC_IDENTITY); setLoading(false); return; }
+    if (referralRoute.kind === 'general') { setPharmacy(HHH_PUBLIC_IDENTITY); setLoading(false); return; }
     resolvePublicReferralToken(token)
       .then(result => { setPharmacy(result.pharmacy); setIntakeVersion(result.intakeVersion); })
       .catch(() => setError('This pharmacy link is not valid or is no longer active.'))
       .finally(() => setLoading(false));
-  }, [isLocalPreview, token]);
+  }, [isLocalPreview, referralRoute, token]);
 
   useEffect(() => {
     const closeConditionMenu = (event: PointerEvent) => {

@@ -55,10 +55,21 @@ export function requireStaff(expectedSurface: ProtectedSurface | 'any' = 'any') 
 
       const session = admission.session!;
       const staff = admission.staff!;
-      const requestId = (request.headers['x-request-id'] as string) || crypto.randomUUID();
+      const requestId = request.requestId || crypto.randomUUID();
       request.requestId = requestId;
 
-      // 4. Build immutable RequestContext
+      // 4. Persist a debounced activity extension before returning a newer
+      // deadline to the client. A serverless background write may be dropped.
+      const now = Date.now();
+      const lastActivity = Date.parse(session.lastActivityAt);
+      let idleExpiresAt = session.idleExpiresAt;
+      if (Number.isFinite(lastActivity) && now - lastActivity >= SESSION_TOUCH_INTERVAL_MS) {
+        const lastActivityAt = new Date(now).toISOString();
+        idleExpiresAt = new Date(now + 15 * 60 * 1000).toISOString();
+        await identityRepo.touchSession(sessionHash, lastActivityAt, idleExpiresAt);
+      }
+
+      // 5. Build immutable RequestContext
       if (staff.role === 'PHARMACY_STAFF') {
         const tenantScope: TenantScope = {
           kind: 'tenant',
@@ -69,7 +80,7 @@ export function requireStaff(expectedSurface: ProtectedSurface | 'any' = 'any') 
           surface: 'pharmacy',
           sessionHash,
           requestId,
-          idleExpiresAt: session.idleExpiresAt,
+          idleExpiresAt,
           absoluteExpiresAt: session.absoluteExpiresAt,
         };
         request.context = tenantScope;
@@ -82,19 +93,10 @@ export function requireStaff(expectedSurface: ProtectedSurface | 'any' = 'any') 
           surface: 'admin',
           sessionHash,
           requestId,
-          idleExpiresAt: session.idleExpiresAt,
+          idleExpiresAt,
           absoluteExpiresAt: session.absoluteExpiresAt,
         };
         request.context = platformScope;
-      }
-
-      // 5. Debounced Session Touch (5 minutes debounce)
-      const now = Date.now();
-      const lastActivity = Date.parse(session.lastActivityAt);
-      if (Number.isFinite(lastActivity) && now - lastActivity >= SESSION_TOUCH_INTERVAL_MS) {
-        const lastActivityAt = new Date(now).toISOString();
-        const idleExpiresAt = new Date(now + 15 * 60 * 1000).toISOString();
-        void identityRepo.touchSession(sessionHash, lastActivityAt, idleExpiresAt).catch(() => undefined);
       }
 
       next();

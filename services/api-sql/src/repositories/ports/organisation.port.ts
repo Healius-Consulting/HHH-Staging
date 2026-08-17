@@ -13,7 +13,6 @@ export interface OrganisationRecord {
   logoText: string;
   status: 'ONBOARDING' | 'INTAKE_LIVE' | 'LIVE' | 'PAUSED';
   classification: 'STANDARD' | 'TRAINING' | 'ALLOCATION_HOLDING';
-  platformFeeMonthlyPence: number | null;
   portalName: string;
   intakeEnabled: boolean;
   prescriptionEnabled: boolean;
@@ -28,6 +27,32 @@ export interface OrganisationRecord {
   pausedReason: string | null;
   pausedAt: string | null;
   version: number;
+  archivedAt?: string | null;
+}
+
+export interface ReferralTokenRecord {
+  id: string;
+  organisationId: string;
+  tokenHash: string;
+  intakeVersion: string;
+  createdByUid: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface CreateOrganisationRecordInput {
+  id: string;
+  name: string;
+  tradingName: string;
+  gphcNumber: string;
+  superintendentName: string;
+  mainContactName: string | null;
+  mainContactPhone: string | null;
+  mainContactEmail: string | null;
+  address: string;
+  primaryColour: string;
+  logoText: string;
+  portalName: string;
 }
 
 export interface PublicPharmacyResolution {
@@ -60,7 +85,17 @@ export interface SetupTaskRecord {
 
 export interface OrganisationRepositoryPort {
   findOrganisationById(id: string): Promise<OrganisationRecord | null>;
+  listOrganisations(): Promise<OrganisationRecord[]>;
   findDirectoryByTokenHash(tokenHash: string): Promise<PublicPharmacyResolution | null>;
+  findReferralTokenByHash(tokenHash: string): Promise<ReferralTokenRecord | null>;
+  createReferralToken(params: {
+    organisationId: string;
+    tokenHash: string;
+    intakeVersion: 'v2';
+    createdByUid?: string | null;
+  }): Promise<void>;
+  createOrganisation(input: CreateOrganisationRecordInput): Promise<void>;
+  createOrganisationDomain(organisationId: string, hostname: string): Promise<void>;
   listSetupTasks(organisationId: string): Promise<SetupTaskRecord[]>;
   upsertSetupTask(params: {
     organisationId: string;

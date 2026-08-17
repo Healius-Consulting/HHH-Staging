@@ -5,6 +5,10 @@ import { HttpError } from '../../domain/common/errors.js';
 import { cookieOptions, csrfCookieName, issueCsrf, requireCsrf } from '../../security/csrf.js';
 import type { ProtectedSurface } from '../../security/request-context.js';
 import { requireStaff, sessionCookieName } from '../../security/require-staff.js';
+import { assertTenantScope } from '../../security/request-context.js';
+import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
+import { toPortalOrganisation } from '../portal/pharmacy-contracts.js';
 
 const sessionInputSchema = z.object({
   idToken: z.string().min(100).max(20_000),
@@ -13,6 +17,8 @@ const sessionInputSchema = z.object({
 export function createAuthRouter(): Router {
   const router = Router();
   const sessionService = new SessionService();
+  const identityRepo = new SqlIdentityRepository();
+  const organisationRepo = new SqlOrganisationRepository();
 
   // GET /v1/auth/csrf - Issue or refresh CSRF token
   router.get('/auth/csrf', (req: Request, res: Response) => {
@@ -53,7 +59,7 @@ export function createAuthRouter(): Router {
     }
   });
 
-  // GET /v1/auth/session & GET /v1/portal/session - Get current session
+  // GET /v1/auth/session - Get current authentication session.
   const getSessionHandler = async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!req.context || req.context.kind === 'public') {
@@ -68,11 +74,45 @@ export function createAuthRouter(): Router {
   };
 
   router.get('/auth/session', requireStaff('any'), getSessionHandler);
-  router.get('/portal/session', requireStaff('any'), getSessionHandler);
+
+  // GET /v1/portal/session - Return the tenant profile contract consumed by
+  // the pharmacy shell. The organisation is resolved from the admitted SQL
+  // tenant scope, never from a caller-supplied identifier.
+  router.get('/portal/session', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const [payload, staff, organisation] = await Promise.all([
+        sessionService.getSessionPayload(scope),
+        identityRepo.findStaffUser(scope.uid),
+        organisationRepo.findOrganisationById(scope.organisationId),
+      ]);
+      if (!staff || !organisation) {
+        throw new HttpError(403, 'The pharmacy account is not fully provisioned.', 'TENANT_REQUIRED');
+      }
+      const csrfToken = issueCsrf(req, res);
+      res.status(200).json({
+        ...payload,
+        csrfToken,
+        pharmacyId: scope.organisationId,
+        profile: {
+          uid: staff.uid,
+          organisationId: staff.organisationId,
+          email: staff.email,
+          displayName: staff.displayName,
+          role: staff.role.toLowerCase(),
+          status: staff.status.toLowerCase(),
+          disabled: staff.disabled,
+        },
+        organisation: toPortalOrganisation(organisation),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
 
 
   // DELETE /v1/auth/session - Log out and revoke session
-  router.delete('/auth/session', requireCsrf, async (req: Request, res: Response, next: NextFunction) => {
+  router.delete('/auth/session', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (req.context && req.context.kind !== 'public') {
         await sessionService.revokeSession(req.context.sessionHash, 'logout');
@@ -85,9 +125,18 @@ export function createAuthRouter(): Router {
     }
   });
 
-  // POST /v1/auth/activity - Ping to touch session
-  router.post('/auth/activity', requireCsrf, requireStaff('pharmacy'), (req: Request, res: Response) => {
-    res.status(200).json({ status: 'active', idleExpiresAt: req.context?.kind !== 'public' ? req.context?.idleExpiresAt : null });
+  // POST /v1/auth/activity - Touch and return the complete refreshed session
+  router.post('/auth/activity', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.context || req.context.kind === 'public') {
+        throw new HttpError(401, 'A valid staff session is required.', 'UNAUTHENTICATED');
+      }
+      const payload = await sessionService.getSessionPayload(req.context);
+      const csrfToken = issueCsrf(req, res);
+      res.status(200).json({ ...payload, csrfToken });
+    } catch (error) {
+      next(error);
+    }
   });
 
   return router;

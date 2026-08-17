@@ -47,6 +47,8 @@ export interface PrescriptionRepositoryPort {
     sizeBytes: number;
     uploadedByUid?: string | null;
   }): Promise<{ id?: string }>;
+  completeFile(id: string, organisationId: string): Promise<boolean>;
+  deleteFile(id: string, organisationId: string): Promise<boolean>;
   listActivePrescribers(): Promise<PrescriberRecord[]>;
   listTenantPrescriptions(organisationId: string, limit?: number): Promise<PrescriptionRecord[]>;
 }

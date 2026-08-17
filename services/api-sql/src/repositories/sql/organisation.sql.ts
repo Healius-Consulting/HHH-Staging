@@ -3,6 +3,8 @@ import type {
   OrganisationRecord,
   OrganisationRepositoryPort,
   PublicPharmacyResolution,
+  ReferralTokenRecord,
+  CreateOrganisationRecordInput,
   SetupTaskRecord,
 } from '../ports/organisation.port.js';
 
@@ -23,7 +25,6 @@ const GET_ORGANISATION_BY_ID_GQL = `
       logoText
       status
       classification
-      platformFeeMonthlyPence
       portalName
       intakeEnabled
       prescriptionEnabled
@@ -38,6 +39,46 @@ const GET_ORGANISATION_BY_ID_GQL = `
       pausedReason
       pausedAt
       version
+      archivedAt
+    }
+  }
+`;
+
+const LIST_ORGANISATIONS_GQL = `
+  query ListOrganisations {
+    organisations(
+      where: { archivedAt: { isNull: true } }
+      orderBy: { tradingName: ASC }
+    ) {
+      id
+      companyId
+      name
+      tradingName
+      gphcNumber
+      superintendentName
+      mainContactName
+      mainContactPhone
+      mainContactEmail
+      address
+      primaryColour
+      logoText
+      status
+      classification
+      portalName
+      intakeEnabled
+      prescriptionEnabled
+      paymentsEnabled
+      supplierOrdersEnabled
+      patientsEnabled
+      resourcesEnabled
+      worldpayEnabled
+      defaultPaymentRoute
+      autoPlacementEnabled
+      gdprComplianceFlag
+      pausedReason
+      pausedAt
+      version
+      archivedAt
     }
   }
 `;
@@ -58,8 +99,91 @@ const GET_PHARMACY_DIRECTORY_BY_TOKEN_GQL = `
         primaryColour
         logoText
         status
+        intakeEnabled
+        archivedAt
       }
     }
+  }
+`;
+
+const GET_REFERRAL_TOKEN_BY_HASH_GQL = `
+  query GetReferralTokenByHash($tokenHash: String!) {
+    referralTokens(where: { tokenHash: { eq: $tokenHash } }, limit: 1) {
+      id
+      organisationId
+      tokenHash
+      intakeVersion
+      createdByUid
+      createdAt
+      revokedAt
+    }
+  }
+`;
+
+const CREATE_REFERRAL_TOKEN_GQL = `
+  mutation CreateReferralToken(
+    $organisationId: UUID!
+    $tokenHash: String!
+    $intakeVersion: String!
+    $createdByUid: String
+  ) {
+    referralToken_insert(data: {
+      organisationId: $organisationId
+      tokenHash: $tokenHash
+      intakeVersion: $intakeVersion
+      createdByUid: $createdByUid
+    })
+  }
+`;
+
+const CREATE_ORGANISATION_GQL = `
+  mutation CreateOrganisation(
+    $id: UUID!
+    $name: String!
+    $tradingName: String!
+    $gphcNumber: String!
+    $superintendentName: String!
+    $mainContactName: String
+    $mainContactPhone: String
+    $mainContactEmail: String
+    $address: String!
+    $primaryColour: String!
+    $logoText: String!
+    $portalName: String!
+  ) {
+    organisation_insert(data: {
+      id: $id
+      name: $name
+      tradingName: $tradingName
+      gphcNumber: $gphcNumber
+      superintendentName: $superintendentName
+      mainContactName: $mainContactName
+      mainContactPhone: $mainContactPhone
+      mainContactEmail: $mainContactEmail
+      address: $address
+      primaryColour: $primaryColour
+      logoText: $logoText
+      portalName: $portalName
+      status: ONBOARDING
+      classification: STANDARD
+      intakeEnabled: true
+      prescriptionEnabled: true
+      paymentsEnabled: true
+      supplierOrdersEnabled: true
+      patientsEnabled: true
+      resourcesEnabled: true
+      worldpayEnabled: false
+      defaultPaymentRoute: MANUAL
+    })
+  }
+`;
+
+const CREATE_ORGANISATION_DOMAIN_GQL = `
+  mutation CreateOrganisationDomain($organisationId: UUID!, $hostname: String!) {
+    organisationDomain_insert(data: {
+      organisationId: $organisationId
+      hostname: $hostname
+    })
   }
 `;
 
@@ -123,6 +247,13 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
     return result.data.organisation ?? null;
   }
 
+  async listOrganisations(): Promise<OrganisationRecord[]> {
+    const result = await dataConnect.executeGraphql<{ organisations: OrganisationRecord[] }, any>(
+      LIST_ORGANISATIONS_GQL
+    );
+    return result.data.organisations ?? [];
+  }
+
   async findDirectoryByTokenHash(tokenHash: string): Promise<PublicPharmacyResolution | null> {
     const result = await dataConnect.executeGraphql<{
       referralTokens: Array<{
@@ -139,6 +270,8 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
           primaryColour: string;
           logoText: string;
           status: string;
+          intakeEnabled: boolean;
+          archivedAt: string | null;
         };
       }>;
     }, any>(GET_PHARMACY_DIRECTORY_BY_TOKEN_GQL, { variables: { tokenHash } });
@@ -147,6 +280,7 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
     if (!match || !match.organisation) return null;
 
     const org = match.organisation;
+    if (org.archivedAt || !org.intakeEnabled || !['INTAKE_LIVE', 'LIVE'].includes(org.status)) return null;
     return {
       type: match.intakeVersion === 'v1' ? 'legacy_pharmacy_qr' : 'future_pharmacy_qr',
       intakeVersion: match.intakeVersion === 'v1' ? 'v1' : 'v2',
@@ -161,6 +295,40 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
         primaryColour: org.primaryColour,
       },
     };
+  }
+
+  async findReferralTokenByHash(tokenHash: string): Promise<ReferralTokenRecord | null> {
+    const result = await dataConnect.executeGraphql<{ referralTokens: ReferralTokenRecord[] }, any>(
+      GET_REFERRAL_TOKEN_BY_HASH_GQL,
+      { variables: { tokenHash } }
+    );
+    return result.data.referralTokens?.[0] ?? null;
+  }
+
+  async createReferralToken(params: {
+    organisationId: string;
+    tokenHash: string;
+    intakeVersion: 'v2';
+    createdByUid?: string | null;
+  }): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(CREATE_REFERRAL_TOKEN_GQL, {
+      variables: {
+        organisationId: params.organisationId,
+        tokenHash: params.tokenHash,
+        intakeVersion: params.intakeVersion,
+        createdByUid: params.createdByUid ?? null,
+      },
+    });
+  }
+
+  async createOrganisation(input: CreateOrganisationRecordInput): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(CREATE_ORGANISATION_GQL, { variables: input });
+  }
+
+  async createOrganisationDomain(organisationId: string, hostname: string): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(CREATE_ORGANISATION_DOMAIN_GQL, {
+      variables: { organisationId, hostname },
+    });
   }
 
   async listSetupTasks(organisationId: string): Promise<SetupTaskRecord[]> {

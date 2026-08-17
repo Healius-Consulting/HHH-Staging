@@ -5,7 +5,6 @@ import type {
   CreatedOrganisation,
   EligibilitySubmissionInput,
   EligibilitySubmissionReceipt,
-  EligibilitySubmissionRecord,
   PharmacySetupStatus,
   PharmacyStaffAccount,
   PharmacyStaffInvitation,
@@ -182,23 +181,8 @@ export function getAssignmentCandidates(caseId: string, query = '') {
   return apiRequest<{ records: Array<Record<string, unknown>> }>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/assignment-candidates?q=${encodeURIComponent(query)}`);
 }
 
-export function reassignIntake(caseId: string, input: { destinationOrganisationId: string; reasonCode: string; note?: string | null; expectedVersion: number; acknowledgeReviewStarted: boolean }) {
+export function reassignIntake(caseId: string, input: { destinationOrganisationId: string; reasonCode: string; note: string | null; expectedVersion: number }) {
   return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/reassign`, { method: 'POST', body: JSON.stringify(input) });
-}
-
-export function confirmIntakeAssignment(caseId: string, input: { reasonCode: string; note?: string | null; expectedVersion: number; acknowledgeReviewStarted: boolean }) {
-  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/confirm-assignment`, { method: 'POST', body: JSON.stringify(input) });
-}
-
-export function recordIntakeFollowUpAttempt(caseId: string, input: {
-  expectedVersion: number;
-  contactMethod: 'phone' | 'email' | 'sms' | 'other';
-  outcome: 'not_started' | 'due' | 'attempted' | 'in_progress' | 'completed' | 'unable_to_contact';
-  reachedPatient: boolean;
-  note: string | null;
-  nextFollowUpAt: string | null;
-}) {
-  return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/follow-up-attempts`, { method: 'POST', body: JSON.stringify(input) });
 }
 
 export function updateIntakeFollowUp(caseId: string, input: Record<string, unknown>) {
@@ -207,18 +191,6 @@ export function updateIntakeFollowUp(caseId: string, input: Record<string, unkno
 
 export function decideV2ProgrammeOnboarding(caseId: string, input: { expectedVersion: number; decision: 'approved' | 'declined'; notes: string | null }) {
   return apiRequest<Record<string, unknown>>(`/v2/portal/admin/intake/${encodeURIComponent(caseId)}/programme-onboarding`, { method: 'POST', body: JSON.stringify(input) });
-}
-
-export function getV2PharmacyEligibilityQueue() {
-  return apiRequest<{ records: V2EligibilityQueueItem[] }>('/v2/portal/eligibility-submissions');
-}
-
-export function getV2PharmacyEligibilityDetail(caseId: string) {
-  return apiRequest<Record<string, unknown>>(`/v2/portal/eligibility-submissions/${encodeURIComponent(caseId)}`);
-}
-
-export function updateV2PharmacyEligibilityReview(caseId: string, input: { expectedVersion: number; reviewStatus: string; outcomeStatus: string; notes: string | null }) {
-  return apiRequest<Record<string, unknown>>(`/v2/portal/eligibility-submissions/${encodeURIComponent(caseId)}/review`, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
 export function getDirectoryProfilesV2() {
@@ -287,10 +259,6 @@ export function createEligibilitySubmission(input: EligibilitySubmissionInput) {
   return apiRequest<EligibilitySubmissionReceipt>('/v1/public/eligibility-submissions', {
     method: 'POST', body: JSON.stringify(input),
   });
-}
-
-export function getPortalEligibilitySubmissions(organisationId: string) {
-  return apiRequest<EligibilitySubmissionRecord[]>(`/v1/portal/eligibility-submissions?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
 export function completeReferralRecordsCheck(submissionId: string, input: { organisationId: string; notes: string }) {
@@ -686,6 +654,11 @@ export function getAdminOrganisations() {
   return apiRequest<PortalOrganisation[]>('/v1/portal/admin/organisations');
 }
 
+export function getReferralLink(organisationId?: string) {
+  const query = organisationId ? `?organisationId=${encodeURIComponent(organisationId)}` : '';
+  return apiRequest<{ url: string }>(`/v1/portal/referral-link${query}`);
+}
+
 export function getAdminReferralFinance(filters: { from?: string; to?: string; organisationId?: string } = {}) {
   const query = new URLSearchParams();
   if (filters.from) query.set('from', filters.from);
@@ -758,6 +731,10 @@ export function removePharmacyStaff(uid: string) {
 
 export function getPharmacySetupStatus(organisationId: string) {
   return apiRequest<PharmacySetupStatus>(`/v1/portal/setup?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+export function getAdminPharmacySetupStatuses() {
+  return apiRequest<{ records: PharmacySetupStatus[] }>('/v1/portal/admin/setup-status');
 }
 
 export function updatePharmacySetupTask(taskId: SetupTaskId, input: UpdatePharmacySetupTaskInput) {

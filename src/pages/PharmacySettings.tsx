@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   Building2,
   CheckCircle2,
   ClipboardCheck,
@@ -10,12 +11,14 @@ import {
   FileArchive,
   Link2,
   QrCode,
+  RefreshCw,
   ShieldCheck,
   Tags,
 } from 'lucide-react';
 import { useApp, type TenantModule } from '../context/AppContext';
 import { brandSwatchStyle } from '../utils/tenantTheme';
-import { isApiConfigured, updatePaymentSettings } from '../shared/api';
+import { getCuraleafConnectionStatus, getReferralLink, isApiConfigured, updatePaymentSettings } from '../shared/api';
+import type { CuraleafConnectionStatus } from '../shared/contracts';
 import WorldpayConnectionPanel from '../components/WorldpayConnectionPanel';
 import { downloadContentPack, downloadDataUrl, eligibilityUrl, qrDataUrl } from '../utils/pharmacyResources';
 import { PharmacySetupWizard } from '../onboarding/PharmacySetupWizard';
@@ -23,7 +26,7 @@ import type { usePharmacySetup } from '../onboarding/usePharmacySetup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 
 const MODULE_LABELS: Record<TenantModule, { name: string; description: string }> = {
-  intake: { name: 'Patient onboarding', description: 'Pharmacy-attributed eligibility submissions and HHH decisions' },
+  intake: { name: 'Eligibility enquiries', description: 'Pharmacy-attributed links with all enquiry review handled by HHH admin' },
   rx: { name: 'Prescription workspace', description: 'Prescription verification and order preparation' },
   payments: { name: 'Payments', description: 'Worldpay checkout and pharmacy-managed payment records' },
   supplierOrders: { name: 'Supplier orders', description: 'Curaleaf ordering, invoices, dispatch status and pharmacy goods-in' },
@@ -40,14 +43,61 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
   const [activeTab, setActiveTab] = useState<'settings' | 'assets' | 'activation'>('settings');
   const [savingRoute, setSavingRoute] = useState(false);
   const [qr, setQr] = useState('');
+  const [formUrl, setFormUrl] = useState('');
+  const [linkLoading, setLinkLoading] = useState(true);
+  const [linkError, setLinkError] = useState('');
+  const [linkRefresh, setLinkRefresh] = useState(0);
+  const [curaleafStatus, setCuraleafStatus] = useState<CuraleafConnectionStatus | null>(null);
   const organisation = useMemo(() => state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0], [state]);
-  const formUrl = eligibilityUrl(organisation);
   const enabledModules = (Object.keys(MODULE_LABELS) as TenantModule[]).filter(key => organisation.modules[key]).length;
 
-  useEffect(() => { void qrDataUrl(organisation).then(setQr); }, [organisation]);
+  useEffect(() => {
+    let cancelled = false;
+    if (activeTab !== 'assets') {
+      setFormUrl('');
+      setQr('');
+      setLinkError('');
+      setLinkLoading(false);
+      return;
+    }
+    setFormUrl('');
+    setQr('');
+    setLinkError('');
+    setLinkLoading(true);
+    const request = isLocalPortalPreview
+      ? Promise.resolve({ url: eligibilityUrl(organisation.referralToken) })
+      : getReferralLink();
+    void request
+      .then(result => { if (!cancelled) setFormUrl(result.url); })
+      .catch(error => { if (!cancelled) setLinkError(error instanceof Error ? error.message : 'The eligibility link could not be loaded.'); })
+      .finally(() => { if (!cancelled) setLinkLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, organisation.id, organisation.referralToken, linkRefresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isLocalPortalPreview) return () => { cancelled = true; };
+    void getCuraleafConnectionStatus()
+      .then(status => { if (!cancelled) setCuraleafStatus(status); })
+      .catch(() => { if (!cancelled) setCuraleafStatus(null); });
+    return () => { cancelled = true; };
+  }, [organisation.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!formUrl) { setQr(''); return; }
+    void qrDataUrl(formUrl)
+      .then(value => { if (!cancelled) setQr(value); })
+      .catch(() => { if (!cancelled) setLinkError('The eligibility QR code could not be generated safely.'); });
+    return () => { cancelled = true; };
+  }, [formUrl]);
 
   const notify = (message: string) => dispatch({ type: 'ADD_TOAST', message, toastType: 'success' });
-  const copyLink = async () => { await navigator.clipboard.writeText(formUrl); notify('Pharmacy eligibility link copied to clipboard.'); };
+  const copyLink = async () => {
+    if (!formUrl) return;
+    await navigator.clipboard.writeText(formUrl);
+    notify('Pharmacy eligibility link copied to clipboard.');
+  };
 
   const setPaymentRoute = async (route: 'manual' | 'worldpay') => {
     if (route === 'worldpay' && organisation.worldpay.status !== 'connected') {
@@ -135,7 +185,7 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
                 <div><span>Environment</span><strong>{organisation.worldpay.environment === 'live' ? 'Live' : 'Sandbox'}</strong></div>
                 <div><span>Merchant</span><strong>{organisation.worldpay.merchantName ?? 'Not assigned'}</strong></div>
                 <div><span>Merchant ID</span><strong>{organisation.worldpay.merchantId ?? 'Pending onboarding'}</strong></div>
-                <div><span>Monthly HHH fee</span><strong>{organisation.platformFeeMonthly == null ? 'To be agreed' : `£${organisation.platformFeeMonthly.toFixed(2)}`}</strong></div>
+                <div><span>Patient payment route</span><strong>{organisation.defaultPaymentRoute === 'worldpay' ? 'Worldpay' : 'Managed by pharmacy'}</strong></div>
               </div>
             )}
 
@@ -163,7 +213,8 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
                 </div>
               </div>
               <div className="settings-meta-grid">
-                <div><span>Curaleaf connection</span><strong>Managed by HHH</strong></div>
+                <div><span>Curaleaf connection</span><strong>{curaleafStatus?.connected ? 'Connected' : curaleafStatus?.status?.replaceAll('_', ' ') ?? 'Managed by HHH'}</strong></div>
+                <div><span>Curaleaf customer ID</span><strong>{curaleafStatus?.customerId ?? 'Not assigned'}</strong></div>
                 <div><span>Dispensing charge</span><strong>£5, £10, £15 or custom</strong></div>
               </div>
               <p className="settings-copy">Curaleaf supplies patient price and wholesale cost. Your team can only add an optional dispensing charge while building an order.</p>
@@ -207,6 +258,7 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
         </div>
       ) : activeTab === 'assets' ? (
         <div className="settings-stack">
+          {linkError ? <div className="banner banner-red" role="alert"><AlertTriangle size={16} /><span>{linkError}</span><button className="btn btn-sm" type="button" onClick={() => setLinkRefresh(value => value + 1)}><RefreshCw size={14} /> Retry</button></div> : null}
           <div className="alert-success settings-assets-banner">
             <Link2 size={18} />
             <div>
@@ -224,10 +276,10 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
                 </div>
               </div>
               <p className="settings-copy">The form stays hosted by HHH. Use this URL on the pharmacy website, email, or counter materials.</p>
-              <div className="resource-url">{formUrl}</div>
+              <div className="resource-url" aria-live="polite">{linkLoading ? 'Loading the protected pharmacy link…' : formUrl || 'Link unavailable'}</div>
               <div className="settings-actions">
-                <button className="btn btn-primary" type="button" onClick={copyLink}><Copy size={14} /> Copy link</button>
-                <a className="btn btn-secondary" href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Preview form</a>
+                <button className="btn btn-primary" type="button" disabled={!formUrl} onClick={copyLink}><Copy size={14} /> Copy link</button>
+                {formUrl ? <a className="btn btn-secondary" href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Preview form</a> : <button className="btn btn-secondary" type="button" disabled><ExternalLink size={14} /> Preview form</button>}
               </div>
             </section>
 
@@ -241,7 +293,7 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
               {qr ? (
                 <img className="resource-qr" src={qr} alt={`Eligibility QR code for ${organisation.name}`} />
               ) : (
-                <div className="resource-qr-placeholder">Generating QR…</div>
+                <div className="resource-qr-placeholder">{linkError ? 'QR unavailable' : 'Generating QR…'}</div>
               )}
               <button
                 className="btn btn-primary"
@@ -266,7 +318,8 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
             <button
               className="btn btn-primary"
               type="button"
-              onClick={async () => { await downloadContentPack(organisation); notify('Developer content pack created.'); }}
+              disabled={!formUrl}
+              onClick={async () => { await downloadContentPack(organisation, formUrl); notify('Developer content pack created.'); }}
             >
               <FileArchive size={15} /> Download content pack (.zip)
             </button>

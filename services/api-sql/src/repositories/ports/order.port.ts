@@ -57,7 +57,10 @@ export interface CreateOrderInput {
 
 export interface OrderRepositoryPort {
   findDraftById(id: string, organisationId: string): Promise<OrderDraftRecord | null>;
+  listTenantDrafts(organisationId: string, limit?: number): Promise<OrderDraftRecord[]>;
   createDraft(data: { organisationId: string; patientId?: string | null; payload: unknown; createdByUid: string }): Promise<{ id?: string }>;
+  updateDraft(data: { id: string; organisationId: string; patientId?: string | null; payload: unknown }): Promise<{ id: string } | null>;
+  deleteDraft(id: string, organisationId: string): Promise<boolean>;
   findOrderById(id: string, organisationId: string): Promise<OrderRecord | null>;
   createOrder(data: CreateOrderInput): Promise<{ id?: string }>;
   listTenantOrders(organisationId: string, limit?: number): Promise<OrderRecord[]>;

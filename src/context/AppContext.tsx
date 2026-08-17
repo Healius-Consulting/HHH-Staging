@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
-import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getOrderDrafts, getPortalEligibilitySubmissions, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
+import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getOrderDrafts, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
 import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderDraftRecord, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 import { checkPatientIdentity } from '../utils/patientIdentity';
@@ -297,7 +297,6 @@ export interface PharmacyTenant {
   gdprExempt?: boolean;
   workspaceClassification?: 'standard' | 'training' | 'allocation_holding';
   staffCount: number;
-  platformFeeMonthly: number | null;
   defaultPaymentRoute: 'manual' | 'worldpay';
   brand: {
     primary: string;
@@ -414,7 +413,6 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     gphcNumber: '1099224', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'pharmacy@primarybranch.co.uk', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
     address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['primarybranch.co.uk'],
     status: 'live', staffCount: 4,
-    platformFeeMonthly: null,
     defaultPaymentRoute: 'worldpay',
     brand: { primary: '#0f766e', portalName: 'Primary Branch' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
@@ -426,7 +424,6 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     gphcNumber: '9012726', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'contact@eastwoodhealthpharmacy.co.uk', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
     address: 'Nottinghamshire, United Kingdom', websiteDomains: ['eastwoodhealthpharmacy.co.uk'],
     status: 'live', staffCount: 2,
-    platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
     brand: { primary: '#1e40af', portalName: 'Eastwood Health Pharmacy' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
@@ -440,7 +437,6 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     status: 'live', staffCount: 2,
     testAccount: true, gdprExempt: true,
     workspaceClassification: 'allocation_holding',
-    platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
     brand: { primary: '#0f766e', portalName: 'Primary Branch' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
@@ -453,7 +449,6 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     address: 'Alternate Training Branch, United Kingdom', websiteDomains: ['training-pharm2.co.uk'],
     status: 'live', staffCount: 2,
     testAccount: true, gdprExempt: true,
-    platformFeeMonthly: null,
     defaultPaymentRoute: 'manual',
     brand: { primary: '#1e40af', portalName: 'Alternate Branch' },
     modules: { intake: true, rx: true, payments: true, supplierOrders: true, patients: true, resources: true },
@@ -2133,64 +2128,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', syncVisibleOrders);
     };
   }, [state.currentOrganisationId, state.organisations, state.staffSession, state.workspaceMode]);
-
-  // Eligibility intake is HHH-admin only. Pharmacy workspaces receive a person
-  // only after HHH activates the corresponding patient record.
-  useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.portalMode !== 'admin') return;
-    let cancelled = false;
-    const sync = async () => {
-      const organisations = state.organisations;
-      try {
-        const groups = await Promise.all(organisations.map(async organisation => ({
-          organisation,
-          records: await getPortalEligibilitySubmissions(organisation.id),
-        })));
-        if (cancelled) return;
-        groups.forEach(({ organisation, records }) => records.forEach(record => dispatch({
-          type: 'ADD_SUBMISSION',
-          submission: {
-            id: record.id,
-            name: `${record.firstName} ${record.surname}`,
-            dob: record.dob,
-            mobile: record.mobile,
-            email: record.email,
-            postcode: record.postcode,
-            conditions: record.conditions,
-            primaryCondition: record.primaryCondition,
-            tried2: record.tried2,
-            psychExclusion: record.psychExclusion,
-            consentReferral: record.consentReferral,
-            consentShare: record.consentShare,
-            marketing: record.marketing,
-            source: record.source,
-            status: record.status,
-            calls: [],
-            reviewedAt: record.reviewedAt,
-            reviewedBy: record.reviewedBy ?? null,
-            reviewerDisplay: record.reviewerDisplay,
-            decisionNote: record.decisionNote ?? null,
-            pharmacyDecisionReason: record.pharmacyDecisionReason,
-            pharmacyDecisionReasonNeedsReview: record.pharmacyDecisionReasonNeedsReview,
-            recordsCheck: record.recordsCheck,
-            referral: record.referral,
-            emailDelivery: record.emailDelivery,
-            patientId: record.patientId,
-            submittedAt: new Date(record.submittedAt),
-            organisationId: record.organisationId,
-            pharmacyName: record.pharmacyName,
-            trainingSubmission: record.trainingSubmission,
-            referralToken: organisation.referralToken,
-          },
-        })));
-      } catch (error) {
-        console.warn('Eligibility API sync unavailable:', error);
-      }
-    };
-    void sync();
-    const interval = window.setInterval(() => void sync(), 15000);
-    return () => { cancelled = true; window.clearInterval(interval); };
-  }, [state.organisations, state.portalMode, state.staffSession]);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

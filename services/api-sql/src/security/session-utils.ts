@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { config } from '../bootstrap/config.js';
 
 export const SESSION_IDLE_MS = 15 * 60 * 1000; // 15 minutes
-export const SESSION_ABSOLUTE_MS = 12 * 60 * 60 * 1000; // 12 hours
+export const SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000; // 8 hours
 export const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes debounce
 
 export function sha256(value: string): string {

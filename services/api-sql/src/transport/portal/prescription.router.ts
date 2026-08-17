@@ -7,11 +7,14 @@ import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 
+const uuidLikeSchema = z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+
 const uploadTargetSchema = z.object({
+  organisationId: z.string().optional(),
   filename: z.string().min(1).max(255),
   contentType: z.enum(['application/pdf', 'image/jpeg', 'image/png']),
-  sizeBytes: z.number().int().positive().max(25 * 1024 * 1024), // max 25MB
-  patientId: z.string().uuid().optional(),
+  sizeBytes: z.number().int().positive().max(30 * 1024 * 1024), // max 30MB
+  patientId: z.union([uuidLikeSchema, z.literal(''), z.null()]).optional(),
 });
 
 export function createPortalPrescriptionRouter(): Router {
@@ -19,8 +22,8 @@ export function createPortalPrescriptionRouter(): Router {
   const prescriptionRepo = new SqlPrescriptionRepository();
   const storageProvider = new StorageProvider();
 
-  // POST /v1/portal/prescription-files/upload-target
-  router.post('/portal/prescription-files/upload-target', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+  // POST /v1/portal/prescription-files/upload-url and /upload-target
+  const createUploadTarget = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertTenantScope(req.context!);
       const input = uploadTargetSchema.parse(req.body);
@@ -37,7 +40,7 @@ export function createPortalPrescriptionRouter(): Router {
       await prescriptionRepo.createFile({
         id: fileId,
         organisationId: scope.organisationId,
-        patientId: input.patientId,
+        patientId: input.patientId || null,
         storagePath: target.storagePath,
         originalFilename: input.filename,
         contentType: input.contentType,
@@ -49,6 +52,42 @@ export function createPortalPrescriptionRouter(): Router {
     } catch (error) {
       next(error);
     }
+  };
+
+  router.post('/portal/prescription-files/upload-target', requireCsrf, requireStaff('pharmacy'), createUploadTarget);
+  router.post('/portal/prescription-files/upload-url', requireCsrf, requireStaff('pharmacy'), createUploadTarget);
+
+  // POST /v1/portal/prescription-files/:id/complete
+  router.post('/portal/prescription-files/:id/complete', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const fileId = String(req.params.id || '');
+      const fileRecord = await prescriptionRepo.findFileById(fileId, scope.organisationId);
+      if (!fileRecord) {
+        throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');
+      }
+      await prescriptionRepo.completeFile(fileId, scope.organisationId);
+      res.status(200).json({ id: fileId, status: 'completed' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // DELETE /v1/portal/prescription-files/:id
+  router.delete('/portal/prescription-files/:id', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const fileId = String(req.params.id || '');
+      const fileRecord = await prescriptionRepo.findFileById(fileId, scope.organisationId);
+      if (!fileRecord) {
+        throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');
+      }
+      await storageProvider.deleteFile(fileRecord.storagePath);
+      await prescriptionRepo.deleteFile(fileId, scope.organisationId);
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
   });
 
   // GET /v1/portal/prescription-files/:id/download-url
@@ -57,7 +96,6 @@ export function createPortalPrescriptionRouter(): Router {
       const scope = assertTenantScope(req.context!);
       const fileId = String(req.params.id || '');
 
-      // Validate tenant ownership strictly in SQL
       const fileRecord = await prescriptionRepo.findFileById(fileId, scope.organisationId);
       if (!fileRecord) {
         throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');

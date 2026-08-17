@@ -63,4 +63,14 @@ export class StorageProvider {
 
     return downloadUrl;
   }
+
+  async deleteFile(storagePath: string): Promise<void> {
+    try {
+      const bucket = this.storage.bucket(this.bucketName);
+      const file = bucket.file(storagePath);
+      await file.delete({ ignoreNotFound: true });
+    } catch (error) {
+      console.warn(`Storage delete failed for ${storagePath}:`, error);
+    }
+  }
 }

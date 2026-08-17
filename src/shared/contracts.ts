@@ -185,6 +185,8 @@ export interface CuraleafConnectionStatus {
   message?: string;
   activated?: boolean;
   maskedIdentifier?: string;
+  /** Curaleaf's non-secret customer/account identifier for the authorised pharmacy. */
+  customerId?: string;
   validation?: CuraleafValidationReport;
   sampleAvailable?: boolean;
 }
@@ -852,7 +854,6 @@ export interface UpdateOrganisationInput {
   logoText?: string;
   websiteDomains?: string[];
   status?: 'onboarding' | 'intake_live' | 'live' | 'paused';
-  platformFeeMonthly?: number | null;
   portalName?: string;
   modules?: OrganisationModules;
 }
@@ -924,6 +925,11 @@ export interface PharmacyOverview {
     status: 'onboarding' | 'intake_live' | 'live' | 'paused';
     trainingMode: boolean;
     allocationHoldingMode: boolean;
+  };
+  enquiries: {
+    pendingCount: number;
+    latestSubmittedAt: string | null;
+    state: 'none' | 'hhh_reviewing';
   };
   summary: {
     activePatients: number;
@@ -1144,7 +1150,6 @@ export interface PortalOrganisation {
   primaryColour: string;
   status: 'onboarding' | 'intake_live' | 'live' | 'paused';
   referralToken?: string;
-  platformFeeMonthly?: number | null;
   portalName?: string;
   modules?: OrganisationModules;
   worldpayEnabled?: boolean;

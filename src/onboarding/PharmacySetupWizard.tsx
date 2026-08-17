@@ -56,36 +56,14 @@ export function PharmacySetupWizard({ organisation, setup, embedded = false }: P
     <div className={`${embedded ? '' : 'page-body '}setup-page`}>
       <section className="card setup-hero">
         <div>
-          <p className="section-label">Pharmacy activation & go-live gates</p>
-          <h2>Technical Go-Live Gates & Operational Checklist</h2>
-          <p>This operational checklist supports readiness. Go-live itself is controlled in Admin by exactly two hard gates: signed company GDPR evidence and a validated branch LIVE Curaleaf key.</p>
+          <p className="section-label">Pharmacy activation & readiness</p>
+          <h2>Operational Checklist & Go-Live Readiness</h2>
+          <p>This checklist guides pharmacy setup and staff walkthroughs before receiving live patient referrals.</p>
         </div>
         <div className="setup-progress-summary" aria-label={`${status.completedCount} of ${status.requiredCount} tasks complete`}>
           <strong>{percent}%</strong><span>{status.completedCount}/{status.requiredCount} operational steps</span>
         </div>
       </section>
-
-      {/* Two authoritative Go-Live gates */}
-      <section className="card go-live-gates-banner" style={{ padding: '1.25rem', marginBottom: '1rem', background: 'var(--surface-tint, #f0fdf4)', border: '1px solid var(--border-color, #bbf7d0)' }}>
-        <h3 style={{ margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <LockKeyhole size={18} />
-          <span>2 Hard Go-Live Gates</span>
-        </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', marginTop: '0.75rem' }}>
-          <div style={{ padding: '0.75rem', background: '#fff', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
-            <small style={{ color: '#6b7280' }}>Gate 1</small>
-            <div style={{ fontWeight: 600 }}>Company GDPR Evidence</div>
-            <span className="pill pill-neutral" style={{ marginTop: '0.25rem' }}>Verified by HHH admin</span>
-          </div>
-
-          <div style={{ padding: '0.75rem', background: '#fff', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
-            <small style={{ color: '#6b7280' }}>Gate 2</small>
-            <div style={{ fontWeight: 600 }}>Branch LIVE Validation</div>
-            <span className="pill pill-neutral" style={{ marginTop: '0.25rem' }}>Verified by HHH admin</span>
-          </div>
-        </div>
-      </section>
-
 
       {error && <div className="banner banner-amber" role="status"><AlertCircle size={16} /> {error}</div>}
 

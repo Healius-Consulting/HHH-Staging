@@ -29,6 +29,23 @@ describe('validatePortalAdmission', () => {
     assert.equal(failure, null);
   });
 
+  it('approves an active admin session for a surface-neutral auth endpoint', () => {
+    const session = createSyntheticSession('test-admin-cookie', SYNTHETIC_STAFF_ADMIN);
+    const failure = validatePortalAdmission({
+      claims: {
+        ...dummyClaims,
+        uid: SYNTHETIC_STAFF_ADMIN.uid,
+        email: SYNTHETIC_STAFF_ADMIN.email,
+        role: 'hhh_admin',
+        organisationId: undefined,
+      },
+      admission: { session, staff: SYNTHETIC_STAFF_ADMIN },
+      sessionHash: session.sessionHash,
+      surface: 'any',
+    });
+    assert.equal(failure, null);
+  });
+
   it('rejects when session record is missing in SQL (SEC-01)', () => {
     const failure = validatePortalAdmission({
       claims: dummyClaims,
@@ -108,5 +125,21 @@ describe('validatePortalAdmission', () => {
     });
     assert.equal(failure?.status, 403);
     assert.equal(failure?.code, 'STAFF_SCOPE_INVALID');
+  });
+
+  it('accepts equivalent hyphenated and compact UUID tenant claims', () => {
+    const hyphenatedId = '70913a30-71c3-4a41-952e-d532927af58c';
+    const compactId = hyphenatedId.replaceAll('-', '');
+    const baseSession = createSyntheticSession('test-cookie-7', SYNTHETIC_STAFF_PHARMACY_A);
+    const failure = validatePortalAdmission({
+      claims: { ...dummyClaims, organisationId: hyphenatedId },
+      admission: {
+        staff: { ...SYNTHETIC_STAFF_PHARMACY_A, organisationId: compactId },
+        session: { ...baseSession, organisationId: compactId },
+      },
+      sessionHash: baseSession.sessionHash,
+      surface: 'pharmacy',
+    });
+    assert.equal(failure, null);
   });
 });
