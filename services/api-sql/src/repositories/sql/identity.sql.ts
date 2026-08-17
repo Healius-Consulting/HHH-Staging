@@ -6,6 +6,7 @@ import type {
   PortalAdmissionResult,
   StaffSessionRecord,
   StaffUserRecord,
+  UpsertStaffUserInput,
 } from '../ports/identity.port.js';
 
 const GET_PORTAL_ADMISSION_GQL = `
@@ -51,8 +52,70 @@ const GET_STAFF_USER_GQL = `
       invitedAt
       activatedAt
       lastSignedInAt
+      createdAt
       version
     }
+  }
+`;
+
+const LIST_PHARMACY_STAFF_BY_ORG_GQL = `
+  query ListPharmacyStaffByOrganisation($organisationId: UUID!) {
+    staffUsers(
+      where: {
+        organisationId: { eq: $organisationId }
+        role: { eq: PHARMACY_STAFF }
+        status: { ne: REMOVED }
+      }
+      orderBy: { createdAt: ASC }
+      limit: 500
+    ) {
+      uid
+      organisationId
+      email
+      displayName
+      role
+      status
+      disabled
+      createdAt
+    }
+  }
+`;
+
+const UPSERT_STAFF_USER_GQL = `
+  mutation UpsertStaffUser(
+    $uid: String!
+    $organisationId: UUID
+    $email: String!
+    $displayName: String!
+    $role: StaffRole!
+    $status: StaffStatus!
+    $disabled: Boolean!
+  ) {
+    staffUser_upsert(data: {
+      uid: $uid
+      organisationId: $organisationId
+      email: $email
+      displayName: $displayName
+      role: $role
+      status: $status
+      disabled: $disabled
+    })
+  }
+`;
+
+const UPDATE_STAFF_USER_STATUS_GQL = `
+  mutation UpdateStaffUserStatus(
+    $uid: String!
+    $status: StaffStatus!
+    $disabled: Boolean!
+  ) {
+    staffUser_update(
+      key: { uid: $uid }
+      data: {
+        status: $status
+        disabled: $disabled
+      }
+    )
   }
 `;
 
@@ -183,6 +246,26 @@ export class SqlIdentityRepository implements IdentityRepositoryPort {
       { variables: { uid } }
     );
     return result.data.staffUser ?? null;
+  }
+
+  async listPharmacyStaffByOrganisationId(organisationId: string): Promise<StaffUserRecord[]> {
+    const result = await dataConnect.executeGraphql<{ staffUsers: StaffUserRecord[] }, any>(
+      LIST_PHARMACY_STAFF_BY_ORG_GQL,
+      { variables: { organisationId } },
+    );
+    return result.data.staffUsers ?? [];
+  }
+
+  async upsertStaffUser(input: UpsertStaffUserInput): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(UPSERT_STAFF_USER_GQL, {
+      variables: input,
+    });
+  }
+
+  async updateStaffUserStatus(uid: string, status: 'INVITED' | 'ACTIVE' | 'DISABLED' | 'REMOVED', disabled: boolean): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(UPDATE_STAFF_USER_STATUS_GQL, {
+      variables: { uid, status, disabled },
+    });
   }
 
   async findStaffSession(sessionHash: string): Promise<StaffSessionRecord | null> {

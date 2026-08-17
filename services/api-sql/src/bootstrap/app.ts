@@ -17,6 +17,7 @@ import { createPortalPharmacyRouter } from '../transport/portal/pharmacy.router.
 import { createPublicPostcodeSearchRouter } from '../transport/public/postcode-search.router.js';
 import { createPublicIntakeV2Router } from '../transport/public/intake-v2.router.js';
 import { createPortalIntakeV2Router } from '../transport/portal/intake-v2.router.js';
+import { createAdminStaffRouter } from '../transport/portal/admin-staff.router.js';
 import { createAdminPatientRouter } from '../transport/portal/admin-patient.router.js';
 import { createPortalIntegrationRouter } from '../transport/portal/integration.router.js';
 import { createPortalFinanceRouter } from '../transport/portal/finance.router.js';
@@ -99,6 +100,7 @@ export function createApp(): Express {
   app.use('/v1', createPortalFulfilmentRouter());
   app.use('/v1', createPortalPharmacyRouter());
   app.use('/v1', createAdminPatientRouter());
+  app.use('/v1', createAdminStaffRouter());
   app.use('/v1', createPortalIntegrationRouter());
   app.use('/v1', createPortalFinanceRouter());
   app.use('/v2', createPublicIntakeV2Router());

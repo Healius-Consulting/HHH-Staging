@@ -10,6 +10,7 @@ export interface StaffUserRecord {
   invitedAt?: string | null;
   activatedAt?: string | null;
   lastSignedInAt?: string | null;
+  createdAt?: string | null;
   version: number;
 }
 
@@ -59,9 +60,22 @@ export interface AppendAuditInput {
   details?: unknown;
 }
 
+export interface UpsertStaffUserInput {
+  uid: string;
+  organisationId: string | null;
+  email: string;
+  displayName: string;
+  role: 'HHH_ADMIN' | 'PHARMACY_STAFF';
+  status: 'INVITED' | 'ACTIVE' | 'DISABLED' | 'REMOVED';
+  disabled: boolean;
+}
+
 export interface IdentityRepositoryPort {
   findAdmission(sessionHash: string, staffUid: string): Promise<PortalAdmissionResult>;
   findStaffUser(uid: string): Promise<StaffUserRecord | null>;
+  listPharmacyStaffByOrganisationId(organisationId: string): Promise<StaffUserRecord[]>;
+  upsertStaffUser(input: UpsertStaffUserInput): Promise<void>;
+  updateStaffUserStatus(uid: string, status: 'INVITED' | 'ACTIVE' | 'DISABLED' | 'REMOVED', disabled: boolean): Promise<void>;
   findStaffSession(sessionHash: string): Promise<StaffSessionRecord | null>;
   createSession(input: CreateSessionInput): Promise<void>;
   touchSession(sessionHash: string, lastActivityAt: string, idleExpiresAt: string): Promise<void>;

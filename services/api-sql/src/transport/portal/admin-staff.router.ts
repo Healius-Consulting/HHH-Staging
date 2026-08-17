@@ -1,0 +1,213 @@
+import { Router, type NextFunction, type Request, type Response } from 'express';
+import { z } from 'zod';
+import { auth } from '../../bootstrap/firebase.js';
+import { portalAppOrigins } from '../../bootstrap/config.js';
+import { HttpError } from '../../domain/common/errors.js';
+import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
+import { requireCsrf } from '../../security/csrf.js';
+import { assertPlatformScope } from '../../security/request-context.js';
+import { requireStaff } from '../../security/require-staff.js';
+import { resolveOwnerUid, toPortalPharmacyStaffAccounts } from './admin-staff-contracts.js';
+
+const organisationIdSchema = z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+const staffUidSchema = z.string().min(8).max(128);
+
+const inviteStaffSchema = z.object({
+  email: z.email().transform(value => value.toLowerCase()),
+  displayName: z.string().trim().min(1).max(200),
+  role: z.literal('pharmacy_staff'),
+  organisationId: organisationIdSchema.optional(),
+  pharmacyId: organisationIdSchema.optional(),
+}).strict().transform(input => {
+  const organisationId = input.organisationId ?? input.pharmacyId;
+  if (!organisationId) {
+    throw new HttpError(400, 'Select a pharmacy before inviting staff.', 'ORGANISATION_REQUIRED');
+  }
+  return {
+    email: input.email,
+    displayName: input.displayName,
+    organisationId,
+  };
+});
+
+function portalAppOrigin() {
+  for (const origin of portalAppOrigins) {
+    if (origin.includes('portal.')) return origin;
+  }
+  return 'https://portal.holistichealthhub.cc';
+}
+
+function firstPartyPasswordResetLink(firebaseLink: string, appOrigin: string) {
+  const source = new URL(firebaseLink);
+  const destination = new URL('/reset-password', appOrigin);
+  for (const key of ['oobCode', 'apiKey', 'lang']) {
+    const value = source.searchParams.get(key);
+    if (value) destination.searchParams.set(key, value);
+  }
+  return destination.toString();
+}
+
+function firebaseAuthErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = error as { code?: unknown; errorInfo?: { code?: unknown } };
+  return typeof candidate.code === 'string'
+    ? candidate.code
+    : typeof candidate.errorInfo?.code === 'string'
+      ? candidate.errorInfo.code
+      : null;
+}
+
+export function createAdminStaffRouter(): Router {
+  const router = Router();
+  const identityRepo = new SqlIdentityRepository();
+  const organisationRepo = new SqlOrganisationRepository();
+
+  router.get('/portal/admin/staff', requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      assertPlatformScope(req.context!);
+      const organisationId = organisationIdSchema.parse(req.query.organisationId);
+      const organisation = await organisationRepo.findOrganisationById(organisationId);
+      if (!organisation) {
+        throw new HttpError(404, 'Pharmacy account not found.', 'NOT_FOUND');
+      }
+      const staff = await identityRepo.listPharmacyStaffByOrganisationId(organisationId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json(toPortalPharmacyStaffAccounts(organisationId, staff));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/portal/admin/staff/invitations', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const input = inviteStaffSchema.parse(req.body);
+      const organisation = await organisationRepo.findOrganisationById(input.organisationId);
+      if (!organisation) {
+        throw new HttpError(404, 'Pharmacy account not found.', 'NOT_FOUND');
+      }
+
+      let user;
+      let existingProfile = null;
+      try {
+        user = await auth.createUser({
+          email: input.email,
+          displayName: input.displayName,
+          emailVerified: false,
+          disabled: false,
+        });
+      } catch (error) {
+        if (firebaseAuthErrorCode(error) !== 'auth/email-already-exists') throw error;
+        user = await auth.getUserByEmail(input.email);
+        existingProfile = await identityRepo.findStaffUser(user.uid);
+        const existingRole = existingProfile?.role ?? (typeof user.customClaims?.role === 'string' ? user.customClaims.role.toUpperCase() : null);
+        const existingOrganisationId = existingProfile?.organisationId ?? (typeof user.customClaims?.organisationId === 'string' ? user.customClaims.organisationId : null);
+        if (existingRole !== 'PHARMACY_STAFF' || existingOrganisationId !== input.organisationId) {
+          throw new HttpError(409, 'This email address already belongs to a different HHH account.', 'EMAIL_ALREADY_IN_USE');
+        }
+        if (existingProfile?.status === 'ACTIVE') {
+          throw new HttpError(409, 'This staff account is already active. Use password reset if they cannot sign in.', 'STAFF_ALREADY_ACTIVE');
+        }
+      }
+
+      await auth.setCustomUserClaims(user.uid, {
+        role: 'pharmacy_staff',
+        organisationId: input.organisationId,
+      });
+
+      const existingStaff = await identityRepo.listPharmacyStaffByOrganisationId(input.organisationId);
+      const contactRole = existingStaff.length === 0 ? 'owner' : 'staff';
+      const createdAt = existingProfile?.createdAt ?? new Date().toISOString();
+
+      await identityRepo.upsertStaffUser({
+        uid: user.uid,
+        organisationId: input.organisationId,
+        email: input.email,
+        displayName: input.displayName,
+        role: 'PHARMACY_STAFF',
+        status: 'INVITED',
+        disabled: false,
+      });
+
+      const firebaseLink = await auth.generatePasswordResetLink(input.email, {
+        url: new URL('/reset-password', portalAppOrigin()).toString(),
+        handleCodeInApp: true,
+      });
+      const actionLink = firstPartyPasswordResetLink(firebaseLink, portalAppOrigin());
+
+      await identityRepo.appendAudit({
+        organisationId: input.organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'staff.invited',
+        recordType: 'StaffUser',
+        recordId: user.uid,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+        details: { role: 'pharmacy_staff', contactRole, deliveryMode: 'firebase_client' },
+      });
+
+      res.status(201).json({
+        uid: user.uid,
+        email: input.email,
+        displayName: input.displayName,
+        role: 'pharmacy_staff',
+        pharmacyId: input.organisationId,
+        organisationId: input.organisationId,
+        contactRole,
+        status: 'invited',
+        createdAt,
+        invitationQueued: false,
+        actionLink,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.delete('/portal/admin/staff/:uid', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const uid = staffUidSchema.parse(req.params.uid);
+      const profile = await identityRepo.findStaffUser(uid);
+      if (!profile || profile.role !== 'PHARMACY_STAFF' || !profile.organisationId) {
+        throw new HttpError(404, 'Staff account not found.', 'STAFF_NOT_FOUND');
+      }
+      const organisation = await organisationRepo.findOrganisationById(profile.organisationId);
+      if (!organisation) {
+        throw new HttpError(404, 'Pharmacy account not found.', 'NOT_FOUND');
+      }
+
+      const activeStaff = await identityRepo.listPharmacyStaffByOrganisationId(profile.organisationId);
+      const ownerUid = resolveOwnerUid(activeStaff);
+      if (profile.uid === ownerUid) {
+        throw new HttpError(409, 'The pharmacy owner account cannot be removed.', 'OWNER_ACCOUNT_PROTECTED');
+      }
+
+      await auth.updateUser(uid, { disabled: true });
+      await auth.revokeRefreshTokens(uid);
+      await identityRepo.updateStaffUserStatus(uid, 'REMOVED', true);
+
+      await identityRepo.appendAudit({
+        organisationId: profile.organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'staff.removed',
+        recordType: 'StaffUser',
+        recordId: uid,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+        details: { retainedForAudit: true },
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  return router;
+}
