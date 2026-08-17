@@ -225,5 +225,133 @@ export function createPortalOrderRouter(): Router {
     }
   });
 
+  // POST /v1/portal/orders/:id/prescriptions/:prescriptionId/place - Place prescription manually
+  router.post('/portal/orders/:id/prescriptions/:prescriptionId/place', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const prescriptionId = String(req.params.prescriptionId || '');
+
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) {
+        throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      }
+
+      await orderRepo.updateOrderStatus({
+        id: orderId,
+        organisationId: scope.organisationId,
+        status: 'PROCESSING',
+        fulfilmentStatus: 'SUPPLIER_PROCESSING',
+      });
+
+      await orderRepo.appendPlacementEvent({
+        organisationId: scope.organisationId,
+        orderId,
+        orderLineId: prescriptionId,
+        fromState: 'SUPPLIER_PENDING',
+        toState: 'SUPPLIER_PROCESSING',
+        reason: 'Prescription placed manually with Curaleaf / pharmacy dispensing',
+        actorUid: scope.uid,
+      });
+
+      res.status(200).json({ success: true, status: 'placed_manually' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /v1/portal/orders/:id/curaleaf-cancellation - Record Curaleaf order cancellation
+  router.post('/portal/orders/:id/curaleaf-cancellation', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const input = z.object({
+        organisationId: z.string().optional(),
+        reason: z.string().min(1).max(255),
+        note: z.string().max(1000).optional(),
+      }).parse(req.body);
+
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) {
+        throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      }
+
+      const now = new Date().toISOString();
+      await orderRepo.updateOrderStatus({
+        id: orderId,
+        organisationId: scope.organisationId,
+        status: 'CANCELLED',
+        cancelledAt: now,
+      });
+
+      await orderRepo.appendPlacementEvent({
+        organisationId: scope.organisationId,
+        orderId,
+        fromState: order.status,
+        toState: 'CANCELLED',
+        reason: `Cancelled: ${input.reason}${input.note ? ` (${input.note})` : ''}`,
+        actorUid: scope.uid,
+      });
+
+      res.status(200).json({ id: orderId, status: 'CANCELLED', cancelledAt: now });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /v1/portal/orders/:id/curaleaf-rejections - Record Curaleaf rejection and support case
+  router.post('/portal/orders/:id/curaleaf-rejections', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const input = z.object({
+        organisationId: z.string().optional(),
+        prescriptionId: z.string(),
+        reason: z.string(),
+        rejectedAt: z.string().optional(),
+        supportCaseId: z.string().optional(),
+      }).parse(req.body);
+
+      const supportCaseId = input.supportCaseId || `case-${Date.now().toString(36)}`;
+      await orderRepo.appendPlacementEvent({
+        organisationId: scope.organisationId,
+        orderId,
+        orderLineId: input.prescriptionId,
+        fromState: 'SUPPLIER_PROCESSING',
+        toState: 'EXCEPTION',
+        reason: `Curaleaf rejected: ${input.reason} [Support case: ${supportCaseId}]`,
+        actorUid: scope.uid,
+      });
+
+      res.status(200).json({ id: crypto.randomUUID(), supportCaseId });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // GET /v1/portal/curaleaf/support-cases
+  router.get('/portal/curaleaf/support-cases', requireStaff('pharmacy'), async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.status(200).json([]);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /v1/portal/curaleaf/support-cases
+  router.post('/portal/curaleaf/support-cases', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = req.body;
+      res.status(201).json({
+        id: `case-${Date.now().toString(36)}`,
+        status: 'open',
+        ...input,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
 }

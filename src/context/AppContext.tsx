@@ -1271,16 +1271,24 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, crm: [...byId.values()] };
     }
     case 'SYNC_PORTAL_ORDERS': {
-      const previousActive = state.orders.find(order => order.id === state.activeOrderId);
-      const retained = state.orders.filter(order => order.organisationId !== action.organisationId || order.payment.status === 'none' && !order.draftId);
-      const orders = [...retained, ...action.orders];
+      const previousActive = state.orders.find(order => order.id === state.activeOrderId && order.payment.status === 'none');
+      const incomingPersisted = action.orders.filter(order => order.payment.status !== 'none');
+      const incomingDrafts = action.orders.filter(order => order.payment.status === 'none');
+      
+      // Preserve the user's in-progress active draft without overwriting it with stale server snapshots
+      const preservedDrafts = previousActive
+        ? incomingDrafts.map(draft => (draft.draftId && draft.draftId === previousActive.draftId) || draft.id === previousActive.id ? previousActive : draft)
+        : incomingDrafts;
+
+      if (previousActive && !preservedDrafts.some(draft => draft.id === previousActive.id || (previousActive.draftId && draft.draftId === previousActive.draftId))) {
+        preservedDrafts.unshift(previousActive);
+      }
+
+      const retainedOtherOrgs = state.orders.filter(order => order.organisationId !== action.organisationId);
+      const orders = [...retainedOtherOrgs, ...incomingPersisted, ...preservedDrafts];
       const nextOrderId = Math.max(state.nextIds.order, ...orders.map(order => order.id + 1));
       const nextRxId = Math.max(state.nextIds.rx, ...orders.flatMap(order => order.prescriptions.map(rx => rx.id + 1)));
-      const rehydratedActive = previousActive?.draftId
-        ? orders.find(order => order.draftId === previousActive.draftId && order.payment.status === 'none')
-        : null;
-      const existingActive = orders.find(order => order.id === state.activeOrderId && order.payment.status === 'none');
-      const activeOrderId = rehydratedActive?.id ?? existingActive?.id ?? action.preferredActiveOrderId ?? null;
+      const activeOrderId = previousActive?.id ?? state.activeOrderId ?? action.preferredActiveOrderId ?? null;
       return { ...state, orders, activeOrderId, nextIds: { ...state.nextIds, order: nextOrderId, rx: nextRxId } };
     }
     case 'LOG_INTERACTION': {

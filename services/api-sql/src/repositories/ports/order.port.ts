@@ -63,6 +63,15 @@ export interface OrderRepositoryPort {
   deleteDraft(id: string, organisationId: string): Promise<boolean>;
   findOrderById(id: string, organisationId: string): Promise<OrderRecord | null>;
   createOrder(data: CreateOrderInput): Promise<{ id?: string }>;
+  updateOrderStatus(data: {
+    id: string;
+    organisationId: string;
+    status?: 'DRAFT' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
+    paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
+    fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'DISPATCHED_TO_PHARMACY' | 'RECEIVED' | 'COLLECTED';
+    paidAt?: string | null;
+    cancelledAt?: string | null;
+  }): Promise<boolean>;
   listTenantOrders(organisationId: string, limit?: number): Promise<OrderRecord[]>;
   appendPlacementEvent(data: {
     organisationId: string;

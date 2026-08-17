@@ -97,19 +97,23 @@ export default function CreateOrder() {
   }, [activeOrder?.id, activeOrder?.payment.status, activeOrder?.paymentRoute, canUseWorldpay, dispatch]);
 
   useEffect(() => {
-    if (!durableDraftEnabled || !activeOrder || activeOrder.draftId) return;
+    if (!durableDraftEnabled || !activeOrder || activeOrder.draftId || checkoutBusy) return;
     void ensureDurableDraft(activeOrder, durableDraftPayload ?? {})
-      .catch(error => dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? `Draft autosave unavailable: ${error.message}` : 'Draft autosave is unavailable.', toastType: 'warning' }))
-  }, [activeOrder, dispatch, durableDraftEnabled, durableDraftPayload, ensureDurableDraft]);
+      .catch(error => {
+        if (!checkoutBusy) console.warn('Draft autosave:', error);
+      });
+  }, [activeOrder, checkoutBusy, durableDraftEnabled, durableDraftPayload, ensureDurableDraft]);
 
   useEffect(() => {
-    if (!durableDraftEnabled || !activeOrder?.draftId || !durableDraftPayload || uploadingRxId !== null || fileRemovalBusyRxId !== null) return;
+    if (!durableDraftEnabled || !activeOrder?.draftId || !durableDraftPayload || uploadingRxId !== null || fileRemovalBusyRxId !== null || checkoutBusy) return;
     const timer = window.setTimeout(() => {
       void updateOrderDraft(activeOrder.draftId!, { organisationId: state.currentOrganisationId, patientId: activeOrder.patientId, payload: durableDraftPayload })
-        .catch(error => dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? `Draft autosave unavailable: ${error.message}` : 'Draft autosave is unavailable.', toastType: 'warning' }));
+        .catch(error => {
+          if (!checkoutBusy) console.warn('Draft autosave update:', error);
+        });
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [activeOrder?.draftId, activeOrder?.patientId, dispatch, durableDraftEnabled, durableDraftPayload, durableDraftSignature, fileRemovalBusyRxId, state.currentOrganisationId, uploadingRxId]);
+  }, [activeOrder?.draftId, activeOrder?.patientId, checkoutBusy, durableDraftEnabled, durableDraftPayload, durableDraftSignature, fileRemovalBusyRxId, state.currentOrganisationId, uploadingRxId]);
 
   useEffect(() => {
     if (!activeOrder?.prescriptions.length) return setSelectedRxId(null);
@@ -194,7 +198,7 @@ export default function CreateOrder() {
   const prescriptionReady = readiness.every(item => item.complete);
   const wholesaleKnown = Boolean(activeOrder?.prescriptions.every(rx => rx.items.every(item => item.cost !== null)));
   const orderMargin = activeOrder && wholesaleKnown
-    ? marginPct(orderCost(activeOrder), orderRevenue(activeOrder) - activeOrder.dispensingFee)
+    ? marginPct(orderCost(activeOrder), orderRevenue(activeOrder))
     : null;
   const currentQuoteItems = activeOrder?.prescriptions.flatMap(rx => rx.items.map(item => ({ packId: item.productId, quantity: item.qty }))) ?? [];
   const currentQuoteSignature = JSON.stringify(currentQuoteItems.slice().sort((a, b) => a.packId.localeCompare(b.packId)));
@@ -1165,7 +1169,7 @@ export default function CreateOrder() {
                   <div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div>
                   <div><dt>Wholesale Total (excl VAT)</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div>
                   <div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div>
-                  <div><dt>gross margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${money(orderRevenue(activeOrder) - activeOrder.dispensingFee - orderCost(activeOrder))} · ${orderMargin}%`}</dd></div>
+                  <div><dt>gross margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${money(orderRevenue(activeOrder) - orderCost(activeOrder))} · ${orderMargin}%`}</dd></div>
                 </dl>
                 <div className={`rx-checkout-readiness${quoteError ? ' has-error' : ''}`}>
                   <span className="section-label">{state.workspaceMode === 'training' ? 'Curaleaf test quote' : 'Live Curaleaf quote'}</span>

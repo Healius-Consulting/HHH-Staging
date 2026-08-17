@@ -169,6 +169,29 @@ const CREATE_ORDER_GQL = `
   }
 `;
 
+const UPDATE_ORDER_STATUS_GQL = `
+  mutation UpdateOrderStatus(
+    $id: UUID!
+    $status: OrderStatus
+    $paymentStatus: PaymentStatus
+    $fulfilmentStatus: FulfilmentStatus
+    $paidAt: Timestamp
+    $cancelledAt: Timestamp
+  ) {
+    order_update(
+      key: { id: $id }
+      data: {
+        status: $status
+        paymentStatus: $paymentStatus
+        fulfilmentStatus: $fulfilmentStatus
+        paidAt: $paidAt
+        cancelledAt: $cancelledAt
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
 const LIST_TENANT_ORDERS_GQL = `
   query ListTenantOrders($organisationId: UUID!, $limit: Int!) {
     orders(
@@ -335,6 +358,33 @@ export class SqlOrderRepository implements OrderRepositoryPort {
       { variables: { organisationId, limit } }
     );
     return result.data.orders ?? [];
+  }
+
+  async updateOrderStatus(data: {
+    id: string;
+    organisationId: string;
+    status?: 'DRAFT' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
+    paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
+    fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'DISPATCHED_TO_PHARMACY' | 'RECEIVED' | 'COLLECTED';
+    paidAt?: string | null;
+    cancelledAt?: string | null;
+  }): Promise<boolean> {
+    const existing = await this.findOrderById(data.id, data.organisationId);
+    if (!existing) return false;
+    await dataConnect.executeGraphql<any, any>(
+      UPDATE_ORDER_STATUS_GQL,
+      {
+        variables: {
+          id: data.id,
+          status: data.status ?? null,
+          paymentStatus: data.paymentStatus ?? null,
+          fulfilmentStatus: data.fulfilmentStatus ?? null,
+          paidAt: data.paidAt ?? null,
+          cancelledAt: data.cancelledAt ?? null,
+        },
+      }
+    );
+    return true;
   }
 
   async appendPlacementEvent(data: {
