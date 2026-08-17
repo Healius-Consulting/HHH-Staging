@@ -12090,7 +12090,8 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   gap: 8px;
 }
 .order-ready-control{ display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border-top: 1px solid color-mix(in srgb, var(--color-success) 28%, var(--border)); background: color-mix(in srgb, var(--color-success) 6%, var(--bg-surface)); }
-.order-ready-control > span{ display: flex; min-width: 0; align-items: flex-start; gap: 8px; color: var(--color-success); }
+.order-ready-control--hint{ border-top-color: color-mix(in srgb, var(--tenant-primary) 25%, var(--border)); background: color-mix(in srgb, var(--tenant-primary) 5%, var(--bg-surface)); }
+.order-ready-control--hint > span{ color: var(--tenant-primary); }
 .order-ready-control strong, .order-ready-control small, .order-ready-confirmed strong, .order-ready-confirmed small{ display: block; }
 .order-ready-control strong, .order-ready-confirmed strong{ color: var(--text-primary); font-size: 10px; }
 .order-ready-control small, .order-ready-confirmed small{ margin-top: 2px; color: var(--text-secondary); font-size: 9px; line-height: 1.4; }

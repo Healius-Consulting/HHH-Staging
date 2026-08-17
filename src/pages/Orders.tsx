@@ -1166,7 +1166,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   const readyArrivedPacks = order.prescriptions.reduce((sum, prescription) =>
     sum + (prescription.fulfilmentLines ?? []).reduce((lineSum, line) => lineSum + Math.max(0, line.received - line.collected), 0), 0);
   const canFullHandout = stage === 'ready' && !remainingOpen;
-  const canPartialHandout = readyArrivedPacks > 0 && remainingOpen && ['delivered', 'ready'].includes(stage);
+  const canPartialHandout = readyArrivedPacks > 0 && remainingOpen && ['dispatched', 'delivered', 'ready'].includes(stage);
 
   const handleCopy = (key: string, text: string) => {
     void navigator.clipboard.writeText(text);
@@ -1926,16 +1926,24 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
     if (!selectedShipmentId || !shipmentIds.includes(selectedShipmentId)) setSelectedShipmentId(shipmentIds.find(id => prescription.shipmentStates?.[id] !== 'collected') ?? shipmentIds[0] ?? '');
   }, [prescription.shipmentStates, selectedShipmentId, shipmentIds]);
   const selectedShipmentState = selectedShipmentId ? prescription.shipmentStates?.[selectedShipmentId] : undefined;
-  const statusLabel = ({ draft: 'Draft', 'awaiting-approval': 'Curaleaf review', processing: 'Processing', approved: 'Approved', dispatched: prescription.dispatchStatus === 'partial' ? 'Partially dispatched' : 'Dispatched', 'partially-received': 'Part delivered', received: 'Delivered', ready: 'Ready to collect', collected: 'Collected', cancelled: 'Cancelled purchase order' } as const)[prescription.status];
+  const baseStatusLabel = ({ draft: 'Draft', 'awaiting-approval': 'Curaleaf review', processing: 'Processing', approved: 'Approved', dispatched: prescription.dispatchStatus === 'partial' ? 'Partially dispatched' : 'Dispatched', 'partially-received': 'Part delivered', received: 'Delivered', ready: 'Ready to collect', collected: 'Collected', cancelled: 'Cancelled purchase order' } as const)[prescription.status];
+  const totalReceivedPacks = (prescription.fulfilmentLines ?? []).reduce((sum, line) => sum + (line.received ?? 0), 0);
+  const totalShippedPacks = (prescription.fulfilmentLines ?? []).reduce((sum, line) => sum + (line.shipped ?? 0), 0);
+  const arrivedNotCollectedPacks = (prescription.fulfilmentLines ?? []).reduce((sum, line) => sum + Math.max(0, (line.received ?? 0) - (line.collected ?? 0)), 0);
+  const hasCheckedInPacks = totalReceivedPacks > 0;
+  const hasShippedNotCheckedIn = totalShippedPacks > totalReceivedPacks;
+  const statusLabel = prescription.status === 'partially-received' && !hasCheckedInPacks && totalShippedPacks > 0
+    ? (prescription.dispatchStatus === 'partial' ? 'Partially dispatched' : 'In transit')
+    : baseStatusLabel;
 
   const remainingOpen = (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered);
   const isCollected = !remainingOpen && prescription.status === 'collected';
   const selectedConsignmentCollected = selectedShipmentState === 'collected';
   const selectedConsignmentReady = selectedShipmentState === 'ready_for_collection';
-  const selectedConsignmentReceived = selectedShipmentState === 'received' || selectedConsignmentReady || selectedConsignmentCollected;
+  const selectedConsignmentReceived = (selectedShipmentState === 'received' || selectedConsignmentReady || selectedConsignmentCollected) && hasCheckedInPacks;
   const isReady = !isCollected && (prescription.status === 'ready' || selectedConsignmentReady);
-  const isDelivered = !isCollected && !isReady && (prescription.status === 'received' || selectedConsignmentReceived);
-  const isPartiallyDelivered = !isCollected && (prescription.status === 'partially-received' || selectedShipmentState === 'partially_received' || (remainingOpen && (prescription.receivedItems?.some(item => item.quantityReceived > 0) || (prescription.fulfilmentLines ?? []).some(line => line.received > 0))));
+  const isDelivered = !isCollected && !isReady && (prescription.status === 'received' || selectedConsignmentReceived || (hasCheckedInPacks && prescription.status === 'partially-received'));
+  const isPartiallyDelivered = !isCollected && hasCheckedInPacks && (prescription.status === 'partially-received' || selectedShipmentState === 'partially_received' || (remainingOpen && (prescription.receivedItems?.some(item => item.quantityReceived > 0) || (prescription.fulfilmentLines ?? []).some(line => line.received > 0))));
 
   const selectedConsignment = selectedShipmentId
     ? prescription.shipments?.find(shipment => shipment.id === selectedShipmentId)
@@ -1949,8 +1957,9 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   const totalConsignmentPacks = prescription.items.reduce((sum, item) => sum + consignmentPacksFor(item.productId), 0);
   const consignmentHasShippedPacks = totalConsignmentPacks > 0;
 
-  const isDispatchedPhase = consignmentHasShippedPacks && (
+  const isDispatchedPhase = (consignmentHasShippedPacks || totalShippedPacks > 0 || prescription.dispatchStatus === 'partial' || prescription.dispatchStatus === 'dispatched') && (
     prescription.status === 'dispatched'
+    || prescription.status === 'partially-received'
     || prescription.dispatchStatus === 'dispatched'
     || prescription.dispatchStatus === 'partial'
     || Boolean(selectedShipmentId)
@@ -1958,16 +1967,14 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   );
 
   const receiving = prescription.placed
-    && consignmentHasShippedPacks
     && !selectedConsignmentCollected
-    && !selectedConsignmentReady
-    && !selectedConsignmentReceived
+    && hasShippedNotCheckedIn
     && isDispatchedPhase;
 
   const readyControl = isDelivered && !remainingOpen;
   const partialReadyControl = (isPartiallyDelivered || (isDelivered && remainingOpen)) && !selectedConsignmentReady && !selectedConsignmentCollected;
   const partialHandoutControl = remainingOpen
-    && (prescription.fulfilmentLines ?? []).some(line => line.received > line.collected)
+    && arrivedNotCollectedPacks > 0
     && (isPartiallyDelivered || isDelivered || isReady || selectedConsignmentReady || selectedConsignmentReceived);
   const fullHandoutControl = (prescription.status === 'ready' || selectedConsignmentReady) && !remainingOpen;
   const collectionControl = isReady && !remainingOpen;
@@ -2111,6 +2118,8 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                     ? 'Delivered to Pharmacy — Checked In'
                     : isPartiallyDelivered
                       ? 'Partial check-in — remainder open with Curaleaf'
+                      : hasShippedNotCheckedIn && prescription.dispatchStatus === 'partial'
+                        ? 'Partial dispatch — check in arriving consignment'
                       : isDelivered || isReady
                         ? 'Arrived consignment checked in'
                         : prescription.dispatchStatus === 'complete'
@@ -2308,6 +2317,17 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
               </div>
             </div>
           ) : null}
+          {!receiving && !partialReadyControl && !readyControl && !partialHandoutControl && !fullHandoutControl && !collectionControl && hasShippedNotCheckedIn ? (
+            <div className="order-ready-control order-ready-control--hint">
+              <span>
+                <PackageCheck size={16} style={{ color: 'var(--tenant-primary)' }} />
+                <span>
+                  <strong>Check in arriving packs before partial handover</strong>
+                  <small>{totalShippedPacks - totalReceivedPacks} pack(s) dispatched from Curaleaf are not checked in yet. Accept delivery below when the consignment arrives, then mark ready and hand over partial quantity.</small>
+                </span>
+              </span>
+            </div>
+          ) : null}
           {partialReadyControl ? (
             <div className="order-ready-control" style={{ background: 'color-mix(in srgb, #f59e0b 8%, var(--bg-surface))', borderColor: 'color-mix(in srgb, #f59e0b 30%, var(--border))' }}>
               <span>
@@ -2346,7 +2366,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 </span>
               </span>
               <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onOpenHandout(true, selectedShipmentId || undefined)}>
-                <Check size={13} /> Hand over partial ({(prescription.fulfilmentLines ?? []).reduce((sum, line) => sum + Math.max(0, line.received - line.collected), 0)} pk)
+                <Check size={13} /> Hand over partial ({arrivedNotCollectedPacks} pk)
               </button>
             </div>
           ) : null}
