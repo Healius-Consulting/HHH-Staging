@@ -25,13 +25,14 @@ export function isOriginPermitted(origin: string | undefined): boolean {
   if (portalAppOrigins.has(origin)) return true;
   try {
     const url = new URL(origin);
-    if (url.hostname.endsWith('.vercel.app')) return true;
-    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    const host = url.hostname.toLowerCase();
+    if (host.endsWith('.vercel.app')) return true;
+    if (host === 'localhost' || host === '127.0.0.1') return true;
     if (
-      url.hostname.endsWith('.holistichealthhub.cc') ||
-      url.hostname.endsWith('.holistichealthhub.live') ||
-      url.hostname.endsWith('.holistichealthhub.co.uk') ||
-      url.hostname.endsWith('.thinktimeless.co.uk')
+      host === 'holistichealthhub.cc' || host.endsWith('.holistichealthhub.cc') ||
+      host === 'holistichealthhub.live' || host.endsWith('.holistichealthhub.live') ||
+      host === 'holistichealthhub.co.uk' || host.endsWith('.holistichealthhub.co.uk') ||
+      host === 'thinktimeless.co.uk' || host.endsWith('.thinktimeless.co.uk')
     ) return true;
   } catch {
     return false;
@@ -58,6 +59,21 @@ export function createApp(): Express {
       }
     },
     credentials: true,
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-CSRF-Token',
+      'x-csrf-token',
+      'X-Request-ID',
+      'x-request-id',
+      'X-Surface',
+      'x-surface',
+      'Accept',
+      'Origin',
+      'Cookie',
+      'X-Requested-With',
+    ],
+    exposedHeaders: ['X-Request-ID', 'x-request-id', 'X-CSRF-Token', 'x-csrf-token'],
   }));
 
   app.use((req: Request, res: Response, next: NextFunction) => {

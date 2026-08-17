@@ -33,13 +33,14 @@ export function isOriginAllowed(request: Request): boolean {
     const origin = new URL(source).origin;
     if (portalAppOrigins.has(origin)) return true;
     const url = new URL(origin);
-    if (url.hostname.endsWith('.vercel.app')) return true;
-    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    const host = url.hostname.toLowerCase();
+    if (host.endsWith('.vercel.app')) return true;
+    if (host === 'localhost' || host === '127.0.0.1') return true;
     if (
-      url.hostname.endsWith('.holistichealthhub.cc') ||
-      url.hostname.endsWith('.holistichealthhub.live') ||
-      url.hostname.endsWith('.holistichealthhub.co.uk') ||
-      url.hostname.endsWith('.thinktimeless.co.uk')
+      host === 'holistichealthhub.cc' || host.endsWith('.holistichealthhub.cc') ||
+      host === 'holistichealthhub.live' || host.endsWith('.holistichealthhub.live') ||
+      host === 'holistichealthhub.co.uk' || host.endsWith('.holistichealthhub.co.uk') ||
+      host === 'thinktimeless.co.uk' || host.endsWith('.thinktimeless.co.uk')
     ) return true;
     return false;
   } catch {
