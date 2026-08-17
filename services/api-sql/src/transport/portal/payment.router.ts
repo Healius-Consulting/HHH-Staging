@@ -113,9 +113,8 @@ export function createPortalPaymentRouter(): Router {
       const connection = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY').catch(() => null);
       const transactionReference = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-      const origin = req.get('origin') || `https://${req.get('host') || 'portal.holistichealthhub.cc'}`;
-      const successUrl = `${origin}/orders?paid=${encodeURIComponent(transactionReference)}`;
-      const cancelUrl = `${origin}/orders?cancelled=${encodeURIComponent(transactionReference)}`;
+      const successUrl = `https://holistichealthhub.cc/payment/success?ref=${encodeURIComponent(transactionReference)}`;
+      const cancelUrl = `https://holistichealthhub.cc/payment/cancelled?ref=${encodeURIComponent(transactionReference)}`;
 
       const session = await createWorldpayHostedSession(connection, scope.organisationId, {
         orderNumber: order.orderNumber || orderId,
@@ -171,9 +170,8 @@ export function createPortalPaymentRouter(): Router {
 
       const connection = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY').catch(() => null);
       const transactionReference = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      const origin = req.get('origin') || `https://${req.get('host') || 'portal.holistichealthhub.cc'}`;
-      const successUrl = `${origin}/orders?paid=${encodeURIComponent(transactionReference)}`;
-      const cancelUrl = `${origin}/orders?cancelled=${encodeURIComponent(transactionReference)}`;
+      const successUrl = `https://holistichealthhub.cc/payment/success?ref=${encodeURIComponent(transactionReference)}`;
+      const cancelUrl = `https://holistichealthhub.cc/payment/cancelled?ref=${encodeURIComponent(transactionReference)}`;
 
       const session = await createWorldpayHostedSession(connection, scope.organisationId, {
         orderNumber: order.orderNumber || orderId,
