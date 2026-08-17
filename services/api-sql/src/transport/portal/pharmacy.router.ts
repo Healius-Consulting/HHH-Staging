@@ -6,7 +6,7 @@ import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
-import { buildSqlPharmacyOverview, toPortalPatient } from './pharmacy-contracts.js';
+import { buildPharmacyPatientDirectory, buildSqlPharmacyOverview, toPortalPatient, toPortalPendingEnquiry } from './pharmacy-contracts.js';
 
 export function createPortalPharmacyRouter(): Router {
   const router = Router();
@@ -15,11 +15,36 @@ export function createPortalPharmacyRouter(): Router {
   const organisationRepo = new SqlOrganisationRepository();
   const intakeRepo = new SqlIntakeRepository();
 
+  router.get('/portal/patient-directory', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const [patients, pendingEnquiries] = await Promise.all([
+        patientRepo.listTenantPatients(scope.organisationId),
+        intakeRepo.listTenantPendingEnquiries(scope.organisationId),
+      ]);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.status(200).json(buildPharmacyPatientDirectory({ patients, pendingEnquiries }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/portal/patients', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertTenantScope(req.context!);
       const patients = await patientRepo.listTenantPatients(scope.organisationId);
       res.status(200).json(patients.map(toPortalPatient));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/portal/enquiries', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const pendingEnquiries = await intakeRepo.listTenantPendingEnquiries(scope.organisationId);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.status(200).json(pendingEnquiries.map(toPortalPendingEnquiry));
     } catch (error) {
       next(error);
     }

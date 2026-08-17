@@ -1,3 +1,16 @@
+export interface PatientConditionRecord {
+  conditionCode: string;
+  primary: boolean;
+}
+
+export interface PatientSourceSubmissionRecord {
+  sourceType: 'GENERAL_HHH_WEBSITE' | 'PHARMACY_QR' | 'LEGACY_PHARMACY_QR';
+  triedTwoTreatments: boolean;
+  psychiatricExclusion: boolean;
+  heardAbout: string | null;
+  marketingConsent: boolean;
+}
+
 export interface PatientRecord {
   id: string;
   organisationId: string;
@@ -15,6 +28,8 @@ export interface PatientRecord {
   version: number;
   createdAt: string;
   updatedAt: string;
+  conditions: PatientConditionRecord[];
+  sourceSubmission: PatientSourceSubmissionRecord | null;
 }
 
 export interface PatientRepositoryPort {

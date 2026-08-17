@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
-import { Activity, AlertTriangle, ArrowLeft, Building2, CalendarDays, FileText, Hash, Mail, MapPin, Phone, Search, ChevronRight, Plus, Users, Package, CheckCircle, HeartPulse, Route } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, CalendarDays, FileText, Inbox, Mail, MapPin, Phone, Search, ChevronRight, Plus, Users, Package, CheckCircle, HeartPulse, Route, Lock, UserRound } from 'lucide-react';
 import { getUnresolvedReason, orderReference, useApp, money, orderRevenue, RX_STATUS_LABELS, PHARMACY } from '../context/AppContext';
-import type { CRMPatient, EligibilitySubmission, PatientOrder } from '../context/AppContext';
+import type { CRMPatient, EligibilitySubmission, PatientOrder, PendingEnquiry } from '../context/AppContext';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
@@ -9,6 +9,14 @@ import { conditionLabel } from '@hhh/domain';
 import ConditionList from '../components/ConditionList';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { isNegativeEligibilityStatus, pharmacyDecisionReason } from '../utils/eligibilityPresentation';
+import {
+  derivePatientJourneyStage,
+  PATIENT_JOURNEY_STEPS,
+  patientClinicalProfile,
+  patientJourneyStepIndex,
+  portalSourceLabel,
+  type PatientJourneyStage,
+} from '../utils/pharmacyPatientDirectory';
 import { directoryContextFromHistory, patientIdFromSearch, patientProfileUrl, type PatientDirectoryContext, type PatientDirectoryFilter, type PatientDirectorySort } from '../utils/patientDirectoryNavigation';
 
 /* ── Unified patient row model ── */
@@ -147,6 +155,98 @@ function patientIndicatorTone(status: ReturnType<typeof deriveStatus>): PatientI
   return 'journey';
 }
 
+type JourneyStage = PatientJourneyStage;
+
+const JOURNEY_STEPS = PATIENT_JOURNEY_STEPS;
+
+function deriveJourneyStage(p: UnifiedPatient): JourneyStage {
+  return derivePatientJourneyStage({
+    crmPatient: p.crmPatient,
+    submission: p.submission,
+    orderCount: p.orders.length,
+    isNegativeEligibility: isNegativeEligibilityStatus,
+  });
+}
+
+function journeyStepIndex(stage: JourneyStage): number {
+  return patientJourneyStepIndex(stage);
+}
+
+function PatientJourneyTrack({ stage, compact = false }: { stage: JourneyStage; compact?: boolean }) {
+  const activeIndex = journeyStepIndex(stage);
+  const halted = stage === 'declined' || stage === 'suspended';
+  return (
+    <ol
+      className={`patient-journey${compact ? ' patient-journey--compact' : ''}${halted ? ' is-halted' : ''}`}
+      aria-label={`Care journey: ${JOURNEY_STEPS[activeIndex]?.label ?? 'Enquiry'}${halted ? ` (${stage})` : ''}`}
+    >
+      {JOURNEY_STEPS.map((step, index) => {
+        let stepClass = 'patient-journey__step';
+        if (index < activeIndex) stepClass += ' is-complete';
+        else if (index === activeIndex && !halted) stepClass += ' is-current';
+        else if (halted && index === activeIndex) stepClass += ' is-halted';
+        return (
+          <li key={step.key} className={stepClass}>
+            <span className="patient-journey__marker" aria-hidden="true">{index + 1}</span>
+            <span className="patient-journey__label">{step.label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function directoryEmptyCopy(tab: PatientDirectoryFilter, hasSearch: boolean): { title: string; detail: string; icon: typeof Users } {
+  if (hasSearch) {
+    return tab === 'enquiries'
+      ? {
+          title: 'No matching enquiries',
+          detail: 'Try a different case reference.',
+          icon: Search,
+        }
+      : {
+          title: 'No matching patients',
+          detail: 'Try a different name, contact detail, condition, or date of birth.',
+          icon: Search,
+        };
+  }
+  switch (tab) {
+    case 'enquiries':
+      return {
+        title: 'No open enquiries',
+        detail: 'New eligibility enquiries remain with HHH admin until review completes and a patient record is activated.',
+        icon: Inbox,
+      };
+    case 'active':
+      return {
+        title: 'No active patients yet',
+        detail: 'Patients appear here once HHH completes referral and activates their pharmacy record.',
+        icon: CheckCircle,
+      };
+    case 'on-order':
+      return {
+        title: 'No patients on order',
+        detail: 'Patients with draft, awaiting payment, or in-fulfilment orders will show in this view.',
+        icon: Package,
+      };
+    default:
+      return {
+        title: 'Patient directory is empty',
+        detail: 'Referred and active patients will appear here as HHH activates records for this pharmacy.',
+        icon: Users,
+      };
+  }
+}
+
+function newOrderGateMessage(workspaceLive: boolean, patient: UnifiedPatient): string | null {
+  if (!workspaceLive) return 'Full pharmacy activation is required before creating an order.';
+  if (!canCreateOrderForPatient(patient.crmPatient)) {
+    return 'Orders unlock once HHH marks the patient Referred or Active. Enquiry and review stages must complete first.';
+  }
+  if (patient.crmPatient?.status === 'Referred') return 'Create this approved referral’s first prescription order.';
+  return 'Create a new prescription order.';
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 0) return '?';
@@ -189,20 +289,41 @@ export default function Patients() {
       });
     }
 
-    // An eligibility application becomes pharmacy-visible only after HHH has
-    // activated a corresponding patient record. Submission-only enquiries stay
-    // in the HHH intake workspace.
-    for (const sub of state.submissions.filter(item => item.organisationId === state.currentOrganisationId)) {
-      const key = sub.email.toLowerCase();
-      const existing = map.get(key);
-      if (existing) {
-        existing.submission = sub;
-        if (!existing.dob) existing.dob = sub.dob;
+    // Training workspace still merges legacy submission fixtures for demo flows.
+    if (state.workspaceMode === 'training') {
+      for (const sub of state.submissions.filter(item => item.organisationId === state.currentOrganisationId)) {
+        const key = sub.email.toLowerCase();
+        const existing = map.get(key);
+        if (existing) {
+          existing.submission = sub;
+          if (!existing.dob) existing.dob = sub.dob;
+        }
       }
     }
 
     return Array.from(map.values());
-  }, [state.crm, state.submissions, state.orders, state.currentOrganisationId]);
+  }, [state.crm, state.submissions, state.orders, state.currentOrganisationId, state.workspaceMode]);
+
+  const enquiries = useMemo(() => (
+    state.enquiries.filter(enquiry => enquiry.organisationId === state.currentOrganisationId)
+  ), [state.enquiries, state.currentOrganisationId]);
+
+  /* ── Filtered & Sorted list ── */
+  const processedEnquiries = useMemo(() => {
+    let list = [...enquiries];
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(enquiry => enquiry.caseReference.toLowerCase().includes(q));
+    }
+    if (sortKey === 'status') {
+      list.sort((a, b) => a.displayStatus.localeCompare(b.displayStatus));
+    } else if (sortKey === 'id') {
+      list.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+    } else {
+      list.sort((a, b) => a.caseReference.localeCompare(b.caseReference, 'en', { sensitivity: 'base' }));
+    }
+    return list;
+  }, [enquiries, search, sortKey]);
 
   /* ── Filtered & Sorted list ── */
   const processedPatients = useMemo(() => {
@@ -245,18 +366,12 @@ export default function Patients() {
   }, [patients, search, activeTab, sortKey]);
 
   const selectedPatient = patients.find(patient => patient.id === selectedPatientId) ?? null;
-  const selectedConditions = selectedPatient
-    ? selectedPatient.submission?.conditions ?? selectedPatient.crmPatient?.conditions ?? []
-    : [];
-  const selectedPrimaryCondition = selectedPatient
-    ? selectedPatient.submission?.primaryCondition ?? selectedPatient.crmPatient?.primaryCondition ?? selectedConditions[0] ?? ''
-    : '';
-  const selectedReferralSource = selectedPatient
-    ? selectedPatient.submission?.source ?? selectedPatient.crmPatient?.referralSource ?? null
+  const selectedClinical = selectedPatient
+    ? patientClinicalProfile({ crmPatient: selectedPatient.crmPatient, submission: selectedPatient.submission })
     : null;
-  const selectedMarketingConsent = selectedPatient
-    ? selectedPatient.submission?.marketing ?? selectedPatient.crmPatient?.marketingConsent ?? null
-    : null;
+  const selectedConditions = selectedClinical?.conditions ?? [];
+  const selectedPrimaryCondition = selectedClinical?.primaryCondition ?? '';
+  const selectedMarketingConsent = selectedClinical?.marketingConsent ?? null;
 
   const currentDirectoryContext = useCallback((): PatientDirectoryContext => ({
     search,
@@ -317,7 +432,7 @@ export default function Patients() {
       pendingDirectoryContext.current = null;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activeTab, processedPatients.length, search, selectedPatientId, sortKey]);
+  }, [activeTab, processedEnquiries.length, processedPatients.length, search, selectedPatientId, sortKey]);
 
   useEffect(() => {
     const target = state.navigationTarget;
@@ -371,7 +486,10 @@ export default function Patients() {
 
   // Metrics counts
   const totalCRM = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId).length;
+  const enquiryCount = enquiries.length;
   const onOrderCount = patients.filter(p => p.crmPatient && p.orders.some(o => orderExceptionReason(o) ? orderNeedsResolution(o) : o.payment.status === 'sent' || o.prescriptions.some(rx => rx.status !== 'collected'))).length;
+  const directoryEmpty = directoryEmptyCopy(activeTab, Boolean(search.trim()));
+  const DirectoryEmptyIcon = directoryEmpty.icon;
   const currentOrganisation = state.organisations.find(organisation => organisation.id === state.currentOrganisationId);
   const selectedProfileStatus = selectedPatient ? deriveStatus(selectedPatient) : null;
   const selectedEligibilityLabel = selectedPatient?.submission ? onboardingStatusLabel(selectedPatient.submission.status) : null;
@@ -389,6 +507,10 @@ export default function Patients() {
           <div className="filter-card__head"><span>All patients</span><Users size={14} className={activeTab === 'all' ? 'text-info' : 'text-muted'} /></div>
           <span className="filter-card__value">{patients.length}</span>
         </button>
+        <button type="button" aria-pressed={activeTab === 'enquiries'} className={`filter-card ${activeTab === 'enquiries' ? 'active' : ''}`} onClick={() => setActiveTab('enquiries')}>
+          <div className="filter-card__head"><span>Enquiries</span><Inbox size={14} className={activeTab === 'enquiries' ? 'text-info' : 'text-muted'} /></div>
+          <span className="filter-card__value">{enquiryCount}</span>
+        </button>
         <button type="button" aria-pressed={activeTab === 'active'} className={`filter-card ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
           <div className="filter-card__head"><span>Active</span><CheckCircle size={14} className={activeTab === 'active' ? 'text-green' : 'text-muted'} /></div>
           <span className="filter-card__value">{totalCRM}</span>
@@ -404,8 +526,8 @@ export default function Patients() {
           <Search size={16} />
           <input
             type="search"
-            placeholder="Search by name, condition, DOB, email, or mobile..."
-            aria-label="Search patient directory"
+            placeholder={activeTab === 'enquiries' ? 'Search by case reference...' : 'Search by name, condition, DOB, email, or mobile...'}
+            aria-label={activeTab === 'enquiries' ? 'Search enquiry directory' : 'Search patient directory'}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -413,56 +535,107 @@ export default function Patients() {
         <label className="sort-control">
           <span>Sort</span>
           <select aria-label="Sort patient directory" value={sortKey} onChange={e => setSortKey(e.target.value as SortKey)}>
-            <option value="name">Name (A–Z)</option>
-            <option value="status">Status</option>
-            <option value="id">Newest</option>
+            {activeTab === 'enquiries' ? (
+              <>
+                <option value="name">Case reference (A–Z)</option>
+                <option value="status">Status</option>
+                <option value="id">Newest</option>
+              </>
+            ) : (
+              <>
+                <option value="name">Name (A–Z)</option>
+                <option value="status">Status</option>
+                <option value="id">Newest</option>
+              </>
+            )}
           </select>
         </label>
       </div>
 
-      {/* ══ Patients directory list ══ */}
-      <div className="table-wrap" ref={directoryRef}>
-        <div className="patient-directory-key">
-          <div className="patient-directory-key__title"><span>Patient directory</span><strong>{processedPatients.length}</strong></div>
-          <small>Select a patient to open their full record.</small>
-        </div>
-        <table className="patient-directory-table">
-          <thead>
-            <tr>
-              <th>Patient</th>
-              <th>DOB</th>
-              <th>Email</th>
-              <th>Mobile</th>
-              <th>Status</th>
-              <th className="text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {processedPatients.length === 0 ? (
-              <tr>
-                <td colSpan={6}>
-                  <div className="empty-state">No matching patient records found in this category.</div>
-                </td>
-              </tr>
+      {/* ══ Patients / enquiries directory list ══ */}
+      <div className="patient-directory" ref={directoryRef}>
+        {activeTab === 'enquiries' ? (
+          <>
+            <header className="patient-directory-key">
+              <div className="patient-directory-key__title"><span>HHH-managed enquiries</span><strong>{processedEnquiries.length}</strong></div>
+              <p className="patient-directory-key__lead">Patient identity stays with HHH until referral is activated. No orders can be created from this view.</p>
+            </header>
+
+            {processedEnquiries.length === 0 ? (
+              <div className="patient-directory-empty" role="status">
+                <span className="patient-directory-empty__icon" aria-hidden="true"><DirectoryEmptyIcon size={28} /></span>
+                <h3>{directoryEmpty.title}</h3>
+                <p>{directoryEmpty.detail}</p>
+              </div>
             ) : (
-              processedPatients.map(p => {
-                const status = deriveStatus(p);
-                const indicatorTone = patientIndicatorTone(status);
-                const eligibilityLabel = p.submission ? onboardingStatusLabel(p.submission.status) : null;
-                const negativeReason = p.submission ? pharmacyDecisionReason(p.submission) : null;
-                const operationalStatusIsDistinct = !p.submission || p.orders.length > 0 || Boolean(p.crmPatient && status.label !== eligibilityLabel);
-                const hasUncollectedWarning = p.orders.some(o =>
-                  o.payment.status === 'paid' &&
-                  o.prescriptions.some(rx => {
-                    if (rx.status !== 'ready' || !rx.readyAt) return false;
-                    const readyDate = new Date(rx.readyAt);
-                    const diffDays = Math.floor((Date.now() - readyDate.getTime()) / (1000 * 60 * 60 * 24));
-                    return diffDays >= 10;
-                  })
-                );
-                return (
-                  <tr
-                    key={p.id}
+              <ul className="patient-directory-list">
+                {processedEnquiries.map((enquiry: PendingEnquiry) => (
+                  <li key={enquiry.id}>
+                    <article className="patient-directory-card patient-directory-card--enquiry" aria-label={`Enquiry ${enquiry.caseReference}`}>
+                      <div className="patient-directory-card__identity">
+                        <div className="avatar patient-directory-card__avatar"><Inbox size={14} aria-hidden="true" /></div>
+                        <div className="patient-directory-card__copy">
+                          <strong title={enquiry.caseReference}>{enquiry.caseReference}</strong>
+                          <span className="patient-directory-card__meta">
+                            <span><CalendarDays size={12} aria-hidden="true" />{fmtDate(enquiry.submittedAt)}</span>
+                            <span>HHH intake case</span>
+                          </span>
+                        </div>
+                      </div>
+                      <div className="patient-directory-card__status">
+                        <span className={`pill ${onboardingStatusPillClass(enquiry.displayStatus === 'New enquiry' ? 'New' : enquiry.displayStatus)}`}>
+                          {enquiry.displayStatus}
+                        </span>
+                      </div>
+                      <span className="patient-directory-card__referral text-muted text-sm">Awaiting HHH referral</span>
+                    </article>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <>
+        <header className="patient-directory-key">
+          <div className="patient-directory-key__title"><span>Patient directory</span><strong>{processedPatients.length}</strong></div>
+          <p className="patient-directory-key__lead">Browse referred and active patients. Journey shows Enquiry → Referred → Active care.</p>
+          <div className="patient-status-key" aria-hidden="true">
+            <span><i className="patient-status-dot is-journey" />In journey</span>
+            <span><i className="patient-status-dot is-active" />Approved / active</span>
+            <span><i className="patient-status-dot is-ready" />Ready for collection</span>
+            <span><i className="patient-status-dot is-attention" />Needs action</span>
+          </div>
+        </header>
+
+        {processedPatients.length === 0 ? (
+          <div className="patient-directory-empty" role="status">
+            <span className="patient-directory-empty__icon" aria-hidden="true"><DirectoryEmptyIcon size={28} /></span>
+            <h3>{directoryEmpty.title}</h3>
+            <p>{directoryEmpty.detail}</p>
+          </div>
+        ) : (
+          <ul className="patient-directory-list">
+            {processedPatients.map(p => {
+              const status = deriveStatus(p);
+              const journeyStage = deriveJourneyStage(p);
+              const indicatorTone = patientIndicatorTone(status);
+              const eligibilityLabel = p.submission ? onboardingStatusLabel(p.submission.status) : null;
+              const negativeReason = p.submission ? pharmacyDecisionReason(p.submission) : null;
+              const operationalStatusIsDistinct = !p.submission || p.orders.length > 0 || Boolean(p.crmPatient && status.label !== eligibilityLabel);
+              const primaryCondition = p.submission?.primaryCondition ?? p.crmPatient?.primaryCondition ?? p.submission?.conditions?.[0] ?? p.crmPatient?.conditions?.[0] ?? '';
+              const hasUncollectedWarning = p.orders.some(o =>
+                o.payment.status === 'paid' &&
+                o.prescriptions.some(rx => {
+                  if (rx.status !== 'ready' || !rx.readyAt) return false;
+                  const readyDate = new Date(rx.readyAt);
+                  const diffDays = Math.floor((Date.now() - readyDate.getTime()) / (1000 * 60 * 60 * 24));
+                  return diffDays >= 10;
+                })
+              );
+              return (
+                <li key={p.id}>
+                  <article
+                    className="patient-directory-card"
                     role="link"
                     tabIndex={0}
                     data-patient-id={p.id}
@@ -474,47 +647,61 @@ export default function Patients() {
                       openPatientProfile(p.id);
                     }}
                   >
-                    <td className="font-semibold">
-                      <div className="flex items-center gap-sm">
-                        <div className="avatar" style={{ width: 28, height: 28, fontSize: 12 }}>{initials(p.name)}</div>
-                        <span className="patient-directory-identity" title={p.name} aria-label={p.name}>
-                          <strong>{compactPatientName(p.name)}</strong>
-                          <small>{p.email} · {formatPatientDob(p.dob)}</small>
+                    <div className="patient-directory-card__identity">
+                      <div className="avatar patient-directory-card__avatar">{initials(p.name)}</div>
+                      <div className="patient-directory-card__copy">
+                        <strong title={p.name}>{compactPatientName(p.name)}</strong>
+                        <span className="patient-directory-card__meta">
+                          <span><CalendarDays size={12} aria-hidden="true" />{formatPatientDob(p.dob)}</span>
+                          <span><Mail size={12} aria-hidden="true" />{p.email}</span>
+                          <span><Phone size={12} aria-hidden="true" />{p.mobile}</span>
                         </span>
+                        {primaryCondition ? (
+                          <span className="patient-directory-card__condition">{conditionLabel(primaryCondition)}</span>
+                        ) : null}
                       </div>
-                    </td>
-                    <td><span className="compact-mobile">{formatPatientDob(p.dob)}</span></td>
-                    <td><span className="compact-email" title={p.email}>{p.email}</span></td>
-                    <td><span className="compact-mobile">{p.mobile}</span></td>
-                    <td>
+                    </div>
+
+                    <div className="patient-directory-card__journey">
+                      <PatientJourneyTrack stage={journeyStage} compact />
+                    </div>
+
+                    <div className="patient-directory-card__status">
                       <div className="patient-directory-status">
-                        {p.submission ? <span className={`pill ${onboardingStatusPillClass(p.submission.status)}`}>{eligibilityLabel}</span> : <span className={`pill ${status.pill}`}>{status.label}</span>}
-                        {operationalStatusIsDistinct && p.submission && <small><i className={`patient-status-dot is-${indicatorTone}`} />Patient: {status.label}</small>}
-                        {negativeReason && <span className="patient-directory-reason" title={negativeReason}>{negativeReason}</span>}
-                        {hasUncollectedWarning && (
-                          <small className="patient-directory-warning"><AlertTriangle size={12} /> Collection follow-up overdue</small>
+                        {p.submission ? (
+                          <span className={`pill ${onboardingStatusPillClass(p.submission.status)}`}>{eligibilityLabel}</span>
+                        ) : (
+                          <span className={`pill ${status.pill}`}>{status.label}</span>
                         )}
+                        {operationalStatusIsDistinct && p.submission ? (
+                          <small><i className={`patient-status-dot is-${indicatorTone}`} aria-hidden="true" />Care: {status.label}</small>
+                        ) : null}
+                        {negativeReason ? <span className="patient-directory-reason" title={negativeReason}>{negativeReason}</span> : null}
+                        {hasUncollectedWarning ? (
+                          <small className="patient-directory-warning"><AlertTriangle size={12} aria-hidden="true" /> Collection follow-up overdue</small>
+                        ) : null}
                       </div>
-                    </td>
-                    <td className="text-right">
-                      <button
-                        type="button"
-                        className="patient-directory-open"
-                        aria-label={`Open ${p.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openPatientProfile(p.id);
-                        }}
-                      >
-                        <ChevronRight size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="patient-directory-open"
+                      aria-label={`Open ${p.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openPatientProfile(p.id);
+                      }}
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </article>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+          </>
+        )}
       </div>
       </>}
 
@@ -531,32 +718,47 @@ export default function Patients() {
             <div className="patient-profile-toolbar">
               <button type="button" className="btn btn-secondary" onClick={backToDirectory}><ArrowLeft size={15} /> Back to list</button>
             </div>
-            <div className="drawer-header patient-record-drawer__header">
-              <div className="patient-record-drawer__identity">
-                <div className="avatar patient-record-drawer__avatar">{initials(selectedPatient.name)}</div>
-                <div>
+
+            <header className="patient-profile-hero">
+              <div className="patient-profile-hero__main">
+                <div className="avatar patient-profile-hero__avatar">{initials(selectedPatient.name)}</div>
+                <div className="patient-profile-hero__copy">
                   <span className="section-label">Patient record</span>
                   <h2 id="patient-drawer-title">{selectedPatient.name}</h2>
-                  {showDistinctProfileStatus && selectedProfileStatus && <span className={`pill patient-record-drawer__status ${selectedProfileStatus.pill}`}>{selectedProfileStatus.label}</span>}
+                  <PatientJourneyTrack stage={deriveJourneyStage(selectedPatient)} />
+                  <div className="patient-profile-hero__badges">
+                    {showDistinctProfileStatus && selectedProfileStatus ? (
+                      <span className={`pill patient-record-drawer__status ${selectedProfileStatus.pill}`}>{selectedProfileStatus.label}</span>
+                    ) : null}
+                    {selectedPatient.submission ? (
+                      <span className={`pill ${onboardingStatusPillClass(selectedPatient.submission.status)}`}>{onboardingStatusLabel(selectedPatient.submission.status)}</span>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-              <div className="patient-record-drawer__actions">
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={state.workspaceMode !== 'live' || !canCreateOrderForPatient(selectedPatient.crmPatient)}
-                  title={state.workspaceMode !== 'live'
-                    ? 'Full pharmacy activation is required before creating an order'
-                    : canCreateOrderForPatient(selectedPatient.crmPatient)
-                    ? selectedPatient.crmPatient?.status === 'Referred'
-                      ? 'Create this approved referral’s first prescription order'
-                      : 'Create a new prescription order'
-                    : 'HHH onboarding must be completed before creating an order'}
-                  onClick={() => handleCreateOrder(selectedPatient)}
-                >
-                  <Plus size={12} /> New order
-                </button>
+              <div className="patient-profile-hero__actions">
+                {(() => {
+                  const canOrder = state.workspaceMode === 'live' && canCreateOrderForPatient(selectedPatient.crmPatient);
+                  const gateMessage = newOrderGateMessage(state.workspaceMode === 'live', selectedPatient);
+                  return (
+                    <div className={`patient-order-gate${canOrder ? ' is-enabled' : ''}`}>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={!canOrder}
+                        aria-describedby={!canOrder ? 'patient-order-gate-tip' : undefined}
+                        onClick={() => handleCreateOrder(selectedPatient)}
+                      >
+                        {!canOrder ? <Lock size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+                        New order
+                      </button>
+                      {!canOrder && gateMessage ? (
+                        <span id="patient-order-gate-tip" role="tooltip" className="patient-order-gate__tooltip">{gateMessage}</span>
+                      ) : null}
+                    </div>
+                  );
+                })()}
               </div>
-            </div>
+            </header>
 
             <div className="drawer-body patient-record-drawer__body">
               {/* Check for uncollected warnings */}
@@ -579,109 +781,98 @@ export default function Patients() {
                 );
               })()}
 
-              {/* Referral record details */}
-              {selectedPatient.submission ? (
-                <section className="patient-record-panel patient-eligibility-panel" aria-labelledby="patient-eligibility-title">
-                  <header><FileText size={15} aria-hidden="true" /><h4 id="patient-eligibility-title">Eligibility intake</h4></header>
+              {/* Structured profile panels */}
+              <div className="patient-profile-panels">
+                <section className="patient-record-panel patient-profile-panel patient-profile-panel--contact" aria-labelledby="patient-contact-title">
+                  <header><UserRound size={15} aria-hidden="true" /><h4 id="patient-contact-title">Contact</h4></header>
+                  <dl>
+                    <div><dt><Mail size={13} aria-hidden="true" /> Email</dt><dd title={selectedPatient.email}>{selectedPatient.email}</dd></div>
+                    <div><dt><CalendarDays size={13} aria-hidden="true" /> Date of birth</dt><dd className="compact-mobile">{formatPatientDob(selectedPatient.dob)}</dd></div>
+                    <div><dt><Phone size={13} aria-hidden="true" /> Mobile</dt><dd className="compact-mobile">{selectedPatient.mobile}</dd></div>
+                    {selectedPatient.crmPatient?.address ? (
+                      <div><dt><MapPin size={13} aria-hidden="true" /> Address</dt><dd>{selectedPatient.crmPatient.address}</dd></div>
+                    ) : null}
+                  </dl>
+                  <div className="patient-profile-panel__account">
+                    <div><span>Pharmacy</span><strong>{currentOrganisation?.tradingName ?? PHARMACY.name}</strong></div>
+                    <div><span>Record ID</span><strong><code>{selectedPatient.id}</code></strong></div>
+                  </div>
+                </section>
 
-                  <div className="patient-eligibility-grid">
-                    <div className="kv-line">
-                      <span className="text-secondary">HHH onboarding decision:</span>
-                      <span className={`pill ${onboardingStatusPillClass(selectedPatient.submission.status)}`}>{onboardingStatusLabel(selectedPatient.submission.status)}</span>
-                    </div>
-                    {isNegativeEligibilityStatus(selectedPatient.submission.status) && <div className="patient-eligibility-reason"><span>Reason</span><strong>{pharmacyDecisionReason(selectedPatient.submission)}</strong></div>}
-                    {selectedPatient.submission.reviewerDisplay && <div className="kv-line"><span className="text-secondary">Reviewed by:</span><span className="font-semibold text-primary">{selectedPatient.submission.reviewerDisplay}</span></div>}
-                    {selectedPatient.submission.reviewedAt && <div className="kv-line"><span className="text-secondary">Decision recorded:</span><span className="font-semibold text-primary">{fmtDate(selectedPatient.submission.reviewedAt)}</span></div>}
+                <section className="patient-record-panel patient-profile-panel patient-profile-panel--clinical" aria-labelledby="patient-clinical-title">
+                  <header><HeartPulse size={15} aria-hidden="true" /><h4 id="patient-clinical-title">Clinical intake</h4><span>{selectedClinical?.fromSubmission ? 'HHH eligibility record' : 'Patient record'}</span></header>
 
-                    <div className="divider" style={{ margin: '4px 0' }} />
-
-                    <div className="kv-line">
-                      <span className="text-secondary">Tried ≥2 treatments:</span>
-                      <span className={selectedPatient.submission.tried2 ? 'text-green' : 'text-red'}>
-                        {selectedPatient.submission.tried2 ? 'Yes (Pass)' : 'No'}
-                      </span>
-                    </div>
-                    <div className="kv-line">
-                      <span className="text-secondary">Psychosis exclusion check:</span>
-                      <span className={selectedPatient.submission.psychExclusion ? 'text-red' : 'text-green'}>
-                        {selectedPatient.submission.psychExclusion ? 'Excluded' : 'Passed'}
-                      </span>
-                    </div>
-
-                    {selectedPatient.submission.calls.length > 0 && (
-                      <div className="patient-call-history">
-                        <span>Patient calls</span>
-                        <div>
-                          {selectedPatient.submission.calls.map((call, idx) => (
-                            <div key={idx}>
-                              <Phone size={12} aria-hidden="true" /> Call logged &middot; {fmtDate(call.ts)}
-                            </div>
-                          ))}
-                        </div>
+                  {selectedClinical?.onboardingPillStatus ? (
+                    <div className="patient-clinical-grid">
+                      <div className="patient-clinical-grid__decision">
+                        <span>{selectedClinical.fromSubmission ? 'HHH onboarding decision' : 'Patient status'}</span>
+                        <span className={`pill ${onboardingStatusPillClass(selectedClinical.onboardingPillStatus)}`}>{onboardingStatusLabel(selectedClinical.onboardingPillStatus)}</span>
                       </div>
-                    )}
+                      {selectedPatient.submission && isNegativeEligibilityStatus(selectedPatient.submission.status) ? (
+                        <div className="patient-eligibility-reason"><span>Reason</span><strong>{pharmacyDecisionReason(selectedPatient.submission)}</strong></div>
+                      ) : null}
+                      {selectedPatient.submission?.reviewerDisplay ? (
+                        <div className="kv-line"><span className="text-secondary">Reviewed by</span><span className="font-semibold text-primary">{selectedPatient.submission.reviewerDisplay}</span></div>
+                      ) : null}
+                      {selectedPatient.submission?.reviewedAt ? (
+                        <div className="kv-line"><span className="text-secondary">Decision recorded</span><span className="font-semibold text-primary">{fmtDate(selectedPatient.submission.reviewedAt)}</span></div>
+                      ) : null}
+                      <div className="kv-line">
+                        <span className="text-secondary">Tried ≥2 treatments</span>
+                        <span className={selectedClinical.triedTwoTreatments ? 'text-green' : 'text-red'}>
+                          {selectedClinical.triedTwoTreatments ? 'Yes (Pass)' : selectedClinical.triedTwoTreatments === false ? 'No' : 'Not recorded'}
+                        </span>
+                      </div>
+                      <div className="kv-line">
+                        <span className="text-secondary">Psychosis exclusion check</span>
+                        <span className={selectedClinical.psychiatricExclusion ? 'text-red' : 'text-green'}>
+                          {selectedClinical.psychiatricExclusion ? 'Excluded' : selectedClinical.psychiatricExclusion === false ? 'Passed' : 'Not recorded'}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="patient-record-note patient-profile-panel__note">
+                      <FileText size={15} aria-hidden="true" /><span><strong>No clinical intake attached</strong><small>This record has not been linked to an eligibility submission yet.</small></span>
+                    </div>
+                  )}
+
+                  <div className="patient-clinical-context">
+                    <div className="patient-clinical-context__conditions">
+                      <span>Conditions disclosed</span>
+                      {selectedConditions.length > 0 && selectedPrimaryCondition ? (
+                        <ConditionList conditions={selectedConditions} primaryCondition={selectedPrimaryCondition} />
+                      ) : (
+                        <strong className="patient-care-context__empty">Not recorded</strong>
+                      )}
+                    </div>
+                    <dl className="patient-clinical-context__details">
+                      <div>
+                        <dt><Route size={13} aria-hidden="true" /> How they found the service</dt>
+                        <dd>{selectedClinical?.heardAbout || portalSourceLabel(selectedClinical?.referralSource) || 'Not recorded'}</dd>
+                      </div>
+                      <div>
+                        <dt>Primary condition</dt>
+                        <dd>{selectedPrimaryCondition ? conditionLabel(selectedPrimaryCondition) : 'Not recorded'}</dd>
+                      </div>
+                      <div>
+                        <dt>Marketing contact</dt>
+                        <dd>{selectedMarketingConsent === null ? 'Not recorded' : selectedMarketingConsent ? 'Consent given' : 'No consent'}</dd>
+                      </div>
+                    </dl>
                   </div>
-                </section>
-              ) : (
-                <div className="patient-record-note">
-                  <FileText size={15} aria-hidden="true" /><span><strong>Direct CRM record</strong><small>No eligibility submission history is attached.</small></span>
-                </div>
-              )}
 
-              <section className="patient-care-context" aria-labelledby="patient-care-context-title">
-                <header className="patient-care-context__header">
-                  <span className="patient-care-context__title">
-                    <HeartPulse size={17} aria-hidden="true" />
-                    <span><small>Patient context</small><h4 id="patient-care-context-title">Conditions and referral</h4></span>
-                  </span>
-                  <span className="patient-care-context__record-type">
-                    {selectedPatient.submission ? 'HHH eligibility record' : 'Patient record'}
-                  </span>
-                </header>
-                <div className="patient-care-context__grid">
-                  <div className="patient-care-context__conditions">
-                    <span>Conditions disclosed</span>
-                    {selectedConditions.length > 0 && selectedPrimaryCondition ? (
-                      <ConditionList conditions={selectedConditions} primaryCondition={selectedPrimaryCondition} />
-                    ) : (
-                      <strong className="patient-care-context__empty">Not recorded</strong>
-                    )}
-                  </div>
-                  <dl className="patient-care-context__details">
-                    <div>
-                      <dt><Route size={13} aria-hidden="true" /> How they found the service</dt>
-                      <dd>{selectedReferralSource || 'Not recorded'}</dd>
+                  {selectedPatient.submission && selectedPatient.submission.calls.length > 0 ? (
+                    <div className="patient-call-history">
+                      <span>Patient calls</span>
+                      <div>
+                        {selectedPatient.submission.calls.map((call, idx) => (
+                          <div key={idx}>
+                            <Phone size={12} aria-hidden="true" /> Call logged &middot; {fmtDate(call.ts)}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div>
-                      <dt>Primary condition</dt>
-                      <dd>{selectedPrimaryCondition ? conditionLabel(selectedPrimaryCondition) : 'Not recorded'}</dd>
-                    </div>
-                    <div>
-                      <dt>Marketing contact</dt>
-                      <dd>{selectedMarketingConsent === null ? 'Not recorded' : selectedMarketingConsent ? 'Consent given' : 'No consent'}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </section>
-
-              <div className="patient-record-facts">
-                <section className="patient-record-panel" aria-labelledby="patient-contact-title">
-                  <header><Mail size={15} aria-hidden="true" /><h4 id="patient-contact-title">Contact</h4></header>
-                  <dl>
-                    <div><dt><Mail size={13} /> Email</dt><dd title={selectedPatient.email}>{selectedPatient.email}</dd></div>
-                    <div><dt><CalendarDays size={13} /> Date of birth</dt><dd className="compact-mobile">{formatPatientDob(selectedPatient.dob)}</dd></div>
-                    <div><dt><Phone size={13} /> Mobile</dt><dd className="compact-mobile">{selectedPatient.mobile}</dd></div>
-                    {selectedPatient.crmPatient?.address && <div><dt><MapPin size={13} /> Address</dt><dd>{selectedPatient.crmPatient.address}</dd></div>}
-                  </dl>
-                </section>
-
-                <section className="patient-record-panel" aria-labelledby="patient-account-title">
-                  <header><Building2 size={15} aria-hidden="true" /><h4 id="patient-account-title">Account</h4></header>
-                  <dl>
-                    <div><dt><Building2 size={13} /> Pharmacy</dt><dd>{currentOrganisation?.tradingName ?? PHARMACY.name}</dd></div>
-                    <div><dt><FileText size={13} /> Record type</dt><dd>{selectedPatient.submission ? 'HHH eligibility intake attached' : 'Direct CRM record'}</dd></div>
-                    <div><dt><Hash size={13} /> System ID</dt><dd><code>{selectedPatient.id}</code></dd></div>
-                  </dl>
+                  ) : null}
                 </section>
               </div>
 
@@ -711,7 +902,11 @@ export default function Patients() {
               <section className="patient-order-history" aria-labelledby="patient-orders-title">
                 <header className="patient-order-history__header"><span><small>Prescription activity</small><h4 id="patient-orders-title">Order history</h4></span><strong>{selectedPatient.orders.length}</strong></header>
                 {selectedPatient.orders.length === 0 ? (
-                  <div className="patient-record-empty">No prescription sessions or orders yet.</div>
+                  <div className="patient-record-empty patient-order-empty">
+                    <Package size={22} aria-hidden="true" />
+                    <strong>No orders yet</strong>
+                    <span>{canCreateOrderForPatient(selectedPatient.crmPatient) ? 'Create the first prescription order when the patient is ready.' : 'Orders unlock after HHH marks the patient Referred or Active.'}</span>
+                  </div>
                 ) : (
                   [...selectedPatient.orders]
                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())

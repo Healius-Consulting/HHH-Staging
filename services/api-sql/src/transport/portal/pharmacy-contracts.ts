@@ -9,6 +9,9 @@ import {
 import type { OrderDraftRecord, OrderRecord } from '../../repositories/ports/order.port.js';
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
 import type { PatientRecord } from '../../repositories/ports/patient.port.js';
+import type { TenantPendingEnquiryRecord } from '../../repositories/ports/intake.port.js';
+import { sqlIntakeCaseReference } from './intake-contracts.js';
+import { pendingEnquiryDisplayStatus, portalSourceType } from './intake-source.js';
 
 type PortalOrder = ReturnType<typeof toPortalOrder>;
 
@@ -69,7 +72,21 @@ export function toPortalOrganisation(organisation: OrganisationRecord) {
   };
 }
 
+export function toPortalPendingEnquiry(record: TenantPendingEnquiryRecord) {
+  const sourceType = portalSourceType(record.sourceType);
+  return {
+    id: record.id,
+    submittedAt: record.submittedAt,
+    caseReference: sqlIntakeCaseReference(record.id, record.submittedAt),
+    displayStatus: pendingEnquiryDisplayStatus(record.followUpStatus),
+    sourceType: sourceType ?? 'legacy_pharmacy_qr' as const,
+  };
+}
+
 export function toPortalPatient(patient: PatientRecord) {
+  const conditions = patient.conditions.map(condition => condition.conditionCode);
+  const primaryCondition = patient.conditions.find(condition => condition.primary)?.conditionCode ?? conditions[0] ?? null;
+  const source = patient.sourceSubmission;
   return {
     id: patient.id,
     organisationId: patient.organisationId,
@@ -81,12 +98,31 @@ export function toPortalPatient(patient: PatientRecord) {
     address: patient.address ?? '',
     postcode: patient.postcode,
     status: lower(patient.status),
-    conditions: [] as string[],
-    primaryCondition: null,
-    referralSource: null,
-    marketingConsent: null,
+    conditions,
+    primaryCondition,
+    referralSource: source?.sourceType ? portalSourceType(source.sourceType) : null,
+    triedTwoTreatments: source?.triedTwoTreatments ?? null,
+    psychiatricExclusion: source?.psychiatricExclusion ?? null,
+    heardAbout: source?.heardAbout ?? null,
+    marketingConsent: source?.marketingConsent ?? null,
     createdAt: patient.createdAt,
     updatedAt: patient.updatedAt,
+  };
+}
+
+export function buildPharmacyPatientDirectory(input: {
+  patients: PatientRecord[];
+  pendingEnquiries: TenantPendingEnquiryRecord[];
+}) {
+  return {
+    patients: input.patients.map(toPortalPatient),
+    enquiries: input.pendingEnquiries.map(toPortalPendingEnquiry),
+    counts: {
+      patients: input.patients.length,
+      pendingEnquiries: input.pendingEnquiries.length,
+      referred: input.patients.filter(patient => patient.status === 'REFERRED').length,
+      active: input.patients.filter(patient => patient.status === 'ACTIVE').length,
+    },
   };
 }
 

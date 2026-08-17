@@ -1,6 +1,8 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
-import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getOrderDrafts, getPortalOrders, getPortalPatients, isApiConfigured } from '../shared/api';
+import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getOrderDrafts, getPortalPatientDirectory, getPortalOrders, isApiConfigured } from '../shared/api';
+import type { PortalPendingEnquiryRecord } from '../shared/contracts';
+import { mapPortalEnquiryRecord, mapPortalPatientRecord } from '../utils/pharmacyPatientDirectory';
 import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderDraftRecord, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 import { checkPatientIdentity } from '../utils/patientIdentity';
@@ -40,6 +42,9 @@ export interface CRMPatient {
   primaryCondition?: string | null;
   referralSource?: string | null;
   marketingConsent?: boolean | null;
+  triedTwoTreatments?: boolean | null;
+  psychiatricExclusion?: boolean | null;
+  heardAbout?: string | null;
   status: 'Referred' | 'HHH approved' | 'Suspended';
   interactions?: { ts: Date | string; type: string; detail: string }[];
 }
@@ -276,6 +281,8 @@ export interface EligibilitySubmission {
   referralToken: string;
 }
 
+export type PendingEnquiry = PortalPendingEnquiryRecord & { organisationId: string };
+
 export interface PharmacyTenant {
   id: string;
   slug: string;
@@ -388,6 +395,7 @@ export interface AppState {
   catalogueUpdatedAt: string | null;
   crm: CRMPatient[];
   submissions: EligibilitySubmission[];
+  enquiries: PendingEnquiry[];
   orders: PatientOrder[];
   activeOrderId: number | null;
   toasts: Toast[];
@@ -632,7 +640,7 @@ export type Action =
   | { type: 'SET_CATALOGUE'; catalogue: CatalogueItem[]; updatedAt: string }
   | { type: 'SET_CATALOGUE_ERROR'; message: string }
   | { type: 'APPLY_CURALEAF_QUOTE'; items: Array<{ productId: string; wholesalePrice: number; patientPrice: number; inStock: boolean; stockStatus?: 'in_stock' | 'low_stock' | 'out_of_stock' }> }
-  | { type: 'SYNC_CRM_PATIENTS'; organisationId: string; patients: CRMPatient[] }
+  | { type: 'SYNC_PATIENT_DIRECTORY'; organisationId: string; patients: CRMPatient[]; enquiries: PendingEnquiry[] }
   | { type: 'SYNC_PORTAL_ORDERS'; organisationId: string; orders: PatientOrder[]; preferredActiveOrderId?: number }
   | { type: 'LOG_INTERACTION'; patientId: string; interactionType: string; detail: string }
   // Referrals
@@ -1010,6 +1018,7 @@ const initialState: AppState = {
   catalogueUpdatedAt: initialCachedCatalogue.updatedAt,
   crm: [],
   submissions: [],
+  enquiries: [],
   orders: [],
   activeOrderId: null,
   toasts: [],
@@ -1178,11 +1187,18 @@ function reducer(state: AppState, action: Action): AppState {
         })),
       };
     }
-    case 'SYNC_CRM_PATIENTS': {
-      const retained = state.workspaceMode === 'training' ? state.crm : state.crm.filter(patient => patient.organisationId !== action.organisationId);
-      const byId = new Map(retained.map(patient => [patient.id, patient]));
+    case 'SYNC_PATIENT_DIRECTORY': {
+      const retainedPatients = state.workspaceMode === 'training'
+        ? state.crm
+        : state.crm.filter(patient => patient.organisationId !== action.organisationId);
+      const byId = new Map(retainedPatients.map(patient => [patient.id, patient]));
       action.patients.forEach(patient => byId.set(patient.id, patient));
-      return { ...state, crm: [...byId.values()] };
+      const retainedEnquiries = state.enquiries.filter(enquiry => enquiry.organisationId !== action.organisationId);
+      return {
+        ...state,
+        crm: [...byId.values()],
+        enquiries: [...retainedEnquiries, ...action.enquiries],
+      };
     }
     case 'SYNC_PORTAL_ORDERS': {
       const previousActive = state.orders.find(order => order.id === state.activeOrderId && order.payment.status === 'none');
@@ -2015,26 +2031,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || (state.workspaceMode === 'training' && !currentOrganisationIsTest)) return;
     let cancelled = false;
     const organisationId = state.currentOrganisationId;
-    getPortalPatients(organisationId).then(records => {
+    getPortalPatientDirectory(organisationId).then(directory => {
       if (cancelled) return;
       dispatch({
-        type: 'SYNC_CRM_PATIENTS',
+        type: 'SYNC_PATIENT_DIRECTORY',
         organisationId,
-        patients: records.map(record => ({
-          id: record.id,
-          organisationId: record.organisationId,
-          name: `${record.firstName} ${record.surname}`.trim(),
-          email: record.email,
-          mobile: record.mobile,
-          dob: record.dob,
-          address: [record.address, record.postcode].filter(Boolean).join(', '),
-          postcode: record.postcode,
-          conditions: record.conditions ?? (record.primaryCondition ? [record.primaryCondition] : []),
-          primaryCondition: record.primaryCondition ?? record.conditions?.[0] ?? null,
-          referralSource: record.referralSource ?? null,
-          marketingConsent: record.marketingConsent ?? null,
-          status: record.status === 'active' ? 'HHH approved' : record.status === 'referred' ? 'Referred' : 'Suspended',
-        })),
+        patients: directory.patients.map(mapPortalPatientRecord),
+        enquiries: directory.enquiries.map(record => mapPortalEnquiryRecord(organisationId, record)),
       });
     }).catch(error => console.warn('Patient directory sync unavailable:', error));
     return () => { cancelled = true; };

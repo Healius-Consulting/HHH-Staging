@@ -22,7 +22,9 @@ import type {
   CuraleafQuote,
   CuraleafQuoteRequestItem,
   CuraleafActivity,
+  PortalPatientDirectoryRecord,
   PortalPatientRecord,
+  PortalPendingEnquiryRecord,
   PortalOrderInput,
   PortalOrderRecord,
   ExpiryCheckState,
@@ -338,8 +340,18 @@ export function getCuraleafActivity(organisationId: string) {
   return apiRequest<CuraleafActivity>(`/v1/portal/integrations/curaleaf/activity?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
+export function getPortalPatientDirectory(organisationId: string) {
+  return apiRequest<PortalPatientDirectoryRecord>(`/v1/portal/patient-directory?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+/** @deprecated Prefer getPortalPatientDirectory */
 export function getPortalPatients(organisationId: string) {
   return apiRequest<PortalPatientRecord[]>(`/v1/portal/patients?organisationId=${encodeURIComponent(organisationId)}`);
+}
+
+/** @deprecated Prefer getPortalPatientDirectory */
+export function getPortalEnquiries(organisationId: string) {
+  return apiRequest<PortalPendingEnquiryRecord[]>(`/v1/portal/enquiries?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
 export function getPortalOrders(organisationId: string, options?: { patientId?: string; unresolvedOnly?: boolean }) {

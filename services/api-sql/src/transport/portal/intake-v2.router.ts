@@ -325,6 +325,7 @@ export function createPortalIntakeV2Router(): Router {
         postcode: record.postcode,
         onboardingNote: input.notes,
       });
+      await intakeRepo.copySubmissionConditionsToPatient(patientId, caseId);
       await identityRepo.appendAudit({
         organisationId: record.assignedOrganisationId,
         actorUid: scope.uid,

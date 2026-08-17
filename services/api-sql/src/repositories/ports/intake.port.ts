@@ -41,6 +41,8 @@ export interface SubmissionQueueItem {
 export interface TenantPendingEnquiryRecord {
   id: string;
   submittedAt: string;
+  followUpStatus: string;
+  sourceType: 'GENERAL_HHH_WEBSITE' | 'PHARMACY_QR' | 'LEGACY_PHARMACY_QR';
 }
 
 export interface IdempotentSubmissionRecord {
@@ -131,5 +133,6 @@ export interface IntakeRepositoryPort {
   reassignPendingSubmission(input: ReassignSubmissionInput): Promise<void>;
   updateSubmissionFollowUp(input: UpdateSubmissionFollowUpInput): Promise<void>;
   activateSubmission(input: ActivateSubmissionInput): Promise<void>;
+  copySubmissionConditionsToPatient(patientId: string, submissionId: string): Promise<void>;
   declineSubmission(input: DeclineSubmissionInput): Promise<void>;
 }

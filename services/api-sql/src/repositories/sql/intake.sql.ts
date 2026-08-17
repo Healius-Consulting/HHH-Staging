@@ -68,6 +68,8 @@ const LIST_TENANT_PENDING_ENQUIRIES_GQL = `
     ) {
       id
       submittedAt
+      followUpStatus
+      sourceType
     }
   }
 `;
@@ -311,7 +313,7 @@ const ACTIVATE_SUBMISSION_GQL = `
       email: $email
       mobile: $mobile
       postcode: $postcode
-      status: ACTIVE
+      status: REFERRED
       activatedAt_expr: "request.time"
       statusChangedAt_expr: "request.time"
       patientIdentity_on_patient: {
@@ -319,6 +321,20 @@ const ACTIVATE_SUBMISSION_GQL = `
         emailHash: $emailHash
         dob: $dob
       }
+    })
+  }
+`;
+
+const UPSERT_PATIENT_CONDITION_GQL = `
+  mutation UpsertPatientCondition(
+    $patientId: UUID!
+    $conditionCode: String!
+    $primary: Boolean!
+  ) {
+    patientCondition_upsert(data: {
+      patientId: $patientId
+      conditionCode: $conditionCode
+      primary: $primary
     })
   }
 `;
@@ -476,6 +492,19 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
     } catch (error) {
       rethrowMutationError(error);
     }
+  }
+
+  async copySubmissionConditionsToPatient(patientId: string, submissionId: string): Promise<void> {
+    const conditions = await this.listSubmissionConditions(submissionId);
+    await Promise.all(conditions.map(condition =>
+      dataConnect.executeGraphql(UPSERT_PATIENT_CONDITION_GQL, {
+        variables: {
+          patientId,
+          conditionCode: condition.conditionCode,
+          primary: condition.primary,
+        },
+      }),
+    ));
   }
 
   async declineSubmission(input: DeclineSubmissionInput): Promise<void> {

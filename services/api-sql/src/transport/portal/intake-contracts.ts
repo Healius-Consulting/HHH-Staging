@@ -1,4 +1,5 @@
 import type { PlatformSubmissionRecord, SubmissionConditionRecord } from '../../repositories/ports/intake.port.js';
+import { portalSourceType } from './intake-source.js';
 
 function lower(value: string) {
   return value.toLowerCase();
@@ -36,11 +37,7 @@ export function toAdminIntakeQueueItem(record: PlatformSubmissionRecord) {
     outcomeStatus: lower(record.outcomeStatus),
     version: record.assignmentVersion,
     legacy: record.sourceType === 'LEGACY_PHARMACY_QR',
-    sourceType: record.sourceType === 'GENERAL_HHH_WEBSITE'
-      ? 'general_hhh_website'
-      : record.sourceType === 'PHARMACY_QR'
-        ? 'future_pharmacy_qr'
-        : 'legacy_pharmacy_qr',
+    sourceType: portalSourceType(record.sourceType) ?? 'legacy_pharmacy_qr',
     sourceOrganisationId: record.sourceOrganisationId,
     assignedOrganisationId: record.assignedOrganisationId,
     firstName: record.firstName,

@@ -4,10 +4,12 @@ import type { OrderRecord } from '../../repositories/ports/order.port.js';
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
 import type { PatientRecord } from '../../repositories/ports/patient.port.js';
 import {
+  buildPharmacyPatientDirectory,
   buildSqlPharmacyOverview,
   toPortalOrder,
   toPortalOrganisation,
   toPortalPatient,
+  toPortalPendingEnquiry,
 } from './pharmacy-contracts.js';
 
 const organisation: OrganisationRecord = {
@@ -44,7 +46,7 @@ const organisation: OrganisationRecord = {
 const patient: PatientRecord = {
   id: '00000000-0000-4000-a000-000000000001',
   organisationId: organisation.id,
-  sourceSubmissionId: null,
+  sourceSubmissionId: '00000000-0000-4000-a000-000000000099',
   firstName: 'Alicia',
   surname: 'Patient',
   dob: '1990-01-01',
@@ -58,6 +60,8 @@ const patient: PatientRecord = {
   version: 1,
   createdAt: '2026-08-01T09:00:00.000Z',
   updatedAt: '2026-08-01T09:00:00.000Z',
+  conditions: [],
+  sourceSubmission: null,
 };
 
 const order: OrderRecord = {
@@ -102,6 +106,32 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.status, 'active');
     assert.equal(mapped.address, '');
     assert.deepEqual(mapped.conditions, []);
+  });
+
+  it('maps referred patient eligibility from conditions and source submission', () => {
+    const mapped = toPortalPatient({
+      ...patient,
+      status: 'REFERRED',
+      conditions: [
+        { conditionCode: 'chronic-pain', primary: true },
+        { conditionCode: 'anxiety', primary: false },
+      ],
+      sourceSubmission: {
+        sourceType: 'PHARMACY_QR',
+        triedTwoTreatments: true,
+        psychiatricExclusion: false,
+        heardAbout: 'Pharmacy poster',
+        marketingConsent: true,
+      },
+    });
+    assert.equal(mapped.status, 'referred');
+    assert.deepEqual(mapped.conditions, ['chronic-pain', 'anxiety']);
+    assert.equal(mapped.primaryCondition, 'chronic-pain');
+    assert.equal(mapped.referralSource, 'future_pharmacy_qr');
+    assert.equal(mapped.triedTwoTreatments, true);
+    assert.equal(mapped.psychiatricExclusion, false);
+    assert.equal(mapped.heardAbout, 'Pharmacy poster');
+    assert.equal(mapped.marketingConsent, true);
   });
 
   it('maps a migrated SQL order to the rich list contract', () => {
@@ -364,6 +394,73 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(line?.remaining, 2);
     assert.equal(mapped.prescriptionFlow?.['rx-beach']?.state, 'PARTIALLY_RECEIVED');
     assert.equal(mapped.prescriptionFlow?.['rx-beach']?.shipmentStates?.['b13179c4-9515-4181-abd8-d1b87b50faa4'], 'received');
+  });
+
+  it('maps a pending tenant enquiry without patient PII', () => {
+    const mapped = toPortalPendingEnquiry({
+      id: '12345678-1234-4123-8123-123456789012',
+      submittedAt: '2026-08-17T09:15:00.000Z',
+      followUpStatus: 'NOT_STARTED',
+      sourceType: 'PHARMACY_QR',
+    });
+    assert.equal(mapped.caseReference, 'HHH-20260817-12345678');
+    assert.equal(mapped.displayStatus, 'New enquiry');
+    assert.equal(mapped.sourceType, 'future_pharmacy_qr');
+    assert.equal(JSON.stringify(mapped).includes('firstName'), false);
+  });
+
+  it('maps an in-progress HHH review enquiry', () => {
+    const mapped = toPortalPendingEnquiry({
+      id: '12345678-1234-4123-8123-123456789012',
+      submittedAt: '2026-08-17T09:15:00.000Z',
+      followUpStatus: 'IN_PROGRESS',
+      sourceType: 'GENERAL_HHH_WEBSITE',
+    });
+    assert.equal(mapped.displayStatus, 'Under HHH review');
+    assert.equal(mapped.sourceType, 'general_hhh_website');
+  });
+
+  it('builds a combined pharmacy patient directory payload', () => {
+    const directory = buildPharmacyPatientDirectory({
+      patients: [{
+        ...({
+          id: 'patient-1',
+          organisationId: organisation.id,
+          sourceSubmissionId: 'sub-1',
+          firstName: 'Avery',
+          surname: 'Taylor',
+          dob: '1990-01-01',
+          email: 'avery@example.com',
+          mobile: '07000000000',
+          address: null,
+          postcode: 'SW1A 1AA',
+          status: 'REFERRED',
+          activatedAt: null,
+          statusChangedAt: null,
+          version: 1,
+          createdAt: '2026-08-17T10:00:00.000Z',
+          updatedAt: '2026-08-17T10:00:00.000Z',
+        }),
+        conditions: [{ conditionCode: 'chronic_pain', primary: true }],
+        sourceSubmission: {
+          sourceType: 'PHARMACY_QR',
+          triedTwoTreatments: true,
+          psychiatricExclusion: false,
+          heardAbout: 'Friend',
+          marketingConsent: false,
+        },
+      }],
+      pendingEnquiries: [{
+        id: '12345678-1234-4123-8123-123456789012',
+        submittedAt: '2026-08-17T09:15:00.000Z',
+        followUpStatus: 'NOT_STARTED',
+        sourceType: 'PHARMACY_QR',
+      }],
+    });
+    assert.equal(directory.counts.patients, 1);
+    assert.equal(directory.counts.pendingEnquiries, 1);
+    assert.equal(directory.patients[0]?.conditions[0], 'chronic_pain');
+    assert.equal(directory.enquiries[0]?.displayStatus, 'New enquiry');
   });
 
   it('builds a PII-masked tenant overview from SQL rows', () => {

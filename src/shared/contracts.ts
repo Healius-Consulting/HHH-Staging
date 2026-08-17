@@ -416,6 +416,25 @@ export interface PortalOrderInput {
   };
 }
 
+export interface PortalPatientDirectoryRecord {
+  patients: PortalPatientRecord[];
+  enquiries: PortalPendingEnquiryRecord[];
+  counts: {
+    patients: number;
+    pendingEnquiries: number;
+    referred: number;
+    active: number;
+  };
+}
+
+export interface PortalPendingEnquiryRecord {
+  id: string;
+  submittedAt: string;
+  caseReference: string;
+  displayStatus: 'New enquiry' | 'Under HHH review';
+  sourceType: 'general_hhh_website' | 'future_pharmacy_qr' | 'legacy_pharmacy_qr';
+}
+
 export interface PortalPatientRecord {
   id: string;
   organisationId: string;
@@ -431,6 +450,9 @@ export interface PortalPatientRecord {
   primaryCondition?: string | null;
   referralSource?: string | null;
   marketingConsent?: boolean | null;
+  triedTwoTreatments?: boolean | null;
+  psychiatricExclusion?: boolean | null;
+  heardAbout?: string | null;
   createdAt: string;
   updatedAt: string;
 }

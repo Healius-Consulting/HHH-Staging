@@ -12,6 +12,7 @@ const patient = {
   firstName: 'Avery', surname: 'Morgan', dob: '1991-04-12', email: 'avery@example.test', mobile: '07000000000',
   address: null, postcode: 'SW1A 1AA', status: 'ACTIVE', activatedAt: null, statusChangedAt: null,
   version: 1, createdAt: '2026-08-01T10:00:00.000Z', updatedAt: '2026-08-17T10:00:00.000Z',
+  conditions: [], sourceSubmission: null,
 } satisfies PatientRecord;
 
 describe('SQL admin patient register', () => {
