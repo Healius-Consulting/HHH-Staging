@@ -135,6 +135,17 @@ export function purchaseOrderMatchScore(
   return 0;
 }
 
+export function existingCuraleafPurchaseOrder(
+  order: { id: string; orderNumber?: string | null; quoteSnapshot?: unknown },
+) {
+  const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, unknown>;
+  const prior = (snapshot.curaleaf && typeof snapshot.curaleaf === 'object' ? snapshot.curaleaf : null) as CuraleafPurchaseOrderLike | null;
+  if (!prior) return null;
+  const priorId = String(prior.purchaseOrderId || prior.id || '').trim();
+  if (!priorId || !priorPurchaseOrderMatchesOrder(prior, order)) return null;
+  return prior;
+}
+
 export function priorPurchaseOrderMatchesOrder(
   prior: CuraleafPurchaseOrderLike | null | undefined,
   order: { id: string; orderNumber?: string | null },

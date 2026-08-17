@@ -1,6 +1,10 @@
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { config } from '../../bootstrap/config.js';
 import { HttpError } from '../../domain/common/errors.js';
+import {
+  existingCuraleafPurchaseOrder,
+  matchPurchaseOrder,
+} from '../orders/curaleaf-fulfilment.js';
 import type { IntegrationConnectionRecord } from '../../repositories/ports/integration.port.js';
 
 const secretClient = new SecretManagerServiceClient();
@@ -217,6 +221,38 @@ export async function executeCuraleafOrderPlacement(
     return { skipped: true, reason: 'Order is cancelled' };
   }
 
+  const recordedPurchaseOrder = existingCuraleafPurchaseOrder(order);
+  if (recordedPurchaseOrder) {
+    return {
+      skipped: true,
+      reason: 'Purchase order already recorded for this order',
+      purchaseOrder: recordedPurchaseOrder,
+      prescriptionId: (recordedPurchaseOrder as { prescriptionId?: string | null }).prescriptionId ?? null,
+      prescriberId: (recordedPurchaseOrder as { prescriberId?: string | null }).prescriberId ?? null,
+    };
+  }
+
+  const customerReference = order.orderNumber || `HHH-${order.id}`;
+  try {
+    const livePurchaseOrders = await fetchCuraleafPurchaseOrders(connection);
+    const matchedPurchaseOrder = matchPurchaseOrder(
+      { id: order.id, orderNumber: order.orderNumber ?? customerReference },
+      livePurchaseOrders,
+      null,
+    );
+    if (matchedPurchaseOrder?.id) {
+      return {
+        skipped: true,
+        reason: 'Purchase order already exists at Curaleaf',
+        purchaseOrder: matchedPurchaseOrder,
+        prescriptionId: null,
+        prescriberId: null,
+      };
+    }
+  } catch (lookupErr) {
+    console.warn('[Curaleaf] Existing purchase-order lookup note:', lookupErr);
+  }
+
   // Step 1: Ensure Prescriber exists — match by GPhC/GMC + PIN, create only if not found
   const snapshot = (order.quoteSnapshot ?? {}) as any;
   const rxList = Array.isArray(snapshot?.prescriptions) ? snapshot.prescriptions : [];
@@ -334,8 +370,6 @@ export async function executeCuraleafOrderPlacement(
   // Use purchase-order-from-prescriptions when a Curaleaf prescription ID exists (correct linked flow),
   // otherwise fall back to direct product items (wholesale/catalog order).
   let purchaseOrderResult: any = null;
-  const customerReference = order.orderNumber
-    || `HHH-${order.id}`;
 
   if (curaleafPrescriptionId && lineItems.length > 0) {
     // Prescription-linked flow — Curaleaf will resolve formulas and quantities from the prescription

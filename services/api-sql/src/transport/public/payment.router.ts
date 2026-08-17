@@ -83,9 +83,11 @@ export function createPublicPaymentRouter(): Router {
               orderId: payment.orderId,
               fromState: 'PENDING_PLACEMENT',
               toState: 'PLACED',
-              reason: curaleafResult?.purchaseOrder?.id
-                ? `Worldpay payment cleared (${payment.transactionReference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
-                : `Worldpay payment cleared (${payment.transactionReference}) - Pharmacy dispensing workflow`,
+              reason: curaleafResult?.skipped
+                ? `Worldpay payment cleared (${payment.transactionReference}) - existing Curaleaf PO retained (${curaleafResult.reason})`
+                : curaleafResult?.purchaseOrder?.id
+                  ? `Worldpay payment cleared (${payment.transactionReference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
+                  : `Worldpay payment cleared (${payment.transactionReference}) - Pharmacy dispensing workflow`,
               externalReference: curaleafResult?.purchaseOrder?.id || payment.transactionReference,
             });
           }

@@ -113,9 +113,11 @@ export function createPortalPaymentRouter(): Router {
         orderId,
         fromState: 'PENDING_PLACEMENT',
         toState: 'PLACED',
-        reason: curaleafResult?.purchaseOrder?.id
-          ? `Manual payment recorded (${input.tender}: ${input.reference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
-          : `Manual payment recorded (${input.tender}: ${input.reference})`,
+        reason: curaleafResult?.skipped
+          ? `Manual payment recorded (${input.tender}: ${input.reference}) - existing Curaleaf PO retained (${curaleafResult.reason})`
+          : curaleafResult?.purchaseOrder?.id
+            ? `Manual payment recorded (${input.tender}: ${input.reference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
+            : `Manual payment recorded (${input.tender}: ${input.reference})`,
         externalReference: curaleafResult?.purchaseOrder?.id || input.reference,
         actorUid: scope.uid,
       });

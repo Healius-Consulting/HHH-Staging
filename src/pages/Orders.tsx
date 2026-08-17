@@ -46,6 +46,7 @@ import { confirmPortalOrderRefund, createPortalOrderRefund, handoutPortalOrder, 
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
 import { hasDispatchedRemainder, orderCancellationResolution, orderHasPartialPharmacyReceipt, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../utils/orderStage';
+import { buildOrderTimelineEvents } from '../utils/orderTimeline';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
 type GoodsReceiptDraft = { quantities: Record<string, number>; batches: Record<string, string>; expiries: Record<string, string>; note: string };
 
@@ -2439,46 +2440,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   );
 }
 
-function OrderTimeline({ order }: { order: PatientOrder }) {
-  const events: Array<{ label: string; detail: string; date: Date | string | null }> = [
-    { label: 'Order created', detail: `${order.prescriptions.length} prescription${order.prescriptions.length === 1 ? '' : 's'} prepared`, date: order.date },
-  ];
-  if (order.payment.sentAt) events.push({ label: 'Payment requested', detail: order.payment.route === 'worldpay' ? 'Worldpay payment link created' : 'Pharmacy payment selected', date: order.payment.sentAt });
-  if (order.payment.paidAt) events.push({ label: 'Payment cleared', detail: `${money(order.payment.amount)} received`, date: order.payment.paidAt });
-  if (order.curaleafApprovedAt) events.push({ label: 'Curaleaf approved', detail: 'Delivery service window started', date: order.curaleafApprovedAt });
-  if (order.cancellation) events.push({ label: 'Cancellation requested', detail: order.curaleafCancellation ? 'Curaleaf cancellation workflow opened' : 'Order cancellation recorded', date: order.cancellation.requestedAt });
-  if (order.curaleafCancellation?.contactedAt) events.push({ label: 'Curaleaf contacted', detail: `Reference ${order.curaleafCancellation.contactReference ?? 'recorded'}`, date: order.curaleafCancellation.contactedAt });
-  if (order.curaleafCancellation?.confirmedAt) events.push({ label: 'Curaleaf cancellation confirmed', detail: `Confirmation ${order.curaleafCancellation.confirmationReference ?? 'recorded'}`, date: order.curaleafCancellation.confirmedAt });
-  order.prescriptions.forEach((prescription, index) => {
-    if (prescription.placed) events.push({ label: `Rx ${index + 1} sent to Curaleaf`, detail: prescription.poRef ? `PO ${prescription.poRef}` : 'Awaiting supplier reference', date: order.payment.paidAt ?? order.date });
-    if (prescription.goodsInAt || ['received', 'ready', 'collected'].includes(prescription.status)) {
-      events.push({
-        label: `Rx ${index + 1} delivered & checked in`,
-        detail: prescription.goodsInBy ? `Checked in by ${prescription.goodsInBy}` : 'Checked in at dispensary',
-        date: prescription.goodsInAt ?? prescription.readyAt ?? new Date(),
-      });
-    }
-    if (prescription.readyAt || ['ready', 'collected'].includes(prescription.status)) {
-      events.push({
-        label: `Rx ${index + 1} ready for collection`,
-        detail: 'Collection notification email queued',
-        date: prescription.readyAt ?? prescription.goodsInAt ?? new Date(),
-      });
-    }
-    if (prescription.status === 'collected') {
-      events.push({
-        label: `Rx ${index + 1} handed to patient`,
-        detail: 'Dispensed and collected',
-        date: prescription.readyAt ?? new Date(),
-      });
-    }
-  });
-  if (order.handoutAt) {
-    events.push({
-      label: 'Medication handed out',
-      detail: `Collected by ${order.handoutRecipient || 'patient'}`,
-      date: order.handoutAt,
-    });
-  }
-  return <section className="order-crm-activity"><div className="order-crm-section-heading"><span><small>Activity</small><strong>Order timeline</strong></span><Clock3 size={15} /></div><ol className="order-crm-timeline">{events.sort((left, right) => new Date(right.date ?? 0).getTime() - new Date(left.date ?? 0).getTime()).map((event, index) => <li key={`${event.label}-${index}`}><span /><div><strong>{event.label}</strong><small>{event.detail}</small><time>{formatDate(event.date, true)}</time></div></li>)}</ol></section>;
+function OrderTimeline({ order }: { order: PatientOrder & { handoutAt?: Date | string | null; handoutRecipient?: string | null } }) {
+  const events = buildOrderTimelineEvents(order);
+  return <section className="order-crm-activity"><div className="order-crm-section-heading"><span><small>Activity</small><strong>Order timeline</strong></span><Clock3 size={15} /></div><ol className="order-crm-timeline">{events.map((event, index) => <li key={`${event.label}-${index}`}><span /><div><strong>{event.label}</strong><small>{event.detail}</small><time>{formatDate(event.date, true)}</time></div></li>)}</ol></section>;
 }

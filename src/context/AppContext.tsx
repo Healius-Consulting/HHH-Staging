@@ -834,6 +834,11 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           : isFlowPlaced ? 'processing'
           : null;
         const shipmentIds = (isPaid && flow?.shipmentIds?.length) ? flow.shipmentIds : (isPaid ? (curaleaf?.shipmentIds ?? []) : []);
+        const latestShipmentAt = isPaid
+          ? (curaleaf?.shipments ?? []).map(shipment => shipment.createdAt).filter((value): value is string => Boolean(value)).sort().at(-1)
+            ?? flow?.latestShipmentAt
+            ?? null
+          : null;
         return {
           id: orderId * 100 + rxIndex + 1,
           backendId: flowKey,
@@ -867,7 +872,9 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           shipmentStates: isPaid ? (flow?.shipmentStates ?? curaleaf?.shipmentStates) : undefined,
           manualPlaceRequired: isPaid ? flow?.manualPlaceRequired : false,
           receivedItems,
-          goodsInAt: receivedItems?.length ? (record.updatedAt ?? record.paidAt ?? record.createdAt) : null,
+          goodsInAt: hasCheckedInPacks
+            ? (flow?.goodsInAt ?? latestShipmentAt)
+            : null,
           fulfilmentLines: flowLines.length ? flowLines.map(line => ({
             productId: line.productId,
             ordered: line.ordered,
@@ -884,11 +891,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
             quantityMismatch: line.quantityMismatch,
           })) : undefined,
           supplierItems: isPaid ? (curaleaf?.supplierItems ?? []) : undefined,
-          latestShipmentAt: isPaid
-            ? (curaleaf?.shipments ?? []).map(shipment => shipment.createdAt).filter((value): value is string => Boolean(value)).sort().at(-1)
-              ?? flow?.latestShipmentAt
-              ?? null
-            : null,
+          latestShipmentAt,
           shipments: isPaid ? (curaleaf?.shipments ?? []) : undefined,
         };
       })

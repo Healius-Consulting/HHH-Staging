@@ -6,6 +6,7 @@ import {
   applyPharmacyHandout,
   customerReferenceMatchesOrder,
   dispatchStatusFromLines,
+  existingCuraleafPurchaseOrder,
   latestShipmentCreatedAt,
   matchPurchaseOrder,
   matchShipments,
@@ -421,5 +422,19 @@ describe('Curaleaf fulfilment mapping', () => {
     };
     const repaired = syncSnapshotLineItemsFromPurchaseOrder(snapshot, tenPackPo, compactOrder);
     assert.equal((repaired.items as Array<{ quantity: number }>)[0]?.quantity, 10);
+  });
+
+  it('detects an existing purchase order already stored on the order snapshot', () => {
+    const compactOrder = {
+      id: 'a55ee7d464664e95bf7f88a95241e60f',
+      orderNumber: 'HHH-a55ee7d4-6466-4e95-bf7f-88a95241e60f-383b50e0f9',
+      quoteSnapshot: {
+        curaleaf: {
+          purchaseOrderId: tenPackPo.id,
+          customerReference: tenPackPo.customerReference,
+        },
+      },
+    };
+    assert.equal(existingCuraleafPurchaseOrder(compactOrder)?.purchaseOrderId, tenPackPo.id);
   });
 });

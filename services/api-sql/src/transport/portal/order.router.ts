@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
-import { curaleafApiRequest, fetchCuraleafPurchaseOrders, fetchCuraleafShipments } from '../../application/integrations/curaleaf.service.js';
+import { curaleafApiRequest, executeCuraleafOrderPlacement, fetchCuraleafPurchaseOrders, fetchCuraleafShipments } from '../../application/integrations/curaleaf.service.js';
 import {
   advanceFulfilmentStatus,
   applyPharmacyHandout,
@@ -423,29 +423,36 @@ export function createPortalOrderRouter(): Router {
         fulfilmentStatus: 'SUPPLIER_PROCESSING',
       });
 
-      // Submit purchase order directly to Curaleaf API if connected
+      // Submit purchase order to Curaleaf API if connected (deduped — never double-submit)
       const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
       let curaleafResult: any = null;
       if (connection?.secretResourceName) {
-        const snapshot = (order.quoteSnapshot ?? {}) as any;
-        const lineItems: Array<{ packId: string; quantity: number }> =
-          snapshot?.lineItems?.map((item: any) => ({ packId: item.packId || item.productId, quantity: item.quantity || item.qty }))
-          || snapshot?.prescriptions?.flatMap((rx: any) => rx.items?.map((item: any) => ({ packId: item.packId || item.productId, quantity: item.quantity || item.qty })))
-          || [];
-
-        if (lineItems.length > 0) {
-          try {
-            curaleafResult = await curaleafApiRequest(connection, '/v1/purchase-orders/', {
-              method: 'POST',
-              body: JSON.stringify({
-                customerReference: order.orderNumber || `HHH-${orderId.slice(0, 8)}`,
-                items: lineItems,
-              }),
-            });
-          } catch (curaleafErr) {
-            console.warn('Curaleaf purchase order submission note:', curaleafErr);
-          }
+        try {
+          curaleafResult = await executeCuraleafOrderPlacement(connection, order);
+        } catch (curaleafErr) {
+          console.warn('Curaleaf purchase order submission note:', curaleafErr);
         }
+      }
+
+      if (curaleafResult?.purchaseOrder) {
+        const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, unknown>;
+        await orderRepo.updateQuoteSnapshot({
+          id: orderId,
+          organisationId: scope.organisationId,
+          quoteSnapshot: {
+            ...snapshot,
+            curaleaf: {
+              ...(typeof snapshot.curaleaf === 'object' && snapshot.curaleaf ? snapshot.curaleaf : {}),
+              ...curaleafResult.purchaseOrder,
+              purchaseOrderId: curaleafResult.purchaseOrder.id,
+              purchaseOrderState: curaleafResult.purchaseOrder.state,
+              customerReference: curaleafResult.purchaseOrder.customerReference,
+              prescriptionId: curaleafResult.prescriptionId,
+              prescriberId: curaleafResult.prescriberId,
+            },
+          },
+          fulfilmentStatus: 'SUPPLIER_PROCESSING',
+        }).catch(err => console.warn('Curaleaf manual placement snapshot persist warning:', err));
       }
 
       await orderRepo.appendPlacementEvent({
@@ -454,8 +461,12 @@ export function createPortalOrderRouter(): Router {
         orderLineId: prescriptionId,
         fromState: 'PENDING_PLACEMENT',
         toState: 'PLACED',
-        reason: curaleafResult ? 'Prescription placed with Curaleaf Laboratories' : 'Prescription placed manually with pharmacy dispensing',
-        externalReference: curaleafResult?.id || order.orderNumber,
+        reason: curaleafResult?.skipped
+          ? `Prescription already placed with Curaleaf (${curaleafResult.reason})`
+          : curaleafResult?.purchaseOrder?.id
+            ? 'Prescription placed with Curaleaf Laboratories'
+            : 'Prescription placed manually with pharmacy dispensing',
+        externalReference: curaleafResult?.purchaseOrder?.id || order.orderNumber,
         actorUid: scope.uid,
       });
 
