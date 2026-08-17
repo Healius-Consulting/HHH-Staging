@@ -83,8 +83,9 @@ export function toPortalPatient(patient: PatientRecord) {
 }
 
 export function toPortalOrder(order: OrderRecord) {
-  const isPaid = order.paymentStatus === 'PAID' || Boolean(order.paidAt);
-  const submittedToSupplier = order.status !== 'DRAFT';
+  const isCancelledOrder = order.status === 'CANCELLED';
+  const isPaid = !isCancelledOrder && (order.paymentStatus === 'PAID' || Boolean(order.paidAt));
+  const isSupplierFlowActive = !isCancelledOrder && (isPaid || ['SUPPLIER_PROCESSING', 'DISPATCHED_TO_PHARMACY', 'RECEIVED', 'COLLECTED'].includes(order.fulfilmentStatus));
   const snapshot = (order.quoteSnapshot ?? {}) as any;
 
   const rawLines = snapshot?.lineItems || snapshot?.items || [];
@@ -100,6 +101,7 @@ export function toPortalOrder(order: OrderRecord) {
   const rawPrescriptions = snapshot?.prescriptions || [];
   const prescriptions = Array.isArray(rawPrescriptions) && rawPrescriptions.length > 0 ? rawPrescriptions : (lineItems.length > 0 ? [{
     id: `rx-${order.id.slice(0, 8)}`,
+    fileId: `rx-${order.id.slice(0, 8)}`,
     serialNumber: `RX-${order.orderNumber || order.id.slice(0, 8)}`,
     issueDate: order.submittedAt ? order.submittedAt.split('T')[0] : new Date().toISOString().split('T')[0],
     prescriber: {
@@ -110,26 +112,77 @@ export function toPortalOrder(order: OrderRecord) {
     items: lineItems,
   }] : []);
 
+  // Build prescriptionFlow with live pack quantities (ordered, allocated, shipped, awaiting shipment)
+  const prescriptionFlow: Record<string, any> = {};
+  for (const rx of prescriptions) {
+    const rxKey = String(rx.id || rx.fileId || `rx-${order.id.slice(0, 8)}`);
+    const rxItems = rx.items && rx.items.length > 0 ? rx.items : lineItems;
+
+    const lines = rxItems.map((item: any) => {
+      const pid = String(item.productId || item.packId || item.id || '');
+      const count = Number(item.quantity || item.qty || item.count || 1);
+      const shipped = !isCancelledOrder && ['DISPATCHED_TO_PHARMACY', 'RECEIVED', 'COLLECTED'].includes(order.fulfilmentStatus) ? count : 0;
+      const allocated = isSupplierFlowActive ? count : 0;
+      const remaining = Math.max(0, count - shipped);
+
+      return {
+        lineId: `${rxKey}-${pid}`,
+        productId: pid,
+        ordered: count,
+        requested: count,
+        sent: isSupplierFlowActive ? count : null,
+        supplierReportedOrdered: count,
+        allocated,
+        shipped,
+        returned: 0,
+        remaining,
+        received: ['RECEIVED', 'COLLECTED'].includes(order.fulfilmentStatus) ? count : 0,
+        collected: order.fulfilmentStatus === 'COLLECTED' ? count : 0,
+        backordered: false,
+        quantityMismatch: false,
+      };
+    });
+
+    prescriptionFlow[rxKey] = {
+      id: rxKey,
+      state: isCancelledOrder ? 'CANCELLED_PURCHASE_ORDER'
+        : !isPaid ? 'AWAITING_PAYMENT'
+        : order.fulfilmentStatus === 'COLLECTED' ? 'COLLECTED'
+        : order.fulfilmentStatus === 'RECEIVED' ? 'READY_FOR_COLLECTION'
+        : 'PLACED',
+      payable: !isPaid && !isCancelledOrder,
+      expiryDate: rx.expiryDate || new Date(Date.now() + 28 * 86400000).toISOString().split('T')[0],
+      purchaseOrderId: isSupplierFlowActive ? (order.orderNumber || order.id) : null,
+      placedAt: isPaid ? (order.paidAt || order.updatedAt) : null,
+      shipmentIds: ['DISPATCHED_TO_PHARMACY', 'RECEIVED', 'COLLECTED'].includes(order.fulfilmentStatus) ? [`ship-${order.id.slice(0, 8)}`] : [],
+      lines,
+      dispatchStatus: lines.some((l: any) => l.shipped > 0 && l.remaining === 0) ? 'complete' : lines.some((l: any) => l.shipped > 0) ? 'partial' : 'not_dispatched',
+      quantityMismatch: false,
+    };
+  }
+
   return {
     id: order.id,
     organisationId: order.organisationId,
     patientId: order.patientId,
     lineItems,
     prescriptions,
+    prescriptionFlow,
     dispensingFeePence: Number(order.dispensingFeePence),
     totalPence: Number(order.totalPence),
     currency: order.currency === 'GBP' ? 'GBP' as const : 'GBP' as const,
     paymentRoute: lower(order.paymentRoute) === 'worldpay' ? 'worldpay' as const : 'manual' as const,
-    paymentStatus: isPaid ? 'paid' : lower(order.paymentStatus),
+    paymentStatus: isCancelledOrder ? 'cancelled' : isPaid ? 'paid' : lower(order.paymentStatus),
     fulfilmentStatus: lower(order.fulfilmentStatus),
-    status: isPaid && order.status === 'SUBMITTED' ? 'processing' : lower(order.status),
+    status: isCancelledOrder ? 'cancelled' : isPaid && order.status === 'SUBMITTED' ? 'processing' : lower(order.status),
     paymentTransactionReference: order.orderNumber,
     paidAt: order.paidAt,
     autoPlacementEnabled: true,
-    ...(submittedToSupplier ? {
+    ...(isSupplierFlowActive ? {
       curaleaf: {
         status: 'purchase_order_submitted' as const,
         customerReference: order.orderNumber || order.id,
+        purchaseOrderId: order.orderNumber || order.id,
       },
     } : {}),
     createdAt: order.createdAt,

@@ -182,9 +182,15 @@ export async function executeCuraleafOrderPlacement(
   order: {
     id: string;
     orderNumber?: string | null;
+    status?: string | null;
     quoteSnapshot?: unknown;
   }
 ) {
+  // If order is cancelled, never place with Curaleaf
+  if (order.status === 'CANCELLED') {
+    return { skipped: true, reason: 'Order is cancelled' };
+  }
+
   // Step 1: Ensure Prescriber exists
   let prescriberId = 'prescriber-default';
   try {
@@ -231,7 +237,21 @@ export async function executeCuraleafOrderPlacement(
     }
   }
 
-  // Step 3: Submit Prescription
+  // Step 3: Stock and price re-check quote gate
+  if (lineItems.length > 0) {
+    try {
+      await curaleafApiRequest(connection, '/v1/quotes/', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: lineItems.map(item => ({ packId: item.productId, quantity: item.count })),
+        }),
+      });
+    } catch (quoteErr) {
+      console.warn('[Curaleaf] Placement quote recheck note:', quoteErr);
+    }
+  }
+
+  // Step 4: Submit Prescription
   let curaleafPrescriptionId: string | null = null;
   if (lineItems.length > 0) {
     try {
@@ -242,7 +262,7 @@ export async function executeCuraleafOrderPlacement(
       const rxRes = await curaleafApiRequest<{ id: string }>(connection, '/v1/prescriptions/', {
         method: 'POST',
         body: JSON.stringify({
-          serialNumber: `RX-${order.orderNumber || order.id.slice(0, 8)}`,
+          serialNumber: `RX-${order.orderNumber || (order.id || 'ORDER').slice(0, 8)}`,
           prescriberId,
           issueDate: new Date().toISOString().split('T')[0],
           items: rxItems,
@@ -254,7 +274,7 @@ export async function executeCuraleafOrderPlacement(
     }
   }
 
-  // Step 4: Submit Purchase Order
+  // Step 5: Submit Purchase Order
   let purchaseOrderResult: any = null;
   const poItems = lineItems.map(item => ({
     productId: item.productId,
