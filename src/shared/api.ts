@@ -379,7 +379,7 @@ export function updatePortalShipmentStatus(shipmentId: string, input: {
   );
 }
 
-export function handoutPortalOrder(orderId: string, input: { organisationId: string }) {
+export function handoutPortalOrder(orderId: string, input: { organisationId: string; partial?: boolean; shipmentId?: string }) {
   return apiRequest<{ order: PortalOrderRecord; idempotent: boolean }>(
     `/v1/portal/orders/${encodeURIComponent(orderId)}/handout`,
     { method: 'POST', body: JSON.stringify(input) },

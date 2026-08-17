@@ -2,6 +2,7 @@ import {
   advanceFulfilmentStatus,
   dispatchStatusFromLines,
   latestShipmentCreatedAt,
+  mergePriorPharmacyLines,
   normalisedFulfilmentLines,
   supplierFulfilmentStatus,
 } from '../../application/orders/curaleaf-fulfilment.js';
@@ -154,9 +155,13 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
   }] : []);
 
   // Build prescriptionFlow with live pack quantities (ordered, allocated, shipped, awaiting shipment)
-  const shipments = Array.isArray(po?.shipments) ? po.shipments : [];
+  const shipments = Array.isArray(po?.shipments) ? po.shipments : (Array.isArray(persistedCuraleaf?.shipments) ? persistedCuraleaf.shipments : []);
   const requestedItems = lineItems.map((item: { packId: string; productId: string; quantity: number }) => ({ packId: item.packId || item.productId, productId: item.productId, quantity: item.quantity }));
-  const priorLines = Array.isArray(po?.lines) ? po.lines : Object.values(snapshot?.prescriptionFlow || {}).flatMap((flow: any) => Array.isArray(flow?.lines) ? flow.lines : []);
+  const priorLines = mergePriorPharmacyLines(
+    po?.lines,
+    persistedCuraleaf?.lines,
+    Object.values(snapshot?.prescriptionFlow || {}).flatMap((flow: any) => Array.isArray(flow?.lines) ? flow.lines : []),
+  );
   const lines = isSupplierFlowActive ? normalisedFulfilmentLines({
     purchaseOrder: po,
     shipments,
@@ -168,8 +173,13 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     order.fulfilmentStatus,
     supplierFulfilmentStatus({ purchaseOrder: po, shipments, lines }),
   );
-  const shipmentIds = (po?.shipmentIds ?? shipments.map((s: any) => s.id)).filter(Boolean);
-  const shipmentStates = po?.shipmentStates && typeof po.shipmentStates === 'object' ? po.shipmentStates : {};
+  const remainingOpenAfterGoodsIn = lines.some(line => line.received > 0 || line.collected > 0)
+    && lines.some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered);
+  const shipmentIds = (po?.shipmentIds ?? persistedCuraleaf?.shipmentIds ?? shipments.map((s: any) => s.id)).filter(Boolean);
+  const shipmentStates = {
+    ...(persistedCuraleaf?.shipmentStates && typeof persistedCuraleaf.shipmentStates === 'object' ? persistedCuraleaf.shipmentStates : {}),
+    ...(po?.shipmentStates && typeof po.shipmentStates === 'object' ? po.shipmentStates : {}),
+  };
   const placedAt = po?.createdAt || po?.issuedDate || order.paidAt || order.submittedAt || order.createdAt;
   const latestShipmentAt = latestShipmentCreatedAt(shipments);
   const prescriptionFlow: Record<string, any> = {};
@@ -179,6 +189,7 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
       id: rxKey,
       orderId: rxKey,
       state: isCancelledOrder ? 'CANCELLED_PURCHASE_ORDER'
+        : remainingOpenAfterGoodsIn ? 'PARTIALLY_RECEIVED'
         : order.fulfilmentStatus === 'COLLECTED' ? 'COLLECTED'
         : order.fulfilmentStatus === 'READY_FOR_COLLECTION' ? 'READY_FOR_COLLECTION'
         : order.fulfilmentStatus === 'RECEIVED' ? 'RECEIVED'
@@ -197,6 +208,7 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
 
   const portalFulfilment = isCancelledOrder
     ? 'cancelled'
+    : remainingOpenAfterGoodsIn ? 'partially_received'
     : computedFulfilment === 'PARTIALLY_DISPATCHED_TO_PHARMACY' ? 'partially_dispatched_to_pharmacy'
     : computedFulfilment === 'DISPATCHED_TO_PHARMACY' ? 'dispatched_to_pharmacy'
     : computedFulfilment === 'PARTIALLY_RECEIVED' ? 'partially_received'
@@ -236,6 +248,7 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
         shipmentStates,
         dispatchStatus,
         quantityMismatch: lines.some(line => line.quantityMismatch),
+        lines,
         supplierItems: po?.supplierItems || poItems.map((item: any) => ({
           productId: item.productId ?? null,
           packsOrderedCount: Number(item.packsOrderedCount || item.count || 0),

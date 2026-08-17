@@ -707,7 +707,7 @@ export type Action =
   | { type: 'RECORD_GOODS_RECEIPT'; orderId: number; rxId: number; lines: GoodsReceiptLine[]; note?: string }
   | { type: 'MARK_READY_FOR_COLLECTION'; orderId: number; rxId: number }
   | { type: 'HANDOVER_TO_PATIENT'; orderId: number; rxId: number }
-  | { type: 'HANDOUT_ORDER'; orderId: number }
+  | { type: 'HANDOUT_ORDER'; orderId: number; partial?: boolean; shipmentId?: string }
   // Toasts
   | { type: 'ADD_TOAST'; message: string; toastType?: 'success' | 'info' | 'warning' | 'error' }
   | { type: 'REMOVE_TOAST'; id: string }
@@ -825,6 +825,10 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           : isFlowPlaced ? 'processing'
           : null;
         const shipmentIds = (isPaid && flow?.shipmentIds?.length) ? flow.shipmentIds : (isPaid ? (curaleaf?.shipmentIds ?? []) : []);
+        const flowLines = (isPaid && flow?.lines?.length && flow.state !== 'AWAITING_PAYMENT') ? flow.lines : [];
+        const receivedItems = flowLines.length
+          ? flowLines.filter(line => line.received > 0).map(line => ({ productId: line.productId, quantityReceived: line.received }))
+          : undefined;
         return {
           id: orderId * 100 + rxIndex + 1,
           backendId: flowKey,
@@ -857,7 +861,9 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
           shipmentIds,
           shipmentStates: isPaid ? (flow?.shipmentStates ?? curaleaf?.shipmentStates) : undefined,
           manualPlaceRequired: isPaid ? flow?.manualPlaceRequired : false,
-          fulfilmentLines: (isPaid && flow?.lines?.length && flow.state !== 'AWAITING_PAYMENT') ? flow.lines.map(line => ({
+          receivedItems,
+          goodsInAt: receivedItems?.length ? (record.updatedAt ?? record.paidAt ?? record.createdAt) : null,
+          fulfilmentLines: flowLines.length ? flowLines.map(line => ({
             productId: line.productId,
             ordered: line.ordered,
             requested: line.requested,
@@ -1819,22 +1825,24 @@ function reducer(state: AppState, action: Action): AppState {
         if (r.status !== 'dispatched' && r.status !== 'partially-received') return r;
         const totals = new Map((r.receivedItems ?? []).map(line => [line.productId, line.quantityReceived]));
         action.lines.forEach(line => {
-          const ordered = r.items.find(item => item.productId === line.productId)?.qty ?? 0;
-          const safeQuantity = Math.max(0, Math.min(ordered, Math.floor(line.quantityReceived)));
-          totals.set(line.productId, safeQuantity);
+          const shipped = r.fulfilmentLines?.find(item => item.productId === line.productId)?.shipped ?? 0;
+          const ordered = r.items.find(item => item.productId === line.productId)?.qty ?? shipped;
+          const cap = shipped > 0 ? shipped : ordered;
+          const safeQuantity = Math.max(0, Math.min(cap, Math.floor(line.quantityReceived)));
+          totals.set(line.productId, Math.max(totals.get(line.productId) ?? 0, safeQuantity));
         });
         const receivedItems = r.items.map(item => ({
           productId: item.productId,
           quantityReceived: totals.get(item.productId) ?? 0,
         }));
-        const complete = r.items.length > 0 && r.items.every(item =>
-          (totals.get(item.productId) ?? 0) >= item.qty
-        );
         const remainingOpen = (r.fulfilmentLines ?? []).some(line => line.remaining > 0)
           || r.items.some(item => (totals.get(item.productId) ?? 0) < item.qty);
+        const complete = !remainingOpen && r.items.length > 0 && r.items.every(item =>
+          (totals.get(item.productId) ?? 0) >= item.qty
+        );
         return {
           ...r,
-          status: complete && !remainingOpen ? 'received' : 'partially-received',
+          status: complete ? 'received' : 'partially-received',
           receivedItems,
           fulfilmentLines: r.fulfilmentLines?.map(line => ({
             ...line,
@@ -1890,16 +1898,41 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'HANDOUT_ORDER': {
       const order = state.orders.find(candidate => candidate.id === action.orderId);
-      if (!order || !order.prescriptions.length || order.prescriptions.some(prescription => !['ready', 'collected'].includes(prescription.status))) return state;
+      if (!order || !order.prescriptions.length) return state;
+      const remainingOpen = order.prescriptions.some(prescription =>
+        (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
+      );
+      const readyForHandout = order.prescriptions.some(prescription =>
+        ['ready', 'partially-received', 'received'].includes(prescription.status)
+        && (prescription.fulfilmentLines ?? []).some(line => line.received > line.collected),
+      );
+      if (!readyForHandout) return state;
+      if (!action.partial && remainingOpen) return state;
       return mapOrder(state, action.orderId, currentOrder => ({
         ...currentOrder,
-        prescriptions: currentOrder.prescriptions.map(prescription => ({
-          ...prescription,
-          status: 'collected' as const,
-          shipmentStates: prescription.shipmentStates
-            ? Object.fromEntries(Object.keys(prescription.shipmentStates).map(shipmentId => [shipmentId, 'collected']))
-            : prescription.shipmentStates,
-        })),
+        handoutAt: new Date(),
+        prescriptions: currentOrder.prescriptions.map(prescription => {
+          const nextLines = prescription.fulfilmentLines?.map(line => ({
+            ...line,
+            collected: Math.max(line.collected, line.received),
+          }));
+          const rxRemainingOpen = (nextLines ?? []).some(line => line.remaining > 0 || line.collected < line.ordered);
+          const nextShipmentStates = prescription.shipmentStates
+            ? Object.fromEntries(Object.entries(prescription.shipmentStates).map(([shipmentId, shipmentState]) => {
+              if (action.shipmentId && shipmentId !== action.shipmentId) return [shipmentId, shipmentState];
+              if (shipmentState === 'ready_for_collection' || shipmentState === 'received' || shipmentState === 'partially_received') {
+                return [shipmentId, 'collected'];
+              }
+              return [shipmentId, shipmentState];
+            }))
+            : prescription.shipmentStates;
+          return {
+            ...prescription,
+            fulfilmentLines: nextLines,
+            status: rxRemainingOpen ? 'partially-received' : 'collected',
+            shipmentStates: nextShipmentStates,
+          };
+        }),
       }));
     }
 

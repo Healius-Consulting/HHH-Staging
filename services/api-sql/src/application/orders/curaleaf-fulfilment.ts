@@ -143,6 +143,86 @@ export function matchShipments(
   });
 }
 
+export function mergePriorPharmacyLines(...sources: unknown[]): Array<Record<string, unknown>> {
+  const byProduct = new Map<string, Record<string, unknown>>();
+  for (const source of sources) {
+    const lines = Array.isArray(source) ? source as Array<Record<string, unknown>> : [];
+    for (const line of lines) {
+      const productId = String(line.productId ?? '');
+      if (!productId) continue;
+      const existing = byProduct.get(productId);
+      if (!existing) {
+        byProduct.set(productId, { ...line, productId });
+        continue;
+      }
+      byProduct.set(productId, {
+        ...existing,
+        ...line,
+        productId,
+        received: Math.max(count(existing.received), count(line.received)),
+        collected: Math.max(count(existing.collected), count(line.collected)),
+      });
+    }
+  }
+  return [...byProduct.values()];
+}
+
+export function pharmacyCountsKey(lines: Array<{ productId?: string; received?: number; collected?: number }>) {
+  return lines.map(line => [String(line.productId || ''), count(line.received), count(line.collected)]);
+}
+
+export function applyPharmacyGoodsReceipt(input: {
+  lines: FulfilmentLine[];
+  items: Array<{ productId: string; receivedQuantity: number }>;
+  shipmentId: string;
+  shipmentStates?: Record<string, string>;
+}): { lines: FulfilmentLine[]; shipmentStates: Record<string, string> } {
+  const receivedByProduct = new Map(input.lines.map(line => [line.productId, line.received]));
+  for (const item of input.items) {
+    receivedByProduct.set(item.productId, Math.max(receivedByProduct.get(item.productId) ?? 0, count(item.receivedQuantity)));
+  }
+  const lines = input.lines.map(line => ({
+    ...line,
+    received: Math.min(line.ordered, line.shipped, receivedByProduct.get(line.productId) ?? line.received),
+  }));
+  return {
+    lines,
+    shipmentStates: { ...(input.shipmentStates ?? {}), [input.shipmentId]: 'received' },
+  };
+}
+
+export function applyPharmacyHandout(input: {
+  lines: FulfilmentLine[];
+  shipmentStates?: Record<string, string>;
+  shipmentId?: string;
+  partial: boolean;
+}): { lines: FulfilmentLine[]; shipmentStates: Record<string, string>; remainingOpen: boolean; allowed: boolean } {
+  const remainingOpen = input.lines.some(line => line.remaining > 0 || line.received < line.ordered);
+  if (!input.partial && remainingOpen) {
+    return {
+      lines: input.lines,
+      shipmentStates: { ...(input.shipmentStates ?? {}) },
+      remainingOpen,
+      allowed: false,
+    };
+  }
+  const lines = input.lines.map(line => ({
+    ...line,
+    collected: Math.max(line.collected, line.received),
+  }));
+  const shipmentStates = { ...(input.shipmentStates ?? {}) };
+  if (input.shipmentId) {
+    shipmentStates[input.shipmentId] = 'collected';
+  } else {
+    for (const [shipmentId, state] of Object.entries(shipmentStates)) {
+      if (state === 'received' || state === 'ready_for_collection' || state === 'partially_received') {
+        shipmentStates[shipmentId] = 'collected';
+      }
+    }
+  }
+  return { lines, shipmentStates, remainingOpen, allowed: true };
+}
+
 export function normalisedFulfilmentLines(input: {
   purchaseOrder?: CuraleafPurchaseOrderLike | null;
   shipments?: CuraleafShipmentLike[];
@@ -153,8 +233,7 @@ export function normalisedFulfilmentLines(input: {
   const shipments = input.shipments ?? [];
   const requestedItems = input.requestedItems ?? [];
   const priorByProduct = new Map(
-    (Array.isArray(input.priorLines) ? input.priorLines as Array<Record<string, unknown>> : [])
-      .map(line => [String(line.productId ?? ''), line]),
+    mergePriorPharmacyLines(input.priorLines).map(line => [String(line.productId ?? ''), line]),
   );
   const requestedByProduct = new Map<string, number>();
   for (const item of requestedItems) {

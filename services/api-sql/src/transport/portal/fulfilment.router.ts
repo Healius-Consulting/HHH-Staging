@@ -2,9 +2,11 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import {
   advanceFulfilmentStatus,
+  applyPharmacyGoodsReceipt,
   normalisedFulfilmentLines,
   supplierFulfilmentStatus,
 } from '../../application/orders/curaleaf-fulfilment.js';
+import { HttpError } from '../../domain/common/errors.js';
 import { SqlFulfilmentRepository } from '../../repositories/sql/fulfilment.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
@@ -62,10 +64,11 @@ export function createPortalFulfilmentRouter(): Router {
       const scope = assertTenantScope(req.context!);
       const supplierShipmentId = String(req.params.shipmentId || '');
       const input = goodsReceiptSchema.parse(req.body || {});
-      const targetOrderId = input.orderId && input.orderId !== scope.organisationId ? input.orderId : undefined;
       const itemsPayload = input.items || input.lines || [];
+      let targetOrderId = input.orderId && input.orderId !== scope.organisationId ? input.orderId : undefined;
 
       let sqlShipment = await fulfilmentRepo.findShipmentBySupplierId(scope.organisationId, supplierShipmentId).catch(() => null);
+      if (!targetOrderId && sqlShipment?.orderId) targetOrderId = sqlShipment.orderId;
       if (!sqlShipment && targetOrderId) {
         const order = await orderRepo.findOrderById(targetOrderId, scope.organisationId);
         const snapshot = snapshotObject(order?.quoteSnapshot);
@@ -83,6 +86,9 @@ export function createPortalFulfilmentRouter(): Router {
               : null
           )).catch(() => null);
         }
+      }
+      if (!targetOrderId) {
+        throw new HttpError(404, 'Shipment not found for this pharmacy tenant.', 'NOT_FOUND');
       }
 
       const notesContent = input.notes
@@ -106,41 +112,40 @@ export function createPortalFulfilmentRouter(): Router {
         if (result?.id) recordId = result.id;
       }
 
-      if (targetOrderId) {
-        const order = await orderRepo.findOrderById(targetOrderId, scope.organisationId);
-        if (order) {
-          const snapshot = snapshotObject(order.quoteSnapshot);
-          const curaleaf = snapshotObject(snapshot.curaleaf);
-          const requestedItems = snapshot.lineItems || snapshot.items || [];
-          const priorLines = normalisedFulfilmentLines({
-            purchaseOrder: curaleaf,
-            shipments: curaleaf.shipments || [],
-            requestedItems,
-            priorLines: curaleaf.lines,
-          });
-          const receivedByProduct = new Map(priorLines.map(line => [line.productId, line.received]));
-          for (const item of itemsPayload) {
-            receivedByProduct.set(item.productId, Math.max(receivedByProduct.get(item.productId) ?? 0, item.receivedQuantity));
-          }
-          const lines = priorLines.map(line => ({
-            ...line,
-            received: Math.min(line.ordered, receivedByProduct.get(line.productId) ?? line.received),
-          }));
-          const shipmentStates = { ...(curaleaf.shipmentStates || {}), [supplierShipmentId]: 'received' };
-          const nextStatus = advanceFulfilmentStatus(
-            order.fulfilmentStatus,
-            supplierFulfilmentStatus({ purchaseOrder: curaleaf, shipments: curaleaf.shipments || [], lines }),
-          );
-          await orderRepo.updateQuoteSnapshot({
-            id: order.id,
-            organisationId: scope.organisationId,
-            quoteSnapshot: { ...snapshot, curaleaf: { ...curaleaf, lines, shipmentStates } },
-            fulfilmentStatus: nextStatus === 'DISPATCHED_TO_PHARMACY' && lines.some(line => line.received > 0)
-              ? (lines.some(line => line.received < line.ordered) ? 'PARTIALLY_RECEIVED' : 'RECEIVED')
-              : nextStatus,
-          }).catch(err => console.warn('Order status sync on shipment check-in warning:', err));
-        }
-      }
+      const order = await orderRepo.findOrderById(targetOrderId, scope.organisationId);
+      if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      const snapshot = snapshotObject(order.quoteSnapshot);
+      const curaleaf = snapshotObject(snapshot.curaleaf);
+      const requestedItems = snapshot.lineItems || snapshot.items || [];
+      const priorLines = normalisedFulfilmentLines({
+        purchaseOrder: curaleaf,
+        shipments: curaleaf.shipments || [],
+        requestedItems,
+        priorLines: curaleaf.lines,
+      });
+      const receiptItems = itemsPayload.map(item => ({
+        productId: item.productId,
+        receivedQuantity: item.receivedQuantity,
+      }));
+      const { lines, shipmentStates } = applyPharmacyGoodsReceipt({
+        lines: priorLines,
+        items: receiptItems,
+        shipmentId: supplierShipmentId,
+        shipmentStates: curaleaf.shipmentStates || {},
+      });
+      const remainingOpen = lines.some(line => line.remaining > 0 || line.received < line.ordered);
+      const nextStatus = advanceFulfilmentStatus(
+        order.fulfilmentStatus,
+        supplierFulfilmentStatus({ purchaseOrder: curaleaf, shipments: curaleaf.shipments || [], lines }),
+      );
+      await orderRepo.updateQuoteSnapshot({
+        id: order.id,
+        organisationId: scope.organisationId,
+        quoteSnapshot: { ...snapshot, curaleaf: { ...curaleaf, lines, shipmentStates } },
+        fulfilmentStatus: remainingOpen && lines.some(line => line.received > 0)
+          ? 'PARTIALLY_RECEIVED'
+          : nextStatus,
+      }).catch(err => console.warn('Order status sync on shipment check-in warning:', err));
 
       res.status(201).json({
         id: recordId,

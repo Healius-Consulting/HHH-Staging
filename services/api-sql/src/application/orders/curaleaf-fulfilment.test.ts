@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   advanceFulfilmentStatus,
+  applyPharmacyGoodsReceipt,
+  applyPharmacyHandout,
   customerReferenceMatchesOrder,
   dispatchStatusFromLines,
   latestShipmentCreatedAt,
   matchPurchaseOrder,
   matchShipments,
+  mergePriorPharmacyLines,
   normalisedFulfilmentLines,
   supplierFulfilmentStatus,
 } from './curaleaf-fulfilment.js';
@@ -217,6 +220,122 @@ describe('Curaleaf fulfilment mapping', () => {
       lines,
     }), 'PARTIALLY_DISPATCHED_TO_PHARMACY');
     assert.equal(latestShipmentCreatedAt([tenPackShipment]), tenPackShipment.createdAt);
+  });
+
+  it('records Beach Wedding 2-of-4 check-in and keeps it after a Curaleaf re-sync', () => {
+    const before = normalisedFulfilmentLines({
+      purchaseOrder: beachWeddingPo,
+      shipments: [beachWeddingShipment],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 4 }],
+    });
+    const checkedIn = applyPharmacyGoodsReceipt({
+      lines: before,
+      items: [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', receivedQuantity: 2 }],
+      shipmentId: beachWeddingShipment.id,
+    });
+    assert.equal(checkedIn.lines[0]?.received, 2);
+    assert.equal(checkedIn.lines[0]?.remaining, 2);
+    assert.equal(checkedIn.shipmentStates[beachWeddingShipment.id], 'received');
+    assert.equal(supplierFulfilmentStatus({
+      purchaseOrder: beachWeddingPo,
+      shipments: [beachWeddingShipment],
+      lines: checkedIn.lines,
+    }), 'PARTIALLY_RECEIVED');
+
+    const resynced = normalisedFulfilmentLines({
+      purchaseOrder: beachWeddingPo,
+      shipments: [beachWeddingShipment],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 4 }],
+      priorLines: mergePriorPharmacyLines(checkedIn.lines, [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', shipped: 2 }]),
+    });
+    assert.equal(resynced[0]?.received, 2);
+    assert.equal(resynced[0]?.shipped, 2);
+    assert.equal(resynced[0]?.remaining, 2);
+    assert.equal(supplierFulfilmentStatus({
+      purchaseOrder: beachWeddingPo,
+      shipments: [beachWeddingShipment],
+      lines: resynced,
+    }), 'PARTIALLY_RECEIVED');
+    assert.equal(
+      advanceFulfilmentStatus('PARTIALLY_RECEIVED', 'PARTIALLY_DISPATCHED_TO_PHARMACY'),
+      'PARTIALLY_RECEIVED',
+    );
+  });
+
+  it('records 1-of-10 check-in and keeps it after a Curaleaf re-sync', () => {
+    const before = normalisedFulfilmentLines({
+      purchaseOrder: tenPackPo,
+      shipments: [tenPackShipment],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 10 }],
+    });
+    const checkedIn = applyPharmacyGoodsReceipt({
+      lines: before,
+      items: [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', receivedQuantity: 1 }],
+      shipmentId: tenPackShipment.id,
+    });
+    assert.equal(checkedIn.lines[0]?.received, 1);
+    assert.equal(checkedIn.lines[0]?.remaining, 9);
+    const resynced = normalisedFulfilmentLines({
+      purchaseOrder: tenPackPo,
+      shipments: [tenPackShipment],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 10 }],
+      priorLines: checkedIn.lines,
+    });
+    assert.equal(resynced[0]?.received, 1);
+    assert.equal(resynced[0]?.remaining, 9);
+    assert.equal(supplierFulfilmentStatus({
+      purchaseOrder: tenPackPo,
+      shipments: [tenPackShipment],
+      lines: resynced,
+    }), 'PARTIALLY_RECEIVED');
+  });
+
+  it('does not check in more packs than Curaleaf has shipped', () => {
+    const before = normalisedFulfilmentLines({
+      purchaseOrder: beachWeddingPo,
+      shipments: [beachWeddingShipment],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 4 }],
+    });
+    const checkedIn = applyPharmacyGoodsReceipt({
+      lines: before,
+      items: [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', receivedQuantity: 4 }],
+      shipmentId: beachWeddingShipment.id,
+    });
+    assert.equal(checkedIn.lines[0]?.received, 2);
+  });
+
+  it('hands out only arrived packs on a split consignment and refuses full collection', () => {
+    const lines = normalisedFulfilmentLines({
+      purchaseOrder: beachWeddingPo,
+      shipments: [beachWeddingShipment],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 4 }],
+      priorLines: [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', received: 2, collected: 0 }],
+    });
+    const blocked = applyPharmacyHandout({
+      lines,
+      shipmentStates: { [beachWeddingShipment.id]: 'received' },
+      shipmentId: beachWeddingShipment.id,
+      partial: false,
+    });
+    assert.equal(blocked.allowed, false);
+    assert.equal(blocked.remainingOpen, true);
+    assert.equal(blocked.lines[0]?.collected, 0);
+
+    const partial = applyPharmacyHandout({
+      lines,
+      shipmentStates: { [beachWeddingShipment.id]: 'ready_for_collection' },
+      shipmentId: beachWeddingShipment.id,
+      partial: true,
+    });
+    assert.equal(partial.allowed, true);
+    assert.equal(partial.remainingOpen, true);
+    assert.equal(partial.lines[0]?.collected, 2);
+    assert.equal(partial.shipmentStates[beachWeddingShipment.id], 'collected');
+    assert.equal(supplierFulfilmentStatus({
+      purchaseOrder: beachWeddingPo,
+      shipments: [beachWeddingShipment],
+      lines: partial.lines,
+    }), 'PARTIALLY_RECEIVED');
   });
 
   it('keeps FULLY_ALLOCATED as supplier allocated when no shipment has been handed to courier', () => {

@@ -65,9 +65,16 @@ export function orderStage(order: PatientOrder, now = new Date()): { stage: Orde
   if (order.payment.status === 'sent') return { stage: 'awaiting-payment', unresolvedReason };
 
   const statuses = order.prescriptions.map(prescription => prescription.status);
+  const remainingOpen = order.prescriptions.some(prescription =>
+    (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
+  );
+  const readyForCollection = order.prescriptions.some(prescription =>
+    prescription.status === 'ready'
+    || Object.values(prescription.shipmentStates ?? {}).includes('ready_for_collection'),
+  );
   if (statuses.length && statuses.every(status => status === 'cancelled')) return { stage: 'cancelled', unresolvedReason };
-  if (statuses.length && statuses.every(status => status === 'collected')) return { stage: 'collected', unresolvedReason };
-  if (statuses.length && statuses.every(status => ['ready', 'collected'].includes(status)) && statuses.some(status => status === 'ready')) return { stage: 'ready', unresolvedReason };
+  if (statuses.length && statuses.every(status => status === 'collected') && !remainingOpen) return { stage: 'collected', unresolvedReason };
+  if (readyForCollection) return { stage: 'ready', unresolvedReason };
   if (statuses.some(status => status === 'received' || status === 'partially-received')) return { stage: 'delivered', unresolvedReason };
   if (statuses.some(status => status === 'dispatched')) return { stage: 'dispatched', unresolvedReason };
   if (statuses.length && statuses.every(status => ['processing', 'approved', 'dispatched', 'partially-received', 'received', 'ready', 'collected', 'cancelled'].includes(status))) return { stage: 'curaleaf-approved', unresolvedReason };

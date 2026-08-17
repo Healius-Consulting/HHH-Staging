@@ -305,6 +305,67 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.lineItems[0]?.name, '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD');
   });
 
+  it('keeps Beach Wedding 2-of-4 check-in after a Curaleaf re-sync', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      id: '5a8b4ac3-236c-41f7-a37b-0132b7892637',
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-13T10:30:00.000Z',
+      fulfilmentStatus: 'PARTIALLY_RECEIVED',
+      quoteSnapshot: {
+        lineItems: [{
+          packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          formulaId: 'f74f63de-dc89-4074-9d8c-be35f5398963',
+          name: '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD',
+          quantity: 4,
+          unitPricePence: 8500,
+        }],
+        prescriptions: [{
+          id: 'rx-beach',
+          fileId: 'rx-beach',
+          serialNumber: 'RX-BEACH',
+          issueDate: '2026-08-13',
+          prescriber: { name: 'Dr Test', pin: '123', gmcNumber: null, gphcNumber: null, initials: 'DT' },
+          items: [],
+        }],
+        curaleaf: {
+          lines: [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', received: 2, collected: 0 }],
+          shipmentStates: { 'b13179c4-9515-4181-abd8-d1b87b50faa4': 'received' },
+        },
+      },
+      curaleaf: {
+        id: '99f4bc42-4312-45c5-b659-21583b5eb364',
+        state: 'PROCESSING',
+        courier: 'POLAR_SPEED',
+        customerReference: 'HHH-5a8b4ac3-236c-41f7-a37b-0132b7892637-a9386eac93',
+        issuedDate: '2026-08-13',
+        createdAt: '2026-08-13T10:29:08.933558Z',
+        items: [{
+          productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          packsOrderedCount: 4,
+          packsAllocatedCount: 2,
+          packsReturnedCount: 0,
+        }],
+        shipments: [{
+          id: 'b13179c4-9515-4181-abd8-d1b87b50faa4',
+          purchaseOrderId: '99f4bc42-4312-45c5-b659-21583b5eb364',
+          createdAt: '2026-08-17T14:29:05.973745Z',
+          items: [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', packCount: 2 }],
+        }],
+        lines: [{ productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', received: 2, collected: 0 }],
+        shipmentStates: { 'b13179c4-9515-4181-abd8-d1b87b50faa4': 'received' },
+      },
+    } as OrderRecord & { curaleaf: unknown });
+
+    assert.equal(mapped.fulfilmentStatus, 'partially_received');
+    const line = mapped.prescriptionFlow?.['rx-beach']?.lines[0];
+    assert.equal(line?.received, 2);
+    assert.equal(line?.remaining, 2);
+    assert.equal(mapped.prescriptionFlow?.['rx-beach']?.state, 'PARTIALLY_RECEIVED');
+    assert.equal(mapped.prescriptionFlow?.['rx-beach']?.shipmentStates?.['b13179c4-9515-4181-abd8-d1b87b50faa4'], 'received');
+  });
+
   it('builds a PII-masked tenant overview from SQL rows', () => {
     const overview = buildSqlPharmacyOverview({
       organisation,

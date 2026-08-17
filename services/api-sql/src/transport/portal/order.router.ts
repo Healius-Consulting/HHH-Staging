@@ -4,10 +4,13 @@ import { HttpError } from '../../domain/common/errors.js';
 import { curaleafApiRequest, fetchCuraleafPurchaseOrders, fetchCuraleafShipments } from '../../application/integrations/curaleaf.service.js';
 import {
   advanceFulfilmentStatus,
+  applyPharmacyHandout,
   buildCuraleafSnapshot,
   matchPurchaseOrder,
   matchShipments,
+  mergePriorPharmacyLines,
   normalisedFulfilmentLines,
+  pharmacyCountsKey,
   supplierFulfilmentStatus,
 } from '../../application/orders/curaleaf-fulfilment.js';
 import { SqlFulfilmentRepository } from '../../repositories/sql/fulfilment.sql.js';
@@ -97,7 +100,10 @@ async function attachCuraleafToOrder(
     purchaseOrder: livePo,
     shipments: liveShipments,
     requestedItems,
-    priorLines: prior.lines,
+    priorLines: mergePriorPharmacyLines(
+      prior.lines,
+      Object.values(snapshot.prescriptionFlow || {}).flatMap((flow: any) => Array.isArray(flow?.lines) ? flow.lines : []),
+    ),
   });
   const curaleaf = (matchedPO || liveShipments.length || prior.purchaseOrderId || prior.id)
     ? {
@@ -134,6 +140,8 @@ async function attachCuraleafToOrder(
       state: prior.purchaseOrderState || prior.state || null,
       shipments: prior.shipmentIds || [],
       shipped: (prior.lines || []).map((line: any) => [line.productId, line.shipped, line.allocated]),
+      pharmacy: pharmacyCountsKey(prior.lines || []),
+      shipmentStates: prior.shipmentStates || {},
     });
     const nextKey = JSON.stringify({
       status: nextStatus,
@@ -141,6 +149,8 @@ async function attachCuraleafToOrder(
       state: matchedPO?.state || prior.purchaseOrderState || prior.state || null,
       shipments: liveShipments.map((shipment: any) => shipment.id),
       shipped: lines.map(line => [line.productId, line.shipped, line.allocated]),
+      pharmacy: pharmacyCountsKey(lines),
+      shipmentStates: prior.shipmentStates || {},
     });
     if (previousKey !== nextKey) {
       await repos.orderRepo.updateQuoteSnapshot({
@@ -596,32 +606,54 @@ export function createPortalOrderRouter(): Router {
     try {
       const scope = assertTenantScope(req.context!);
       const orderId = String(req.params.id || '');
+      const input = z.object({
+        organisationId: z.string().optional(),
+        partial: z.boolean().optional(),
+        shipmentId: z.string().optional(),
+      }).parse(req.body || {});
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
 
       const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
-      const lines = Array.isArray(snapshot.curaleaf?.lines) ? snapshot.curaleaf.lines : [];
-      const remainingOpen = lines.some((line: any) => Number(line.remaining || 0) > 0 || Number(line.collected || 0) < Number(line.ordered || 0));
-      const nextLines = lines.map((line: any) => ({
-        ...line,
-        collected: Math.max(Number(line.collected || 0), Number(line.received || 0)),
-      }));
+      const curaleaf = snapshot.curaleaf && typeof snapshot.curaleaf === 'object' ? snapshot.curaleaf : {};
+      const requestedItems = snapshot.lineItems || snapshot.items || [];
+      const lines = normalisedFulfilmentLines({
+        purchaseOrder: curaleaf,
+        shipments: curaleaf.shipments || [],
+        requestedItems,
+        priorLines: curaleaf.lines,
+      });
+      const result = applyPharmacyHandout({
+        lines,
+        shipmentStates: curaleaf.shipmentStates || {},
+        shipmentId: input.shipmentId,
+        partial: input.partial === true,
+      });
+      if (!result.allowed) {
+        throw new HttpError(409, 'Remaining packs are still open with Curaleaf. Use partial handover for arrived packs only.', 'REMAINDER_OPEN');
+      }
+      const nextStatus = result.remainingOpen
+        ? 'PARTIALLY_RECEIVED'
+        : 'COLLECTED';
       await orderRepo.updateQuoteSnapshot({
         id: orderId,
         organisationId: scope.organisationId,
         quoteSnapshot: {
           ...snapshot,
           curaleaf: {
-            ...(snapshot.curaleaf || {}),
-            lines: nextLines,
+            ...curaleaf,
+            lines: result.lines,
+            shipmentStates: result.shipmentStates,
           },
         },
-        fulfilmentStatus: remainingOpen && nextLines.some((line: any) => Number(line.collected || 0) < Number(line.ordered || 0))
-          ? 'PARTIALLY_RECEIVED'
-          : 'COLLECTED',
+        fulfilmentStatus: nextStatus,
       });
 
-      res.status(200).json({ id: orderId, status: remainingOpen ? 'partially_collected' : 'collected', collectedAt: new Date().toISOString() });
+      res.status(200).json({
+        id: orderId,
+        status: result.remainingOpen ? 'partially_collected' : 'collected',
+        collectedAt: new Date().toISOString(),
+      });
     } catch (error) {
       next(error);
     }
@@ -635,10 +667,15 @@ export function createPortalOrderRouter(): Router {
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
 
-      await orderRepo.updateOrderStatus({
+      const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
+      const curaleaf = snapshot.curaleaf && typeof snapshot.curaleaf === 'object' ? snapshot.curaleaf : {};
+      const lines = Array.isArray(curaleaf.lines) ? curaleaf.lines : [];
+      const remainingOpen = lines.some((line: any) => Number(line.remaining || 0) > 0 || Number(line.received || 0) < Number(line.ordered || 0));
+      await orderRepo.updateQuoteSnapshot({
         id: orderId,
         organisationId: scope.organisationId,
-        fulfilmentStatus: 'RECEIVED',
+        quoteSnapshot: snapshot,
+        fulfilmentStatus: remainingOpen ? 'PARTIALLY_RECEIVED' : 'READY_FOR_COLLECTION',
       });
 
       res.status(200).json({ id: orderId, status: 'ready', readyAt: new Date().toISOString() });

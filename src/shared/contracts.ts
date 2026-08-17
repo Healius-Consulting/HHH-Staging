@@ -472,6 +472,7 @@ export interface PortalCuraleafOrderState {
   shipmentStates?: Record<string, string>;
   dispatchStatus?: 'not_dispatched' | 'partial' | 'complete';
   quantityMismatch?: boolean;
+  lines?: FulfilmentLineRecord[];
   requestedItems?: Array<{ packId: string; quantity: number }>;
   placementRequest?: {
     endpoint: string;
@@ -556,7 +557,7 @@ export interface PortalOrderRecord {
   updatedAt: string;
 }
 
-export type PrescriptionFlowState = 'DRAFT' | 'AWAITING_PAYMENT' | 'PAID' | 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'PLACED' | 'HELD_FOR_RENEWAL' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXPIRED' | 'CANCELLED_PURCHASE_ORDER' | 'CANCELLED_REFUNDED';
+export type PrescriptionFlowState = 'DRAFT' | 'AWAITING_PAYMENT' | 'PAID' | 'PENDING_PLACEMENT' | 'HELD_PRICE' | 'HELD_STOCK' | 'PLACED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'HELD_FOR_RENEWAL' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXPIRED' | 'CANCELLED_PURCHASE_ORDER' | 'CANCELLED_REFUNDED';
 
 export interface FulfilmentLineRecord {
   lineId: string;
