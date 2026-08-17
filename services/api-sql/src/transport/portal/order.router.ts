@@ -1,6 +1,8 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
+import { curaleafApiRequest } from '../../application/integrations/curaleaf.service.js';
+import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
@@ -65,6 +67,7 @@ const createOrderInputSchema = z.object({
 export function createPortalOrderRouter(): Router {
   const router = Router();
   const orderRepo = new SqlOrderRepository();
+  const integrationRepo = new SqlIntegrationRepository();
 
   // GET /v1/portal/order-drafts - List active tenant drafts
   router.get('/portal/order-drafts', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
@@ -244,17 +247,43 @@ export function createPortalOrderRouter(): Router {
         fulfilmentStatus: 'SUPPLIER_PROCESSING',
       });
 
+      // Submit purchase order directly to Curaleaf API if connected
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
+      let curaleafResult: any = null;
+      if (connection?.secretResourceName) {
+        const snapshot = (order.quoteSnapshot ?? {}) as any;
+        const lineItems: Array<{ packId: string; quantity: number }> =
+          snapshot?.lineItems?.map((item: any) => ({ packId: item.packId || item.productId, quantity: item.quantity || item.qty }))
+          || snapshot?.prescriptions?.flatMap((rx: any) => rx.items?.map((item: any) => ({ packId: item.packId || item.productId, quantity: item.quantity || item.qty })))
+          || [];
+
+        if (lineItems.length > 0) {
+          try {
+            curaleafResult = await curaleafApiRequest(connection, '/v1/purchase-orders/', {
+              method: 'POST',
+              body: JSON.stringify({
+                customerReference: order.orderNumber || `HHH-${orderId.slice(0, 8)}`,
+                items: lineItems,
+              }),
+            });
+          } catch (curaleafErr) {
+            console.warn('Curaleaf purchase order submission note:', curaleafErr);
+          }
+        }
+      }
+
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
         orderId,
         orderLineId: prescriptionId,
         fromState: 'PENDING_PLACEMENT',
         toState: 'PLACED',
-        reason: 'Prescription placed manually with Curaleaf / pharmacy dispensing',
+        reason: curaleafResult ? 'Prescription placed with Curaleaf Laboratories' : 'Prescription placed manually with pharmacy dispensing',
+        externalReference: curaleafResult?.id || order.orderNumber,
         actorUid: scope.uid,
       });
 
-      res.status(200).json({ success: true, status: 'placed_manually' });
+      res.status(200).json({ success: true, status: 'placed_manually', curaleaf: curaleafResult });
     } catch (error) {
       next(error);
     }
