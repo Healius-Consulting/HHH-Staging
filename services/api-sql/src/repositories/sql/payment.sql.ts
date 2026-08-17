@@ -2,17 +2,21 @@ import { dataConnect } from '../../bootstrap/firebase.js';
 import type { PaymentRecord, PaymentRepositoryPort } from '../ports/payment.port.js';
 
 const GET_PAYMENT_BY_WORLDPAY_CODE_GQL = `
-  query GetPaymentByWorldpayCode($worldpayOrderCode: String!) {
-    payments(where: { worldpayOrderCode: { eq: $worldpayOrderCode } }, limit: 1) {
+  query GetPaymentByWorldpayCode($transactionReference: String!) {
+    payments(where: { transactionReference: { eq: $transactionReference } }, limit: 1) {
       id
       organisationId
       orderId
+      patientId
       status
       amountPence
       currency
       route
       receiptHash
-      worldpayOrderCode
+      transactionReference
+      hostedPaymentUrl
+      manualTender
+      manualReference
       version
       createdAt
       updatedAt
@@ -26,11 +30,39 @@ const GET_PAYMENT_BY_RECEIPT_HASH_GQL = `
       id
       organisationId
       orderId
+      patientId
       status
       amountPence
       currency
       route
       receiptHash
+      transactionReference
+      hostedPaymentUrl
+      manualTender
+      manualReference
+      version
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+const GET_PAYMENT_BY_ORDER_ID_GQL = `
+  query GetPaymentByOrderId($orderId: UUID!, $organisationId: UUID!) {
+    payments(where: { orderId: { eq: $orderId }, organisationId: { eq: $organisationId } }, limit: 5) {
+      id
+      organisationId
+      orderId
+      patientId
+      status
+      amountPence
+      currency
+      route
+      receiptHash
+      transactionReference
+      hostedPaymentUrl
+      manualTender
+      manualReference
       version
       createdAt
       updatedAt
@@ -43,12 +75,16 @@ const LIST_TENANT_PAYMENTS_GQL = `
     payments(where: { organisationId: { eq: $organisationId } }, limit: $limit) {
       id
       orderId
+      patientId
       status
       amountPence
       currency
       route
       receiptHash
-      worldpayOrderCode
+      transactionReference
+      hostedPaymentUrl
+      manualTender
+      manualReference
       version
       createdAt
     }
@@ -59,13 +95,16 @@ const CREATE_PAYMENT_GQL = `
   mutation CreatePayment(
     $organisationId: UUID!
     $orderId: UUID!
-    $patientId: UUID
+    $patientId: UUID!
     $status: PaymentStatus!
     $amountPence: Int64!
     $currency: String!
     $route: PaymentRoute!
-    $worldpayOrderCode: String
+    $transactionReference: String
     $receiptHash: String
+    $hostedPaymentUrl: String
+    $manualTender: String
+    $manualReference: String
   ) {
     payment_insert(data: {
       organisationId: $organisationId
@@ -75,8 +114,12 @@ const CREATE_PAYMENT_GQL = `
       amountPence: $amountPence
       currency: $currency
       route: $route
-      worldpayOrderCode: $worldpayOrderCode
+      transactionReference: $transactionReference
       receiptHash: $receiptHash
+      hostedPaymentUrl: $hostedPaymentUrl
+      manualTender: $manualTender
+      manualReference: $manualReference
+      version: 1
     })
   }
 `;
@@ -93,6 +136,7 @@ const UPDATE_PAYMENT_STATUS_GQL = `
       data: {
         status: $status
         receiptHash: $receiptHash
+        updatedAt_expr: "request.time"
       }
     )
     order_update(
@@ -100,6 +144,7 @@ const UPDATE_PAYMENT_STATUS_GQL = `
       data: {
         paymentStatus: $status
         paidAt_expr: "request.time"
+        updatedAt_expr: "request.time"
       }
     )
   }
@@ -133,7 +178,7 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
   async findPaymentByWorldpayCode(worldpayOrderCode: string): Promise<PaymentRecord | null> {
     const result = await dataConnect.executeGraphql<{ payments: PaymentRecord[] }, any>(
       GET_PAYMENT_BY_WORLDPAY_CODE_GQL,
-      { variables: { worldpayOrderCode } }
+      { variables: { transactionReference: worldpayOrderCode } }
     );
     return result.data.payments?.[0] ?? null;
   }
@@ -142,6 +187,14 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
     const result = await dataConnect.executeGraphql<{ payments: PaymentRecord[] }, any>(
       GET_PAYMENT_BY_RECEIPT_HASH_GQL,
       { variables: { receiptHash } }
+    );
+    return result.data.payments?.[0] ?? null;
+  }
+
+  async findPaymentByOrderId(orderId: string, organisationId: string): Promise<PaymentRecord | null> {
+    const result = await dataConnect.executeGraphql<{ payments: PaymentRecord[] }, any>(
+      GET_PAYMENT_BY_ORDER_ID_GQL,
+      { variables: { orderId, organisationId } }
     );
     return result.data.payments?.[0] ?? null;
   }
@@ -157,13 +210,16 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
   async createPayment(data: {
     organisationId: string;
     orderId: string;
-    patientId?: string | null;
+    patientId: string;
     status: 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
     amountPence: number;
     currency: string;
     route: 'MANUAL' | 'WORLDPAY';
-    worldpayOrderCode?: string | null;
+    transactionReference?: string | null;
     receiptHash?: string | null;
+    hostedPaymentUrl?: string | null;
+    manualTender?: string | null;
+    manualReference?: string | null;
   }): Promise<{ id?: string }> {
     const result = await dataConnect.executeGraphql<{ payment_insert: { id: string } }, any>(
       CREATE_PAYMENT_GQL,
@@ -171,20 +227,23 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
         variables: {
           organisationId: data.organisationId,
           orderId: data.orderId,
-          patientId: data.patientId ?? null,
+          patientId: data.patientId,
           status: data.status,
           amountPence: data.amountPence,
           currency: data.currency,
           route: data.route,
-          worldpayOrderCode: data.worldpayOrderCode ?? null,
+          transactionReference: data.transactionReference ?? null,
           receiptHash: data.receiptHash ?? null,
+          hostedPaymentUrl: data.hostedPaymentUrl ?? null,
+          manualTender: data.manualTender ?? null,
+          manualReference: data.manualReference ?? null,
         },
       }
     );
     return { id: result.data.payment_insert?.id };
   }
 
-  async updatePaymentStatus(id: string, status: 'PAID' | 'FAILED', orderId: string, receiptHash?: string | null): Promise<void> {
+  async updatePaymentStatus(id: string, status: 'PAID' | 'FAILED' | 'CANCELLED', orderId: string, receiptHash?: string | null): Promise<void> {
     await dataConnect.executeGraphql<any, any>(UPDATE_PAYMENT_STATUS_GQL, {
       variables: { id, status, orderId, receiptHash: receiptHash ?? null },
     });

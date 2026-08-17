@@ -1,6 +1,8 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
+import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
+import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
@@ -36,6 +38,7 @@ export function createPortalPaymentRouter(): Router {
   const router = Router();
   const paymentRepo = new SqlPaymentRepository();
   const orderRepo = new SqlOrderRepository();
+  const integrationRepo = new SqlIntegrationRepository();
 
   // POST /v1/portal/orders/:id/payments/manual - Record manual pharmacy payment
   router.post('/portal/orders/:id/payments/manual', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
@@ -59,6 +62,8 @@ export function createPortalPaymentRouter(): Router {
         currency: 'GBP',
         route: 'MANUAL',
         receiptHash,
+        manualTender: input.tender,
+        manualReference: input.reference,
       });
 
       const now = new Date().toISOString();
@@ -105,7 +110,17 @@ export function createPortalPaymentRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const worldpayOrderCode = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'worldpay').catch(() => null);
+      const transactionReference = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+      const session = await createWorldpayHostedSession(connection, scope.organisationId, {
+        orderNumber: order.orderNumber || orderId,
+        transactionReference,
+        amountPence: order.totalPence,
+        currency: order.currency || 'GBP',
+        statementNarrative: order.orderNumber || 'HHH Order',
+      });
+
       const paymentResult = await paymentRepo.createPayment({
         organisationId: scope.organisationId,
         orderId,
@@ -114,22 +129,22 @@ export function createPortalPaymentRouter(): Router {
         amountPence: order.totalPence,
         currency: order.currency || 'GBP',
         route: 'WORLDPAY',
-        worldpayOrderCode,
+        transactionReference: session.transactionReference,
+        hostedPaymentUrl: session.url,
       });
 
-      const checkoutUrl = `https://secure-test.worldpay.com/hosted/checkout?order=${encodeURIComponent(order.orderNumber || orderId)}&amount=${order.totalPence}`;
       res.status(200).json({
         paymentId: paymentResult.id,
-        transactionReference: worldpayOrderCode,
+        transactionReference: session.transactionReference,
         provider: {
-          url: checkoutUrl,
+          url: session.url,
           _links: {
             redirect: {
-              href: checkoutUrl,
+              href: session.url,
             },
           },
         },
-        linkExpiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+        linkExpiresAt: session.expiresAt,
         reused: false,
       });
     } catch (error) {
@@ -148,20 +163,51 @@ export function createPortalPaymentRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const worldpayOrderCode = `WP-${Date.now().toString(36).toUpperCase()}`;
-      const checkoutUrl = `https://secure-test.worldpay.com/hosted/checkout?order=${encodeURIComponent(order.orderNumber || orderId)}&amount=${order.totalPence}`;
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'worldpay').catch(() => null);
+      const transactionReference = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+      const session = await createWorldpayHostedSession(connection, scope.organisationId, {
+        orderNumber: order.orderNumber || orderId,
+        transactionReference,
+        amountPence: order.totalPence,
+        currency: order.currency || 'GBP',
+        statementNarrative: order.orderNumber || 'HHH Order',
+      });
+
+      const paymentResult = await paymentRepo.createPayment({
+        organisationId: scope.organisationId,
+        orderId,
+        patientId: order.patientId,
+        status: 'PENDING',
+        amountPence: order.totalPence,
+        currency: order.currency || 'GBP',
+        route: 'WORLDPAY',
+        transactionReference: session.transactionReference,
+        hostedPaymentUrl: session.url,
+      });
+
+      await orderRepo.appendPlacementEvent({
+        organisationId: scope.organisationId,
+        orderId,
+        fromState: 'SUBMITTED',
+        toState: 'SUBMITTED',
+        reason: `Re-issued Worldpay checkout link (${session.transactionReference})`,
+        externalReference: session.transactionReference,
+        actorUid: scope.uid,
+      });
+
       res.status(200).json({
-        paymentId: crypto.randomUUID(),
-        transactionReference: worldpayOrderCode,
+        paymentId: paymentResult.id,
+        transactionReference: session.transactionReference,
         provider: {
-          url: checkoutUrl,
+          url: session.url,
           _links: {
             redirect: {
-              href: checkoutUrl,
+              href: session.url,
             },
           },
         },
-        linkExpiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+        linkExpiresAt: session.expiresAt,
       });
     } catch (error) {
       next(error);

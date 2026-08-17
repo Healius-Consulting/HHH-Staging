@@ -169,23 +169,40 @@ const CREATE_ORDER_GQL = `
   }
 `;
 
-const UPDATE_ORDER_STATUS_GQL = `
-  mutation UpdateOrderStatus(
-    $id: UUID!
-    $status: OrderStatus
-    $paymentStatus: PaymentStatus
-    $fulfilmentStatus: FulfilmentStatus
-    $paidAt: Timestamp
-    $cancelledAt: Timestamp
-  ) {
+const RECORD_PAYMENT_ORDER_GQL = `
+  mutation RecordPaymentOrder($id: UUID!) {
     order_update(
       key: { id: $id }
       data: {
-        status: $status
-        paymentStatus: $paymentStatus
+        status: PROCESSING
+        paymentStatus: PAID
+        paidAt_expr: "request.time"
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const UPDATE_FULFILMENT_GQL = `
+  mutation UpdateFulfilment($id: UUID!, $fulfilmentStatus: FulfilmentStatus!) {
+    order_update(
+      key: { id: $id }
+      data: {
+        status: PROCESSING
         fulfilmentStatus: $fulfilmentStatus
-        paidAt: $paidAt
-        cancelledAt: $cancelledAt
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const CANCEL_ORDER_GQL = `
+  mutation CancelOrder($id: UUID!) {
+    order_update(
+      key: { id: $id }
+      data: {
+        status: CANCELLED
+        cancelledAt_expr: "request.time"
         updatedAt_expr: "request.time"
       }
     )
@@ -371,19 +388,24 @@ export class SqlOrderRepository implements OrderRepositoryPort {
   }): Promise<boolean> {
     const existing = await this.findOrderById(data.id, data.organisationId);
     if (!existing) return false;
-    await dataConnect.executeGraphql<any, any>(
-      UPDATE_ORDER_STATUS_GQL,
-      {
-        variables: {
-          id: data.id,
-          status: data.status ?? null,
-          paymentStatus: data.paymentStatus ?? null,
-          fulfilmentStatus: data.fulfilmentStatus ?? null,
-          paidAt: data.paidAt ?? null,
-          cancelledAt: data.cancelledAt ?? null,
-        },
-      }
-    );
+
+    if (data.status === 'CANCELLED' || data.cancelledAt) {
+      await dataConnect.executeGraphql<any, any>(CANCEL_ORDER_GQL, { variables: { id: data.id } });
+      return true;
+    }
+
+    if (data.paymentStatus === 'PAID' || data.paidAt) {
+      await dataConnect.executeGraphql<any, any>(RECORD_PAYMENT_ORDER_GQL, { variables: { id: data.id } });
+      return true;
+    }
+
+    if (data.fulfilmentStatus) {
+      await dataConnect.executeGraphql<any, any>(UPDATE_FULFILMENT_GQL, {
+        variables: { id: data.id, fulfilmentStatus: data.fulfilmentStatus },
+      });
+      return true;
+    }
+
     return true;
   }
 
