@@ -2229,34 +2229,25 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                       </div>
                     </div>
                     
-                    <div className="order-fulfilment-pipeline">
-                      <div className={`pipeline-step pipeline-step--ordered ${isStep1Active ? 'pipeline-step--active' : ''} ${isStep1Complete ? 'pipeline-step--complete' : ''}`}>
-                        <div className="pipeline-step__header">
-                          <span className="pipeline-step__num">1</span>
-                          <span className="pipeline-step__line" />
-                        </div>
+                    <div className="order-fulfilment-pipeline" role="list" aria-label="Curaleaf fulfilment progress">
+                      <div className={`pipeline-step pipeline-step--ordered ${isStep1Active ? 'pipeline-step--active' : ''} ${isStep1Complete ? 'pipeline-step--complete' : ''}`} role="listitem">
+                        <span className="pipeline-step__num" aria-hidden="true">1</span>
                         <div className="pipeline-step__content">
                           <span className="pipeline-step__label">Ordered</span>
                           <strong className="pipeline-step__value">{line.orderedPacks} <small>pk</small></strong>
                         </div>
                       </div>
 
-                      <div className={`pipeline-step pipeline-step--picked ${isStep2Active ? 'pipeline-step--active' : ''} ${isStep2Complete ? 'pipeline-step--complete' : ''}`}>
-                        <div className="pipeline-step__header">
-                          <span className="pipeline-step__num">2</span>
-                          <span className="pipeline-step__line" />
-                        </div>
+                      <div className={`pipeline-step pipeline-step--picked ${isStep2Active ? 'pipeline-step--active' : ''} ${isStep2Complete ? 'pipeline-step--complete' : ''}`} role="listitem">
+                        <span className="pipeline-step__num" aria-hidden="true">2</span>
                         <div className="pipeline-step__content">
                           <span className="pipeline-step__label">Curaleaf Dispensed</span>
                           <strong className="pipeline-step__value">{line.allocatedPacks}/{line.orderedPacks} <small>pk</small></strong>
                         </div>
                       </div>
 
-                      <div className={`pipeline-step pipeline-step--transit ${isStep3Active ? 'pipeline-step--active' : ''} ${isStep3Complete ? 'pipeline-step--complete' : ''}`}>
-                        <div className="pipeline-step__header">
-                          <span className="pipeline-step__num">3</span>
-                          <span className="pipeline-step__line" />
-                        </div>
+                      <div className={`pipeline-step pipeline-step--transit ${isStep3Active ? 'pipeline-step--active' : ''} ${isStep3Complete ? 'pipeline-step--complete' : ''}`} role="listitem">
+                        <span className="pipeline-step__num" aria-hidden="true">3</span>
                         <div className="pipeline-step__content">
                           <span className="pipeline-step__label">In Transit</span>
                           <strong className="pipeline-step__value">
@@ -2270,10 +2261,8 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                         </div>
                       </div>
 
-                      <div className={`pipeline-step pipeline-step--received ${isStep4Active ? 'pipeline-step--active' : ''} ${isStep4Complete ? 'pipeline-step--complete' : ''}`}>
-                        <div className="pipeline-step__header">
-                          <span className="pipeline-step__num">4</span>
-                        </div>
+                      <div className={`pipeline-step pipeline-step--received ${isStep4Active ? 'pipeline-step--active' : ''} ${isStep4Complete ? 'pipeline-step--complete' : ''}`} role="listitem">
+                        <span className="pipeline-step__num" aria-hidden="true">4</span>
                         <div className="pipeline-step__content">
                           <span className="pipeline-step__label">Checked In</span>
                           <strong className="pipeline-step__value">{line.receivedPacks}/{line.orderedPacks} <small>pk</small></strong>
