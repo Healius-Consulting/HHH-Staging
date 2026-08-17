@@ -13,8 +13,10 @@ import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 
+const entityIdSchema = z.string().regex(/^(?:[a-f\d]{32}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i);
+
 const goodsReceiptSchema = z.object({
-  orderId: z.string().uuid().optional(),
+  orderId: entityIdSchema.optional(),
   receiptNumber: z.string().min(1).max(100).optional(),
   status: z.enum(['COMPLETE', 'DAMAGED', 'DISCREPANCY', 'PARTIAL']).optional(),
   notes: z.string().max(4000).optional(),
