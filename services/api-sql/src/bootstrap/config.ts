@@ -19,13 +19,13 @@ const configSchema = z.object({
     'portal.holistichealthhub.cc,portal.holistichealthhub.live,' +
     'localhost,127.0.0.1'
   ),
-  // Domain feature flags
-  STORAGE_BACKEND: z.enum(['firestore', 'sql-shadow', 'sql']).default('sql'),
-  AUTH_BACKEND: z.enum(['firestore', 'sql-shadow', 'sql']).default('sql'),
-  INTAKE_BACKEND: z.enum(['firestore', 'sql-shadow', 'sql']).default('sql'),
-  ORDERS_BACKEND: z.enum(['firestore', 'sql-shadow', 'sql']).default('sql'),
-  PAYMENTS_BACKEND: z.enum(['firestore', 'sql-shadow', 'sql']).default('sql'),
-  FULFILMENT_BACKEND: z.enum(['firestore', 'sql-shadow', 'sql']).default('sql'),
+  // Domain backends are SQL Connect only. Firestore is not a valid runtime.
+  STORAGE_BACKEND: z.literal('sql').default('sql'),
+  AUTH_BACKEND: z.literal('sql').default('sql'),
+  INTAKE_BACKEND: z.literal('sql').default('sql'),
+  ORDERS_BACKEND: z.literal('sql').default('sql'),
+  PAYMENTS_BACKEND: z.literal('sql').default('sql'),
+  FULFILMENT_BACKEND: z.literal('sql').default('sql'),
 });
 
 export type RuntimeConfig = z.infer<typeof configSchema>;
