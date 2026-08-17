@@ -46,7 +46,7 @@ import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { confirmPortalOrderRefund, createPortalOrderRefund, handoutPortalOrder, placePrescriptionManually, recordCuraleafRejection, recordPortalCuraleafCancellation, recordPortalGoodsReceipt, recordPortalManualPayment, requestPortalOrderCancellation, resendWorldpayPaymentLink, updatePortalShipmentStatus } from '../shared/api';
 import { compactPatientName } from '../utils/patientName';
 import { formatPatientDob } from '../utils/patientDob';
-import { hasDispatchedRemainder, orderCancellationResolution, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../utils/orderStage';
+import { hasDispatchedRemainder, orderCancellationResolution, orderHasPartialPharmacyReceipt, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../utils/orderStage';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
 type GoodsReceiptDraft = { quantities: Record<string, number>; batches: Record<string, string>; expiries: Record<string, string>; note: string };
 
@@ -137,6 +137,14 @@ function recordStageMeta(record: OrderRecord) {
   if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'warning', icon: AlertTriangle };
   if (resolution === 'refunded') return { label: 'Refunded', description: 'Cancellation closed and patient refund completed', tone: 'refunded', icon: Banknote };
   if (resolution === 'resolved') return { label: 'Resolved', description: 'Cancellation closed with no action outstanding', tone: 'resolved', icon: CheckCircle2 };
+  if (record.stage === 'dispatched' && orderHasPartialPharmacyReceipt(record.order)) {
+    return {
+      label: 'Part delivered',
+      description: 'First consignment checked in; remainder still with Curaleaf',
+      tone: 'dispatched',
+      icon: Truck,
+    };
+  }
   return STAGE_META[record.stage];
 }
 
@@ -1233,7 +1241,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
         </div>
       </header>
 
-      {cancellationClosed ? <CancellationClosureSummary order={order} resolution={cancellationResolution as 'resolved' | 'refunded'} /> : <JourneyRail stage={stage} paymentPaid={order.payment.status === 'paid'} />}
+      {cancellationClosed ? <CancellationClosureSummary order={order} resolution={cancellationResolution as 'resolved' | 'refunded'} /> : <JourneyRail stage={stage} paymentPaid={order.payment.status === 'paid'} order={order} />}
 
       <ExpiryCountdown order={order} now={now} />
       <ReplacementLineage order={order} allOrders={state.orders} />
@@ -1907,7 +1915,7 @@ function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked,
   );
 }
 
-function JourneyRail({ stage, paymentPaid }: { stage: OrderStage; paymentPaid: boolean }) {
+function JourneyRail({ stage, paymentPaid, order }: { stage: OrderStage; paymentPaid: boolean; order: PatientOrder }) {
   if (stage === 'cancelled') {
     const phases = [
       { label: 'Payment', detail: paymentPaid ? 'Cleared' : 'Cancelled', complete: paymentPaid },
@@ -1926,13 +1934,14 @@ function JourneyRail({ stage, paymentPaid }: { stage: OrderStage; paymentPaid: b
       </ol>
     );
   }
+  const partialReceipt = orderHasPartialPharmacyReceipt(order);
   const curaleafComplete = ['curaleaf-approved', 'dispatched', 'delivered', 'ready', 'collected'].includes(stage);
   const deliveryComplete = ['delivered', 'ready', 'collected'].includes(stage);
   const collectionComplete = stage === 'collected';
   const phases = [
     { label: 'Payment', detail: paymentPaid ? 'Cleared' : 'Awaiting', complete: paymentPaid, active: stage === 'awaiting-payment' },
     { label: 'Curaleaf', detail: curaleafComplete ? 'Approved' : stage === 'curaleaf-pending' ? 'In review' : 'Pending', complete: curaleafComplete, active: stage === 'paid' || stage === 'curaleaf-pending' },
-    { label: 'Delivery', detail: deliveryComplete ? 'Received' : stage === 'dispatched' ? 'In transit' : 'Pending', complete: deliveryComplete, active: stage === 'curaleaf-approved' || stage === 'dispatched' },
+    { label: 'Delivery', detail: deliveryComplete ? 'Received' : partialReceipt ? 'Part delivered' : stage === 'dispatched' ? 'In transit' : 'Pending', complete: deliveryComplete, active: stage === 'curaleaf-approved' || stage === 'dispatched' },
     { label: 'Ready to collect', detail: collectionComplete ? 'Handed out' : stage === 'ready' ? 'Ready' : 'Pending', complete: collectionComplete, active: stage === 'delivered' || stage === 'ready' },
   ];
   return (

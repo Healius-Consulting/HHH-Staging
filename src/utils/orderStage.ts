@@ -70,6 +70,33 @@ function prescriptionDeliveredAtPharmacy(prescription: OrderPrescription) {
     );
 }
 
+function orderHasOpenRemainder(order: PatientOrder) {
+  return order.prescriptions.some(prescription =>
+    (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
+  );
+}
+
+/** Partial split: some packs checked in at pharmacy while supplier remainder is still open. */
+export function orderHasPartialPharmacyReceipt(order: PatientOrder) {
+  if (!orderHasOpenRemainder(order)) return false;
+  return order.prescriptions.some(prescription => {
+    if (!prescriptionHasCheckedInPacks(prescription)) return false;
+    if (!prescriptionUsesPackProgress(prescription)) return prescription.status === 'partially-received';
+    const { ordered, received } = prescriptionPackTotals(prescription);
+    return received > 0 && received < ordered;
+  });
+}
+
+function orderAllOrderedPacksReceived(order: PatientOrder) {
+  return order.prescriptions.every(prescription => {
+    if (!prescriptionUsesPackProgress(prescription)) {
+      return ['received', 'ready', 'collected'].includes(prescription.status);
+    }
+    const { ordered, received } = prescriptionPackTotals(prescription);
+    return received >= ordered;
+  });
+}
+
 /**
  * Cancellation is an order outcome, not a patient status. Keep unfinished
  * supplier/refund work operational while demoting closed cancellations.
@@ -114,9 +141,7 @@ export function orderStage(order: PatientOrder, now = new Date()): { stage: Orde
   if (order.payment.status === 'sent') return { stage: 'awaiting-payment', unresolvedReason };
 
   const statuses = order.prescriptions.map(prescription => prescription.status);
-  const remainingOpen = order.prescriptions.some(prescription =>
-    (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
-  );
+  const remainingOpen = orderHasOpenRemainder(order);
   const hasInTransitPacks = order.prescriptions.some(prescription => prescriptionHasInTransitPacks(prescription));
   const readyForCollection = !hasInTransitPacks
     && order.prescriptions.some(prescription => prescriptionReadyForCollection(prescription));
@@ -126,8 +151,15 @@ export function orderStage(order: PatientOrder, now = new Date()): { stage: Orde
   if (statuses.length && statuses.every(status => status === 'collected') && !remainingOpen) return { stage: 'collected', unresolvedReason };
   if (hasInTransitPacks) return { stage: 'dispatched', unresolvedReason };
   if (readyForCollection) return { stage: 'ready', unresolvedReason };
+  if (orderHasPartialPharmacyReceipt(order)) return { stage: 'dispatched', unresolvedReason };
   const usesPackProgress = order.prescriptions.some(prescriptionUsesPackProgress);
   if (deliveredAtPharmacy || (!usesPackProgress && statuses.some(status => status === 'received' || status === 'partially-received'))) {
+    if (!usesPackProgress && statuses.some(status => status === 'partially-received') && remainingOpen) {
+      return { stage: 'dispatched', unresolvedReason };
+    }
+    if (usesPackProgress && remainingOpen && !orderAllOrderedPacksReceived(order)) {
+      return { stage: 'dispatched', unresolvedReason };
+    }
     return { stage: 'delivered', unresolvedReason };
   }
   if (statuses.some(status => status === 'dispatched')) return { stage: 'dispatched', unresolvedReason };

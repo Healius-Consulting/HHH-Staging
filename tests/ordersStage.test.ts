@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasDispatchedRemainder, orderCancellationResolution, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
+import { hasDispatchedRemainder, orderCancellationResolution, orderHasPartialPharmacyReceipt, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
 import type { PatientOrder } from '../src/context/AppContext.tsx';
 
 const taxonomy: Array<[OrderStage, StageFilter]> = [
@@ -146,4 +146,61 @@ test('ready and already-collected prescriptions classify the remaining order as 
     prescriptions: [{ status: 'ready' }, { status: 'collected' }],
   } as PatientOrder;
   assert.equal(orderStage(order).stage, 'ready');
+});
+
+test('partial check-in with supplier remainder stays in delivery not delivered', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{
+      status: 'partially-received',
+      dispatchStatus: 'partial',
+      shipmentStates: { 'ship-1': 'received' },
+      fulfilmentLines: [{
+        productId: 'p1',
+        ordered: 10,
+        shipped: 1,
+        received: 1,
+        remaining: 9,
+        collected: 0,
+        requested: 10,
+        sent: null,
+        supplierReportedOrdered: 10,
+        allocated: 1,
+        returned: 0,
+        backordered: true,
+        quantityMismatch: false,
+      }],
+    }],
+  } as PatientOrder;
+  assert.equal(orderStage(order).stage, 'dispatched');
+  assert.equal(orderHasPartialPharmacyReceipt(order), true);
+});
+
+test('all ordered packs checked in but not ready classifies as delivered', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{
+      status: 'received',
+      shipmentStates: { 'ship-1': 'received' },
+      fulfilmentLines: [{
+        productId: 'p1',
+        ordered: 10,
+        shipped: 10,
+        received: 10,
+        remaining: 0,
+        collected: 0,
+        requested: 10,
+        sent: null,
+        supplierReportedOrdered: 10,
+        allocated: 10,
+        returned: 0,
+        backordered: false,
+        quantityMismatch: false,
+      }],
+    }],
+  } as PatientOrder;
+  assert.equal(orderStage(order).stage, 'delivered');
+  assert.equal(orderHasPartialPharmacyReceipt(order), false);
 });
