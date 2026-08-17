@@ -196,6 +196,20 @@ const UPDATE_FULFILMENT_GQL = `
   }
 `;
 
+const COMPLETE_ORDER_GQL = `
+  mutation CompleteOrder($id: UUID!) {
+    order_update(
+      key: { id: $id }
+      data: {
+        status: COMPLETED
+        fulfilmentStatus: COLLECTED
+        collectedAt_expr: "request.time"
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
 const CANCEL_ORDER_GQL = `
   mutation CancelOrder($id: UUID!) {
     order_update(
@@ -239,6 +253,19 @@ const LIST_TENANT_ORDERS_GQL = `
       createdAt
       updatedAt
     }
+  }
+`;
+
+const UPDATE_ORDER_SNAPSHOT_GQL = `
+  mutation UpdateOrderSnapshot($id: UUID!, $quoteSnapshot: Any, $fulfilmentStatus: FulfilmentStatus) {
+    order_update(
+      key: { id: $id }
+      data: {
+        quoteSnapshot: $quoteSnapshot
+        fulfilmentStatus: $fulfilmentStatus
+        updatedAt_expr: "request.time"
+      }
+    )
   }
 `;
 
@@ -377,12 +404,30 @@ export class SqlOrderRepository implements OrderRepositoryPort {
     return result.data.orders ?? [];
   }
 
+  async updateQuoteSnapshot(data: {
+    id: string;
+    organisationId: string;
+    quoteSnapshot: unknown;
+    fulfilmentStatus?: CreateOrderInput['fulfilmentStatus'];
+  }): Promise<boolean> {
+    const existing = await this.findOrderById(data.id, data.organisationId);
+    if (!existing) return false;
+    await dataConnect.executeGraphql<any, any>(UPDATE_ORDER_SNAPSHOT_GQL, {
+      variables: {
+        id: data.id,
+        quoteSnapshot: data.quoteSnapshot ?? existing.quoteSnapshot ?? null,
+        fulfilmentStatus: data.fulfilmentStatus ?? existing.fulfilmentStatus,
+      },
+    });
+    return true;
+  }
+
   async updateOrderStatus(data: {
     id: string;
     organisationId: string;
     status?: 'DRAFT' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
     paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
-    fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'DISPATCHED_TO_PHARMACY' | 'RECEIVED' | 'COLLECTED';
+    fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'SUPPLIER_ALLOCATED' | 'PARTIALLY_DISPATCHED_TO_PHARMACY' | 'DISPATCHED_TO_PHARMACY' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXCEPTION';
     paidAt?: string | null;
     cancelledAt?: string | null;
   }): Promise<boolean> {
@@ -396,6 +441,11 @@ export class SqlOrderRepository implements OrderRepositoryPort {
 
     if (data.paymentStatus === 'PAID' || data.paidAt) {
       await dataConnect.executeGraphql<any, any>(RECORD_PAYMENT_ORDER_GQL, { variables: { id: data.id } });
+      return true;
+    }
+
+    if (data.fulfilmentStatus === 'COLLECTED' || data.status === 'COMPLETED') {
+      await dataConnect.executeGraphql<any, any>(COMPLETE_ORDER_GQL, { variables: { id: data.id } });
       return true;
     }
 

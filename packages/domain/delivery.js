@@ -48,17 +48,19 @@ export function curaleafDeliveryGuidance(value) {
 
   const isWeekend = placement.weekday === 'Sat' || placement.weekday === 'Sun';
   const isFriday = placement.weekday === 'Fri';
-  const beforeCutoff = !isWeekend && placement.minutes < CUTOFF_MINUTES;
-  const scenario = isFriday
-    ? beforeCutoff ? 'DT-3' : 'DT-4'
-    : isWeekend
-      ? 'DT-4'
-      : beforeCutoff ? 'DT-1' : 'DT-2';
+  const beforeCutoff = !isWeekend && !isFriday && placement.minutes < CUTOFF_MINUTES;
+  // DT-1: Mon–Thu before 14:30 → 1–2 working days
+  // DT-2: Mon–Thu at/after 14:30 → 2–4 working days (next day processing)
+  // DT-4: Fri (any time), Sat, Sun → 2–4 working days (Monday batch)
+  const scenario = isFriday || isWeekend ? 'DT-4' : beforeCutoff ? 'DT-1' : 'DT-2';
   const effectiveProcessingDate = beforeCutoff
     ? placement.dateKey
     : nextWorkingDay(placement.dateKey);
   const windowStart = addWorkingDays(effectiveProcessingDate, 1);
-  const windowEnd = addWorkingDays(effectiveProcessingDate, 4);
+  // DT-1 (Mon–Thu before cutoff): 1–2 working days; all others: up to 4 working days
+  const windowEnd = scenario === 'DT-1'
+    ? addWorkingDays(effectiveProcessingDate, 2)
+    : addWorkingDays(effectiveProcessingDate, 4);
 
   return {
     scenario,

@@ -37,6 +37,13 @@ Card order, density, grid/list/board composition, metric emphasis, view switchin
 - Overview actions navigate to an authorised detail context. Messaging, reminders, refunds, payment changes, and prescription actions occur only on the full record screen through audited API mutations.
 - Never hide tenant context or use a runtime query parameter to switch portal, tenant, authentication, or production application.
 
+## Curaleaf Fulfilment & Delivery Integration Boundaries
+
+- **Outbound Dispatch Authority Only**: Curaleaf's Rocky API tracks lab allocation and courier dispatch (`dispatched` / `line.shipped`). Curaleaf cannot report courier delivery or arrival status (`delivered`).
+- **Dispensary Goods-In Authority**: Delivery arrival, physical verification, and check-in are strictly recorded by the pharmacy dispensary team.
+- **Pipeline & Metric Calculations**: Never rely on Curaleaf API responses for `line.received` or delivery completion. Always derive goods-in progress (`receivedPacks`, `inTransitPacks`, Step 4 Checked-In) from the dispensary's verified goods-in records (`prescription.receivedItems` and prescription status `received` / `ready` / `collected`).
+- **No Extraneous Form Fields**: Do not enforce batch number, lot number, expiry date, or inspection note inputs in the Goods-In arrival check unless explicitly mandated by pharmacy PMS protocol.
+
 ## Completion output
 
 Summarise the data/state inventory, fixed elements preserved, responsive views checked, accessibility/privacy findings, and verification performed. If a requested visual conflicts with a fixed rule, explain the conflict and provide a compliant alternative.

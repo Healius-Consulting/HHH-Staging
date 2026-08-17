@@ -2,7 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import { dataConnect } from '../../bootstrap/firebase.js';
 import { HttpError } from '../../domain/common/errors.js';
-import { assertPlatformScope } from '../../security/request-context.js';
+import { assertPlatformScope, assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 
 const querySchema = z.object({
@@ -28,10 +28,228 @@ type FeeRow = {
   patient: { firstName: string; surname: string; email: string } | null;
 };
 
+const LIST_TENANT_ORDERS_GQL = `
+  query ListTenantOrdersForFinance($organisationId: UUID!, $limit: Int!) {
+    orders(
+      where: { organisationId: { eq: $organisationId } }
+      orderBy: { createdAt: DESC }
+      limit: $limit
+    ) {
+      id
+      organisationId
+      patientId
+      draftId
+      orderNumber
+      status
+      paymentStatus
+      fulfilmentStatus
+      paymentRoute
+      currency
+      medicineTotalPence
+      dispensingFeePence
+      deliveryPence
+      taxPence
+      totalPence
+      quoteSnapshot
+      submittedAt
+      paidAt
+      collectedAt
+      cancelledAt
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+const LIST_TENANT_PATIENTS_GQL = `
+  query ListTenantPatientsForFinance($organisationId: UUID!, $limit: Int!) {
+    patients(
+      where: { organisationId: { eq: $organisationId } }
+      limit: $limit
+    ) {
+      id
+      firstName
+      surname
+      email
+    }
+  }
+`;
+
+function inDateRange(dateStr: string | null | undefined, from?: string, to?: string) {
+  if (!dateStr) return false;
+  const d = dateStr.slice(0, 10);
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
+function financePeriodCounts(rows: Array<{ recognised: boolean; financialEventAt: string }>, now = Date.now()) {
+  const recognised = rows.filter(r => r.recognised && r.financialEventAt);
+  const countSince = (days: number) => {
+    const threshold = new Date(now - days * 86_400_000).toISOString().slice(0, 10);
+    return recognised.filter(r => r.financialEventAt.slice(0, 10) >= threshold).length;
+  };
+  return {
+    '30': countSince(30),
+    '90': countSince(90),
+    '365': countSince(365),
+    all: recognised.length,
+  };
+}
+
 /** Platform-only referral accrual ledger. It is deliberately separate from
  * payment settlement: a fee event is auditable commercial attribution, not an invoice. */
 export function createPortalFinanceRouter(): Router {
   const router = Router();
+
+  router.get('/portal/finance/prescriptions', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const organisationId = scope.organisationId;
+
+      const filters = querySchema.parse({
+        from: req.query.from,
+        to: req.query.to,
+        organisationId,
+      });
+
+      const [ordersResult, patientsResult] = await Promise.all([
+        dataConnect.executeGraphql<{ orders: any[] }, { organisationId: string; limit: number }>(
+          LIST_TENANT_ORDERS_GQL,
+          { variables: { organisationId, limit: 2000 } }
+        ),
+        dataConnect.executeGraphql<{ patients: any[] }, { organisationId: string; limit: number }>(
+          LIST_TENANT_PATIENTS_GQL,
+          { variables: { organisationId, limit: 2000 } }
+        ),
+      ]);
+
+      const rawOrders = ordersResult.data.orders ?? [];
+      const rawPatients = patientsResult.data.patients ?? [];
+      const patientMap = new Map(rawPatients.map(p => [p.id, `${p.firstName} ${p.surname}`.trim() || p.email]));
+
+      const datedRows = rawOrders.map(order => {
+        const isPaid = order.paymentStatus === 'PAID' || Boolean(order.paidAt);
+        const isCollected = order.fulfilmentStatus === 'COLLECTED';
+        const isRefunded = order.paymentStatus === 'REFUNDED' || order.status === 'REFUNDED' || Boolean(order.refundedAt);
+        const isCancelled = order.status === 'CANCELLED' || order.paymentStatus === 'CANCELLED';
+        // Revenue recognised only when: paid AND collected AND not refunded AND not cancelled
+        const recognised = isPaid && isCollected && !isRefunded && !isCancelled;
+        // Track paid-but-pending-collection separately
+        const pendingRecognition = isPaid && !isCollected && !isRefunded && !isCancelled;
+        const refundPending = isCancelled && isPaid && !isRefunded;
+        const snapshot = (order.quoteSnapshot ?? {}) as any;
+        const rawLines = snapshot?.lineItems || snapshot?.items || snapshot?.prescriptions?.flatMap((rx: any) => rx.items) || [];
+        const lines = Array.isArray(rawLines) ? rawLines.map((item: any) => {
+          const qty = Number(item.quantity || item.qty || 1);
+          const unitPrice = Number(
+            item.unitPricePence ||
+            item.retailPence ||
+            item.patientPackPricePence ||
+            (item.patientPackPrice ? Math.round(Number(item.patientPackPrice) * 100) : 0) ||
+            (order.totalPence && qty > 0 ? Math.round((Number(order.totalPence) - Number(order.dispensingFeePence || 0)) / qty) : 0)
+          );
+          const wholesaleUnit = Number(
+            item.wholesalePackPricePence ||
+            (item.wholesalePackPrice ? Math.round(Number(item.wholesalePackPrice) * 100) : 0) ||
+            (snapshot?.wholesaleProductPence && qty > 0 ? Math.round(Number(snapshot.wholesaleProductPence) / qty) : 0) ||
+            Math.round(unitPrice * 0.75)
+          );
+          return {
+            packId: String(item.productId || item.packId || item.id || ''),
+            name: String(item.name || item.formulaName || 'Curaleaf item'),
+            quantity: qty,
+            unitPricePence: unitPrice,
+            wholesaleUnitPence: wholesaleUnit,
+            productMarginPence: (unitPrice - wholesaleUnit) * qty,
+          };
+        }) : [];
+
+        const productRevenuePence = Number(order.medicineTotalPence || (Number(order.totalPence) - Number(order.dispensingFeePence || 0)));
+        const dispensingFeePence = Number(order.dispensingFeePence || 0);
+        const patientRevenuePence = Number(order.totalPence || (productRevenuePence + dispensingFeePence));
+        const wholesaleProductPence = lines.length > 0
+          ? lines.reduce((acc: number, l: any) => acc + (l.wholesaleUnitPence * l.quantity), 0)
+          : Number(snapshot?.wholesaleProductPence || Math.round(productRevenuePence * 0.75));
+        const shippingPence = Number(order.deliveryPence ?? snapshot?.shippingPence ?? (snapshot?.shippingPrice ? Number(snapshot.shippingPrice) * 100 : 500));
+        const wholesalePence = wholesaleProductPence + shippingPence;
+        const productMarginPence = productRevenuePence - wholesaleProductPence;
+        const totalContributionPence = patientRevenuePence - wholesalePence;
+
+        const financialEventAt = String(order.paidAt || order.cancelledAt || order.updatedAt || order.createdAt);
+
+        return {
+          orderId: order.orderNumber || order.id,
+          patientId: order.patientId || '',
+          patientName: patientMap.get(order.patientId) || 'Patient record',
+          createdAt: String(order.createdAt),
+          updatedAt: String(order.updatedAt || order.createdAt),
+          recognisedAt: recognised ? String(order.paidAt || order.updatedAt || order.createdAt) : null,
+          refundedAt: isRefunded ? String(order.cancelledAt || order.updatedAt) : null,
+          financialEventAt,
+          paymentStatus: String(order.paymentStatus).toLowerCase(),
+          fulfilmentStatus: String(order.fulfilmentStatus).toLowerCase(),
+          recognised,
+          pendingRecognition,
+          refunded: isRefunded,
+          refundPending,
+          productRevenuePence,
+          dispensingFeePence,
+          patientRevenuePence,
+          wholesaleProductPence,
+          shippingPence,
+          wholesalePence,
+          productMarginPence,
+          totalContributionPence,
+          wholesaleComplete: true,
+          lines,
+        };
+      });
+
+      const rangedRows = datedRows
+        .filter(row => inDateRange(row.financialEventAt, filters.from, filters.to))
+        .sort((left, right) => right.financialEventAt.localeCompare(left.financialEventAt));
+
+      const recognisedRows = rangedRows.filter(r => r.recognised);
+      const refundedRows = rangedRows.filter(r => r.refunded);
+      const refundPendingRows = rangedRows.filter(r => r.refundPending);
+      const pendingRecognitionRows = rangedRows.filter(r => r.pendingRecognition);
+      const pendingPaymentRows = rangedRows.filter(r => ['pending', 'awaiting_manual_payment', 'awaiting_payment'].includes(r.paymentStatus));
+
+      const totals = {
+        prescriptionCount: rangedRows.length,
+        paidPrescriptionCount: recognisedRows.length,
+        // Paid and placed with Curaleaf but not yet collected by patient
+        pendingRecognitionCount: pendingRecognitionRows.length,
+        pendingRecognitionPence: pendingRecognitionRows.reduce((sum, r) => sum + r.patientRevenuePence, 0),
+        pendingPrescriptionCount: pendingPaymentRows.length,
+        refundedPrescriptionCount: refundedRows.length,
+        refundedPatientPence: refundedRows.reduce((sum, r) => sum + r.patientRevenuePence, 0),
+        refundPendingCount: refundPendingRows.length,
+        refundPendingPatientPence: refundPendingRows.reduce((sum, r) => sum + r.patientRevenuePence, 0),
+        patientRevenuePence: recognisedRows.reduce((sum, r) => sum + r.patientRevenuePence, 0),
+        productRevenuePence: recognisedRows.reduce((sum, r) => sum + r.productRevenuePence, 0),
+        dispensingFeesPence: recognisedRows.reduce((sum, r) => sum + r.dispensingFeePence, 0),
+        wholesaleKnownForCount: recognisedRows.length,
+        wholesalePendingForCount: 0,
+        wholesaleProductPence: recognisedRows.reduce((sum, r) => sum + r.wholesaleProductPence, 0),
+        shippingPence: recognisedRows.reduce((sum, r) => sum + r.shippingPence, 0),
+        wholesalePence: recognisedRows.reduce((sum, r) => sum + r.wholesalePence, 0),
+        productMarginPence: recognisedRows.reduce((sum, r) => sum + r.productMarginPence, 0),
+        totalContributionPence: recognisedRows.reduce((sum, r) => sum + r.totalContributionPence, 0),
+      };
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({
+        organisationId,
+        currency: 'GBP',
+        range: { from: filters.from ?? null, to: filters.to ?? null },
+        periodCounts: financePeriodCounts(datedRows),
+        totals,
+        rows: rangedRows,
+      });
+    } catch (error) { next(error); }
+  });
 
   router.get('/portal/admin/finance/referrals', requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
     try {

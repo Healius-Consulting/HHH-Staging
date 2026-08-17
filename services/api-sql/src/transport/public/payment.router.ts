@@ -57,6 +57,27 @@ export function createPublicPaymentRouter(): Router {
               curaleafResult = await executeCuraleafOrderPlacement(connection, order);
             }
 
+            if (curaleafResult?.purchaseOrder) {
+              const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, unknown>;
+              await orderRepo.updateQuoteSnapshot({
+                id: order.id,
+                organisationId: payment.organisationId,
+                quoteSnapshot: {
+                  ...snapshot,
+                  curaleaf: {
+                    ...(typeof snapshot.curaleaf === 'object' && snapshot.curaleaf ? snapshot.curaleaf : {}),
+                    ...curaleafResult.purchaseOrder,
+                    purchaseOrderId: curaleafResult.purchaseOrder.id,
+                    purchaseOrderState: curaleafResult.purchaseOrder.state,
+                    customerReference: curaleafResult.purchaseOrder.customerReference,
+                    prescriptionId: curaleafResult.prescriptionId,
+                    prescriberId: curaleafResult.prescriberId,
+                  },
+                },
+                fulfilmentStatus: 'SUPPLIER_PROCESSING',
+              }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
+            }
+
             await orderRepo.appendPlacementEvent({
               organisationId: payment.organisationId,
               orderId: payment.orderId,

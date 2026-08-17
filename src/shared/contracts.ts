@@ -363,9 +363,18 @@ export interface PortalOrderInput {
   organisationId: string;
   paymentRoute?: 'manual' | 'worldpay';
   patientId: string;
+  medicineTotalPence?: number;
+  dispensingFeePence: number;
+  totalPence?: number;
+  quoteSnapshot?: Record<string, unknown>;
+  pricingQuote?: CuraleafQuote;
   lineItems: Array<{
+    productId?: string;
     packId: string;
+    formulaId?: string;
+    name?: string;
     quantity: number;
+    unitPricePence?: number;
   }>;
   prescriptions: Array<{
     id?: string;
@@ -456,7 +465,11 @@ export interface PortalCuraleafOrderState {
   purchaseOrderId?: string | null;
   purchaseOrderState?: 'CREATED' | 'PROCESSING' | 'FULLY_ALLOCATED' | 'CANCELLED' | null;
   courier?: string;
+  issuedDate?: string | null;
+  createdAt?: string | null;
   shipmentIds?: string[];
+  shipments?: CuraleafShipment[];
+  shipmentStates?: Record<string, string>;
   dispatchStatus?: 'not_dispatched' | 'partial' | 'complete';
   quantityMismatch?: boolean;
   requestedItems?: Array<{ packId: string; quantity: number }>;
@@ -569,6 +582,7 @@ export interface PrescriptionFlowRecord {
   expiryDate: string;
   purchaseOrderId?: string | null;
   placedAt?: string | null;
+  latestShipmentAt?: string | null;
   shipmentIds: string[];
   shipmentStates?: Record<string, 'partially_dispatched_to_pharmacy' | 'dispatched_to_pharmacy' | 'partially_received' | 'received' | 'ready_for_collection' | 'collected' | 'exception' | string>;
   lines: FulfilmentLineRecord[];

@@ -351,6 +351,7 @@ export function getPortalOrders(organisationId: string, options?: { patientId?: 
 
 export function recordPortalGoodsReceipt(shipmentId: string, input: {
   organisationId: string;
+  orderId?: string;
   items: Array<{
     productId: string;
     expectedQuantity: number;
@@ -369,6 +370,7 @@ export function recordPortalGoodsReceipt(shipmentId: string, input: {
 
 export function updatePortalShipmentStatus(shipmentId: string, input: {
   organisationId: string;
+  orderId?: string;
   status: 'ready_for_collection' | 'collected' | 'exception';
 }) {
   return apiRequest<Record<string, unknown> & { notification?: { status: 'queued'; outboxId: string; recipient: string } }>(
@@ -380,6 +382,13 @@ export function updatePortalShipmentStatus(shipmentId: string, input: {
 export function handoutPortalOrder(orderId: string, input: { organisationId: string }) {
   return apiRequest<{ order: PortalOrderRecord; idempotent: boolean }>(
     `/v1/portal/orders/${encodeURIComponent(orderId)}/handout`,
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+}
+
+export function cancelAndArchivePortalOrder(orderId: string, input: { organisationId: string }) {
+  return apiRequest<{ success: boolean; cancelledOrderId: string }>(
+    `/v1/portal/orders/${encodeURIComponent(orderId)}/cancel-and-archive`,
     { method: 'POST', body: JSON.stringify(input) },
   );
 }
@@ -400,13 +409,6 @@ export function evaluatePortalOrderExpiry(orderId: string, organisationId: strin
     redoEligible: boolean;
     evaluatedAt: string;
   }>(`/v1/portal/orders/${encodeURIComponent(orderId)}/evaluate-28day-expiry?organisationId=${encodeURIComponent(organisationId)}`);
-}
-
-export function cancelAndArchivePortalOrder(orderId: string, organisationId: string) {
-  return apiRequest<PortalOrderRecord>(`/v1/portal/orders/${encodeURIComponent(orderId)}/cancel-and-archive`, {
-    method: 'POST',
-    body: JSON.stringify({ organisationId }),
-  });
 }
 
 export function requestPortalOrderCancellation(orderId: string, input: {

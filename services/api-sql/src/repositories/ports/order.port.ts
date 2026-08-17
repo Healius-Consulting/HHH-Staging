@@ -43,7 +43,7 @@ export interface CreateOrderInput {
   orderNumber?: string | null;
   status: 'DRAFT' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
   paymentStatus: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
-  fulfilmentStatus: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'DISPATCHED_TO_PHARMACY' | 'RECEIVED' | 'COLLECTED';
+  fulfilmentStatus: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'SUPPLIER_ALLOCATED' | 'PARTIALLY_DISPATCHED_TO_PHARMACY' | 'DISPATCHED_TO_PHARMACY' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXCEPTION';
   paymentRoute: 'MANUAL' | 'WORLDPAY';
   currency: string;
   medicineTotalPence: number;
@@ -68,11 +68,17 @@ export interface OrderRepositoryPort {
     organisationId: string;
     status?: 'DRAFT' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
     paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
-    fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'DISPATCHED_TO_PHARMACY' | 'RECEIVED' | 'COLLECTED';
+    fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'SUPPLIER_ALLOCATED' | 'PARTIALLY_DISPATCHED_TO_PHARMACY' | 'DISPATCHED_TO_PHARMACY' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXCEPTION';
     paidAt?: string | null;
     cancelledAt?: string | null;
   }): Promise<boolean>;
   listTenantOrders(organisationId: string, limit?: number): Promise<OrderRecord[]>;
+  updateQuoteSnapshot(data: {
+    id: string;
+    organisationId: string;
+    quoteSnapshot: unknown;
+    fulfilmentStatus?: CreateOrderInput['fulfilmentStatus'];
+  }): Promise<boolean>;
   appendPlacementEvent(data: {
     organisationId: string;
     orderId: string;

@@ -1,9 +1,20 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
-import { curaleafApiRequest } from '../../application/integrations/curaleaf.service.js';
+import { curaleafApiRequest, fetchCuraleafPurchaseOrders, fetchCuraleafShipments } from '../../application/integrations/curaleaf.service.js';
+import {
+  advanceFulfilmentStatus,
+  buildCuraleafSnapshot,
+  matchPurchaseOrder,
+  matchShipments,
+  normalisedFulfilmentLines,
+  supplierFulfilmentStatus,
+} from '../../application/orders/curaleaf-fulfilment.js';
+import { SqlFulfilmentRepository } from '../../repositories/sql/fulfilment.sql.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
+import type { OrderRecord } from '../../repositories/ports/order.port.js';
+import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
@@ -23,8 +34,12 @@ const createOrderInputSchema = z.object({
   draftId: z.union([uuidLikeSchema, z.literal(''), z.null()]).optional(),
   orderNumber: z.string().optional(),
   lineItems: z.array(z.object({
+    productId: z.string().optional(),
     packId: z.string(),
+    formulaId: z.string().optional(),
+    name: z.string().optional(),
     quantity: z.number().int().positive(),
+    unitPricePence: z.number().int().nonnegative().optional(),
   })).default([]),
   prescriptions: z.array(z.object({
     id: z.string().optional(),
@@ -60,14 +75,108 @@ const createOrderInputSchema = z.object({
   totalPence: z.number().int().positive().optional(),
   paymentRoute: z.enum(['manual', 'worldpay', 'MANUAL', 'WORLDPAY']).default('manual'),
   currency: z.string().default('GBP'),
+  pricingQuote: z.record(z.string(), z.unknown()).optional(),
   quoteSnapshot: z.record(z.string(), z.unknown()).optional(),
   redoContext: z.record(z.string(), z.unknown()).nullable().optional(),
 });
+
+async function attachCuraleafToOrder(
+  order: OrderRecord,
+  purchaseOrders: any[],
+  shipments: any[],
+  repos?: { orderRepo: SqlOrderRepository; fulfilmentRepo: SqlFulfilmentRepository },
+) {
+  const matchedPO = matchPurchaseOrder(order, purchaseOrders);
+  const matchedShipments = matchShipments(order, matchedPO, shipments);
+  const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
+  const prior = snapshot.curaleaf && typeof snapshot.curaleaf === 'object' ? snapshot.curaleaf : {};
+  const requestedItems = snapshot.lineItems || snapshot.items || [];
+  const liveShipments = matchedShipments.length ? matchedShipments : (Array.isArray(prior.shipments) ? prior.shipments : []);
+  const livePo = matchedPO || prior;
+  const lines = normalisedFulfilmentLines({
+    purchaseOrder: livePo,
+    shipments: liveShipments,
+    requestedItems,
+    priorLines: prior.lines,
+  });
+  const curaleaf = (matchedPO || liveShipments.length || prior.purchaseOrderId || prior.id)
+    ? {
+      ...livePo,
+      shipments: liveShipments,
+      shipmentIds: liveShipments.map((shipment: any) => shipment.id).filter(Boolean),
+      shipmentStates: prior.shipmentStates || {},
+      lines,
+    }
+    : null;
+
+  if (repos && curaleaf) {
+    const nextStatus = advanceFulfilmentStatus(
+      order.fulfilmentStatus,
+      supplierFulfilmentStatus({ purchaseOrder: livePo, shipments: liveShipments, lines }),
+    );
+    const nextSnapshot = {
+      ...snapshot,
+      curaleaf: {
+        ...buildCuraleafSnapshot({
+          purchaseOrder: livePo,
+          shipments: liveShipments,
+          lines,
+          shipmentStates: prior.shipmentStates || {},
+          order,
+        }),
+        lines,
+        shipmentStates: prior.shipmentStates || {},
+      },
+    };
+    const previousKey = JSON.stringify({
+      status: order.fulfilmentStatus,
+      po: prior.purchaseOrderId || prior.id || null,
+      state: prior.purchaseOrderState || prior.state || null,
+      shipments: prior.shipmentIds || [],
+      shipped: (prior.lines || []).map((line: any) => [line.productId, line.shipped, line.allocated]),
+    });
+    const nextKey = JSON.stringify({
+      status: nextStatus,
+      po: matchedPO?.id || prior.purchaseOrderId || prior.id || null,
+      state: matchedPO?.state || prior.purchaseOrderState || prior.state || null,
+      shipments: liveShipments.map((shipment: any) => shipment.id),
+      shipped: lines.map(line => [line.productId, line.shipped, line.allocated]),
+    });
+    if (previousKey !== nextKey) {
+      await repos.orderRepo.updateQuoteSnapshot({
+        id: order.id,
+        organisationId: order.organisationId,
+        quoteSnapshot: nextSnapshot,
+        fulfilmentStatus: nextStatus,
+      }).catch(err => console.warn('Curaleaf snapshot persist warning:', err));
+      order.fulfilmentStatus = nextStatus;
+      order.quoteSnapshot = nextSnapshot;
+    }
+    for (const shipment of liveShipments) {
+      if (!shipment?.id || !matchedPO?.id) continue;
+      await repos.fulfilmentRepo.upsertSupplierShipment({
+        organisationId: order.organisationId,
+        orderId: order.id,
+        supplierPurchaseOrderId: String(matchedPO.id),
+        supplierShipmentId: String(shipment.id),
+        supplierCustomerReference: shipment.purchaseOrderCustomerReference || matchedPO.customerReference || order.orderNumber,
+        dispatchedAt: shipment.createdAt || null,
+      }).catch(err => console.warn('Curaleaf shipment persist warning:', err));
+    }
+  }
+
+  return toPortalOrder({
+    ...order,
+    ...(curaleaf ? { curaleaf } : {}),
+  } as any);
+}
 
 export function createPortalOrderRouter(): Router {
   const router = Router();
   const orderRepo = new SqlOrderRepository();
   const integrationRepo = new SqlIntegrationRepository();
+  const paymentRepo = new SqlPaymentRepository();
+  const fulfilmentRepo = new SqlFulfilmentRepository();
 
   // GET /v1/portal/order-drafts - List active tenant drafts
   router.get('/portal/order-drafts', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
@@ -163,13 +272,23 @@ export function createPortalOrderRouter(): Router {
       const scope = assertTenantScope(req.context!);
       const input = createOrderInputSchema.parse(req.body);
 
-      const medicineTotalPence = input.medicineTotalPence ?? 0;
+      const medicineTotalPence = input.medicineTotalPence ?? input.lineItems.reduce((s, it) => s + (it.unitPricePence ?? 0) * it.quantity, 0);
       const dispensingFeePence = input.dispensingFeePence ?? 0;
       const deliveryPence = input.deliveryPence ?? 0;
       const taxPence = input.taxPence ?? 0;
-      const totalPence = input.totalPence ?? (medicineTotalPence + dispensingFeePence + deliveryPence + taxPence);
+      const calculatedTotal = medicineTotalPence + dispensingFeePence + deliveryPence + taxPence;
+      const totalPence = input.totalPence && input.totalPence > 0 ? input.totalPence : calculatedTotal;
       const paymentRoute = input.paymentRoute.toUpperCase() === 'WORLDPAY' ? 'WORLDPAY' as const : 'MANUAL' as const;
       const orderNumber = input.orderNumber || `ORD-${Date.now().toString(36).toUpperCase()}`;
+
+      const quoteSnapshot = input.quoteSnapshot ?? {
+        prescriptions: input.prescriptions,
+        lineItems: input.lineItems,
+        pricingQuote: input.pricingQuote ?? null,
+        medicineTotalPence,
+        dispensingFeePence,
+        totalPence,
+      };
 
       const result = await orderRepo.createOrder({
         organisationId: scope.organisationId,
@@ -186,7 +305,7 @@ export function createPortalOrderRouter(): Router {
         deliveryPence,
         taxPence,
         totalPence: totalPence > 0 ? totalPence : 1,
-        quoteSnapshot: input.quoteSnapshot ?? { prescriptions: input.prescriptions, lineItems: input.lineItems },
+        quoteSnapshot,
         createdByUid: scope.uid,
       });
 
@@ -205,7 +324,22 @@ export function createPortalOrderRouter(): Router {
     try {
       const scope = assertTenantScope(req.context!);
       const orders = await orderRepo.listTenantOrders(scope.organisationId);
-      res.status(200).json(orders.map(toPortalOrder));
+
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
+      let curaleafPOs: any[] = [];
+      let curaleafShipments: any[] = [];
+      if (connection?.secretResourceName) {
+        [curaleafPOs, curaleafShipments] = await Promise.all([
+          fetchCuraleafPurchaseOrders(connection).catch(() => []),
+          fetchCuraleafShipments(connection).catch(() => []),
+        ]);
+      }
+
+      const ordersWithPOs = await Promise.all(orders.map(order => (
+        attachCuraleafToOrder(order, curaleafPOs, curaleafShipments, { orderRepo, fulfilmentRepo })
+      )));
+
+      res.status(200).json(ordersWithPOs);
     } catch (error) {
       next(error);
     }
@@ -222,7 +356,18 @@ export function createPortalOrderRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      res.status(200).json(toPortalOrder(order));
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
+      let curaleafPOs: any[] = [];
+      let curaleafShipments: any[] = [];
+      if (connection?.secretResourceName) {
+        [curaleafPOs, curaleafShipments] = await Promise.all([
+          fetchCuraleafPurchaseOrders(connection).catch(() => []),
+          fetchCuraleafShipments(connection).catch(() => []),
+        ]);
+      }
+
+      const mapped = await attachCuraleafToOrder(order, curaleafPOs, curaleafShipments, { orderRepo, fulfilmentRepo });
+      res.status(200).json(mapped);
     } catch (error) {
       next(error);
     }
@@ -367,16 +512,180 @@ export function createPortalOrderRouter(): Router {
     }
   });
 
-  // POST /v1/portal/curaleaf/support-cases
-  router.post('/portal/curaleaf/support-cases', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+  // POST /v1/portal/orders/:id/refunds/manual - Prepare manual refund task
+  router.post('/portal/orders/:id/refunds/manual', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const input = req.body;
-      res.status(201).json({
-        id: `case-${Date.now().toString(36)}`,
-        status: 'open',
-        ...input,
-        createdAt: new Date().toISOString(),
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const input = z.object({
+        organisationId: z.string().optional(),
+        reason: z.enum(['patient_cancelled', 'replacement_price_changed']),
+        resolution: z.enum(['cancel', 'replace_new_payment']),
+      }).parse(req.body);
+
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+
+      const refundId = `ref-${Date.now().toString(36)}`;
+      const refundState = {
+        id: refundId,
+        status: 'pending_confirmation',
+        amountPence: Number(order.totalPence || 0),
+        method: order.paymentRoute === 'worldpay' ? 'worldpay_portal' : 'pharmacy_manual',
+        paymentReference: order.orderNumber || order.id,
+        transactionReference: order.orderNumber || order.id,
+        reason: input.reason,
+        resolution: input.resolution,
+        requestedAt: new Date().toISOString(),
+        requestedBy: scope.uid,
+      };
+
+      await orderRepo.updateOrderStatus({
+        id: orderId,
+        organisationId: scope.organisationId,
+        status: 'CANCELLED',
+        cancelledAt: new Date().toISOString(),
       });
+
+      res.status(201).json(refundState);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /v1/portal/orders/:id/refunds/:refundId/confirm - Confirm completed manual refund
+  router.post('/portal/orders/:id/refunds/:refundId/confirm', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const refundId = String(req.params.refundId || '');
+      const input = z.object({
+        organisationId: z.string().optional(),
+        externalReference: z.string().trim().min(3).max(160),
+      }).parse(req.body);
+
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+
+      const now = new Date().toISOString();
+      await paymentRepo.updatePaymentStatus(orderId, 'CANCELLED', orderId);
+      await orderRepo.updateOrderStatus({
+        id: orderId,
+        organisationId: scope.organisationId,
+        status: 'CANCELLED',
+        cancelledAt: now,
+      });
+
+      const nextRefund = {
+        id: refundId,
+        status: 'completed',
+        amountPence: Number(order.totalPence || 0),
+        externalReference: input.externalReference,
+        confirmedAt: now,
+        confirmedBy: scope.uid,
+      };
+
+      res.status(200).json(nextRefund);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /v1/portal/orders/:id/handout - Hand out medication to patient
+  router.post('/portal/orders/:id/handout', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+
+      const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
+      const lines = Array.isArray(snapshot.curaleaf?.lines) ? snapshot.curaleaf.lines : [];
+      const remainingOpen = lines.some((line: any) => Number(line.remaining || 0) > 0 || Number(line.collected || 0) < Number(line.ordered || 0));
+      const nextLines = lines.map((line: any) => ({
+        ...line,
+        collected: Math.max(Number(line.collected || 0), Number(line.received || 0)),
+      }));
+      await orderRepo.updateQuoteSnapshot({
+        id: orderId,
+        organisationId: scope.organisationId,
+        quoteSnapshot: {
+          ...snapshot,
+          curaleaf: {
+            ...(snapshot.curaleaf || {}),
+            lines: nextLines,
+          },
+        },
+        fulfilmentStatus: remainingOpen && nextLines.some((line: any) => Number(line.collected || 0) < Number(line.ordered || 0))
+          ? 'PARTIALLY_RECEIVED'
+          : 'COLLECTED',
+      });
+
+      res.status(200).json({ id: orderId, status: remainingOpen ? 'partially_collected' : 'collected', collectedAt: new Date().toISOString() });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /v1/portal/orders/:id/ready-for-collection - Mark order ready for collection
+  router.post('/portal/orders/:id/ready-for-collection', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+
+      await orderRepo.updateOrderStatus({
+        id: orderId,
+        organisationId: scope.organisationId,
+        fulfilmentStatus: 'RECEIVED',
+      });
+
+      res.status(200).json({ id: orderId, status: 'ready', readyAt: new Date().toISOString() });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /v1/portal/orders/:id/cancel-and-archive - Cancel with Curaleaf & Replace Order
+  router.post('/portal/orders/:id/cancel-and-archive', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
+      if (connection?.secretResourceName) {
+        try {
+          const pos = await fetchCuraleafPurchaseOrders(connection);
+          const po = matchPurchaseOrder(order, pos);
+          if (po?.id) {
+            await curaleafApiRequest(connection, `/v1/purchase-orders/${po.id}`, {
+              method: 'DELETE',
+            });
+          }
+        } catch (err) {
+          console.warn('Failed to cancel Curaleaf order:', err);
+        }
+      }
+
+      await orderRepo.updateOrderStatus({
+        id: orderId,
+        organisationId: scope.organisationId,
+        status: 'CANCELLED',
+        cancelledAt: new Date().toISOString(),
+      });
+
+      await orderRepo.appendPlacementEvent({
+        organisationId: scope.organisationId,
+        orderId,
+        toState: 'CANCELLED_REFUNDED',
+        reason: 'Order cancelled and archived for replacement',
+        actorUid: scope.uid,
+      });
+
+      res.status(200).json({ success: true, cancelledOrderId: orderId });
     } catch (error) {
       next(error);
     }

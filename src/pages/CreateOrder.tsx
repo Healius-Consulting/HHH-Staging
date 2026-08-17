@@ -364,14 +364,29 @@ export default function CreateOrder() {
       if (!isLocalPortalPreview && state.workspaceMode === 'live') {
         if (!quoteAvailable) throw new Error('A complete in-stock Curaleaf quote is required before creating the live order.');
         const lineItems = activeOrder.prescriptions.flatMap(rx => rx.items.map(item => ({
+          productId: item.productId,
           packId: item.productId,
+          formulaId: item.formulaId,
+          name: item.name,
           quantity: item.qty,
+          unitPricePence: Math.round((item.retail || 0) * 100),
         })));
+        const orderRevPence = Math.round(orderRevenue(activeOrder) * 100);
+        const dispensingFeePence = Math.round((activeOrder.dispensingFee || 0) * 100);
+        const medicineTotalPence = Math.max(0, orderRevPence - dispensingFeePence);
+        const totalPence = orderRevPence > 0 ? orderRevPence : Math.round(activeOrder.payment.amount * 100);
+        const pricingQuote = activeOrder.pricingQuote ?? activeOrder.curaleaf?.quote;
+
         const persisted = activeOrder.backendId ? { id: activeOrder.backendId } : await createPortalOrder({
           organisationId: state.currentOrganisationId,
           draftId: activeOrder.draftId,
           patientId: activeOrder.patientId!,
           paymentRoute: selectedPaymentRoute,
+          medicineTotalPence,
+          dispensingFeePence,
+          totalPence,
+          pricingQuote,
+          quoteSnapshot: pricingQuote ? { quote: pricingQuote, lineItems, totalPence } : undefined,
           lineItems,
           prescriptions: activeOrder.prescriptions.map(rx => ({
             fileId: rx.fileId!,
@@ -399,7 +414,6 @@ export default function CreateOrder() {
               quantity: item.qty,
             })),
           })),
-          dispensingFeePence: Math.round(activeOrder.dispensingFee * 100),
           currency: 'GBP',
           ...(activeOrder.redoContext ? {
             redoContext: {

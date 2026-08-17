@@ -43,8 +43,9 @@ function unresolvedOrderReason(order: PatientOrder, now: Date): UnresolvedOrderR
   if (order.payment.status === 'none') return null;
   if (order.prescriptions.length > 0 && order.prescriptions.every(prescription => prescription.status === 'collected')) return null;
   if (order.redoneByOrderId) return null;
-  if (order.unresolvedReason === 'expired' || order.unresolvedReason === 'rejected') return order.unresolvedReason;
+  if (order.unresolvedReason === 'expired' || order.unresolvedReason === 'rejected' || order.unresolvedReason === 'cancelled') return order.unresolvedReason;
   if (order.redoEligible === false) return null;
+  if (order.cancellation?.status === 'refund_required' || order.cancellation?.status === 'confirmed' || order.prescriptions.some(rx => rx.status === 'cancelled' || rx.purchaseOrderState === 'CANCELLED')) return 'cancelled';
   if (order.quoteReview?.status === 'recreate_required' || order.quoteReview) return 'rejected';
   if (order.lifecycleStatus === 'archived' || order.isExpired) return 'expired';
   const entryDate = new Date(order.date);

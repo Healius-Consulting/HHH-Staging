@@ -10,11 +10,32 @@ const LIST_TENANT_SHIPMENTS_GQL = `
     shipments(where: { organisationId: { eq: $organisationId } }, limit: $limit) {
       id
       orderId
-      courier
-      trackingNumber
+      supplierPurchaseOrderId
+      supplierShipmentId
+      supplierCustomerReference
       status
-      dispatchDate
-      deliveryDate
+      dispatchedAt
+      createdAt
+    }
+  }
+`;
+
+const FIND_SHIPMENT_BY_SUPPLIER_ID_GQL = `
+  query FindShipmentBySupplierId($organisationId: UUID!, $supplierShipmentId: String!) {
+    shipments(
+      where: {
+        organisationId: { eq: $organisationId }
+        supplierShipmentId: { eq: $supplierShipmentId }
+      }
+      limit: 1
+    ) {
+      id
+      orderId
+      supplierPurchaseOrderId
+      supplierShipmentId
+      supplierCustomerReference
+      status
+      dispatchedAt
       createdAt
     }
   }
@@ -24,18 +45,20 @@ const CREATE_SHIPMENT_GQL = `
   mutation CreateShipment(
     $organisationId: UUID!
     $orderId: UUID!
-    $courier: String!
-    $trackingNumber: String!
+    $supplierPurchaseOrderId: String!
+    $supplierShipmentId: String
+    $supplierCustomerReference: String
     $status: ShipmentStatus!
-    $dispatchDate: Timestamp!
+    $dispatchedAt: Timestamp
   ) {
     shipment_insert(data: {
       organisationId: $organisationId
       orderId: $orderId
-      courier: $courier
-      trackingNumber: $trackingNumber
+      supplierPurchaseOrderId: $supplierPurchaseOrderId
+      supplierShipmentId: $supplierShipmentId
+      supplierCustomerReference: $supplierCustomerReference
       status: $status
-      dispatchDate: $dispatchDate
+      dispatchedAt: $dispatchedAt
     })
   }
 `;
@@ -44,13 +67,11 @@ const LIST_TENANT_GOODS_RECEIPTS_GQL = `
   query ListTenantGoodsReceipts($organisationId: UUID!, $limit: Int!) {
     goodsReceipts(where: { organisationId: { eq: $organisationId } }, limit: $limit) {
       id
-      orderId
-      receiptNumber
+      shipmentId
       receivedByUid
-      receivedDate
+      receivedAt
       status
       notes
-      createdAt
     }
   }
 `;
@@ -58,19 +79,15 @@ const LIST_TENANT_GOODS_RECEIPTS_GQL = `
 const CREATE_GOODS_RECEIPT_GQL = `
   mutation CreateGoodsReceipt(
     $organisationId: UUID!
-    $orderId: UUID!
-    $receiptNumber: String!
+    $shipmentId: UUID!
     $receivedByUid: String!
-    $receivedDate: Timestamp!
-    $status: GoodsReceiptStatus!
+    $status: ReceiptStatus!
     $notes: String
   ) {
     goodsReceipt_insert(data: {
       organisationId: $organisationId
-      orderId: $orderId
-      receiptNumber: $receiptNumber
+      shipmentId: $shipmentId
       receivedByUid: $receivedByUid
-      receivedDate: $receivedDate
       status: $status
       notes: $notes
     })
@@ -86,28 +103,45 @@ export class SqlFulfilmentRepository implements FulfilmentRepositoryPort {
     return result.data.shipments ?? [];
   }
 
-  async createShipment(data: {
+  async findShipmentBySupplierId(organisationId: string, supplierShipmentId: string): Promise<ShipmentRecord | null> {
+    const result = await dataConnect.executeGraphql<{ shipments: ShipmentRecord[] }, any>(
+      FIND_SHIPMENT_BY_SUPPLIER_ID_GQL,
+      { variables: { organisationId, supplierShipmentId } }
+    );
+    return result.data.shipments?.[0] ?? null;
+  }
+
+  async upsertSupplierShipment(data: {
     organisationId: string;
     orderId: string;
-    courier: string;
-    trackingNumber: string;
-    status: 'DISPATCHED' | 'IN_TRANSIT' | 'DELIVERED';
-    dispatchDate: string;
+    supplierPurchaseOrderId: string;
+    supplierShipmentId: string;
+    supplierCustomerReference?: string | null;
+    dispatchedAt?: string | null;
   }): Promise<{ id?: string }> {
-    const result = await dataConnect.executeGraphql<{ shipment_insert: { id: string } }, any>(
-      CREATE_SHIPMENT_GQL,
-      {
-        variables: {
-          organisationId: data.organisationId,
-          orderId: data.orderId,
-          courier: data.courier,
-          trackingNumber: data.trackingNumber,
-          status: data.status,
-          dispatchDate: data.dispatchDate,
-        },
-      }
-    );
-    return { id: result.data.shipment_insert?.id };
+    const existing = await this.findShipmentBySupplierId(data.organisationId, data.supplierShipmentId).catch(() => null);
+    if (existing?.id) return { id: existing.id };
+    try {
+      const result = await dataConnect.executeGraphql<{ shipment_insert: { id: string } }, any>(
+        CREATE_SHIPMENT_GQL,
+        {
+          variables: {
+            organisationId: data.organisationId,
+            orderId: data.orderId,
+            supplierPurchaseOrderId: data.supplierPurchaseOrderId,
+            supplierShipmentId: data.supplierShipmentId,
+            supplierCustomerReference: data.supplierCustomerReference ?? null,
+            status: 'DISPATCHED',
+            dispatchedAt: data.dispatchedAt ?? null,
+          },
+        }
+      );
+      return { id: result.data.shipment_insert?.id };
+    } catch (error) {
+      const raced = await this.findShipmentBySupplierId(data.organisationId, data.supplierShipmentId).catch(() => null);
+      if (raced?.id) return { id: raced.id };
+      throw error;
+    }
   }
 
   async listGoodsReceipts(organisationId: string, limit = 200): Promise<GoodsReceiptRecord[]> {
@@ -120,11 +154,9 @@ export class SqlFulfilmentRepository implements FulfilmentRepositoryPort {
 
   async createGoodsReceipt(data: {
     organisationId: string;
-    orderId: string;
-    receiptNumber: string;
+    shipmentId: string;
     receivedByUid: string;
-    receivedDate: string;
-    status: 'COMPLETE' | 'DAMAGED' | 'DISCREPANCY';
+    status: 'COMPLETE' | 'PARTIAL' | 'EXCEPTION';
     notes?: string | null;
   }): Promise<{ id?: string }> {
     const result = await dataConnect.executeGraphql<{ goodsReceipt_insert: { id: string } }, any>(
@@ -132,10 +164,8 @@ export class SqlFulfilmentRepository implements FulfilmentRepositoryPort {
       {
         variables: {
           organisationId: data.organisationId,
-          orderId: data.orderId,
-          receiptNumber: data.receiptNumber,
+          shipmentId: data.shipmentId,
           receivedByUid: data.receivedByUid,
-          receivedDate: data.receivedDate,
           status: data.status,
           notes: data.notes ?? null,
         },

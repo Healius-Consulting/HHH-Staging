@@ -145,7 +145,6 @@ const UPDATE_PAYMENT_STATUS_GQL = `
       data: {
         status: PROCESSING
         paymentStatus: $status
-        fulfilmentStatus: SUPPLIER_PROCESSING
         paidAt_expr: "request.time"
         updatedAt_expr: "request.time"
       }

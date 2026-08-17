@@ -87,6 +87,27 @@ export function createPortalPaymentRouter(): Router {
         console.warn('[Manual Payment] Curaleaf automated placement note:', placementErr);
       }
 
+      if (curaleafResult?.purchaseOrder) {
+        const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, unknown>;
+        await orderRepo.updateQuoteSnapshot({
+          id: orderId,
+          organisationId: scope.organisationId,
+          quoteSnapshot: {
+            ...snapshot,
+            curaleaf: {
+              ...(typeof snapshot.curaleaf === 'object' && snapshot.curaleaf ? snapshot.curaleaf : {}),
+              ...curaleafResult.purchaseOrder,
+              purchaseOrderId: curaleafResult.purchaseOrder.id,
+              purchaseOrderState: curaleafResult.purchaseOrder.state,
+              customerReference: curaleafResult.purchaseOrder.customerReference,
+              prescriptionId: curaleafResult.prescriptionId,
+              prescriberId: curaleafResult.prescriberId,
+            },
+          },
+          fulfilmentStatus: 'SUPPLIER_PROCESSING',
+        }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
+      }
+
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
         orderId,

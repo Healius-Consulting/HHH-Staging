@@ -1,43 +1,40 @@
 export interface ShipmentRecord {
   id: string;
   orderId: string;
-  courier: string;
-  trackingNumber: string;
+  supplierPurchaseOrderId: string;
+  supplierShipmentId: string | null;
+  supplierCustomerReference: string | null;
   status: string;
-  dispatchDate: string;
-  deliveryDate?: string | null;
+  dispatchedAt: string | null;
   createdAt: string;
 }
 
 export interface GoodsReceiptRecord {
   id: string;
-  orderId: string;
-  receiptNumber: string;
+  shipmentId: string;
   receivedByUid: string;
-  receivedDate: string;
+  receivedAt: string;
   status: string;
   notes?: string | null;
-  createdAt: string;
 }
 
 export interface FulfilmentRepositoryPort {
   listShipments(organisationId: string, limit?: number): Promise<ShipmentRecord[]>;
-  createShipment(data: {
+  findShipmentBySupplierId(organisationId: string, supplierShipmentId: string): Promise<ShipmentRecord | null>;
+  upsertSupplierShipment(data: {
     organisationId: string;
     orderId: string;
-    courier: string;
-    trackingNumber: string;
-    status: 'DISPATCHED' | 'IN_TRANSIT' | 'DELIVERED';
-    dispatchDate: string;
+    supplierPurchaseOrderId: string;
+    supplierShipmentId: string;
+    supplierCustomerReference?: string | null;
+    dispatchedAt?: string | null;
   }): Promise<{ id?: string }>;
   listGoodsReceipts(organisationId: string, limit?: number): Promise<GoodsReceiptRecord[]>;
   createGoodsReceipt(data: {
     organisationId: string;
-    orderId: string;
-    receiptNumber: string;
+    shipmentId: string;
     receivedByUid: string;
-    receivedDate: string;
-    status: 'COMPLETE' | 'DAMAGED' | 'DISCREPANCY';
+    status: 'COMPLETE' | 'PARTIAL' | 'EXCEPTION';
     notes?: string | null;
   }): Promise<{ id?: string }>;
 }
