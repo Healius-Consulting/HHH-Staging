@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { directoryContextFromHistory, patientIdFromSearch, patientProfileUrl } from '../src/utils/patientDirectoryNavigation.js';
+import { directoryContextFromHistory, patientIdFromSearch, patientProfileUrl } from '../src/utils/patientDirectoryNavigation.ts';
 
 test('patient profile URLs preserve unrelated query parameters without patient data', () => {
   assert.equal(patientProfileUrl('https://portal.example.test/?devPortal=pharmacy#main', 'P-123'), '/?devPortal=pharmacy&patient=P-123#main');

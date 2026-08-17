@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import QRCode from 'qrcode';
 import type { PharmacyTenant } from '../context/AppContext';
-import { deriveTenantTheme } from './tenantTheme';
+import { deriveTenantTheme } from './tenantTheme.ts';
 
 export const DEFAULT_ELIGIBILITY_FORM_URL = 'https://holistichealthhub.cc/eligibility';
 

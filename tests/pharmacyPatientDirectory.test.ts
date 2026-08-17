@@ -5,7 +5,7 @@ import {
   mapPortalPatientRecord,
   patientClinicalProfile,
   portalSourceLabel,
-} from '../src/utils/pharmacyPatientDirectory';
+} from '../src/utils/pharmacyPatientDirectory.ts';
 
 describe('pharmacyPatientDirectory', () => {
   it('maps portal patients into pharmacy CRM rows', () => {

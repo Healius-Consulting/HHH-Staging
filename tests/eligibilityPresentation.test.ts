@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LEGACY_PHARMACY_DECISION_REASON, isNegativeEligibilityStatus, pharmacyDecisionReason } from '../src/utils/eligibilityPresentation.js';
+import { LEGACY_PHARMACY_DECISION_REASON, isNegativeEligibilityStatus, pharmacyDecisionReason } from '../src/utils/eligibilityPresentation.ts';
 
 test('declined and rejected are the only negative eligibility outcomes', () => {
   assert.equal(isNegativeEligibilityStatus('Declined'), true);
