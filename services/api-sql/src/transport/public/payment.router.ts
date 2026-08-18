@@ -1,8 +1,11 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { HttpError } from '../../domain/common/errors.js';
 import { executeCuraleafOrderPlacement } from '../../application/integrations/curaleaf.service.js';
+import { promotePatientAfterCuraleafPlacement } from '../../application/patient-finance/patient-finance.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
+import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
+import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { sha256 } from '../../security/session-utils.js';
 
@@ -11,6 +14,9 @@ export function createPublicPaymentRouter(): Router {
   const paymentRepo = new SqlPaymentRepository();
   const orderRepo = new SqlOrderRepository();
   const integrationRepo = new SqlIntegrationRepository();
+  const patientRepo = new SqlPatientRepository();
+  const patientFinanceRepo = new SqlPatientFinanceRepository();
+  const patientFinanceDeps = { patientRepo, patientFinanceRepo };
 
   // GET /v1/public/payments/status - Check real-time payment clearance status
   router.get('/public/payments/status', async (req: Request, res: Response, next: NextFunction) => {
@@ -77,6 +83,10 @@ export function createPublicPaymentRouter(): Router {
                 fulfilmentStatus: 'SUPPLIER_PROCESSING',
               }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
             }
+
+            await promotePatientAfterCuraleafPlacement(patientFinanceDeps, order, curaleafResult).catch(err =>
+              console.warn('Patient activation after Curaleaf placement note:', err),
+            );
 
             await orderRepo.appendPlacementEvent({
               organisationId: payment.organisationId,

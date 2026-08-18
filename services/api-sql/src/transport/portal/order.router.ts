@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { curaleafApiRequest, executeCuraleafOrderPlacement, fetchCuraleafPurchaseOrders, fetchCuraleafShipments } from '../../application/integrations/curaleaf.service.js';
 import {
+  assertPatientEligibleForOrder,
+  promotePatientAfterCuraleafPlacement,
+  recordCollectedDispense,
+} from '../../application/patient-finance/patient-finance.js';
+import {
   advanceFulfilmentStatus,
   applyPharmacyHandout,
   buildCuraleafSnapshot,
@@ -19,6 +24,8 @@ import {
 import { SqlFulfilmentRepository } from '../../repositories/sql/fulfilment.sql.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
+import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
+import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import type { OrderRecord, CreateOrderInput } from '../../repositories/ports/order.port.js';
 import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
@@ -208,6 +215,9 @@ export function createPortalOrderRouter(): Router {
   const integrationRepo = new SqlIntegrationRepository();
   const paymentRepo = new SqlPaymentRepository();
   const fulfilmentRepo = new SqlFulfilmentRepository();
+  const patientRepo = new SqlPatientRepository();
+  const patientFinanceRepo = new SqlPatientFinanceRepository();
+  const patientFinanceDeps = { patientRepo, patientFinanceRepo };
 
   // GET /v1/portal/order-drafts - List active tenant drafts
   router.get('/portal/order-drafts', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
@@ -225,6 +235,11 @@ export function createPortalOrderRouter(): Router {
     try {
       const scope = assertTenantScope(req.context!);
       const input = draftInputSchema.parse(req.body);
+
+      if (input.patientId) {
+        const patient = await patientRepo.findPatientById(scope.organisationId, input.patientId);
+        assertPatientEligibleForOrder(patient);
+      }
 
       const result = await orderRepo.createDraft({
         organisationId: scope.organisationId,
@@ -302,6 +317,9 @@ export function createPortalOrderRouter(): Router {
     try {
       const scope = assertTenantScope(req.context!);
       const input = createOrderInputSchema.parse(req.body);
+
+      const patient = await patientRepo.findPatientById(scope.organisationId, input.patientId);
+      assertPatientEligibleForOrder(patient);
 
       const medicineTotalPence = input.medicineTotalPence ?? input.lineItems.reduce((s, it) => s + (it.unitPricePence ?? 0) * it.quantity, 0);
       const dispensingFeePence = input.dispensingFeePence ?? 0;
@@ -454,6 +472,10 @@ export function createPortalOrderRouter(): Router {
           fulfilmentStatus: 'SUPPLIER_PROCESSING',
         }).catch(err => console.warn('Curaleaf manual placement snapshot persist warning:', err));
       }
+
+      await promotePatientAfterCuraleafPlacement(patientFinanceDeps, order, curaleafResult).catch(err =>
+        console.warn('Patient activation after Curaleaf placement note:', err),
+      );
 
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
@@ -664,6 +686,21 @@ export function createPortalOrderRouter(): Router {
       if (!result.allowed) {
         throw new HttpError(409, 'Remaining packs are still open with Curaleaf. Use partial handover for arrived packs only.', 'REMAINDER_OPEN');
       }
+      if (!order.patientId) {
+        throw new HttpError(409, 'The order has no patient.', 'PATIENT_REQUIRED');
+      }
+
+      const collectedAt = new Date().toISOString();
+      const dispenseKey = input.shipmentId || (input.partial ? `partial-${collectedAt.slice(0, 10)}` : 'full');
+      await recordCollectedDispense(patientFinanceDeps, {
+        organisationId: scope.organisationId,
+        patientId: order.patientId,
+        orderId,
+        actorUid: scope.uid,
+        dispenseKey,
+        collectedAt,
+      });
+
       const nextStatus = result.remainingOpen
         ? 'PARTIALLY_RECEIVED'
         : 'COLLECTED';
@@ -681,10 +718,19 @@ export function createPortalOrderRouter(): Router {
         fulfilmentStatus: nextStatus,
       });
 
+      if (!result.remainingOpen) {
+        await orderRepo.updateOrderStatus({
+          id: orderId,
+          organisationId: scope.organisationId,
+          status: 'COMPLETED',
+          fulfilmentStatus: 'COLLECTED',
+        });
+      }
+
       res.status(200).json({
         id: orderId,
         status: result.remainingOpen ? 'partially_collected' : 'collected',
-        collectedAt: new Date().toISOString(),
+        collectedAt,
       });
     } catch (error) {
       next(error);

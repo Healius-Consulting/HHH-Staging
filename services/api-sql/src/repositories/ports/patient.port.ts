@@ -35,4 +35,13 @@ export interface PatientRecord {
 export interface PatientRepositoryPort {
   listTenantPatients(organisationId: string, limit?: number): Promise<PatientRecord[]>;
   listPlatformPatients(limit?: number): Promise<PatientRecord[]>;
+  listActivePatients(limit?: number): Promise<PatientRecord[]>;
+  findPatientById(organisationId: string, patientId: string): Promise<PatientRecord | null>;
+  updatePatientStatus(data: {
+    id: string;
+    organisationId: string;
+    status: PatientRecord['status'];
+    activatedAt?: string | null;
+    statusChangedAt?: string | null;
+  }): Promise<void>;
 }

@@ -2,9 +2,12 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { executeCuraleafOrderPlacement } from '../../application/integrations/curaleaf.service.js';
+import { promotePatientAfterCuraleafPlacement } from '../../application/patient-finance/patient-finance.js';
 import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
+import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
+import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
@@ -40,6 +43,9 @@ export function createPortalPaymentRouter(): Router {
   const paymentRepo = new SqlPaymentRepository();
   const orderRepo = new SqlOrderRepository();
   const integrationRepo = new SqlIntegrationRepository();
+  const patientRepo = new SqlPatientRepository();
+  const patientFinanceRepo = new SqlPatientFinanceRepository();
+  const patientFinanceDeps = { patientRepo, patientFinanceRepo };
 
   // POST /v1/portal/orders/:id/payments/manual - Record manual pharmacy payment
   router.post('/portal/orders/:id/payments/manual', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
@@ -107,6 +113,10 @@ export function createPortalPaymentRouter(): Router {
           fulfilmentStatus: 'SUPPLIER_PROCESSING',
         }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
       }
+
+      await promotePatientAfterCuraleafPlacement(patientFinanceDeps, order, curaleafResult).catch(err =>
+        console.warn('Patient activation after Curaleaf placement note:', err),
+      );
 
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
