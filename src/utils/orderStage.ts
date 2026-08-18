@@ -23,18 +23,104 @@ export function hasDispatchedRemainder(line: { ordered: number; shipped: number 
 
 type OrderPrescription = PatientOrder['prescriptions'][number];
 
-function prescriptionPackTotals(prescription: OrderPrescription) {
+function prescriptionUsesPackProgress(prescription: OrderPrescription) {
+  return (prescription.fulfilmentLines ?? []).length > 0;
+}
+
+export function prescriptionPackTotals(prescription: OrderPrescription) {
   const lines = prescription.fulfilmentLines ?? [];
   return lines.reduce((totals, line) => ({
     ordered: totals.ordered + line.ordered,
     shipped: totals.shipped + line.shipped,
     received: totals.received + line.received,
     collected: totals.collected + line.collected,
-  }), { ordered: 0, shipped: 0, received: 0, collected: 0 });
+    remaining: totals.remaining + line.remaining,
+  }), { ordered: 0, shipped: 0, received: 0, collected: 0, remaining: 0 });
 }
 
-function prescriptionUsesPackProgress(prescription: OrderPrescription) {
-  return (prescription.fulfilmentLines ?? []).length > 0;
+export function orderPackTotals(order: PatientOrder) {
+  return order.prescriptions.reduce((totals, prescription) => {
+    const packs = prescriptionPackTotals(prescription);
+    return {
+      ordered: totals.ordered + packs.ordered,
+      shipped: totals.shipped + packs.shipped,
+      received: totals.received + packs.received,
+      collected: totals.collected + packs.collected,
+      remaining: totals.remaining + packs.remaining,
+    };
+  }, { ordered: 0, shipped: 0, received: 0, collected: 0, remaining: 0 });
+}
+
+export function orderHasInTransitPacks(order: PatientOrder) {
+  return order.prescriptions.some(prescription => prescriptionHasInTransitPacks(prescription));
+}
+
+export function orderHasUncollectedReceivedPacks(order: PatientOrder) {
+  return order.prescriptions.some(prescription => {
+    if (prescriptionUsesPackProgress(prescription)) {
+      const { received, collected } = prescriptionPackTotals(prescription);
+      return received > collected;
+    }
+    return prescription.status === 'ready';
+  });
+}
+
+export function orderHasPartialCollection(order: PatientOrder) {
+  return order.prescriptions.some(prescription => {
+    const { ordered, collected } = prescriptionPackTotals(prescription);
+    return collected > 0 && collected < ordered;
+  });
+}
+
+export function orderAwaitingSupplierShipmentProductNames(order: PatientOrder) {
+  const names = order.prescriptions.flatMap(prescription => (prescription.fulfilmentLines ?? []).flatMap(line => {
+    const awaitingShipment = line.ordered > line.shipped;
+    const inTransit = line.shipped > line.received;
+    if (!awaitingShipment || inTransit) return [];
+    const product = prescription.items.find(item => item.productId === line.productId);
+    return product?.name ? [product.name] : [];
+  }));
+  return [...new Set(names)];
+}
+
+export function orderInTransitProductNames(order: PatientOrder) {
+  const names = order.prescriptions.flatMap(prescription => (prescription.fulfilmentLines ?? []).flatMap(line => {
+    if (line.shipped <= line.received) return [];
+    const product = prescription.items.find(item => item.productId === line.productId);
+    return product?.name ? [product.name] : [];
+  }));
+  return [...new Set(names)];
+}
+
+export function prescriptionStatusLabel(prescription: OrderPrescription) {
+  const totals = prescriptionPackTotals(prescription);
+  const remainingOpen = (prescription.fulfilmentLines ?? []).some(line =>
+    line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered,
+  );
+  const hasCheckedInPacks = totals.received > 0
+    || ['received', 'partially-received', 'ready', 'collected'].includes(prescription.status);
+
+  if (prescription.status === 'collected' && !remainingOpen) return 'Collected';
+  if (totals.collected > 0 && remainingOpen) return 'Part collected';
+  if (hasCheckedInPacks && totals.received >= totals.collected && totals.collected > 0 && remainingOpen) {
+    return 'Part collected';
+  }
+  if (prescription.status === 'partially-received' && !hasCheckedInPacks && totals.shipped > 0) {
+    return prescription.dispatchStatus === 'partial' ? 'Partially dispatched' : 'In transit';
+  }
+
+  return ({
+    draft: 'Draft',
+    'awaiting-approval': 'Curaleaf review',
+    processing: 'Processing',
+    approved: 'Approved',
+    dispatched: prescription.dispatchStatus === 'partial' ? 'Partially dispatched' : 'Dispatched',
+    'partially-received': 'Part delivered',
+    received: 'Delivered',
+    ready: 'Ready to collect',
+    collected: 'Collected',
+    cancelled: 'Cancelled purchase order',
+  } as const)[prescription.status];
 }
 
 function prescriptionHasCheckedInPacks(prescription: OrderPrescription) {

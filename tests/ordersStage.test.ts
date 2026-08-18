@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasDispatchedRemainder, orderCancellationResolution, orderHasPartialPharmacyReceipt, orderStage, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
+import { hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderStage, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
 import type { PatientOrder } from '../src/context/AppContext.tsx';
 
 const taxonomy: Array<[OrderStage, StageFilter]> = [
@@ -203,4 +203,38 @@ test('all ordered packs checked in but not ready classifies as delivered', () =>
   } as PatientOrder;
   assert.equal(orderStage(order).stage, 'delivered');
   assert.equal(orderHasPartialPharmacyReceipt(order), false);
+});
+
+test('partial collection with supplier remainder does not keep an in-transit delivery banner state', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{
+      status: 'partially-received',
+      dispatchStatus: 'partial',
+      items: [{ productId: 'p1', name: 'Beach Wedding', qty: 4 }],
+      shipmentStates: { 'ship-1': 'collected' },
+      fulfilmentLines: [{
+        productId: 'p1',
+        ordered: 4,
+        shipped: 2,
+        received: 2,
+        remaining: 2,
+        collected: 2,
+        requested: 4,
+        sent: null,
+        supplierReportedOrdered: 4,
+        allocated: 2,
+        returned: 0,
+        backordered: true,
+        quantityMismatch: false,
+      }],
+    }],
+  } as PatientOrder;
+
+  assert.equal(orderHasInTransitPacks(order), false);
+  assert.equal(orderHasPartialCollection(order), true);
+  assert.equal(orderHasUncollectedReceivedPacks(order), false);
+  assert.equal(orderAwaitingSupplierShipmentProductNames(order).length, 1);
+  assert.equal(prescriptionStatusLabel(order.prescriptions[0]!), 'Part collected');
 });
