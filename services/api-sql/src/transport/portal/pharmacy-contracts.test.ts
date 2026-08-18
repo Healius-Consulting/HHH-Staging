@@ -541,6 +541,7 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(overview.summary.awaitingPayment, 1);
     assert.equal(overview.summary.supplierFulfilment, 1);
     assert.equal(overview.priorityItems.length, 1);
+    assert.equal(overview.priorityItems[0]?.kind, 'payment');
     assert.equal(overview.priorityItems[0]?.maskedPatientLabel, 'Patient, A');
     assert.equal(overview.priorityItems[0]?.orderReference, '#ORD-1001');
     assert.equal(overview.priorityItems[0]?.maskedPatientLabel.includes('Alicia'), false);

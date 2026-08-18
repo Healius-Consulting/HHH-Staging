@@ -265,6 +265,10 @@
 .overview-today .summary-tiles { margin: 0; }
 .overview-priority-meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0.25rem 0 0; color: var(--text-muted, #526157); font-size: 0.8125rem; }
 .overview-priority-meta span:first-child { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+.overview-priority-item--payment .overview-kind { color: #b45309; }
+.overview-priority-item--repeat .overview-kind { color: #0369a1; }
+.overview-priority-item--collection .overview-kind { color: #b91c1c; }
+.overview-priority-item--cancellation .overview-kind { color: #b91c1c; }
 .overview-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.75rem; }
 .overview-summary-tile { display: grid; gap: 0.25rem; min-height: 7.25rem; padding: 1rem; border: 1px solid var(--border-subtle, #d9e0da); border-radius: 0.75rem; background: var(--surface-elevated, #fff); }
 .overview-summary-tile > span { color: var(--text-muted, #526157); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -4536,7 +4540,7 @@ html[data-reduced-motion='true'] .mobile-more-sheet { animation: none; }
 .unified-admin-shell .tenant-status--live{ color: var(--color-success); background: color-mix(in srgb, var(--color-success) 10%, var(--bg-surface)); }
 
 .summary-tiles--compact{ margin: 20px 0 24px; }
-
+.summary-tiles--two{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .summary-tiles--three{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 .rx-record-body{ grid-template-columns: minmax(0, 1fr); }

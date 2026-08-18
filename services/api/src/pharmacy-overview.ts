@@ -129,14 +129,15 @@ export function composePharmacyOverview(input: {
     const payment = orderPayment(order);
     const sentAt = timestamp(payment, 'sentAt', 'createdAt');
     const days = ageDays(sentAt, now);
-    if (now - sentAt < 3 * DAY_MS) continue;
     const patient = patientById.get(text(order.patientId));
     priorityItems.push({
       id: `payment-${text(order.id)}`, kind: 'payment', ageDays: days,
       maskedPatientLabel: overviewPatientLabelFromName(patientName(patient ?? {})),
       orderReference: overviewOrderReferenceFromId(text(order.id), order.orderNumber),
       recordTarget: { kind: 'order', id: text(order.id) },
-      summary: `Payment outstanding for ${days} day${days === 1 ? '' : 's'}.`,
+      summary: days === 0
+        ? 'Payment link sent today.'
+        : `Payment outstanding for ${days} day${days === 1 ? '' : 's'}.`,
       actionLabel: 'Open order',
     });
   }
@@ -164,6 +165,39 @@ export function composePharmacyOverview(input: {
       recordTarget: { kind: 'order', id: text(order.id) },
       summary: 'Cancellation or refund resolution requires attention.',
       actionLabel: 'Open order',
+    });
+  }
+
+  const repeatGapDays = 30;
+  const ordersByPatient = new Map<string, RecordData[]>();
+  for (const order of activeOrders) {
+    const patientId = text(order.patientId);
+    if (!patientId) continue;
+    const bucket = ordersByPatient.get(patientId) ?? [];
+    bucket.push(order);
+    ordersByPatient.set(patientId, bucket);
+  }
+
+  for (const patient of patients) {
+    if (text(patient.status) !== 'active' && text(patient.lifecycleStatus) !== 'active') continue;
+    const patientOrders = ordersByPatient.get(text(patient.id)) ?? [];
+    if (!patientOrders.length) continue;
+    const latestOrder = patientOrders.reduce((latest, current) => {
+      const latestAt = timestamp(latest, 'collectedAt', 'updatedAt', 'date', 'createdAt');
+      const currentAt = timestamp(current, 'collectedAt', 'updatedAt', 'date', 'createdAt');
+      return currentAt > latestAt ? current : latest;
+    });
+    const daysSince = ageDays(timestamp(latestOrder, 'collectedAt', 'updatedAt', 'date', 'createdAt'), now);
+    if (!Number.isFinite(daysSince) || daysSince < repeatGapDays) continue;
+    priorityItems.push({
+      id: `repeat-${text(patient.id)}`,
+      kind: 'repeat',
+      ageDays: daysSince,
+      maskedPatientLabel: overviewPatientLabelFromName(patientName(patient)),
+      orderReference: overviewOrderReferenceFromId(text(latestOrder.id), latestOrder.orderNumber),
+      recordTarget: { kind: 'patient', id: text(patient.id) },
+      summary: `Last order ${daysSince} days ago. Repeat prescription may be due.`,
+      actionLabel: 'Open patient',
     });
   }
   priorityItems.sort((left, right) => Number(right.ageDays) - Number(left.ageDays));

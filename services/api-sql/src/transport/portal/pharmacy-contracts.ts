@@ -31,6 +31,14 @@ function ageDays(at: number, now: number) {
   return Math.max(0, Math.floor((now - at) / DAY_MS));
 }
 
+function orderActivityAt(order: Pick<OrderRecord, 'collectedAt' | 'paidAt' | 'submittedAt' | 'updatedAt' | 'createdAt'>) {
+  for (const value of [order.collectedAt, order.paidAt, order.submittedAt, order.updatedAt, order.createdAt]) {
+    const parsed = Date.parse(value || '');
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
 function overviewPatientLabel(patient: PatientRecord | undefined) {
   const surname = patient?.surname?.trim();
   const firstInitial = patient?.firstName?.trim()?.[0]?.toUpperCase();
@@ -368,18 +376,17 @@ export function buildSqlPharmacyOverview(params: {
   const readyForCollection = activeOrders.filter(order => order.fulfilmentStatus === 'ready_for_collection');
   const priorityItems: Array<{
     id: string;
-    kind: 'payment' | 'collection';
+    kind: 'payment' | 'collection' | 'repeat';
     ageDays: number;
     maskedPatientLabel: string;
     orderReference: string;
-    recordTarget: { kind: 'order'; id: string };
+    recordTarget: { kind: 'order' | 'patient'; id: string };
     summary: string;
     actionLabel: string;
   }> = [];
 
   for (const order of awaitingPayment) {
     const age = ageDays(timestamp(order.updatedAt, order.createdAt), now);
-    if (age < 3) continue;
     priorityItems.push({
       id: `payment-${order.id}`,
       kind: 'payment',
@@ -387,7 +394,9 @@ export function buildSqlPharmacyOverview(params: {
       maskedPatientLabel: overviewPatientLabel(patientById.get(order.patientId)),
       orderReference: overviewOrderReference(order),
       recordTarget: { kind: 'order', id: order.id },
-      summary: `Payment outstanding for ${age} day${age === 1 ? '' : 's'}.`,
+      summary: age === 0
+        ? 'Payment link sent today.'
+        : `Payment outstanding for ${age} day${age === 1 ? '' : 's'}.`,
       actionLabel: 'Open order',
     });
   }
@@ -404,6 +413,36 @@ export function buildSqlPharmacyOverview(params: {
       recordTarget: { kind: 'order', id: order.id },
       summary: `Ready to collect for ${age} day${age === 1 ? '' : 's'}.`,
       actionLabel: 'Open order',
+    });
+  }
+
+  const repeatGapDays = 30;
+  const ordersByPatient = new Map<string, OrderRecord[]>();
+  for (const rawOrder of params.orders) {
+    if (rawOrder.status === 'CANCELLED' || rawOrder.paymentStatus === 'CANCELLED') continue;
+    const bucket = ordersByPatient.get(rawOrder.patientId) ?? [];
+    bucket.push(rawOrder);
+    ordersByPatient.set(rawOrder.patientId, bucket);
+  }
+
+  for (const patient of params.patients) {
+    if (patient.status !== 'ACTIVE') continue;
+    const patientOrders = ordersByPatient.get(patient.id) ?? [];
+    if (!patientOrders.length) continue;
+    const latestOrder = patientOrders.reduce((latest, current) => (
+      orderActivityAt(current) > orderActivityAt(latest) ? current : latest
+    ));
+    const daysSince = ageDays(orderActivityAt(latestOrder), now);
+    if (!Number.isFinite(daysSince) || daysSince < repeatGapDays) continue;
+    priorityItems.push({
+      id: `repeat-${patient.id}`,
+      kind: 'repeat',
+      ageDays: daysSince,
+      maskedPatientLabel: overviewPatientLabel(patient),
+      orderReference: overviewOrderReference(latestOrder),
+      recordTarget: { kind: 'patient', id: patient.id },
+      summary: `Last order ${daysSince} days ago. Repeat prescription may be due.`,
+      actionLabel: 'Open patient',
     });
   }
 

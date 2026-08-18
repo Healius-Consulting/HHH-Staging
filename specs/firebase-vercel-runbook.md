@@ -1,10 +1,10 @@
-# Firebase and Vercel staging runbook
+# Firebase and Vercel runbook
 
-Live hostnames (do not treat `hhh.thinktimeless.co.uk` as staging) are in [`.agents/skills/production-hosting/SKILL.md`](../.agents/skills/production-hosting/SKILL.md): production public is `holistichealthhub.cc`, Hobby public staging is `staging.thinktimeless.co.uk`, and `hhh.thinktimeless.co.uk` is a Cloudflare pharmacy QR redirect.
+> **Hobby staging is retired.** Live frontend deploys come from GitHub `main` → HHH Vercel team only. See [`.agents/skills/production-hosting/SKILL.md`](../.agents/skills/production-hosting/SKILL.md).
 
-This is the active low-cost staging topology. It uses only Vercel Hobby capabilities, but it does **not** weaken the application authentication boundary.
+Live hostnames: production public is `holistichealthhub.cc`, portal is `portal.holistichealthhub.cc`, and `hhh.thinktimeless.co.uk` is a Cloudflare pharmacy QR redirect (not Vercel).
 
-> Vercel Hobby is restricted by Vercel to personal, non-commercial use. Use this configuration only for owner-operated development with synthetic data. Before a client, pharmacy, patient, or production workload uses it, move both projects to an appropriate paid account and complete the security/compliance gates. Firebase and other external services have their own limits and charges.
+The sections below describe the **HHH production** Vercel topology. Historical Hobby staging notes are kept for reference only.
 
 ## Topology
 
