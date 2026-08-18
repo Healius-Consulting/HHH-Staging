@@ -99,7 +99,7 @@ export function createPortalPrescriptionRouter(): Router {
       const scope = assertTenantScope(req.context!);
       const fileId = String(req.params.id || '');
       const fileRecord = await prescriptionRepo.findFileById(fileId, scope.organisationId);
-      if (!fileRecord) {
+      if (!fileRecord || fileRecord.status === 'DELETED' || fileRecord.deletedAt) {
         throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');
       }
       await prescriptionRepo.completeFile(fileId, scope.organisationId);
@@ -133,7 +133,7 @@ export function createPortalPrescriptionRouter(): Router {
       const fileId = String(req.params.id || '');
 
       const fileRecord = await prescriptionRepo.findFileById(fileId, scope.organisationId);
-      if (!fileRecord) {
+      if (!fileRecord || fileRecord.status === 'DELETED' || fileRecord.deletedAt) {
         throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');
       }
 

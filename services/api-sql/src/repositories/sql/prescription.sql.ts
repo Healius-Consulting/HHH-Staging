@@ -4,6 +4,7 @@ import type {
   PrescriptionFileRecord,
   PrescriptionRecord,
   PrescriptionRepositoryPort,
+  UpsertOrderPrescriptionInput,
   UpsertPrescriberInput,
 } from '../ports/prescription.port.js';
 
@@ -38,6 +39,7 @@ const GET_PRESCRIPTION_FILE_BY_ID_GQL = `
       sizeBytes
       status
       verifiedAt
+      deletedAt
     }
   }
 `;
@@ -120,25 +122,121 @@ const UPDATE_PRESCRIBER_GQL = `
   }
 `;
 
+const PRESCRIPTION_FIELDS = `
+  id
+  organisationId
+  patientId
+  prescriberId
+  fileId
+  supplierPrescriptionId
+  serialNumber
+  issueDate
+  expiryDate
+  status
+  patientNameSnapshot
+  patientDobSnapshot
+  verifiedAt
+  createdAt
+`;
+
 const LIST_TENANT_PRESCRIPTIONS_GQL = `
   query ListTenantPrescriptions($organisationId: UUID!, $limit: Int!) {
     prescriptions(
       where: { organisationId: { eq: $organisationId } }
       limit: $limit
     ) {
-      id
-      patientId
-      prescriberId
-      fileId
-      serialNumber
-      issueDate
-      expiryDate
-      status
-      patientNameSnapshot
-      patientDobSnapshot
-      verifiedAt
-      createdAt
+      ${PRESCRIPTION_FIELDS}
     }
+  }
+`;
+
+const FIND_PRESCRIPTION_BY_SUPPLIER_ID_GQL = `
+  query FindPrescriptionBySupplierId($organisationId: UUID!, $supplierPrescriptionId: String!) {
+    prescriptions(
+      where: { organisationId: { eq: $organisationId }, supplierPrescriptionId: { eq: $supplierPrescriptionId } }
+      limit: 1
+    ) {
+      ${PRESCRIPTION_FIELDS}
+    }
+  }
+`;
+
+const FIND_PRESCRIPTION_BY_SERIAL_GQL = `
+  query FindPrescriptionBySerial($organisationId: UUID!, $serialNumber: String!) {
+    prescriptions(
+      where: { organisationId: { eq: $organisationId }, serialNumber: { eq: $serialNumber } }
+      limit: 1
+    ) {
+      ${PRESCRIPTION_FIELDS}
+    }
+  }
+`;
+
+const INSERT_PRESCRIPTION_GQL = `
+  mutation InsertPrescription(
+    $organisationId: UUID!
+    $patientId: UUID!
+    $fileId: UUID
+    $prescriberId: UUID
+    $supplierPrescriptionId: String!
+    $serialNumber: String!
+    $issueDate: Date!
+    $expiryDate: Date!
+    $status: PrescriptionStatus!
+    $patientNameSnapshot: String!
+    $patientDobSnapshot: Date!
+    $prescriberSnapshot: Any!
+  ) {
+    prescription_insert(data: {
+      organisationId: $organisationId
+      patientId: $patientId
+      fileId: $fileId
+      prescriberId: $prescriberId
+      supplierPrescriptionId: $supplierPrescriptionId
+      serialNumber: $serialNumber
+      issueDate: $issueDate
+      expiryDate: $expiryDate
+      status: $status
+      patientNameSnapshot: $patientNameSnapshot
+      patientDobSnapshot: $patientDobSnapshot
+      prescriberSnapshot: $prescriberSnapshot
+    })
+  }
+`;
+
+const UPDATE_PRESCRIPTION_SUPPLIER_GQL = `
+  mutation UpdatePrescriptionSupplier(
+    $id: UUID!
+    $supplierPrescriptionId: String!
+    $status: PrescriptionStatus!
+    $fileId: UUID
+  ) {
+    prescription_update(
+      key: { id: $id }
+      data: {
+        supplierPrescriptionId: $supplierPrescriptionId
+        status: $status
+        fileId: $fileId
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const UPSERT_ORDER_PRESCRIPTION_GQL = `
+  mutation UpsertOrderPrescription(
+    $orderId: UUID!
+    $prescriptionId: UUID!
+    $placementState: PlacementState!
+    $supplierPurchaseOrderId: String
+  ) {
+    orderPrescription_upsert(data: {
+      orderId: $orderId
+      prescriptionId: $prescriptionId
+      placementState: $placementState
+      supplierPurchaseOrderId: $supplierPurchaseOrderId
+      updatedAt_expr: "request.time"
+    })
   }
 `;
 
@@ -175,6 +273,19 @@ const COMPLETE_PRESCRIPTION_FILE_GQL = `
       data: {
         status: UPLOADED
         verifiedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const MARK_PRESCRIPTION_FILE_DELETED_GQL = `
+  mutation MarkPrescriptionFileDeleted($id: UUID!) {
+    prescriptionFile_update(
+      key: { id: $id }
+      data: {
+        status: DELETED
+        deletedAt_expr: "request.time"
+        updatedAt_expr: "request.time"
       }
     )
   }
@@ -316,6 +427,17 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
     return true;
   }
 
+  async markFileDeleted(id: string, organisationId: string): Promise<boolean> {
+    const existing = await this.findFileById(id, organisationId);
+    if (!existing) return false;
+    if (existing.status === 'DELETED' || existing.deletedAt) return true;
+    await dataConnect.executeGraphql<any, any>(
+      MARK_PRESCRIPTION_FILE_DELETED_GQL,
+      { variables: { id } }
+    );
+    return true;
+  }
+
   async deleteFile(id: string, organisationId: string): Promise<boolean> {
     const existing = await this.findFileById(id, organisationId);
     if (!existing) return false;
@@ -324,5 +446,69 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
       { variables: { id } }
     );
     return true;
+  }
+
+  async findPrescriptionBySupplierId(organisationId: string, supplierPrescriptionId: string): Promise<PrescriptionRecord | null> {
+    const result = await dataConnect.executeGraphql<{ prescriptions: PrescriptionRecord[] }, any>(
+      FIND_PRESCRIPTION_BY_SUPPLIER_ID_GQL,
+      { variables: { organisationId, supplierPrescriptionId } },
+    );
+    return result.data.prescriptions?.[0] ?? null;
+  }
+
+  async findPrescriptionBySerial(organisationId: string, serialNumber: string): Promise<PrescriptionRecord | null> {
+    const result = await dataConnect.executeGraphql<{ prescriptions: PrescriptionRecord[] }, any>(
+      FIND_PRESCRIPTION_BY_SERIAL_GQL,
+      { variables: { organisationId, serialNumber } },
+    );
+    return result.data.prescriptions?.[0] ?? null;
+  }
+
+  async recordSupplierPrescription(input: UpsertOrderPrescriptionInput): Promise<PrescriptionRecord> {
+    const existing = await this.findPrescriptionBySupplierId(input.organisationId, input.supplierPrescriptionId)
+      ?? await this.findPrescriptionBySerial(input.organisationId, input.serialNumber);
+
+    if (existing) {
+      await dataConnect.executeGraphql(UPDATE_PRESCRIPTION_SUPPLIER_GQL, {
+        variables: {
+          id: existing.id,
+          supplierPrescriptionId: input.supplierPrescriptionId,
+          status: input.status,
+          fileId: input.fileId ?? existing.fileId ?? null,
+        },
+      });
+    } else {
+      await dataConnect.executeGraphql(INSERT_PRESCRIPTION_GQL, {
+        variables: {
+          organisationId: input.organisationId,
+          patientId: input.patientId,
+          fileId: input.fileId ?? null,
+          prescriberId: input.prescriberId ?? null,
+          supplierPrescriptionId: input.supplierPrescriptionId,
+          serialNumber: input.serialNumber,
+          issueDate: input.issueDate,
+          expiryDate: input.expiryDate,
+          status: input.status,
+          patientNameSnapshot: input.patientNameSnapshot,
+          patientDobSnapshot: input.patientDobSnapshot,
+          prescriberSnapshot: input.prescriberSnapshot ?? {},
+        },
+      });
+    }
+
+    const saved = await this.findPrescriptionBySupplierId(input.organisationId, input.supplierPrescriptionId)
+      ?? await this.findPrescriptionBySerial(input.organisationId, input.serialNumber);
+    if (!saved) throw new Error('Prescription could not be saved with the Curaleaf prescription ID.');
+
+    await dataConnect.executeGraphql(UPSERT_ORDER_PRESCRIPTION_GQL, {
+      variables: {
+        orderId: input.orderId,
+        prescriptionId: saved.id,
+        placementState: input.placementState ?? (input.status === 'PLACED' ? 'PLACED' : 'PENDING_PLACEMENT'),
+        supplierPurchaseOrderId: input.supplierPurchaseOrderId ?? null,
+      },
+    });
+
+    return saved;
   }
 }

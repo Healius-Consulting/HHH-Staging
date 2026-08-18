@@ -5,7 +5,14 @@ import {
   existingCuraleafPurchaseOrder,
   matchPurchaseOrder,
 } from '../orders/curaleaf-fulfilment.js';
+import {
+  prescriptionFileIdsFromSnapshot,
+  purgeOrderPrescriptionFiles,
+} from '../prescriptions/prescription-file-purge.js';
+import { persistCuraleafPrescriptionIdentity } from '../prescriptions/curaleaf-prescription-record.js';
+import { StorageProvider } from '../../providers/storage/storage.provider.js';
 import type { IntegrationConnectionRecord } from '../../repositories/ports/integration.port.js';
+import { SqlPrescriptionRepository } from '../../repositories/sql/prescription.sql.js';
 
 const secretClient = new SecretManagerServiceClient();
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -143,24 +150,26 @@ export async function fetchCuraleafShipments(connection: IntegrationConnectionRe
 export async function curaleafApiRequest<T = any>(
   connection: IntegrationConnectionRecord,
   path: string,
-  init: RequestInit = {}
+  init: RequestInit & { timeoutMs?: number } = {}
 ): Promise<T> {
   const credential = await credentialFor(connection);
   const method = (init.method || 'GET').toUpperCase();
   const apiKey = method === 'GET' ? (credential.readApiKey || credential.writeApiKey) : credential.writeApiKey;
+  const { timeoutMs = REQUEST_TIMEOUT_MS, headers: initHeaders, ...rest } = init;
+  const isFormData = typeof FormData !== 'undefined' && rest.body instanceof FormData;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(new URL(path.replace(/^\//, ''), `${config.CURALEAF_BASE_URL}/`), {
-      ...init,
+      ...rest,
       method,
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
-        'Content-Type': 'application/json',
         'X-API-Key': apiKey,
-        ...init.headers,
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+        ...initHeaders,
       },
     });
 
@@ -174,7 +183,7 @@ export async function curaleafApiRequest<T = any>(
 
     if (!response.ok) {
       throw new HttpError(
-        response.status === 429 ? 429 : 502,
+        response.status === 429 || response.status === 409 ? response.status : 502,
         body?.message || `Curaleaf rejected the request (${response.status}).`,
         'CURALEAF_REQUEST_FAILED'
       );
@@ -207,6 +216,60 @@ export async function fetchCuraleafQuote(
   });
 }
 
+async function uploadCuraleafPrescriptionFile(
+  connection: IntegrationConnectionRecord,
+  prescriptionId: string,
+  file: { bytes: Buffer; contentType: string; filename: string },
+) {
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.filename);
+  return curaleafApiRequest(connection, `/v1/prescriptions/${encodeURIComponent(prescriptionId)}/file/`, {
+    method: 'POST',
+    body: form,
+    timeoutMs: 30_000,
+  });
+}
+
+async function sendAndPurgeLocalPrescriptionCopy(
+  connection: IntegrationConnectionRecord,
+  organisationId: string,
+  snapshot: unknown,
+  curaleafPrescriptionId: string,
+) {
+  const fileIds = prescriptionFileIdsFromSnapshot(snapshot);
+  if (!fileIds.length) return { uploaded: false, purged: false };
+  const prescriptionRepo = new SqlPrescriptionRepository();
+  const storage = new StorageProvider();
+  let uploaded = false;
+
+  for (const fileId of fileIds) {
+    const record = await prescriptionRepo.findFileById(fileId, organisationId);
+    if (!record || record.status === 'DELETED' || record.deletedAt || !record.storagePath) continue;
+    try {
+      const downloaded = await storage.downloadFile(record.storagePath);
+      await uploadCuraleafPrescriptionFile(connection, curaleafPrescriptionId, {
+        bytes: downloaded.bytes,
+        contentType: downloaded.contentType || record.contentType || 'application/pdf',
+        filename: record.originalFilename || 'prescription.pdf',
+      });
+      uploaded = true;
+    } catch (error) {
+      const alreadyHeld = error instanceof HttpError && error.statusCode === 409
+        || /already|exists|duplicate/i.test(error instanceof Error ? error.message : String(error));
+      if (alreadyHeld) {
+        uploaded = true;
+      } else {
+        console.warn('[Curaleaf] Prescription file upload note:', error);
+      }
+    }
+  }
+
+  if (uploaded) {
+    await purgeOrderPrescriptionFiles(organisationId, snapshot, { prescriptionRepo, storage });
+  }
+  return { uploaded, purged: uploaded };
+}
+
 export async function executeCuraleafOrderPlacement(
   connection: IntegrationConnectionRecord,
   order: {
@@ -216,6 +279,7 @@ export async function executeCuraleafOrderPlacement(
     paymentStatus?: string | null;
     paidAt?: string | null;
     quoteSnapshot?: unknown;
+    patientId?: string | null;
   }
 ) {
   if (order.status === 'CANCELLED') {
@@ -228,6 +292,9 @@ export async function executeCuraleafOrderPlacement(
 
   const recordedPurchaseOrder = existingCuraleafPurchaseOrder(order);
   if (recordedPurchaseOrder) {
+    await purgeOrderPrescriptionFiles(connection.organisationId, order.quoteSnapshot).catch(error =>
+      console.warn('[Prescription file] Purge after recorded PO note:', error),
+    );
     return {
       skipped: true,
       reason: 'Purchase order already recorded for this order',
@@ -251,6 +318,9 @@ export async function executeCuraleafOrderPlacement(
       null,
     );
     if (matchedPurchaseOrder?.id) {
+      await purgeOrderPrescriptionFiles(connection.organisationId, snapshot).catch(error =>
+        console.warn('[Prescription file] Purge after existing PO note:', error),
+      );
       return {
         skipped: true,
         reason: 'Purchase order already exists at Curaleaf',
@@ -417,6 +487,23 @@ export async function executeCuraleafOrderPlacement(
     };
   }
 
+  await persistCuraleafPrescriptionIdentity({
+    organisationId: connection.organisationId,
+    orderId: order.id,
+    patientId: order.patientId,
+    snapshot,
+    prescriptionId: curaleafPrescriptionId,
+    prescriberId,
+    purchaseOrder: null,
+  }).catch(error => console.warn('[Prescription] Persist Curaleaf ID note:', error));
+
+  await sendAndPurgeLocalPrescriptionCopy(
+    connection,
+    connection.organisationId,
+    snapshot,
+    curaleafPrescriptionId,
+  );
+
   // Step 5: Confirm prescription is ready before purchase-order-from-prescriptions.
   try {
     const prescriptionDetails = await curaleafApiRequest<{ state?: string }>(
@@ -457,6 +544,16 @@ export async function executeCuraleafOrderPlacement(
       }),
     });
     console.log(`[Curaleaf] Purchase order from prescription placed: ${JSON.stringify(purchaseOrderResult)}`);
+    await persistCuraleafPrescriptionIdentity({
+      organisationId: connection.organisationId,
+      orderId: order.id,
+      patientId: order.patientId,
+      snapshot,
+      prescriptionId: curaleafPrescriptionId,
+      prescriberId,
+      purchaseOrder: purchaseOrderResult,
+      fulfilmentStatus: 'SUPPLIER_PROCESSING',
+    }).catch(error => console.warn('[Prescription] Persist Curaleaf PO note:', error));
   } catch (poErr) {
     console.warn('[Curaleaf] purchase-order-from-prescriptions failed:', poErr);
     return {

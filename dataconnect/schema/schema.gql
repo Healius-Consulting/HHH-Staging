@@ -624,8 +624,8 @@ type Prescription @table {
   patientId: UUID! @index
   prescriber: Prescriber @ref(fields: "prescriberId")
   prescriberId: UUID @index
-  file: PrescriptionFile! @unique @ref(fields: "fileId")
-  fileId: UUID!
+  file: PrescriptionFile @unique @ref(fields: "fileId")
+  fileId: UUID
   supplierPrescriptionId: String @unique
   serialNumber: String! @unique
   issueDate: Date!

@@ -26,6 +26,8 @@ import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
+import { purgeOrderPrescriptionFiles } from '../../application/prescriptions/prescription-file-purge.js';
+import { persistCuraleafPrescriptionIdentity } from '../../application/prescriptions/curaleaf-prescription-record.js';
 import type { OrderRecord, CreateOrderInput } from '../../repositories/ports/order.port.js';
 import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
@@ -456,25 +458,17 @@ export function createPortalOrderRouter(): Router {
         }
       }
 
-      if (curaleafResult?.purchaseOrder) {
-        const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, unknown>;
-        await orderRepo.updateQuoteSnapshot({
-          id: orderId,
+      if (curaleafResult?.prescriptionId || curaleafResult?.purchaseOrder) {
+        await persistCuraleafPrescriptionIdentity({
           organisationId: scope.organisationId,
-          quoteSnapshot: {
-            ...snapshot,
-            curaleaf: {
-              ...(typeof snapshot.curaleaf === 'object' && snapshot.curaleaf ? snapshot.curaleaf : {}),
-              ...curaleafResult.purchaseOrder,
-              purchaseOrderId: curaleafResult.purchaseOrder.id,
-              purchaseOrderState: curaleafResult.purchaseOrder.state,
-              customerReference: curaleafResult.purchaseOrder.customerReference,
-              prescriptionId: curaleafResult.prescriptionId,
-              prescriberId: curaleafResult.prescriberId,
-            },
-          },
-          fulfilmentStatus: 'SUPPLIER_PROCESSING',
-        }).catch(err => console.warn('Curaleaf manual placement snapshot persist warning:', err));
+          orderId,
+          patientId: order.patientId,
+          snapshot: order.quoteSnapshot,
+          prescriptionId: curaleafResult.prescriptionId,
+          prescriberId: curaleafResult.prescriberId,
+          purchaseOrder: curaleafResult.purchaseOrder ?? null,
+          fulfilmentStatus: curaleafResult.purchaseOrder ? 'SUPPLIER_PROCESSING' : undefined,
+        }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
       }
 
       await promotePatientAfterCuraleafPlacement(patientFinanceDeps, order, curaleafResult).catch(err =>
@@ -525,6 +519,10 @@ export function createPortalOrderRouter(): Router {
         status: 'CANCELLED',
         cancelledAt: now,
       });
+
+      await purgeOrderPrescriptionFiles(scope.organisationId, order.quoteSnapshot).catch(error =>
+        console.warn('[Prescription file] Purge after cancellation note:', error),
+      );
 
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,
@@ -615,6 +613,10 @@ export function createPortalOrderRouter(): Router {
         cancelledAt: new Date().toISOString(),
       });
 
+      await purgeOrderPrescriptionFiles(scope.organisationId, order.quoteSnapshot).catch(error =>
+        console.warn('[Prescription file] Purge after cancellation note:', error),
+      );
+
       res.status(201).json(refundState);
     } catch (error) {
       next(error);
@@ -643,6 +645,10 @@ export function createPortalOrderRouter(): Router {
         status: 'CANCELLED',
         cancelledAt: now,
       });
+
+      await purgeOrderPrescriptionFiles(scope.organisationId, order.quoteSnapshot).catch(error =>
+        console.warn('[Prescription file] Purge after cancellation note:', error),
+      );
 
       const nextRefund = {
         id: refundId,
@@ -795,6 +801,10 @@ export function createPortalOrderRouter(): Router {
         status: 'CANCELLED',
         cancelledAt: new Date().toISOString(),
       });
+
+      await purgeOrderPrescriptionFiles(scope.organisationId, order.quoteSnapshot).catch(error =>
+        console.warn('[Prescription file] Purge after cancellation note:', error),
+      );
 
       await orderRepo.appendPlacementEvent({
         organisationId: scope.organisationId,

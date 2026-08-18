@@ -187,10 +187,12 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
   const rawPrescriptions = snapshot?.prescriptions || [];
   const prescriptions = Array.isArray(rawPrescriptions) && rawPrescriptions.length > 0 ? rawPrescriptions.map((rx: any) => ({
     ...rx,
+    curaleafPrescriptionId: rx.curaleafPrescriptionId || po?.prescriptionId || persistedCuraleaf?.prescriptionId || null,
     items: lineItems,
   })) : (lineItems.length > 0 ? [{
     id: `rx-${order.id.slice(0, 8)}`,
     fileId: `rx-${order.id.slice(0, 8)}`,
+    curaleafPrescriptionId: po?.prescriptionId || persistedCuraleaf?.prescriptionId || null,
     serialNumber: `RX-${order.orderNumber || order.id.slice(0, 8)}`,
     issueDate: order.submittedAt ? order.submittedAt.split('T')[0] : new Date().toISOString().split('T')[0],
     prescriber: {

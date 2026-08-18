@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { executeCuraleafOrderPlacement } from '../../application/integrations/curaleaf.service.js';
+import { persistCuraleafPrescriptionIdentity } from '../../application/prescriptions/curaleaf-prescription-record.js';
 import { promotePatientAfterCuraleafPlacement } from '../../application/patient-finance/patient-finance.js';
 import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
@@ -93,24 +94,16 @@ export function createPortalPaymentRouter(): Router {
         console.warn('[Manual Payment] Curaleaf automated placement note:', placementErr);
       }
 
-      if (curaleafResult?.purchaseOrder) {
-        const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, unknown>;
-        await orderRepo.updateQuoteSnapshot({
-          id: orderId,
+      if (curaleafResult?.prescriptionId || curaleafResult?.purchaseOrder) {
+        await persistCuraleafPrescriptionIdentity({
           organisationId: scope.organisationId,
-          quoteSnapshot: {
-            ...snapshot,
-            curaleaf: {
-              ...(typeof snapshot.curaleaf === 'object' && snapshot.curaleaf ? snapshot.curaleaf : {}),
-              ...curaleafResult.purchaseOrder,
-              purchaseOrderId: curaleafResult.purchaseOrder.id,
-              purchaseOrderState: curaleafResult.purchaseOrder.state,
-              customerReference: curaleafResult.purchaseOrder.customerReference,
-              prescriptionId: curaleafResult.prescriptionId,
-              prescriberId: curaleafResult.prescriberId,
-            },
-          },
-          fulfilmentStatus: 'SUPPLIER_PROCESSING',
+          orderId,
+          patientId: order.patientId,
+          snapshot: order.quoteSnapshot,
+          prescriptionId: curaleafResult.prescriptionId,
+          prescriberId: curaleafResult.prescriberId,
+          purchaseOrder: curaleafResult.purchaseOrder ?? null,
+          fulfilmentStatus: curaleafResult.purchaseOrder ? 'SUPPLIER_PROCESSING' : undefined,
         }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
       }
 

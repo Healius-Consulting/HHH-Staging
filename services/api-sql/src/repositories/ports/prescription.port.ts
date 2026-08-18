@@ -8,6 +8,7 @@ export interface PrescriptionFileRecord {
   sizeBytes: number;
   status: string;
   verifiedAt: string | null;
+  deletedAt?: string | null;
 }
 
 export interface PrescriberRecord {
@@ -34,9 +35,11 @@ export interface UpsertPrescriberInput {
 
 export interface PrescriptionRecord {
   id: string;
+  organisationId?: string;
   patientId: string;
   prescriberId: string | null;
-  fileId: string;
+  fileId: string | null;
+  supplierPrescriptionId?: string | null;
   serialNumber: string;
   issueDate: string;
   expiryDate: string;
@@ -45,6 +48,24 @@ export interface PrescriptionRecord {
   patientDobSnapshot: string;
   verifiedAt: string | null;
   createdAt: string;
+}
+
+export interface UpsertOrderPrescriptionInput {
+  organisationId: string;
+  orderId: string;
+  patientId: string;
+  fileId?: string | null;
+  supplierPrescriptionId: string;
+  serialNumber: string;
+  issueDate: string;
+  expiryDate: string;
+  status: 'DRAFT' | 'VERIFIED' | 'AWAITING_PAYMENT' | 'PAID' | 'PENDING_PLACEMENT' | 'PLACED' | 'HELD_FOR_RENEWAL' | 'CANCELLED' | 'EXPIRED';
+  patientNameSnapshot: string;
+  patientDobSnapshot: string;
+  prescriberSnapshot: unknown;
+  prescriberId?: string | null;
+  supplierPurchaseOrderId?: string | null;
+  placementState?: 'PENDING_PLACEMENT' | 'PLACED';
 }
 
 export interface PrescriptionRepositoryPort {
@@ -60,6 +81,7 @@ export interface PrescriptionRepositoryPort {
     uploadedByUid?: string | null;
   }): Promise<{ id?: string }>;
   completeFile(id: string, organisationId: string): Promise<boolean>;
+  markFileDeleted(id: string, organisationId: string): Promise<boolean>;
   deleteFile(id: string, organisationId: string): Promise<boolean>;
   listActivePrescribers(): Promise<PrescriberRecord[]>;
   findActivePrescriberMatch(input: {
@@ -69,4 +91,7 @@ export interface PrescriptionRepositoryPort {
   }): Promise<PrescriberRecord | null>;
   upsertPrescriber(input: UpsertPrescriberInput): Promise<PrescriberRecord>;
   listTenantPrescriptions(organisationId: string, limit?: number): Promise<PrescriptionRecord[]>;
+  findPrescriptionBySupplierId(organisationId: string, supplierPrescriptionId: string): Promise<PrescriptionRecord | null>;
+  findPrescriptionBySerial(organisationId: string, serialNumber: string): Promise<PrescriptionRecord | null>;
+  recordSupplierPrescription(input: UpsertOrderPrescriptionInput): Promise<PrescriptionRecord>;
 }

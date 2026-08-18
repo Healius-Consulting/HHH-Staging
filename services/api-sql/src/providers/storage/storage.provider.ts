@@ -73,4 +73,19 @@ export class StorageProvider {
       console.warn(`Storage delete failed for ${storagePath}:`, error);
     }
   }
+
+  async downloadFile(storagePath: string): Promise<{ bytes: Buffer; contentType: string | null }> {
+    const bucket = this.storage.bucket(this.bucketName);
+    const file = bucket.file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new Error(`Prescription file is not in storage (${storagePath}).`);
+    }
+    const [bytes] = await file.download();
+    const [metadata] = await file.getMetadata();
+    return {
+      bytes,
+      contentType: typeof metadata.contentType === 'string' ? metadata.contentType : null,
+    };
+  }
 }
