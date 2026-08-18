@@ -33,11 +33,15 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import {
+  lineCost,
+  lineMargin,
+  lineRevenue,
   money,
   orderReference,
   rxRevenue,
   useApp,
   type CRMPatient,
+  type LineItem,
   type ManualTender,
   type PatientOrder,
   type Prescription,
@@ -2029,6 +2033,149 @@ function fulfilmentPipelineSteps(line: {
   };
 }
 
+type FulfilmentDisplayLine = {
+  productId: string;
+  displayName: string;
+  item: LineItem;
+  orderedPacks: number;
+  allocatedPacks: number;
+  dispatchedPacks: number;
+  consignmentPacks: number;
+  receivedPacks: number;
+  inTransitPacks: number;
+  awaitingDispatchPacks: number;
+  isDeliveredOrCheckedIn: boolean;
+  isSplit: boolean;
+  percentReceived: number;
+  percentAllocated: number;
+  percentInTransit: number;
+  quantityMismatch?: boolean;
+  supplierReportedOrdered?: number;
+};
+
+function FulfilmentItemCard({
+  line,
+  index,
+  defaultOpen,
+}: {
+  line: FulfilmentDisplayLine;
+  index: number;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const margin = lineMargin(line.item);
+  const contribution = line.item.cost === null ? null : lineRevenue(line.item) - lineCost(line.item);
+  const steps = fulfilmentPipelineSteps(line);
+  const panelId = `fulfilment-item-${line.productId}`;
+
+  return (
+    <article className={`order-fulfilment-item-card${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="order-fulfilment-item-card__header"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen(current => !current)}
+      >
+        <span className="order-fulfilment-item-card__index">{String(index + 1).padStart(2, '0')}</span>
+        <span className="order-fulfilment-item-card__identity">
+          <strong>{line.displayName}</strong>
+          <small>
+            {line.orderedPacks} pack{line.orderedPacks === 1 ? '' : 's'}
+            {' · '}
+            {money(lineRevenue(line.item))} line
+            {margin !== null && line.item.cost !== null ? ` · ${margin}% margin` : ''}
+          </small>
+        </span>
+        <span className={`order-fulfilment-item-card__margin${margin !== null && margin < 25 ? ' is-low' : ''}`}>
+          {contribution === null || margin === null
+            ? 'Margin pending'
+            : `${contribution >= 0 ? '+' : '−'}${money(Math.abs(contribution))}`}
+        </span>
+        {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+      </button>
+
+      {open ? (
+        <div id={panelId} className="order-fulfilment-item-card__body">
+          <div className="order-fulfilment-item-card__pricing">
+            <div className="order-fulfilment-item-card__metric">
+              <small>Patient price</small>
+              <strong>{money(line.item.retail)}</strong>
+              <em>{money(lineRevenue(line.item))} line</em>
+            </div>
+            <div className="order-fulfilment-item-card__metric">
+              <small>Wholesale cost</small>
+              <strong>{line.item.cost === null ? 'Quote required' : money(line.item.cost)}</strong>
+              <em>{line.item.cost === null ? 'Order-specific' : `${money(lineCost(line.item))} line`}</em>
+            </div>
+            <div className={`order-fulfilment-item-card__metric order-fulfilment-item-card__metric--margin${margin !== null && margin < 25 ? ' is-low' : ''}`}>
+              <small>Gross margin</small>
+              <strong>
+                {contribution === null || margin === null
+                  ? 'Pending'
+                  : `${contribution >= 0 ? '+' : '−'}${money(Math.abs(contribution))} · ${margin}%`}
+              </strong>
+            </div>
+          </div>
+
+          {line.quantityMismatch ? (
+            <span className="mismatch-tag">
+              PO reports {line.supplierReportedOrdered} pk (mismatch)
+            </span>
+          ) : null}
+
+          <div className="order-fulfilment-pipeline" role="list" aria-label="Curaleaf fulfilment progress">
+            <div className={pipelineStepClass('pipeline-step pipeline-step--ordered', steps.ordered)} role="listitem">
+              <span className="pipeline-step__num" aria-hidden="true">1</span>
+              <div className="pipeline-step__content">
+                <span className="pipeline-step__label">Ordered</span>
+                <strong className="pipeline-step__value">{line.orderedPacks} <small>pk</small></strong>
+              </div>
+            </div>
+
+            <div className={pipelineStepClass('pipeline-step pipeline-step--picked', steps.dispensed)} role="listitem">
+              <span className="pipeline-step__num" aria-hidden="true">2</span>
+              <div className="pipeline-step__content">
+                <span className="pipeline-step__label">Curaleaf Dispensed</span>
+                <strong className="pipeline-step__value">{line.allocatedPacks}/{line.orderedPacks} <small>pk</small></strong>
+              </div>
+            </div>
+
+            <div className={pipelineStepClass('pipeline-step pipeline-step--transit', steps.inTransit)} role="listitem">
+              <span className="pipeline-step__num" aria-hidden="true">3</span>
+              <div className="pipeline-step__content">
+                <span className="pipeline-step__label">In Transit</span>
+                <strong className="pipeline-step__value">
+                  {line.inTransitPacks} <small>pk</small>
+                  {line.isSplit && line.awaitingDispatchPacks > 0 ? (
+                    <span className="pipeline-step__split-tag" title={`${line.awaitingDispatchPacks} pack(s) awaiting next dispatch`}>
+                      +{line.awaitingDispatchPacks} split
+                    </span>
+                  ) : null}
+                </strong>
+              </div>
+            </div>
+
+            <div className={pipelineStepClass('pipeline-step pipeline-step--received', steps.checkedIn)} role="listitem">
+              <span className="pipeline-step__num" aria-hidden="true">4</span>
+              <div className="pipeline-step__content">
+                <span className="pipeline-step__label">Checked In</span>
+                <strong className="pipeline-step__value">{line.receivedPacks}/{line.orderedPacks} <small>pk</small></strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="order-fulfilment-bar">
+            <div className="order-fulfilment-bar__fill--allocated" style={{ width: `${line.percentAllocated}%` }} />
+            {line.inTransitPacks > 0 || (line.isSplit && line.awaitingDispatchPacks > 0) ? <div className="order-fulfilment-bar__fill--transit" style={{ width: `${line.percentInTransit}%` }} /> : null}
+            <div className="order-fulfilment-bar__fill--received" style={{ width: `${line.percentReceived}%` }} />
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, onManualPlace, onChaseCuraleaf, onOpenHandout }: {
   prescription: Prescription;
   index: number;
@@ -2140,6 +2287,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
     return {
       productId: item.productId,
       displayName: resolveProductName(item),
+      item,
       orderedPacks,
       allocatedPacks,
       dispatchedPacks,
@@ -2262,72 +2410,14 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 ) : null}
               </header>
               <div className="order-supplier-fulfilment__body">
-                {displayLines.map(line => {
-                  const steps = fulfilmentPipelineSteps(line);
-
-                  return (
-                    <div key={line.productId} className={`order-fulfilment-row ${line.quantityMismatch ? 'has-mismatch' : ''}`}>
-                      <div className="order-fulfilment-row__header">
-                        <div className="order-fulfilment-row__product">
-                          <strong>{line.displayName}</strong>
-                          <span className="pack-qty-badge pack-qty-badge--inline">{line.orderedPacks} pk</span>
-                          {line.quantityMismatch ? (
-                            <span className="mismatch-tag">
-                              PO reports {line.supplierReportedOrdered} pk (mismatch)
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="order-fulfilment-pipeline" role="list" aria-label="Curaleaf fulfilment progress">
-                        <div className={pipelineStepClass('pipeline-step pipeline-step--ordered', steps.ordered)} role="listitem">
-                          <span className="pipeline-step__num" aria-hidden="true">1</span>
-                          <div className="pipeline-step__content">
-                            <span className="pipeline-step__label">Ordered</span>
-                            <strong className="pipeline-step__value">{line.orderedPacks} <small>pk</small></strong>
-                          </div>
-                        </div>
-
-                        <div className={pipelineStepClass('pipeline-step pipeline-step--picked', steps.dispensed)} role="listitem">
-                          <span className="pipeline-step__num" aria-hidden="true">2</span>
-                          <div className="pipeline-step__content">
-                            <span className="pipeline-step__label">Curaleaf Dispensed</span>
-                            <strong className="pipeline-step__value">{line.allocatedPacks}/{line.orderedPacks} <small>pk</small></strong>
-                          </div>
-                        </div>
-
-                        <div className={pipelineStepClass('pipeline-step pipeline-step--transit', steps.inTransit)} role="listitem">
-                          <span className="pipeline-step__num" aria-hidden="true">3</span>
-                          <div className="pipeline-step__content">
-                            <span className="pipeline-step__label">In Transit</span>
-                            <strong className="pipeline-step__value">
-                              {line.inTransitPacks} <small>pk</small>
-                              {line.isSplit && line.awaitingDispatchPacks > 0 ? (
-                                <span className="pipeline-step__split-tag" title={`${line.awaitingDispatchPacks} pack(s) awaiting next dispatch`}>
-                                  +{line.awaitingDispatchPacks} split
-                                </span>
-                              ) : null}
-                            </strong>
-                          </div>
-                        </div>
-
-                        <div className={pipelineStepClass('pipeline-step pipeline-step--received', steps.checkedIn)} role="listitem">
-                          <span className="pipeline-step__num" aria-hidden="true">4</span>
-                          <div className="pipeline-step__content">
-                            <span className="pipeline-step__label">Checked In</span>
-                            <strong className="pipeline-step__value">{line.receivedPacks}/{line.orderedPacks} <small>pk</small></strong>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="order-fulfilment-bar">
-                        <div className="order-fulfilment-bar__fill--allocated" style={{ width: `${line.percentAllocated}%` }} />
-                        {line.inTransitPacks > 0 || (line.isSplit && line.awaitingDispatchPacks > 0) ? <div className="order-fulfilment-bar__fill--transit" style={{ width: `${line.percentInTransit}%` }} /> : null}
-                        <div className="order-fulfilment-bar__fill--received" style={{ width: `${line.percentReceived}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
+                {displayLines.map((line, lineIndex) => (
+                  <FulfilmentItemCard
+                    key={line.productId}
+                    line={line}
+                    index={lineIndex}
+                    defaultOpen={displayLines.length <= 2 || lineIndex === 0}
+                  />
+                ))}
               </div>
             </div>
 
