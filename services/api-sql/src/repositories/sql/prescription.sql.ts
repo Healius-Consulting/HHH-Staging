@@ -308,6 +308,19 @@ const COMPLETE_PRESCRIPTION_FILE_GQL = `
   }
 `;
 
+const RESTORE_PRESCRIPTION_FILE_GQL = `
+  mutation RestorePrescriptionFile($id: UUID!) {
+    prescriptionFile_update(
+      key: { id: $id }
+      data: {
+        status: UPLOADED
+        deletedAt: null
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
 const MARK_PRESCRIPTION_FILE_DELETED_GQL = `
   mutation MarkPrescriptionFileDeleted($id: UUID!) {
     prescriptionFile_update(
@@ -468,6 +481,16 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
     if (!existing) return false;
     await dataConnect.executeGraphql<any, any>(
       COMPLETE_PRESCRIPTION_FILE_GQL,
+      { variables: { id } }
+    );
+    return true;
+  }
+
+  async restoreFile(id: string, organisationId: string): Promise<boolean> {
+    const existing = await this.findFileById(id, organisationId);
+    if (!existing) return false;
+    await dataConnect.executeGraphql<any, any>(
+      RESTORE_PRESCRIPTION_FILE_GQL,
       { variables: { id } }
     );
     return true;

@@ -131,11 +131,11 @@ export async function placeOrderAfterWorldpaySettlement(
     organisationId: payment.organisationId,
     orderId: payment.orderId,
     fromState: 'PENDING_PLACEMENT',
-    toState: 'PLACED',
-    reason: skipped
-      ? `Worldpay payment cleared (${payment.transactionReference}) - existing Curaleaf PO retained (${skipReason})`
-      : purchaseOrderId
-        ? `Worldpay payment cleared (${payment.transactionReference}) - Curaleaf Purchase Order ${purchaseOrderId} placed automatically`
+    toState: purchaseOrderId ? 'PLACED' : 'PENDING_PLACEMENT',
+    reason: purchaseOrderId
+      ? `Worldpay payment cleared (${payment.transactionReference}) - Curaleaf Purchase Order ${purchaseOrderId} placed automatically`
+      : skipped
+        ? `Worldpay payment cleared (${payment.transactionReference}) - Curaleaf placement waiting (${skipReason})`
         : `Worldpay payment cleared (${payment.transactionReference}) - Pharmacy dispensing workflow`,
     externalReference: purchaseOrderId || payment.transactionReference || null,
   });

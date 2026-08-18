@@ -3246,14 +3246,25 @@ app.put('/v1/portal/integrations/:integration/credentials', async (request, resp
         username: z.string().trim().min(1).max(500),
         password: z.string().min(8).max(1_000),
         entityId: z.string().trim().min(1).max(200),
+        customisationId: z.string().trim().max(64).regex(/^[A-Za-z0-9_-]*$/).optional(),
       }).parse(request.body);
-    const worldpayValidation = integration === 'worldpay'
-      ? await validateWorldpayCredentials(credential as WorldpayCredential)
+    const worldpayCredential = integration === 'worldpay'
+      ? {
+        username: (credential as { username: string }).username,
+        password: (credential as { password: string }).password,
+        entityId: (credential as { entityId: string }).entityId,
+        ...((credential as { customisationId?: string }).customisationId
+          ? { customisationId: (credential as { customisationId: string }).customisationId }
+          : {}),
+      }
+      : null;
+    const worldpayValidation = worldpayCredential
+      ? await validateWorldpayCredentials(worldpayCredential)
       : null;
     const safeIdentifier = maskedIdentifier(integration === 'curaleaf'
       ? (credential as { customerId: string }).customerId
       : (credential as { entityId: string }).entityId);
-    const stored = await writeIntegrationSecret(organisationId, integration, credential);
+    const stored = await writeIntegrationSecret(organisationId, integration, worldpayCredential ?? credential as Record<string, string>);
     const id = `${organisationId}--${integration}`;
     await firestore.collection('integrationConnections').doc(id).set({
       id,
@@ -3481,7 +3492,83 @@ app.get('/v1/portal/integrations/:integration/status', async (request, response,
     if (integration === 'curaleaf') return response.json(await curaleafConnectionStatus(organisationId));
     const snapshot = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
     const connection = snapshot.data();
-    response.json(snapshot.exists ? { configured: true, connected: connection?.status === 'connected', status: connection?.status, maskedIdentifier: connection?.maskedIdentifier, updatedAt: connection?.updatedAt } : { configured: false, connected: false });
+    let brandingConfigured = false;
+    if (snapshot.exists && connection?.status === 'connected') {
+      try {
+        const stored = await readIntegrationSecret<{ customisationId?: string }>(organisationId, 'worldpay');
+        brandingConfigured = Boolean(stored.customisationId);
+      } catch {
+        brandingConfigured = false;
+      }
+    }
+    response.json(snapshot.exists ? {
+      configured: connection?.status !== 'disconnected',
+      connected: connection?.status === 'connected',
+      status: connection?.status === 'disconnected' ? 'verification_required' : connection?.status,
+      maskedIdentifier: connection?.maskedIdentifier,
+      brandingConfigured,
+      updatedAt: connection?.updatedAt,
+    } : { configured: false, connected: false, brandingConfigured: false });
+  } catch (error) { next(error); }
+});
+
+app.patch('/v1/portal/integrations/worldpay/credentials', async (request, response, next) => {
+  try {
+    ensureFreshAuthentication(request);
+    const organisationId = tenantFor(request, request.body.organisationId);
+    const input = z.object({
+      customisationId: z.string().trim().max(64).regex(/^[A-Za-z0-9_-]*$/).optional(),
+    }).parse(request.body);
+    const snapshot = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
+    if (!snapshot.exists || snapshot.data()?.status === 'disconnected') {
+      throw new HttpError(404, 'Worldpay is not connected for this pharmacy.', 'INTEGRATION_NOT_CONNECTED');
+    }
+    const stored = await readIntegrationSecret<WorldpayCredential & { customisationId?: string }>(organisationId, 'worldpay');
+    const next = {
+      username: stored.username,
+      password: stored.password,
+      entityId: stored.entityId,
+      ...(input.customisationId ? { customisationId: input.customisationId } : {}),
+    };
+    await writeIntegrationSecret(organisationId, 'worldpay', next);
+    await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).set({
+      updatedAt: timestamp(),
+      updatedBy: identity(request).uid,
+    }, { merge: true });
+    await audit(request, 'integration.worldpay_branding_updated', { organisationId, brandingConfigured: Boolean(next.customisationId) });
+    const refreshed = await firestore.collection('integrationConnections').doc(`${organisationId}--worldpay`).get();
+    response.json({
+      configured: true,
+      connected: true,
+      status: 'connected' as const,
+      maskedIdentifier: refreshed.data()?.maskedIdentifier,
+      brandingConfigured: Boolean(next.customisationId),
+      updatedAt: timestamp(),
+    });
+  } catch (error) { next(error); }
+});
+
+app.delete('/v1/portal/integrations/worldpay/credentials', async (request, response, next) => {
+  try {
+    ensureFreshAuthentication(request);
+    const organisationId = tenantFor(request, request.body?.organisationId ?? request.query.organisationId);
+    const id = `${organisationId}--worldpay`;
+    const snapshot = await firestore.collection('integrationConnections').doc(id).get();
+    if (snapshot.exists) {
+      try {
+        await writeIntegrationSecret(organisationId, 'worldpay', { revokedAt: timestamp() });
+      } catch {
+        // Connection is still marked disconnected even if secret overwrite fails.
+      }
+      await firestore.collection('integrationConnections').doc(id).set({
+        status: 'disconnected',
+        maskedIdentifier: null,
+        updatedAt: timestamp(),
+        updatedBy: identity(request).uid,
+      }, { merge: true });
+      await audit(request, 'integration.worldpay_disconnected', { organisationId });
+    }
+    response.json({ configured: false, connected: false, status: 'verification_required' as const, brandingConfigured: false, updatedAt: timestamp() });
   } catch (error) { next(error); }
 });
 

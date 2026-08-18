@@ -173,6 +173,45 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.deepEqual(mapped.lineItems, []);
   });
 
+  it('maps a paid order waiting on Curaleaf prescription approval without inventing a purchase order', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-18T18:25:53.380340Z',
+      fulfilmentStatus: 'SUPPLIER_PROCESSING',
+      quoteSnapshot: {
+        lineItems: [{
+          packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          formulaId: 'f74f63de-dc89-4074-9d8c-be35f5398963',
+          name: '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD',
+          quantity: 1,
+          unitPricePence: 8500,
+        }],
+        prescriptions: [{
+          id: 'rx-pending',
+          fileId: 'rx-pending',
+          serialNumber: '34CD78GH',
+          issueDate: '2026-08-18',
+          prescriber: { name: 'Dr Prescriber', pin: '123', gmcNumber: null, gphcNumber: '000123', initials: 'DP' },
+          items: [],
+        }],
+        curaleaf: {
+          status: 'prescription_pending',
+          prescriptionId: '2bd0fa9f-50ee-4344-a5fa-d0da95ac83aa',
+          prescriberId: '1c2ccf78-1307-4233-b420-2348fd04065c',
+          prescriptionState: 'PENDING',
+        },
+      },
+    });
+    assert.equal(mapped.paymentStatus, 'paid');
+    assert.equal(mapped.fulfilmentStatus, 'supplier_pending');
+    assert.equal(mapped.curaleaf?.status, 'prescription_pending');
+    assert.equal(mapped.curaleaf?.prescriptionState, 'PENDING');
+    assert.equal(mapped.curaleaf?.purchaseOrderId, null);
+    assert.equal(mapped.prescriptionFlow['rx-pending']?.state, 'PENDING_PLACEMENT');
+  });
+
   it('maps a split Curaleaf shipment onto the portal contract without inventing a full dispatch', () => {
     const mapped = toPortalOrder({
       ...order,

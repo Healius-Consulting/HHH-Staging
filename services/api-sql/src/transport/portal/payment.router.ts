@@ -95,7 +95,12 @@ export function createPortalPaymentRouter(): Router {
       try {
         const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
         if (connection?.secretResourceName) {
-          curaleafResult = await executeCuraleafOrderPlacement(connection, order);
+          curaleafResult = await executeCuraleafOrderPlacement(connection, {
+            ...order,
+            status: 'PROCESSING',
+            paymentStatus: 'PAID',
+            paidAt: now,
+          });
         }
       } catch (placementErr) {
         console.warn('[Manual Payment] Curaleaf automated placement note:', placementErr);
@@ -122,13 +127,13 @@ export function createPortalPaymentRouter(): Router {
         organisationId: scope.organisationId,
         orderId,
         fromState: 'PENDING_PLACEMENT',
-        toState: 'PLACED',
-        reason: curaleafResult?.skipped
-          ? `Manual payment recorded (${input.tender}: ${input.reference}) - existing Curaleaf PO retained (${curaleafResult.reason})`
-          : curaleafResult?.purchaseOrder?.id
-            ? `Manual payment recorded (${input.tender}: ${input.reference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
+        toState: curaleafResult?.purchaseOrder?.id ? 'PLACED' : 'PENDING_PLACEMENT',
+        reason: curaleafResult?.purchaseOrder?.id
+          ? `Manual payment recorded (${input.tender}: ${input.reference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
+          : curaleafResult?.skipped
+            ? `Manual payment recorded (${input.tender}: ${input.reference}) - Curaleaf placement waiting (${curaleafResult.reason})`
             : `Manual payment recorded (${input.tender}: ${input.reference})`,
-        externalReference: curaleafResult?.purchaseOrder?.id || input.reference,
+        externalReference: curaleafResult?.purchaseOrder?.id || curaleafResult?.prescriptionId || input.reference,
         actorUid: scope.uid,
       });
 

@@ -150,6 +150,7 @@ async function attachCuraleafToOrder(
       ? {
         ...alignedSnapshot,
         curaleaf: {
+          ...prior,
           ...buildCuraleafSnapshot({
             purchaseOrder: livePo,
             shipments: liveShipments,
@@ -157,6 +158,9 @@ async function attachCuraleafToOrder(
             shipmentStates: prior.shipmentStates || {},
             order,
           }),
+          prescriptionId: prior.prescriptionId || livePo?.prescriptionId || null,
+          prescriberId: prior.prescriberId || livePo?.prescriberId || null,
+          prescriptionState: prior.prescriptionState || (livePo ? 'ACTIVE' : prior.prescriptionState) || null,
           lines,
           shipmentStates: prior.shipmentStates || {},
         },
@@ -465,7 +469,7 @@ export function createPortalOrderRouter(): Router {
         id: orderId,
         organisationId: scope.organisationId,
         status: 'PROCESSING',
-        fulfilmentStatus: 'SUPPLIER_PROCESSING',
+        fulfilmentStatus: 'SUPPLIER_PENDING',
       });
 
       // Submit purchase order to Curaleaf API if connected (deduped — never double-submit)

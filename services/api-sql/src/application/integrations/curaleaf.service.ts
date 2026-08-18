@@ -230,21 +230,21 @@ async function uploadCuraleafPrescriptionFile(
   });
 }
 
-async function sendAndPurgeLocalPrescriptionCopy(
+async function uploadLocalPrescriptionCopyToCuraleaf(
   connection: IntegrationConnectionRecord,
   organisationId: string,
   snapshot: unknown,
   curaleafPrescriptionId: string,
 ) {
   const fileIds = prescriptionFileIdsFromSnapshot(snapshot);
-  if (!fileIds.length) return { uploaded: false, purged: false };
+  if (!fileIds.length) return { uploaded: false };
   const prescriptionRepo = new SqlPrescriptionRepository();
   const storage = new StorageProvider();
   let uploaded = false;
 
   for (const fileId of fileIds) {
     const record = await prescriptionRepo.findFileById(fileId, organisationId);
-    if (!record || record.status === 'DELETED' || record.deletedAt || !record.storagePath) continue;
+    if (!record?.storagePath) continue;
     try {
       const downloaded = await storage.downloadFile(record.storagePath);
       await uploadCuraleafPrescriptionFile(connection, curaleafPrescriptionId, {
@@ -264,10 +264,7 @@ async function sendAndPurgeLocalPrescriptionCopy(
     }
   }
 
-  if (uploaded) {
-    await purgeOrderPrescriptionFiles(organisationId, snapshot, { prescriptionRepo, storage });
-  }
-  return { uploaded, purged: uploaded };
+  return { uploaded };
 }
 
 export async function executeCuraleafOrderPlacement(
@@ -497,7 +494,7 @@ export async function executeCuraleafOrderPlacement(
     purchaseOrder: null,
   }).catch(error => console.warn('[Prescription] Persist Curaleaf ID note:', error));
 
-  await sendAndPurgeLocalPrescriptionCopy(
+  await uploadLocalPrescriptionCopyToCuraleaf(
     connection,
     connection.organisationId,
     snapshot,
@@ -512,6 +509,17 @@ export async function executeCuraleafOrderPlacement(
     );
     const prescriptionState = String(prescriptionDetails.state || '').toUpperCase();
     if (prescriptionState === 'PENDING') {
+      await persistCuraleafPrescriptionIdentity({
+        organisationId: connection.organisationId,
+        orderId: order.id,
+        patientId: order.patientId,
+        snapshot,
+        prescriptionId: curaleafPrescriptionId,
+        prescriberId,
+        prescriptionState: 'PENDING',
+        purchaseOrder: null,
+        fulfilmentStatus: 'SUPPLIER_PENDING',
+      }).catch(error => console.warn('[Prescription] Persist Curaleaf pending state note:', error));
       return {
         skipped: true,
         reason: 'Prescription pending Curaleaf approval',
@@ -521,6 +529,16 @@ export async function executeCuraleafOrderPlacement(
       };
     }
     if (prescriptionState === 'EXPIRED' || prescriptionState === 'CANCELLED') {
+      await persistCuraleafPrescriptionIdentity({
+        organisationId: connection.organisationId,
+        orderId: order.id,
+        patientId: order.patientId,
+        snapshot,
+        prescriptionId: curaleafPrescriptionId,
+        prescriberId,
+        prescriptionState,
+        purchaseOrder: null,
+      }).catch(error => console.warn('[Prescription] Persist Curaleaf closed state note:', error));
       return {
         skipped: true,
         reason: `Prescription is ${prescriptionState.toLowerCase()}`,
@@ -551,9 +569,13 @@ export async function executeCuraleafOrderPlacement(
       snapshot,
       prescriptionId: curaleafPrescriptionId,
       prescriberId,
+      prescriptionState: 'ACTIVE',
       purchaseOrder: purchaseOrderResult,
       fulfilmentStatus: 'SUPPLIER_PROCESSING',
     }).catch(error => console.warn('[Prescription] Persist Curaleaf PO note:', error));
+    await purgeOrderPrescriptionFiles(connection.organisationId, snapshot).catch(error =>
+      console.warn('[Prescription file] Purge after purchase-order-from-prescriptions note:', error),
+    );
   } catch (poErr) {
     console.warn('[Curaleaf] purchase-order-from-prescriptions failed:', poErr);
     return {

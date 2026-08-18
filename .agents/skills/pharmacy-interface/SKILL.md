@@ -39,8 +39,12 @@ Card order, density, grid/list/board composition, metric emphasis, view switchin
 
 ## Curaleaf Fulfilment & Delivery Integration Boundaries
 
+Follow [`.agents/rules/curaleaf-rocky.md`](../../rules/curaleaf-rocky.md) for Rocky placement. Paid orders show a **3-step clinic rail** until a purchase order exists, then that rail is replaced by the **4-step dispensing rail**.
+
+- **Placement (before a PO)**: Prescriber check → Prescription check (`PENDING` = Curaleaf waiter) → Purchase order sent via `POST /v1/purchase-order-from-prescriptions/` with the Curaleaf prescription id. Do not show Combined progress (Ordered / Dispensed / In Transit / Checked In) in this phase.
+- **Dispensing (after a PO id exists)**: Ordered → Curaleaf Dispensed → In Transit → Checked In.
 - **Outbound Dispatch Authority Only**: Curaleaf's Rocky API tracks lab allocation and courier dispatch (`dispatched` / `line.shipped`). Curaleaf cannot report courier delivery or arrival status (`delivered`).
-- **Dispensary Goods-In Authority**: Delivery arrival, physical verification, and check-in are strictly recorded by the pharmacy dispensary team.
+- **Dispensary Goods-In Authority**: Delivery arrival, physical verification, and check-in are strictly recorded by the pharmacy dispensary team. Hide goods-in while the PO is `CREATED` or allocated packs are 0.
 - **Pipeline & Metric Calculations**: Never rely on Curaleaf API responses for `line.received` or delivery completion. Always derive goods-in progress (`receivedPacks`, `inTransitPacks`, Step 4 Checked-In) from the dispensary's verified goods-in records (`prescription.receivedItems` and prescription status `received` / `ready` / `collected`).
 - **No Extraneous Form Fields**: Do not enforce batch number, lot number, expiry date, or inspection note inputs in the Goods-In arrival check unless explicitly mandated by pharmacy PMS protocol.
 

@@ -280,15 +280,26 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
             <div className="settings-note"><ShieldCheck size={16} /><span>Each order permanently records the route selected when that order is created. Later changes apply only to future orders.</span></div>
             <WorldpayConnectionPanel
               organisationId={organisation.id}
-              onConnected={connection => dispatch({
-                type: 'UPDATE_WORLDPAY',
-                organisationId: organisation.id,
-                updates: {
-                  status: connection.connected ? 'connected' : connection.configured ? 'onboarding' : 'not-connected',
-                  merchantId: connection.maskedIdentifier ?? null,
-                  lastSyncedAt: connection.updatedAt ?? new Date(),
-                },
-              })}
+              onConnected={connection => {
+                dispatch({
+                  type: 'UPDATE_WORLDPAY',
+                  organisationId: organisation.id,
+                  updates: {
+                    enabled: connection.connected,
+                    status: connection.connected ? 'connected' : connection.configured ? 'onboarding' : 'not-connected',
+                    merchantId: connection.maskedIdentifier ?? null,
+                    lastSyncedAt: connection.updatedAt ?? new Date(),
+                  },
+                });
+                if (!connection.connected && organisation.defaultPaymentRoute === 'worldpay') {
+                  dispatch({ type: 'UPDATE_ORGANISATION', organisationId: organisation.id, updates: { defaultPaymentRoute: 'manual' } });
+                  if (!isLocalPortalPreview && isApiConfigured) {
+                    void updatePaymentSettings(organisation.id, 'manual').catch(() => {
+                      dispatch({ type: 'ADD_TOAST', message: 'Worldpay was disconnected. Default payment route still needs switching to pharmacy payment.', toastType: 'warning' });
+                    });
+                  }
+                }
+              }}
             />
           </section>
 

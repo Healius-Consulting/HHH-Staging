@@ -15,11 +15,22 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
+export type CuraleafPrescriptionState = 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING';
+
+export function asCuraleafPrescriptionState(value: unknown): CuraleafPrescriptionState | null {
+  const state = String(value || '').trim().toUpperCase();
+  if (state === 'ACTIVE' || state === 'FULFILLED' || state === 'EXPIRED' || state === 'CANCELLED' || state === 'PENDING') {
+    return state;
+  }
+  return null;
+}
+
 export function stampCuraleafPrescriptionOnSnapshot(
   snapshot: unknown,
   input: {
     prescriptionId?: string | null;
     prescriberId?: string | null;
+    prescriptionState?: string | null;
     purchaseOrder?: Record<string, unknown> | null;
   },
 ) {
@@ -28,6 +39,17 @@ export function stampCuraleafPrescriptionOnSnapshot(
   const prescriptionId = input.prescriptionId || (typeof prior.prescriptionId === 'string' ? prior.prescriptionId : null);
   const prescriberId = input.prescriberId || (typeof prior.prescriberId === 'string' ? prior.prescriberId : null);
   const purchaseOrder = input.purchaseOrder && typeof input.purchaseOrder === 'object' ? input.purchaseOrder : null;
+  const hasPurchaseOrder = Boolean(purchaseOrder?.id || purchaseOrder?.purchaseOrderId);
+  const prescriptionState = asCuraleafPrescriptionState(input.prescriptionState)
+    ?? asCuraleafPrescriptionState(prior.prescriptionState)
+    ?? (hasPurchaseOrder ? 'ACTIVE' : prescriptionId ? 'PENDING' : null);
+  const status = hasPurchaseOrder
+    ? 'purchase_order_submitted'
+    : prescriptionState === 'EXPIRED' || prescriptionState === 'CANCELLED'
+      ? 'prescription_closed'
+      : prescriptionId || prescriberId
+        ? 'prescription_pending'
+        : prior.status ?? null;
   const prescriptions = Array.isArray(root.prescriptions)
     ? root.prescriptions.map((entry) => {
       const rx = asRecord(entry);
@@ -41,8 +63,10 @@ export function stampCuraleafPrescriptionOnSnapshot(
     curaleaf: {
       ...prior,
       ...(purchaseOrder ?? {}),
+      status,
       prescriptionId,
       prescriberId,
+      prescriptionState,
       purchaseOrderId: purchaseOrder?.id ?? prior.purchaseOrderId ?? null,
       purchaseOrderState: purchaseOrder?.state ?? prior.purchaseOrderState ?? null,
       customerReference: purchaseOrder?.customerReference ?? prior.customerReference ?? null,
@@ -57,6 +81,7 @@ export async function persistCuraleafPrescriptionIdentity(input: {
   snapshot: unknown;
   prescriptionId?: string | null;
   prescriberId?: string | null;
+  prescriptionState?: string | null;
   purchaseOrder?: Record<string, unknown> | null;
   fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'SUPPLIER_ALLOCATED' | 'PARTIALLY_DISPATCHED_TO_PHARMACY' | 'DISPATCHED_TO_PHARMACY' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXCEPTION';
 }) {

@@ -866,6 +866,12 @@ export interface WorldpayConnectionInput {
   username: string;
   password: string;
   entityId: string;
+  customisationId?: string;
+}
+
+export interface WorldpayBrandingInput {
+  organisationId: string;
+  customisationId?: string;
 }
 
 export interface WorldpayConnectionStatus {
@@ -873,6 +879,7 @@ export interface WorldpayConnectionStatus {
   connected: boolean;
   status?: 'verification_required' | 'connected' | 'attention';
   maskedIdentifier?: string;
+  brandingConfigured?: boolean;
   updatedAt?: string;
   validation?: {
     passed: true;

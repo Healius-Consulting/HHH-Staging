@@ -38,6 +38,7 @@ import type {
   CuraleafClinicScan,
   CuraleafManualPrescriptionInput,
   CuraleafSubmissionResult,
+  WorldpayBrandingInput,
   WorldpayConnectionInput,
   WorldpayConnectionStatus,
   AdminReferralFinanceReport,
@@ -675,6 +676,20 @@ export function connectWorldpayPharmacy(input: WorldpayConnectionInput) {
   return apiRequest<WorldpayConnectionStatus>('/v1/portal/integrations/worldpay/credentials', {
     method: 'PUT',
     body: JSON.stringify(input),
+  });
+}
+
+export function updateWorldpayBranding(input: WorldpayBrandingInput) {
+  return apiRequest<WorldpayConnectionStatus>('/v1/portal/integrations/worldpay/credentials', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function removeWorldpayConnection(organisationId: string) {
+  return apiRequest<WorldpayConnectionStatus>(`/v1/portal/integrations/worldpay/credentials?organisationId=${encodeURIComponent(organisationId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ organisationId }),
   });
 }
 

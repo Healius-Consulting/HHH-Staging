@@ -6,10 +6,20 @@ import {
   mergeQuoteBankIntoCatalogue,
   upsertCuraleafQuoteBankFromQuote,
 } from '../../application/integrations/curaleaf-quote-bank.service.js';
-import type { IntegrationName } from '../../repositories/ports/integration.port.js';
+import {
+  maskWorldpayIdentifier,
+  readStoredWorldpayCredential,
+  revokeWorldpayCredential,
+  updateStoredWorldpayCustomisation,
+  validateWorldpayCredentials,
+  writeWorldpayCredential,
+  type WorldpayCredential,
+} from '../../application/integrations/worldpay.service.js';
+import type { IntegrationConnectionRecord, IntegrationName } from '../../repositories/ports/integration.port.js';
 import { SqlCuraleafQuoteBankRepository } from '../../repositories/sql/curaleaf-quote-bank.sql.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
+import { requireCsrf } from '../../security/csrf.js';
 import { requireStaff } from '../../security/require-staff.js';
 import type { RequestContext } from '../../security/request-context.js';
 
@@ -36,6 +46,47 @@ export async function authorisedOrganisationId(
     throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
   }
   return organisationId;
+}
+
+const customisationIdSchema = z.string().trim().max(64).regex(/^[A-Za-z0-9_-]*$/);
+const worldpayCredentialSchema = z.object({
+  organisationId: z.string().optional(),
+  username: z.string().trim().min(1).max(500),
+  password: z.string().min(8).max(1_000),
+  entityId: z.string().trim().min(1).max(200),
+  customisationId: customisationIdSchema.optional(),
+});
+const worldpayBrandingSchema = z.object({
+  organisationId: z.string().optional(),
+  customisationId: customisationIdSchema.optional(),
+});
+
+function worldpayEnvironmentFromValidation(environment: 'try' | 'live'): 'TEST' | 'PRODUCTION' {
+  return environment === 'live' ? 'PRODUCTION' : 'TEST';
+}
+
+async function worldpayConnectionStatus(
+  connection: IntegrationConnectionRecord | null,
+  organisationId: string,
+) {
+  const disconnected = !connection || connection.status === 'DISCONNECTED';
+  const configured = !disconnected && Boolean(connection?.secretResourceName);
+  const connected = connection?.status === 'ACTIVE';
+  const stored = configured ? await readStoredWorldpayCredential(connection, organisationId) : null;
+  return {
+    configured,
+    connected,
+    status: disconnected || !configured ? 'verification_required' as const : connected ? 'connected' as const : 'attention' as const,
+    maskedIdentifier: connection?.maskedCredential ?? undefined,
+    brandingConfigured: Boolean(stored?.customisationId),
+    updatedAt: connection?.updatedAt,
+    validation: connected && connection?.externalCustomerId ? {
+      passed: true as const,
+      checkedAt: connection.updatedAt,
+      environment: connection.environment === 'PRODUCTION' ? 'live' as const : 'try' as const,
+      entityId: connection.maskedCredential ?? '',
+    } : null,
+  };
 }
 
 export function createPortalIntegrationRouter(): Router {
@@ -73,28 +124,87 @@ export function createPortalIntegrationRouter(): Router {
         });
         return;
       }
-      const configured = Boolean(connection?.secretResourceName);
-      const connected = connection?.status === 'ACTIVE';
-      res.status(200).json({
-        configured,
-        connected,
-        status: !configured ? 'verification_required' : connected ? 'connected' : 'attention',
-        maskedIdentifier: connection?.maskedCredential ?? undefined,
-        updatedAt: connection?.updatedAt,
-        validation: connected && connection?.externalCustomerId ? {
-          passed: true,
-          checkedAt: connection.updatedAt,
-          environment: connection.environment === 'PRODUCTION' ? 'live' : 'try',
-          // Preserve the legacy response shape without returning the merchant
-          // entity identifier after it has been securely stored.
-          entityId: connection.maskedCredential ?? '',
-        } : null,
-      });
+      res.status(200).json(await worldpayConnectionStatus(connection, organisationId));
     } catch (error) { next(error); }
   };
 
   router.get('/portal/integrations/curaleaf/status', requireStaff('any'), status('CURALEAF'));
   router.get('/portal/integrations/worldpay/status', requireStaff('any'), status('WORLDPAY'));
+
+  router.put('/portal/integrations/worldpay/credentials', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = worldpayCredentialSchema.parse(req.body);
+      const organisationId = await authorisedOrganisationId(req.context, input.organisationId, organisationRepo);
+      const credential: WorldpayCredential = {
+        username: input.username,
+        password: input.password,
+        entityId: input.entityId,
+        ...(input.customisationId ? { customisationId: input.customisationId } : {}),
+      };
+      const existing = await integrationRepo.findConnection(organisationId, 'WORLDPAY');
+      if (!credential.customisationId) {
+        const stored = await readStoredWorldpayCredential(existing, organisationId);
+        if (stored?.customisationId) credential.customisationId = stored.customisationId;
+      }
+      const validation = await validateWorldpayCredentials(credential);
+      const secretResourceName = await writeWorldpayCredential(organisationId, credential, existing?.secretResourceName);
+      const restored = await integrationRepo.restoreConnection({
+        organisationId,
+        integration: 'WORLDPAY',
+        environment: worldpayEnvironmentFromValidation(validation.environment),
+        status: 'ACTIVE',
+        secretResourceName,
+        externalCustomerId: credential.entityId,
+        maskedCredential: maskWorldpayIdentifier(credential.entityId),
+      });
+      res.status(200).json(await worldpayConnectionStatus(restored, organisationId));
+    } catch (error) { next(error); }
+  });
+
+  router.patch('/portal/integrations/worldpay/credentials', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = worldpayBrandingSchema.parse(req.body);
+      const organisationId = await authorisedOrganisationId(req.context, input.organisationId, organisationRepo);
+      const existing = await integrationRepo.findConnection(organisationId, 'WORLDPAY');
+      if (!existing || existing.status === 'DISCONNECTED') {
+        throw new HttpError(404, 'Worldpay is not connected for this pharmacy.', 'INTEGRATION_NOT_CONNECTED');
+      }
+      const customisationId = input.customisationId?.trim() || undefined;
+      const updated = await updateStoredWorldpayCustomisation(existing, organisationId, customisationId);
+      const restored = await integrationRepo.restoreConnection({
+        organisationId,
+        integration: 'WORLDPAY',
+        environment: existing.environment,
+        status: 'ACTIVE',
+        secretResourceName: updated.resourceName,
+        externalCustomerId: existing.externalCustomerId,
+        maskedCredential: existing.maskedCredential,
+      });
+      res.status(200).json(await worldpayConnectionStatus(restored, organisationId));
+    } catch (error) { next(error); }
+  });
+
+  router.delete('/portal/integrations/worldpay/credentials', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const organisationId = await authorisedOrganisationId(req.context, req.body?.organisationId ?? req.query.organisationId, organisationRepo);
+      const existing = await integrationRepo.findConnection(organisationId, 'WORLDPAY');
+      if (!existing || existing.status === 'DISCONNECTED') {
+        res.status(200).json(await worldpayConnectionStatus(existing, organisationId));
+        return;
+      }
+      await revokeWorldpayCredential(existing.secretResourceName);
+      const restored = await integrationRepo.restoreConnection({
+        organisationId,
+        integration: 'WORLDPAY',
+        environment: existing.environment,
+        status: 'DISCONNECTED',
+        secretResourceName: existing.secretResourceName || `projects/${organisationId}/secrets/hhh-worldpay-revoked`,
+        externalCustomerId: null,
+        maskedCredential: null,
+      });
+      res.status(200).json(await worldpayConnectionStatus(restored, organisationId));
+    } catch (error) { next(error); }
+  });
 
   const getCatalogue = async (req: Request, res: Response, next: NextFunction) => {
     try {
