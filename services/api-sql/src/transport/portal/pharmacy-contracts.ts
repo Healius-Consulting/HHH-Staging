@@ -379,11 +379,120 @@ function isSupplierFlow(order: PortalOrder) {
   ].includes(order.fulfilmentStatus);
 }
 
+export type OverviewIntegrationConnection = {
+  integration: 'CURALEAF' | 'WORLDPAY';
+  environment: 'TEST' | 'PRODUCTION';
+  status: 'DISCONNECTED' | 'PENDING_VALIDATION' | 'ACTIVE' | 'PAUSED' | 'ERROR';
+  secretResourceName: string | null;
+  lastSuccessfulAt: string | null;
+  validatedAt: string | null;
+};
+
+export function overviewIntegrationHealth(connections: OverviewIntegrationConnection[] = []) {
+  return (['CURALEAF', 'WORLDPAY'] as const).map(integration => {
+    const connection = connections.find(item => item.integration === integration);
+    const configured = Boolean(connection?.secretResourceName);
+    const environment = !connection ? null : connection.environment === 'PRODUCTION' ? 'production' as const : 'test' as const;
+    const checkedAt = connection?.lastSuccessfulAt || connection?.validatedAt || null;
+    if (!configured) {
+      return { integration: integration.toLowerCase() as 'curaleaf' | 'worldpay', state: 'not-configured' as const, environment, checkedAt: null };
+    }
+    const state = connection!.status === 'ERROR'
+      ? 'degraded' as const
+      : connection!.status === 'PAUSED'
+        ? 'unavailable' as const
+        : 'connected' as const;
+    return { integration: integration.toLowerCase() as 'curaleaf' | 'worldpay', state, environment, checkedAt };
+  });
+}
+
+const REPEAT_GAP_DAYS = 30;
+const FIRST_START_LIMIT = 12;
+const REPEAT_START_LIMIT = 8;
+
+function isLiveOrder(order: OrderRecord) {
+  return order.status !== 'CANCELLED' && order.paymentStatus !== 'CANCELLED';
+}
+
+function isOpenOrder(order: OrderRecord) {
+  return isLiveOrder(order) && order.fulfilmentStatus !== 'COLLECTED';
+}
+
+type OverviewPrescriptionStart = {
+  id: string;
+  kind: 'first' | 'repeat';
+  ageDays: number;
+  maskedPatientLabel: string;
+  lastOrderReference: string | null;
+  recordTarget: { kind: 'patient'; id: string };
+};
+
+export function overviewPrescriptionStarts(params: {
+  patients: PatientRecord[];
+  orders: OrderRecord[];
+  now?: number;
+  firstLimit?: number;
+  repeatLimit?: number;
+}) {
+  const now = params.now ?? Date.now();
+  const ordersByPatient = new Map<string, OrderRecord[]>();
+  for (const order of params.orders) {
+    const bucket = ordersByPatient.get(order.patientId) ?? [];
+    bucket.push(order);
+    ordersByPatient.set(order.patientId, bucket);
+  }
+
+  const firsts: OverviewPrescriptionStart[] = [];
+  const repeats: OverviewPrescriptionStart[] = [];
+
+  for (const patient of params.patients) {
+    if (patient.status === 'INACTIVE') continue;
+    const patientOrders = ordersByPatient.get(patient.id) ?? [];
+    const liveOrders = patientOrders.filter(isLiveOrder);
+    if (!liveOrders.length) {
+      firsts.push({
+        id: `first-${patient.id}`,
+        kind: 'first',
+        ageDays: ageDays(timestamp(patient.statusChangedAt, patient.createdAt), now),
+        maskedPatientLabel: overviewPatientLabel(patient),
+        lastOrderReference: null,
+        recordTarget: { kind: 'patient', id: patient.id },
+      });
+      continue;
+    }
+    if (patientOrders.some(isOpenOrder)) continue;
+    const latestOrder = liveOrders.reduce((latest, current) => (
+      orderActivityAt(current) > orderActivityAt(latest) ? current : latest
+    ));
+    const daysSince = ageDays(orderActivityAt(latestOrder), now);
+    if (!Number.isFinite(daysSince) || daysSince < REPEAT_GAP_DAYS) continue;
+    repeats.push({
+      id: `repeat-${patient.id}`,
+      kind: 'repeat',
+      ageDays: daysSince,
+      maskedPatientLabel: overviewPatientLabel(patient),
+      lastOrderReference: overviewOrderReference(latestOrder),
+      recordTarget: { kind: 'patient', id: patient.id },
+    });
+  }
+
+  firsts.sort((left, right) => right.ageDays - left.ageDays || left.maskedPatientLabel.localeCompare(right.maskedPatientLabel));
+  repeats.sort((left, right) => right.ageDays - left.ageDays || left.maskedPatientLabel.localeCompare(right.maskedPatientLabel));
+  const firstLimit = params.firstLimit ?? FIRST_START_LIMIT;
+  const repeatLimit = params.repeatLimit ?? REPEAT_START_LIMIT;
+  return {
+    firstCount: firsts.length,
+    repeatCount: repeats.length,
+    items: [...firsts.slice(0, firstLimit), ...repeats.slice(0, repeatLimit)],
+  };
+}
+
 export function buildSqlPharmacyOverview(params: {
   organisation: OrganisationRecord;
   patients: PatientRecord[];
   orders: OrderRecord[];
   pendingEnquiries?: Array<{ submittedAt: string }>;
+  connections?: OverviewIntegrationConnection[];
   now?: number;
 }) {
   const now = params.now ?? Date.now();
@@ -436,37 +545,12 @@ export function buildSqlPharmacyOverview(params: {
     });
   }
 
-  const repeatGapDays = 30;
-  const ordersByPatient = new Map<string, OrderRecord[]>();
-  for (const rawOrder of params.orders) {
-    if (rawOrder.status === 'CANCELLED' || rawOrder.paymentStatus === 'CANCELLED') continue;
-    const bucket = ordersByPatient.get(rawOrder.patientId) ?? [];
-    bucket.push(rawOrder);
-    ordersByPatient.set(rawOrder.patientId, bucket);
-  }
-
-  for (const patient of params.patients) {
-    if (patient.status !== 'ACTIVE') continue;
-    const patientOrders = ordersByPatient.get(patient.id) ?? [];
-    if (!patientOrders.length) continue;
-    const latestOrder = patientOrders.reduce((latest, current) => (
-      orderActivityAt(current) > orderActivityAt(latest) ? current : latest
-    ));
-    const daysSince = ageDays(orderActivityAt(latestOrder), now);
-    if (!Number.isFinite(daysSince) || daysSince < repeatGapDays) continue;
-    priorityItems.push({
-      id: `repeat-${patient.id}`,
-      kind: 'repeat',
-      ageDays: daysSince,
-      maskedPatientLabel: overviewPatientLabel(patient),
-      orderReference: overviewOrderReference(latestOrder),
-      recordTarget: { kind: 'patient', id: patient.id },
-      summary: `Last order ${daysSince} days ago. Repeat prescription may be due.`,
-      actionLabel: 'Open patient',
-    });
-  }
-
   priorityItems.sort((left, right) => right.ageDays - left.ageDays);
+  const prescriptionStarts = overviewPrescriptionStarts({
+    patients: params.patients,
+    orders: params.orders,
+    now,
+  });
   const organisation = params.organisation;
   const activePatients = params.patients.filter(patient => patient.status === 'ACTIVE').length;
 
@@ -491,6 +575,7 @@ export function buildSqlPharmacyOverview(params: {
       readyForCollection: readyForCollection.length,
       urgentTotal: priorityItems.length,
     },
+    prescriptionStarts,
     priorityItems,
     recentSessions: [],
     handover: {
@@ -499,9 +584,6 @@ export function buildSqlPharmacyOverview(params: {
       supplierOrdersInProgress: supplierOrders.length,
       agedCollections: priorityItems.filter(item => item.kind === 'collection').length,
     },
-    integrations: [
-      { integration: 'curaleaf' as const, state: 'not-configured' as const, checkedAt: null },
-      { integration: 'worldpay' as const, state: 'not-configured' as const, checkedAt: null },
-    ],
+    integrations: overviewIntegrationHealth(params.connections),
   };
 }

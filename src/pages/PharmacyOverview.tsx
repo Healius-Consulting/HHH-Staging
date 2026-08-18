@@ -27,12 +27,25 @@ function formatAsOf(value: string) {
   return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
-function stateLabel(state: PharmacyOverviewContract['integrations'][number]['state']) {
-  return state.replace('-', ' ');
+function startKindLabel(kind: PharmacyOverviewContract['prescriptionStarts']['items'][number]['kind']) {
+  return kind === 'first' ? 'First order' : 'Repeat';
+}
+
+function startAgeLabel(kind: PharmacyOverviewContract['prescriptionStarts']['items'][number]['kind'], ageDays: number) {
+  if (kind === 'first') {
+    return ageDays === 0 ? 'Referred today' : `Referred ${ageDays} day${ageDays === 1 ? '' : 's'} ago`;
+  }
+  return `Last order ${ageDays} day${ageDays === 1 ? '' : 's'} ago`;
+}
+
+function stateLabel(item: PharmacyOverviewContract['integrations'][number]) {
+  const label = item.state.replace('-', ' ');
+  if (item.state === 'not-configured' || item.environment !== 'test') return label;
+  return `${label} (Test)`;
 }
 
 export default function PharmacyOverview() {
-  const { dispatch } = useApp();
+  const { state, dispatch } = useApp();
   const [overview, setOverview] = useState<PharmacyOverviewContract | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,6 +79,20 @@ export default function PharmacyOverview() {
     dispatch({ type: 'SET_SCREEN', screen: 'patients' });
   };
 
+  const startPrescription = (patientId: string) => {
+    const existingDraft = state.orders.find(order => (
+      order.organisationId === state.currentOrganisationId
+      && order.patientId === patientId
+      && order.payment.status === 'none'
+    ));
+    if (existingDraft) {
+      dispatch({ type: 'SET_ACTIVE_ORDER', orderId: existingDraft.id });
+    } else {
+      dispatch({ type: 'NEW_ORDER', patientId });
+    }
+    dispatch({ type: 'SET_SCREEN', screen: 'create' });
+  };
+
   if (!overview && refreshing) {
     return (
       <div className="page-body">
@@ -97,6 +124,7 @@ export default function PharmacyOverview() {
   const ordersQueueTotal = overview.summary.awaitingPayment
     + overview.summary.supplierFulfilment
     + overview.summary.readyForCollection;
+  const prescriptionStarts = overview.prescriptionStarts ?? { firstCount: 0, repeatCount: 0, items: [] };
 
   return (
     <div className="page-body secure-overview">
@@ -170,6 +198,49 @@ export default function PharmacyOverview() {
           ]}
         />
 
+        <section className="card overview-rx-starts" aria-label="Start a prescription">
+          <div className="section-heading">
+            <div>
+              <p className="section-label">Prescriptions</p>
+              <h2>Start a prescription</h2>
+            </div>
+            {prescriptionStarts.items.length > 0 ? (
+              <span>{prescriptionStarts.firstCount} first · {prescriptionStarts.repeatCount} repeat</span>
+            ) : null}
+          </div>
+          <p className="overview-rx-starts__lead">Clinic paperwork can take time. Start when the prescription is ready.</p>
+          {prescriptionStarts.items.length === 0 ? (
+            <p className="overview-muted">No first orders or 30-day repeats just now.</p>
+          ) : (
+            <ul className="overview-priority-list">
+              {prescriptionStarts.items.map(item => (
+                <li key={item.id} className={`overview-rx-item overview-rx-item--${item.kind}`}>
+                  <div>
+                    <span className="overview-kind">{startKindLabel(item.kind)}</span>
+                    <strong>{item.maskedPatientLabel}</strong>
+                    <p className="overview-rx-meta">
+                      <span>{startAgeLabel(item.kind, item.ageDays)}</span>
+                      {item.lastOrderReference ? <span>{item.lastOrderReference}</span> : null}
+                    </p>
+                  </div>
+                  {state.workspaceMode === 'live' ? (
+                    <button
+                      type="button"
+                      className="priority-action"
+                      aria-label={`Start prescription for ${item.maskedPatientLabel}`}
+                      onClick={() => startPrescription(item.recordTarget.id)}
+                    >
+                      Start prescription <ArrowRight size={14} aria-hidden="true" />
+                    </button>
+                  ) : (
+                    <span className="overview-muted">Orders unlock after pharmacy activation</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         <section className="card overview-queue">
           <div className="section-heading">
             <div>
@@ -182,7 +253,7 @@ export default function PharmacyOverview() {
             <div className="overview-empty">
               <CheckCircle2 aria-hidden="true" />
               <strong>No priority exceptions</strong>
-              <span>There are no awaiting payments, repeat prescription warnings, or aged cases in this summary.</span>
+              <span>There are no awaiting payments or aged collections in this summary.</span>
             </div>
           ) : (
             <ul className="overview-priority-list">
@@ -214,7 +285,7 @@ export default function PharmacyOverview() {
             {overview.integrations.map(item => (
               <li key={item.integration}>
                 <span>{item.integration}</span>
-                <strong className={`integration-state integration-state--${item.state}`}>{stateLabel(item.state)}</strong>
+                <strong className={`integration-state integration-state--${item.state}`}>{stateLabel(item)}</strong>
                 <small>{item.checkedAt ? `Checked ${formatAsOf(item.checkedAt)}` : 'No recent check'}</small>
               </li>
             ))}

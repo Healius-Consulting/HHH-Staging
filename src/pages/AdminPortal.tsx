@@ -1163,7 +1163,7 @@ export default function AdminPortal() {
         <a className="skip-link" href="#admin-main-content">Skip to main content</a>
         <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
         <div className="app-main">
-          <WorkspacePageHeader section="Administration" context={selectedOrganisation.tradingName} title={selectedOrganisation.tradingName} subtitle={`Manage identity, access, readiness and attributed patients for ${selectedOrganisation.name}.`} commandLabel="Find anything" onSectionClick={() => { setSelectedOrganisationId(null); setView('overview'); }} backAction={{ label: 'Return to previous admin page', onClick: () => setSelectedOrganisationId(null) }} contextControl={!setupStatus?.completed ? <div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div> : undefined} />
+          <WorkspacePageHeader section="Administration" context={selectedOrganisation.tradingName} title={selectedOrganisation.tradingName} commandLabel="Find anything" onSectionClick={() => { setSelectedOrganisationId(null); setView('overview'); }} backAction={{ label: 'Return to previous admin page', onClick: () => setSelectedOrganisationId(null) }} contextControl={!setupStatus?.completed ? <div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div> : undefined} />
           <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
           <section className="admin-client-heading">
             <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Pharmacy account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
@@ -1706,12 +1706,12 @@ export default function AdminPortal() {
     </>
   );
 
-  const pageMeta: Record<AdminView, { title: string; subtitle: string }> = {
-    overview: { title: 'Pharmacy administration', subtitle: 'Provision pharmacy workspaces, monitor attribution and control each pharmacy’s go-live gate.' },
-    referrals: { title: 'HHH patient intake and referral', subtitle: 'Log contact, complete referral checks and activate approved patients for the confirmed pharmacy.' },
-    patients: { title: 'Patients and pharmacy attribution', subtitle: 'Review the cross-pharmacy patient index and its pharmacy ownership.' },
-    finance: { title: 'HHH referral finance', subtitle: 'Track £50 first-dispense fees and recurring £40 annual patient fees.' },
-    platform: { title: 'Platform', subtitle: 'Track pharmacy setup progress and validate each pharmacy’s Curaleaf connection.' },
+  const pageMeta: Record<AdminView, { title: string }> = {
+    overview: { title: 'Pharmacy administration' },
+    referrals: { title: 'HHH patient intake and referral' },
+    patients: { title: 'Patients and pharmacy attribution' },
+    finance: { title: 'HHH referral finance' },
+    platform: { title: 'Platform' },
   };
 
   return (
@@ -1719,7 +1719,7 @@ export default function AdminPortal() {
       <a className="skip-link" href="#admin-main-content">Skip to main content</a>
       <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setView(next); setQuery(''); }} />
       <div className="app-main">
-        <WorkspacePageHeader section="HHH operations" context={pageMeta[view].title} title={pageMeta[view].title} subtitle={pageMeta[view].subtitle} commandLabel="Find anything" onSectionClick={() => { setView('overview'); setQuery(''); }} backAction={view !== 'overview' ? { label: 'Return to pharmacies', onClick: () => { setView('overview'); setQuery(''); } } : undefined} contextControl={<div className="header-context"><span>Access</span><span className="tenant-status tenant-status--live">Admin</span></div>} />
+        <WorkspacePageHeader section="HHH operations" context={pageMeta[view].title} title={pageMeta[view].title} commandLabel="Find anything" onSectionClick={() => { setView('overview'); setQuery(''); }} backAction={view !== 'overview' ? { label: 'Return to pharmacies', onClick: () => { setView('overview'); setQuery(''); } } : undefined} contextControl={<div className="header-context"><span>Access</span><span className="tenant-status tenant-status--live">Admin</span></div>} />
         <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
           {view === 'overview' && renderOverview()}
           {view === 'referrals' && renderReferrals()}

@@ -1,20 +1,29 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { CircleDollarSign, Package, Search, ShieldCheck, Tags } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { ChevronLeft, ChevronRight, CircleDollarSign, Package, Search, ShieldCheck, Tags } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import { money, TYPE_LABELS, useApp } from '../context/AppContext';
 
 const TYPE_FILTERS = ['All', 'oil', 'flos', 'capsule', 'lozenge', 'vape', 'other'] as const;
+const PAGE_SIZE = 25;
 
 export default function FormularyPricing() {
   const { state, dispatch } = useApp();
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('All');
+  const [page, setPage] = useState(1);
+  const ledgerRef = useRef<HTMLElement>(null);
 
   const products = useMemo(() => state.catalogue.filter(product => {
     const needle = query.trim().toLowerCase();
     const matchesQuery = !needle || `${product.name} ${product.unit ?? ''}`.toLowerCase().includes(needle);
     return matchesQuery && (typeFilter === 'All' || product.type === typeFilter);
   }), [query, state.catalogue, typeFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const rangeStart = products.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE;
+  const rangeEnd = Math.min(rangeStart + PAGE_SIZE, products.length);
+  const pageProducts = products.slice(rangeStart, rangeEnd);
 
   const activeCount = state.catalogue.filter(product => product.supplierState === 'ACTIVE').length;
   const pricedCount = state.catalogue.filter(product => product.retail > 0).length;
@@ -23,11 +32,21 @@ export default function FormularyPricing() {
     : null;
 
   useEffect(() => {
+    setPage(1);
+  }, [query, typeFilter]);
+
+  useEffect(() => {
     if (state.navigationTarget?.kind !== 'catalogue') return;
     setTypeFilter('All');
     setQuery(state.navigationTarget.query);
+    setPage(1);
     dispatch({ type: 'CLEAR_NAVIGATION_TARGET' });
   }, [dispatch, state.navigationTarget]);
+
+  const goToPage = (nextPage: number) => {
+    setPage(nextPage);
+    ledgerRef.current?.scrollIntoView({ block: 'start' });
+  };
 
   return (
     <div className="page-body formulary-pricing-workspace">
@@ -54,24 +73,27 @@ export default function FormularyPricing() {
           title="Curaleaf information is temporarily delayed"
           detail="You can wait and try again later. If this continues, contact your HHH administrator; pharmacy staff do not need to change any connection settings."
         />
-      ) : state.catalogueSource === 'curaleaf' ? (
-        <ProviderStatusNotice
-          state="available"
-          title="Catalogue connected"
-          detail={updatedAt ? `Last refreshed ${updatedAt}. Curaleaf remains the source of patient pricing.` : 'Curaleaf remains the source of patient pricing.'}
-        />
-      ) : (
+      ) : state.catalogueSource !== 'curaleaf' ? (
         <ProviderStatusNotice
           title="Catalogue has not loaded"
           detail="Wait and refresh this page. If it remains unavailable, contact your HHH administrator; pharmacy staff do not need to change any connection settings."
         />
-      )}
+      ) : null}
 
-      <section className="pricing-ledger">
+      <section className="pricing-ledger" ref={ledgerRef}>
         <header className="pricing-ledger__header">
           <div>
             <small>Curaleaf catalogue</small>
-            <strong>{state.catalogue.length} product{state.catalogue.length === 1 ? '' : 's'} loaded</strong>
+            <strong>
+              {products.length === 0
+                ? 'No products to show'
+                : `Showing ${rangeStart + 1}–${rangeEnd} of ${products.length}`}
+              {updatedAt ? (
+                <time className="pricing-ledger__refreshed" dateTime={state.catalogueUpdatedAt ?? undefined}>
+                  {' '}· Refreshed {updatedAt}
+                </time>
+              ) : null}
+            </strong>
           </div>
           <label className="pricing-search">
             <Search size={15} />
@@ -100,7 +122,7 @@ export default function FormularyPricing() {
               <Search size={20} />
               <span><strong>No products match</strong><small>Change the search or product type.</small></span>
             </div>
-          ) : products.map((product, index) => (
+          ) : pageProducts.map((product, index) => (
             <div className="pricing-row pricing-row--readonly" role="row" key={product.id} style={{ '--stagger-index': index } as CSSProperties}>
               <span className="pricing-product" role="cell">
                 <strong>{product.name}</strong>
@@ -133,6 +155,27 @@ export default function FormularyPricing() {
             </div>
           ))}
         </div>
+        {products.length > PAGE_SIZE ? (
+          <nav className="pricing-pagination" aria-label="Catalogue pages">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={currentPage <= 1}
+              onClick={() => goToPage(currentPage - 1)}
+            >
+              <ChevronLeft size={14} aria-hidden="true" /> Previous
+            </button>
+            <span>Page {currentPage} of {pageCount}</span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={currentPage >= pageCount}
+              onClick={() => goToPage(currentPage + 1)}
+            >
+              Next <ChevronRight size={14} aria-hidden="true" />
+            </button>
+          </nav>
+        ) : null}
       </section>
     </div>
   );

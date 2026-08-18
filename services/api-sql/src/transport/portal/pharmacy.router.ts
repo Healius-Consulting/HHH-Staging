@@ -8,6 +8,7 @@ import { SqlDirectoryRepository } from '../../repositories/sql/directory.sql.js'
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
@@ -36,6 +37,7 @@ export function createPortalPharmacyRouter(): Router {
   const directoryRepo = new SqlDirectoryRepository();
   const intakeRepo = new SqlIntakeRepository();
   const identityRepo = new SqlIdentityRepository();
+  const integrationRepo = new SqlIntegrationRepository();
 
   router.get('/portal/patient-directory', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -75,17 +77,25 @@ export function createPortalPharmacyRouter(): Router {
   router.get('/portal/overview', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertTenantScope(req.context!);
-      const [organisation, patients, orders, pendingEnquiries] = await Promise.all([
+      const [organisation, patients, orders, pendingEnquiries, curaleaf, worldpay] = await Promise.all([
         organisationRepo.findOrganisationById(scope.organisationId),
         patientRepo.listTenantPatients(scope.organisationId),
         orderRepo.listTenantOrders(scope.organisationId),
         intakeRepo.listTenantPendingEnquiries(scope.organisationId),
+        integrationRepo.findConnection(scope.organisationId, 'CURALEAF'),
+        integrationRepo.findConnection(scope.organisationId, 'WORLDPAY'),
       ]);
       if (!organisation) {
         throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
       }
       res.setHeader('Cache-Control', 'private, no-store');
-      res.status(200).json(buildSqlPharmacyOverview({ organisation, patients, orders, pendingEnquiries }));
+      res.status(200).json(buildSqlPharmacyOverview({
+        organisation,
+        patients,
+        orders,
+        pendingEnquiries,
+        connections: [curaleaf, worldpay].filter((connection): connection is NonNullable<typeof connection> => Boolean(connection)),
+      }));
     } catch (error) {
       next(error);
     }

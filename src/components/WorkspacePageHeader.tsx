@@ -7,7 +7,6 @@ interface WorkspacePageHeaderProps {
   section: string;
   context: string;
   title: string;
-  subtitle?: string;
   contextControl?: ReactNode;
   actions?: ReactNode;
   commandLabel?: string;
@@ -15,7 +14,7 @@ interface WorkspacePageHeaderProps {
   backAction?: { label: string; onClick: () => void };
 }
 
-export default function WorkspacePageHeader({ section, context, title, subtitle, contextControl, actions, commandLabel = 'Quick find', onSectionClick, backAction }: WorkspacePageHeaderProps) {
+export default function WorkspacePageHeader({ section, context, title, contextControl, actions, commandLabel = 'Quick find', onSectionClick, backAction }: WorkspacePageHeaderProps) {
   return (
     <header className="app-header workspace-page-header">
       <div className="brand-text">
@@ -26,7 +25,6 @@ export default function WorkspacePageHeader({ section, context, title, subtitle,
           <ChevronRight size={12} />{context}
         </div>
         <h1>{title}</h1>
-        {subtitle ? <p>{subtitle}</p> : null}
       </div>
       <div className="app-header__actions">
         {actions}

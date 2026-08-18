@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { curaleafDeliveryGuidance } from '@hhh/domain/delivery';
 import {
   AlertTriangle,
   Archive,
   Banknote,
-  Building2,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -13,12 +12,10 @@ import {
   Clock3,
   Copy,
   CreditCard,
-  FileCode2,
   FileText,
   Info,
   Layers2,
   Mail,
-  MapPin,
   Package,
   PackageCheck,
   Phone,
@@ -26,7 +23,6 @@ import {
   Search,
   ShieldAlert,
   Truck,
-  UserRound,
   X,
   XCircle,
   PhoneCall,
@@ -72,7 +68,6 @@ import {
   collectOrderConsignments,
   orderCourierLabel,
   orderDeliveryDestination,
-  orderFinancialTotal,
   shortConsignmentId,
 } from '../utils/orderDetailsLedger';
 type ManualPaymentForm = { tender: ManualTender; reference: string; notes: string; confirmed: boolean };
@@ -170,7 +165,7 @@ function recordStageMeta(record: OrderRecord) {
   if (isSplit && orderHasUncollectedReceivedPacks(record.order)) {
     return {
       label: 'Part ready',
-      description: `${split.atPharmacy} pack(s) checked in · ${split.withCuraleaf + split.inTransit} still with Curaleaf or courier`,
+      description: `${split.atPharmacy} pack(s) checked in · ${split.withCuraleaf + split.inTransit} still in transit or awaiting dispatch`,
       tone: 'partial',
       icon: Layers2,
     };
@@ -178,7 +173,7 @@ function recordStageMeta(record: OrderRecord) {
   if (orderHasPartialCollection(record.order) && !orderHasInTransitPacks(record.order) && !orderHasUncollectedReceivedPacks(record.order)) {
     return {
       label: 'Part collected',
-      description: 'Arrived packs handed out; remainder still with Curaleaf',
+      description: 'Arrived packs handed out; remainder awaiting dispatch',
       tone: 'partial',
       icon: Layers2,
     };
@@ -186,7 +181,7 @@ function recordStageMeta(record: OrderRecord) {
   if (orderHasPartialPharmacyReceipt(record.order) && !orderHasInTransitPacks(record.order)) {
     return {
       label: 'Part delivered',
-      description: 'First consignment checked in; remainder still with Curaleaf',
+      description: 'First consignment checked in; remainder awaiting dispatch',
       tone: 'partial',
       icon: Layers2,
     };
@@ -195,7 +190,7 @@ function recordStageMeta(record: OrderRecord) {
     return {
       label: 'Part in transit',
       description: split.withCuraleaf > 0
-        ? `${split.inTransit} of ${split.total} packs with courier · ${split.withCuraleaf} with Curaleaf`
+        ? `${split.inTransit} of ${split.total} packs in transit · ${split.withCuraleaf} awaiting dispatch`
         : `${split.inTransit} of ${split.total} packs with courier`,
       tone: 'partial',
       icon: Layers2,
@@ -204,7 +199,7 @@ function recordStageMeta(record: OrderRecord) {
   if (isSplit && split.withCuraleaf > 0 && !orderHasInTransitPacks(record.order)) {
     return {
       label: 'Awaiting next shipment',
-      description: `${split.withCuraleaf} pack(s) open with Curaleaf after first consignment`,
+      description: `${split.withCuraleaf} pack(s) awaiting dispatch after the first consignment`,
       tone: 'partial',
       icon: Layers2,
     };
@@ -241,7 +236,6 @@ export default function Orders() {
   const [refundBusyOrderId, setRefundBusyOrderId] = useState<number | null>(null);
   const [refundReferences, setRefundReferences] = useState<Record<number, string>>({});
   const [cancelOrderId, setCancelOrderId] = useState<number | null>(null);
-  const [cancelReason, setCancelReason] = useState<'added_in_error' | 'patient_request' | 'other'>('added_in_error');
   const [cancelNote, setCancelNote] = useState('');
   const [cancellationReference, setCancellationReference] = useState('');
   const [cancellationContactNote, setCancellationContactNote] = useState('');
@@ -256,6 +250,8 @@ export default function Orders() {
   const [now, setNow] = useState(() => new Date());
   const [placementConfirmation, setPlacementConfirmation] = useState<{ orderId: number; message: string } | null>(null);
   const observedPlacements = useRef<Map<number, Set<number>> | null>(null);
+  const listRowsRef = useRef<HTMLDivElement>(null);
+  const [listOverflow, setListOverflow] = useState({ top: false, bottom: false });
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
@@ -323,6 +319,30 @@ export default function Orders() {
   useEffect(() => {
     if (!filtered.some(record => record.order.id === selectedOrderId)) setSelectedOrderId(filtered[0]?.order.id ?? null);
   }, [filtered, selectedOrderId]);
+
+  const syncListOverflow = useCallback(() => {
+    const el = listRowsRef.current;
+    if (!el) {
+      setListOverflow({ top: false, bottom: false });
+      return;
+    }
+    const top = el.scrollTop > 6;
+    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 6;
+    setListOverflow(current => current.top === top && current.bottom === bottom ? current : { top, bottom });
+  }, []);
+
+  useEffect(() => {
+    const el = listRowsRef.current;
+    syncListOverflow();
+    if (!el) return;
+    el.addEventListener('scroll', syncListOverflow, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncListOverflow);
+    observer?.observe(el);
+    return () => {
+      el.removeEventListener('scroll', syncListOverflow);
+      observer?.disconnect();
+    };
+  }, [syncListOverflow, filtered.length, activeFilter]);
 
   useEffect(() => {
     const target = state.navigationTarget;
@@ -422,12 +442,12 @@ export default function Orders() {
       if (!isLocalPortalPreview && state.workspaceMode === 'live' && order.backendId) {
         const result = await requestPortalOrderCancellation(order.backendId, {
           organisationId: state.currentOrganisationId,
-          reason: cancelReason,
+          reason: 'other',
           note: cancelNote.trim() || undefined,
         });
         applyCancellationResponse(order, result);
       } else {
-        dispatch({ type: 'REQUEST_ORDER_CANCELLATION', orderId: order.id, reason: cancelReason, note: cancelNote });
+        dispatch({ type: 'REQUEST_ORDER_CANCELLATION', orderId: order.id, reason: 'other', note: cancelNote.trim() || undefined });
       }
       if (order.patientId) dispatch({ type: 'LOG_INTERACTION', patientId: order.patientId, interactionType: 'Order cancellation requested', detail: `Cancellation requested for ${orderReference(order)}. ${order.payment.status === 'paid' ? 'Paid order requires pharmacy action.' : 'No settled patient payment recorded.'}` });
       const hasCuraleafOrder = order.payment.status === 'paid' && order.prescriptions.some(prescription => prescription.placed || prescription.poRef);
@@ -669,7 +689,7 @@ export default function Orders() {
       (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
     );
     if (!partial && remainingOpen) {
-      dispatch({ type: 'ADD_TOAST', message: 'Remaining packs are still open with Curaleaf. Use partial handover for arrived packs only.', toastType: 'warning' });
+      dispatch({ type: 'ADD_TOAST', message: 'Remaining packs are still awaiting dispatch. Use partial handover for arrived packs only.', toastType: 'warning' });
       return;
     }
     setHandoutBusy(true);
@@ -685,7 +705,7 @@ export default function Orders() {
       dispatch({ type: 'HANDOUT_ORDER', orderId: order.id, partial, shipmentId });
       dispatch({
         type: 'ADD_TOAST',
-        message: partial ? 'Partial handover recorded. Remaining packs stay open with Curaleaf.' : 'Handover recorded. The order is now completed.',
+        message: partial ? 'Partial handover recorded. Remaining packs are still awaiting dispatch.' : 'Handover recorded. The order is now completed.',
         toastType: 'success',
       });
       setHandoutOrderId(null);
@@ -772,9 +792,10 @@ export default function Orders() {
       </section>
 
       <div className="order-crm-workspace">
-        <aside className="order-crm-list" aria-label="Orders">
+        <aside className={`order-crm-list${listOverflow.top ? ' is-overflow-top' : ''}${listOverflow.bottom ? ' is-overflow-bottom' : ''}`} aria-label="Orders">
           <header><span><small>{activeFilter === 'cancelled' ? 'Cancellation history' : 'Orders'}</small><strong>{filtered.length} result{filtered.length === 1 ? '' : 's'}</strong></span></header>
-          <div className="order-crm-list__rows">
+          <div className="order-crm-list__scroller">
+          <div className="order-crm-list__rows" ref={listRowsRef}>
             {filtered.length ? (
               activeFilter === 'cancelled' ? (
                 <>
@@ -796,6 +817,7 @@ export default function Orders() {
                 ))
               )
             ) : <div className="order-crm-empty"><Package size={26} /><strong>No orders in this stage</strong><span>Try another filter or search term.</span></div>}
+          </div>
           </div>
         </aside>
 
@@ -837,14 +859,12 @@ export default function Orders() {
               onConfirmRefund={() => void confirmRefund(selected.order)}
               refundBusy={refundBusyOrderId === selected.order.id}
               cancellationEditorOpen={cancelOrderId === selected.order.id}
-              cancellationReason={cancelReason}
               cancellationNote={cancelNote}
               cancellationReference={cancellationReference}
               cancellationContactNote={cancellationContactNote}
               cancellationBusy={cancellationBusyOrderId === selected.order.id}
-              onOpenCancellation={() => { setCancelOrderId(selected.order.id); setCancelReason('added_in_error'); setCancelNote(''); }}
-              onCloseCancellation={() => setCancelOrderId(null)}
-              onCancellationReasonChange={setCancelReason}
+              onOpenCancellation={() => { setCancelOrderId(selected.order.id); setCancelNote(''); }}
+              onCloseCancellation={() => { setCancelOrderId(null); setCancelNote(''); }}
               onCancellationNoteChange={setCancelNote}
               onCancellationReferenceChange={setCancellationReference}
               onCancellationContactNoteChange={setCancellationContactNote}
@@ -1061,7 +1081,7 @@ export default function Orders() {
               <h2 id="order-handout-title">{handoutPartial ? 'Confirm partial handover to patient' : 'Confirm medication has been handed to the patient'}</h2>
               <p id="order-handout-description">
                 {handoutPartial
-                  ? `This records handover of arrived packs only for ${orderReference(selected.order)}. Remaining quantity stays open with Curaleaf.`
+                  ? `This records handover of arrived packs only for ${orderReference(selected.order)}. Remaining packs are still awaiting dispatch.`
                   : `This completes ${orderReference(selected.order)} and records the handout in the audit trail.`}
               </p>
             </div>
@@ -1184,7 +1204,7 @@ function ReplacementLineage({ order, allOrders }: { order: PatientOrder; allOrde
   );
 }
 
-function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHandout, manualForm, onManualFormChange, onRecordManual, onRedo, busy, receiptDrafts, fulfilmentBusyRxId, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, onCallCuraleaf, onManualPlace, onPaymentLinkResend, paymentLinkBusy, refundReference, onRefundReferenceChange, onRequestRefund, onConfirmRefund, refundBusy, cancellationEditorOpen, cancellationReason, cancellationNote, cancellationReference, cancellationContactNote, cancellationBusy, onOpenCancellation, onCloseCancellation, onCancellationReasonChange, onCancellationNoteChange, onCancellationReferenceChange, onCancellationContactNoteChange, onRequestCancellation, onRecordCuraleafContact, onConfirmCuraleafCancellation, onChaseDelivery }: {
+function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHandout, manualForm, onManualFormChange, onRecordManual, onRedo, busy, receiptDrafts, fulfilmentBusyRxId, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, onCallCuraleaf, onManualPlace, onPaymentLinkResend, paymentLinkBusy, refundReference, onRefundReferenceChange, onRequestRefund, onConfirmRefund, refundBusy, cancellationEditorOpen, cancellationNote, cancellationReference, cancellationContactNote, cancellationBusy, onOpenCancellation, onCloseCancellation, onCancellationNoteChange, onCancellationReferenceChange, onCancellationContactNoteChange, onRequestCancellation, onRecordCuraleafContact, onConfirmCuraleafCancellation, onChaseDelivery }: {
   record: OrderRecord;
   now: Date;
   placementConfirmation: string | null;
@@ -1211,14 +1231,12 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   onConfirmRefund: () => void;
   refundBusy: boolean;
   cancellationEditorOpen: boolean;
-  cancellationReason: 'added_in_error' | 'patient_request' | 'other';
   cancellationNote: string;
   cancellationReference: string;
   cancellationContactNote: string;
   cancellationBusy: boolean;
   onOpenCancellation: () => void;
   onCloseCancellation: () => void;
-  onCancellationReasonChange: (reason: 'added_in_error' | 'patient_request' | 'other') => void;
   onCancellationNoteChange: (note: string) => void;
   onCancellationReferenceChange: (reference: string) => void;
   onCancellationContactNoteChange: (note: string) => void;
@@ -1232,6 +1250,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   const [copiedDetailKey, setCopiedDetailKey] = useState<string | null>(null);
   const { state } = useApp();
   const { order, patient, stage } = record;
+  const pharmacy = state.organisations.find(organisation => organisation.id === state.currentOrganisationId);
   const meta = recordStageMeta(record);
   const Icon = meta.icon;
   const cancellationResolution = orderCancellationResolution(order);
@@ -1245,17 +1264,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   const remainingOpen = order.prescriptions.some(prescription =>
     (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
   );
-  const readyNotCollectedPacks = order.prescriptions.reduce((sum, prescription) => {
-    const prescriptionReady = prescription.status === 'ready'
-      || Object.values(prescription.shipmentStates ?? {}).includes('ready_for_collection');
-    if (!prescriptionReady) return sum;
-    return sum + (prescription.fulfilmentLines ?? []).reduce(
-      (lineSum, line) => lineSum + Math.max(0, (line.received ?? 0) - (line.collected ?? 0)),
-      0,
-    );
-  }, 0);
   const canFullHandout = stage === 'ready' && !remainingOpen;
-  const canPartialHandout = readyNotCollectedPacks > 0 && remainingOpen;
 
   const handleCopy = (key: string, text: string) => {
     void navigator.clipboard.writeText(text);
@@ -1265,7 +1274,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
 
   const resolveProductName = (item: { name?: string; productId: string; formulaId?: string }) => {
     const isGeneric = !item.name || ['Curaleaf prescription item', 'Curaleaf formulary product', 'Curaleaf medication', 'Prescribed product'].includes(item.name);
-    if (!isGeneric) return item.name;
+    if (!isGeneric) return item.name ?? 'Curaleaf medication';
     const cat = state.catalogue.find(c => c.id === item.productId || (item.formulaId && c.formulaId === item.formulaId));
     return cat?.name ?? item.name ?? 'Curaleaf medication';
   };
@@ -1308,7 +1317,6 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
           </div>
           <div className="order-crm-record__actions" role="group" aria-label="Order actions">
             {canFullHandout ? <button type="button" className="btn btn-primary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(false)}><Check size={13} /> Hand over</button> : null}
-            {canPartialHandout ? <button type="button" className="btn btn-secondary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(true)}><Check size={13} /> Hand over partial ({readyNotCollectedPacks} pk)</button> : null}
             {mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={hasCuraleafOrder ? onCallCuraleaf : onOpenCancellation}>{hasCuraleafOrder ? <PhoneCall size={13} /> : <XCircle size={13} />} {hasCuraleafOrder ? 'Call Curaleaf to cancel' : 'Cancel order'}</button> : null}
           </div>
         </div>
@@ -1323,19 +1331,11 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
         <OrderCancellationPanel
           order={order}
           editorOpen={cancellationEditorOpen}
-          reason={cancellationReason}
           note={cancellationNote}
-          reference={cancellationReference}
-          contactNote={cancellationContactNote}
           busy={cancellationBusy}
           onClose={onCloseCancellation}
-          onReasonChange={onCancellationReasonChange}
           onNoteChange={onCancellationNoteChange}
-          onReferenceChange={onCancellationReferenceChange}
-          onContactNoteChange={onCancellationContactNoteChange}
           onRequest={onRequestCancellation}
-          onRecordContact={onRecordCuraleafContact}
-          onConfirm={onConfirmCuraleafCancellation}
         />
       ) : null}
 
@@ -1423,7 +1423,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
             patient={patient}
             cleanStreetAddress={cleanStreetAddress}
             patientPostcode={patientPostcode}
-            pharmacyName={state.currentOrganisation?.tradingName || state.currentOrganisation?.name || null}
+            pharmacyName={pharmacy?.tradingName || pharmacy?.name || null}
             showOrderDetails={showOrderDetails}
             onToggle={() => setShowOrderDetails(prev => !prev)}
             copiedDetailKey={copiedDetailKey}
@@ -1493,42 +1493,13 @@ function PrePlacementDeliveryGuidance({ now }: { now: Date }) {
   );
 }
 
-type SplitPackSnapshot = {
-  collected: number;
-  atPharmacy: number;
-  inTransit: number;
-  withCuraleaf: number;
-  total: number;
-};
-
-function splitPackSnapshot(packTotals: ReturnType<typeof orderPackTotals>): SplitPackSnapshot {
-  return {
-    collected: packTotals.collected,
-    atPharmacy: Math.max(0, packTotals.received - packTotals.collected),
-    inTransit: Math.max(0, packTotals.shipped - packTotals.received),
-    withCuraleaf: Math.max(0, packTotals.ordered - packTotals.shipped),
-    total: packTotals.ordered,
-  };
-}
-
-function splitPackStatItems(snapshot: SplitPackSnapshot) {
+function splitPackStatItems(snapshot: ReturnType<typeof orderSplitPackSnapshot>) {
   return [
-    { value: snapshot.collected, label: snapshot.collected === 1 ? 'Collected' : 'Collected' },
-    { value: snapshot.atPharmacy, label: snapshot.atPharmacy === 1 ? 'At pharmacy' : 'At pharmacy' },
-    { value: snapshot.inTransit, label: snapshot.inTransit === 1 ? 'In transit' : 'In transit' },
-    { value: snapshot.withCuraleaf, label: snapshot.withCuraleaf === 1 ? 'With Curaleaf' : 'With Curaleaf' },
+    { value: snapshot.collected, label: 'Handed out' },
+    { value: snapshot.atPharmacy, label: 'Checked in' },
+    { value: snapshot.inTransit, label: 'In transit' },
+    { value: snapshot.withCuraleaf, label: 'Awaiting dispatch' },
   ].filter(stat => stat.value > 0);
-}
-
-function orderIsSplitShipment(
-  order: PatientOrder,
-  snapshot: SplitPackSnapshot,
-  awaitingSupplierCount: number,
-) {
-  return awaitingSupplierCount > 0
-    || order.prescriptions.some(rx => rx.dispatchStatus === 'partial')
-    || snapshot.inTransit + snapshot.withCuraleaf > 0
-    || snapshot.collected > 0 && snapshot.collected < snapshot.total;
 }
 
 function SplitOrderDeliveryBanner({
@@ -1547,6 +1518,7 @@ function SplitOrderDeliveryBanner({
   stats: Array<{ value: number; label: string }>;
 }) {
   const visibleStats = stats.filter(stat => stat.value > 0);
+  const showStats = visibleStats.length > 1;
   return (
     <div className={`order-delivery-banner order-delivery-banner--${tone}`} role="status">
       <div className="order-delivery-banner__main">
@@ -1558,8 +1530,8 @@ function SplitOrderDeliveryBanner({
             <span>{eyebrow}</span>
           </div>
           <strong className="order-delivery-banner__title">{title}</strong>
-          {visibleStats.length ? (
-            <ul className="order-delivery-banner__stats" aria-label="Pack progress">
+          {showStats ? (
+            <ul className="order-delivery-banner__stats" aria-label="Where packs are now">
               {visibleStats.map(stat => (
                 <li key={stat.label}>
                   <strong>{stat.value}</strong>
@@ -1579,14 +1551,13 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
   const guidance = deliveryGuidanceForOrder(order);
   if (!guidance) return null;
   const range = deliveryRange(guidance);
-  const packTotals = orderPackTotals(order);
-  const splitSnapshot = splitPackSnapshot(packTotals);
+  const splitSnapshot = orderSplitPackSnapshot(order);
   const splitStats = splitPackStatItems(splitSnapshot);
   const awaitingSupplier = orderAwaitingSupplierShipmentProductNames(order);
   const hasInTransit = orderHasInTransitPacks(order);
   const hasUncollected = orderHasUncollectedReceivedPacks(order);
   const hasPartialCollection = orderHasPartialCollection(order);
-  const isSplit = orderIsSplitShipment(order, splitSnapshot, awaitingSupplier.length);
+  const isSplit = orderIsSplitFulfilment(order);
 
   if (hasUncollected) {
     const packsWaiting = splitSnapshot.atPharmacy;
@@ -1595,9 +1566,13 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
         <SplitOrderDeliveryBanner
           tone="partial"
           icon={PackageCheck}
-          eyebrow="Split order · Ready for handout"
+          eyebrow="Ready for handout"
           title={`${packsWaiting} pack${packsWaiting === 1 ? '' : 's'} checked in — verify and hand out to the patient`}
-          desc="Other packs from this order are still in transit or awaiting dispatch with Curaleaf."
+          desc={splitSnapshot.withCuraleaf > 0 && splitSnapshot.inTransit > 0
+            ? 'Other packs are still in transit or waiting to dispatch.'
+            : splitSnapshot.inTransit > 0
+              ? 'Other packs from this order are still in transit.'
+              : 'Other packs are waiting at Curaleaf for a later dispatch.'}
           stats={splitStats}
         />
       );
@@ -1630,9 +1605,9 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
       <SplitOrderDeliveryBanner
         tone="partial"
         icon={Layers2}
-        eyebrow="Split order · First consignment complete"
+        eyebrow="Part collected"
         title={`${splitSnapshot.collected} of ${splitSnapshot.total} packs handed out`}
-        desc={`${remaining} remaining pack${remaining === 1 ? '' : 's'} stay with Curaleaf until the next shipment. No action needed until it dispatches.`}
+        desc={`${remaining} pack${remaining === 1 ? '' : 's'} still to dispatch. No pharmacy action until they ship.`}
         stats={splitStats}
       />
     );
@@ -1646,27 +1621,27 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
       <SplitOrderDeliveryBanner
         tone={overdue ? 'overdue' : 'partial'}
         icon={overdue ? AlertTriangle : Truck}
-        eyebrow="Split order · Consignment in transit"
+        eyebrow={overdue ? 'Delivery overdue' : 'Part in transit'}
         title={overdue
           ? `${inTransit} of ${splitSnapshot.total} packs overdue · expected by ${formatDeliveryDate(guidance.windowEnd)}`
           : `${inTransit} of ${splitSnapshot.total} packs in transit · expected ${range}`}
         desc={remaining > 0
-          ? `Check in when the courier arrives. ${remaining} more pack${remaining === 1 ? '' : 's'} remain with Curaleaf for a later dispatch.`
+          ? `Check in when the courier arrives. ${remaining} pack${remaining === 1 ? '' : 's'} still to dispatch.`
           : 'Check in packs when the courier arrives. Pharmacy goods-in verification is required.'}
         stats={splitStats}
       />
     );
   }
 
-  if (awaitingSupplier.length && !hasInTransit) {
+  if (isSplit && awaitingSupplier.length && !hasInTransit) {
     const remaining = splitSnapshot.withCuraleaf;
     return (
       <SplitOrderDeliveryBanner
         tone="partial"
         icon={Layers2}
-        eyebrow="Split order · Awaiting next shipment"
-        title={`${remaining} pack${remaining === 1 ? '' : 's'} open with Curaleaf`}
-        desc="The first consignment is complete. Curaleaf will dispatch the remaining quantity in a separate shipment."
+        eyebrow="Awaiting next shipment"
+        title={`${remaining} pack${remaining === 1 ? '' : 's'} still to dispatch`}
+        desc="The first consignment is complete. Remaining packs will ship separately."
         stats={splitStats}
       />
     );
@@ -1817,36 +1792,51 @@ function CancellationClosureSummary({ order, resolution }: { order: PatientOrder
   );
 }
 
-function OrderCancellationPanel({ order, editorOpen, reason, note, reference, contactNote, busy, onClose, onReasonChange, onNoteChange, onReferenceChange, onContactNoteChange, onRequest, onRecordContact, onConfirm }: {
+function OrderCancellationPanel({ order, editorOpen, note, busy, onClose, onNoteChange, onRequest }: {
   order: PatientOrder;
   editorOpen: boolean;
-  reason: 'added_in_error' | 'patient_request' | 'other';
   note: string;
-  reference: string;
-  contactNote: string;
   busy: boolean;
   onClose: () => void;
-  onReasonChange: (reason: 'added_in_error' | 'patient_request' | 'other') => void;
   onNoteChange: (note: string) => void;
-  onReferenceChange: (reference: string) => void;
-  onContactNoteChange: (note: string) => void;
   onRequest: () => void;
-  onRecordContact: () => void;
-  onConfirm: () => void;
 }) {
-  const supplier = order.curaleafCancellation;
-  const hasCuraleafOrder = order.payment.status === 'paid' && order.prescriptions.some(prescription => prescription.placed || prescription.poRef);
-  if (!order.cancellation && editorOpen) return (
-    <section className="order-cancellation-card order-cancellation-card--compose">
-      <header><span><small>Controlled cancellation</small><strong>Cancel {orderReference(order)}</strong></span><button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Keep order</button></header>
-      <div className="order-cancellation-warning"><AlertTriangle size={16} /><span><strong>The payment request will be retired</strong><small>The order and link are cancelled in HHH. Any late provider payment will be flagged for refund.</small></span></div>
-      <div className="order-cancellation-fields">
-        <label><span>Reason</span><select className="input select" value={reason} onChange={event => onReasonChange(event.target.value as typeof reason)}><option value="added_in_error">Prescription added in error</option><option value="patient_request">Patient requested cancellation</option><option value="other">Other</option></select></label>
-        <label><span>Cancellation note</span><textarea className="input" value={note} onChange={event => onNoteChange(event.target.value)} placeholder="Briefly explain what was added incorrectly" /></label>
-      </div>
-      <footer><button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={onRequest}><XCircle size={13} /> {busy ? 'Cancelling…' : 'Cancel order'}</button></footer>
-    </section>
-  );
+  if (!order.cancellation && editorOpen) {
+    const unpaid = order.payment.status !== 'paid';
+    return (
+      <section className="order-cancellation-card order-cancellation-card--compose" aria-labelledby="order-cancel-title">
+        <div className="order-cancellation-confirm">
+          <span className="order-cancellation-confirm__icon" aria-hidden="true">
+            <XCircle size={18} />
+          </span>
+          <div className="order-cancellation-confirm__copy">
+            <h2 id="order-cancel-title">Cancel {orderReference(order)}?</h2>
+            <p>
+              {unpaid
+                ? 'The payment request will be retired. This order is cancelled in HHH.'
+                : 'This order will be cancelled. If payment was taken, a refund task will follow.'}
+            </p>
+          </div>
+          <div className="order-cancellation-confirm__actions">
+            <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onClose}>Keep order</button>
+            <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={onRequest}>
+              <XCircle size={13} /> {busy ? 'Cancelling…' : 'Cancel order'}
+            </button>
+          </div>
+        </div>
+        <label className="order-cancellation-note">
+          <span>Cancellation note</span>
+          <textarea
+            className="input"
+            value={note}
+            onChange={event => onNoteChange(event.target.value)}
+            placeholder="Why this order is being cancelled"
+            rows={2}
+          />
+        </label>
+      </section>
+    );
+  }
 
   if (!order.cancellation) return null;
 
@@ -2127,8 +2117,8 @@ function FulfilmentProgressRail({
             <strong className="pipeline-step__value">
               {progress.inTransitPacks} <small>pk</small>
               {progress.isSplit && progress.awaitingDispatchPacks > 0 ? (
-                <span className="pipeline-step__split-tag" title={`${progress.awaitingDispatchPacks} pack(s) awaiting next dispatch`}>
-                  +{progress.awaitingDispatchPacks} split
+                <span className="pipeline-step__split-tag" title={`${progress.awaitingDispatchPacks} pack(s) awaiting dispatch`}>
+                  +{progress.awaitingDispatchPacks} to ship
                 </span>
               ) : null}
             </strong>
@@ -2440,7 +2430,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                     {isCollected
                       ? 'Delivered to Pharmacy — Checked In'
                       : isPartiallyDelivered
-                        ? 'Partial check-in — remainder open with Curaleaf'
+                        ? 'Partial check-in — remainder awaiting dispatch'
                         : hasShippedNotCheckedIn && prescription.dispatchStatus === 'partial'
                           ? 'Partial dispatch — check in arriving consignment'
                           : isDelivered || isReady
@@ -2448,7 +2438,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                             : prescription.dispatchStatus === 'complete'
                               ? 'Fulfilled by Curaleaf — Dispatched'
                               : prescription.dispatchStatus === 'partial'
-                                ? 'Partial dispatch — remainder awaiting dispatch at Curaleaf'
+                                ? 'Partial dispatch — remainder awaiting dispatch'
                                 : isDispatchedPhase
                                   ? 'Dispatched with courier — check in arriving consignment'
                                   : prescription.purchaseOrderState === 'FULLY_ALLOCATED'
@@ -2501,7 +2491,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                   <div className="order-goods-in__consignment-stats">
                     <span className="pill pill-blue"><PackageCheck size={11} /> {arrivingPacks} pack{arrivingPacks === 1 ? '' : 's'} arriving</span>
                     {totalAwaitingDispatchPacks > 0 ? (
-                      <span className="pill pill-amber">{totalAwaitingDispatchPacks} pack{totalAwaitingDispatchPacks === 1 ? '' : 's'} still with Curaleaf</span>
+                      <span className="pill pill-amber">{totalAwaitingDispatchPacks} pack{totalAwaitingDispatchPacks === 1 ? '' : 's'} awaiting dispatch</span>
                     ) : (
                       <span className="pill pill-green"><Check size={11} /> Full quantity in consignment</span>
                     )}
@@ -2551,7 +2541,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                   <Clock3 size={16} style={{ color: '#d97706' }} />
                   <span>
                     <strong>Arrived consignment checked in ({arrivingPacks} pk)</strong>
-                    <small>Mark these packs ready for collection. {remainingOpen ? `${Math.max(0, totalOrderedPacks - totalDispatchedPacks)} pack(s) remain open with Curaleaf for a later shipment.` : 'Perform pharmacy dispensing checks before patient collection.'}</small>
+                    <small>Mark these packs ready for collection. {remainingOpen ? `${Math.max(0, totalOrderedPacks - totalDispatchedPacks)} pack(s) still to dispatch in a later shipment.` : 'Perform pharmacy dispensing checks before patient collection.'}</small>
                   </span>
                 </span>
                 <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => onReadyForCollection(selectedShipmentId || undefined)}>
@@ -2579,7 +2569,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                   <PackageCheck size={16} style={{ color: 'var(--tenant-primary)' }} />
                   <span>
                     <strong>Arrived packs ready — partial handover available</strong>
-                    <small>Hand over only the checked-in packs now. Remaining quantity stays open with Curaleaf and the split dispatch banner remains visible.</small>
+                    <small>Hand over only the checked-in packs now. Remaining packs will ship separately.</small>
                   </span>
                 </span>
                 <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onOpenHandout(true, selectedShipmentId || undefined)}>
@@ -2617,23 +2607,23 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   );
 }
 
-function LedgerCopyButton({ detailKey, copyKey, value, copiedDetailKey, onCopy, compact = false }: {
+function LedgerCopyButton({ detailKey, copyKey, value, label, copiedDetailKey, onCopy }: {
   detailKey: string;
   copyKey: string;
   value: string;
+  label: string;
   copiedDetailKey: string | null;
   onCopy: (key: string, text: string) => void;
-  compact?: boolean;
 }) {
   return (
     <button
       type="button"
-      className={`order-ledger__copy-btn ${compact ? 'order-ledger__copy-btn--compact' : ''}`}
+      className="order-ledger__copy-btn"
       onClick={() => onCopy(copyKey, value)}
-      title="Copy"
-      aria-label="Copy value"
+      title={`Copy ${label}`}
+      aria-label={`Copy ${label}`}
     >
-      {copiedDetailKey === detailKey ? <Check size={compact ? 10 : 11} aria-hidden="true" /> : <Copy size={compact ? 10 : 11} aria-hidden="true" />}
+      {copiedDetailKey === detailKey ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
     </button>
   );
 }
@@ -2669,7 +2659,6 @@ function OrderDetailsDrawer({ order, patient, cleanStreetAddress, patientPostcod
   const consignments = collectOrderConsignments(order);
   const courierLabel = orderCourierLabel(order);
   const deliveryDestination = orderDeliveryDestination(order, pharmacyName);
-  const computedTotal = orderFinancialTotal(order);
   const paymentReference = order.payment.manualReference ?? order.payment.ref ?? null;
 
   return (
@@ -2679,246 +2668,154 @@ function OrderDetailsDrawer({ order, patient, cleanStreetAddress, patientPostcod
         className="order-details-drawer__toggle-btn"
         onClick={onToggle}
         aria-expanded={showOrderDetails}
+        aria-controls="order-details-drawer-content"
       >
-        <div className="order-details-drawer__toggle-left">
-          <span className="order-details-drawer__toggle-icon">
-            <FileText size={16} />
-          </span>
-          <div className="order-details-drawer__toggle-text">
-            <strong>{showOrderDetails ? 'Hide order details & history' : 'Order details & audit history'}</strong>
-            <small>References, consignments, contact, payment, and timeline</small>
-          </div>
-        </div>
-        <div className="order-details-drawer__toggle-right">
-          <span className="order-details-drawer__toggle-pill">
-            {showOrderDetails ? 'Collapse' : 'Expand details'}
-          </span>
-          {showOrderDetails ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-        </div>
+        <strong>{showOrderDetails ? 'Hide details' : 'Order details'}</strong>
+        {showOrderDetails ? <ChevronUp size={18} aria-hidden="true" /> : <ChevronDown size={18} aria-hidden="true" />}
       </button>
 
       {showOrderDetails ? (
-        <div className="order-details-drawer__content">
-          <div className="order-details-drawer__grid">
-            <section className="order-ledger__card">
-              <header className="order-ledger__card-head">
-                <span><small>Curaleaf Rocky API</small><strong>Prescription & PO references</strong></span>
-                <FileCode2 size={15} aria-hidden="true" />
-              </header>
-              <div className="order-ledger__stack">
-                {order.prescriptions.map((rx, rxIdx) => (
-                  <div key={rx.id} className="order-ledger__group">
-                    {order.prescriptions.length > 1 ? (
-                      <p className="order-ledger__group-label">Prescription {rxIdx + 1}</p>
-                    ) : null}
-                    <dl className="order-ledger__facts">
-                      <div className="order-ledger__row">
-                        <dt>Prescriber</dt>
-                        <dd><LedgerValue>{rx.prescriber || 'Prescriber pending'}</LedgerValue></dd>
-                      </div>
-                      <div className="order-ledger__row">
-                        <dt>PO reference</dt>
-                        <dd className="order-ledger__row-value">
-                          <LedgerValue mono>{rx.poRef ?? 'Pending placement'}</LedgerValue>
-                          {rx.poRef ? <LedgerCopyButton detailKey={`po_${rx.id}`} copyKey={`po_${rx.id}`} value={rx.poRef} copiedDetailKey={copiedDetailKey} onCopy={onCopy} /> : null}
+        <div id="order-details-drawer-content" className="order-details-drawer__content">
+          <div className="order-details-pair">
+            <section className="order-details-block">
+              <h3>Curaleaf</h3>
+              {order.prescriptions.map((rx, rxIdx) => {
+                const registration = rx.prescriberGmcNumber
+                  ? `GMC ${rx.prescriberGmcNumber}`
+                  : rx.prescriberGphcNumber
+                    ? `GPhC ${rx.prescriberGphcNumber}`
+                    : null;
+                return (
+                  <div key={rx.id}>
+                    {order.prescriptions.length > 1 ? <p className="order-details-group">{`Prescription ${rxIdx + 1}`}</p> : null}
+                    <dl className="order-details-kv">
+                      <div>
+                        <dt>PO</dt>
+                        <dd className="order-details-value">
+                          <LedgerValue mono>{rx.poRef ?? 'Pending'}</LedgerValue>
+                          {rx.poRef ? <LedgerCopyButton detailKey={`po_${rx.id}`} copyKey={`po_${rx.id}`} value={rx.poRef} label="PO reference" copiedDetailKey={copiedDetailKey} onCopy={onCopy} /> : null}
                         </dd>
                       </div>
-                      <div className="order-ledger__row">
-                        <dt>Serial number</dt>
-                        <dd className="order-ledger__row-value">
-                          <LedgerValue mono>{rx.serialNumber ?? 'Not recorded'}</LedgerValue>
-                          {rx.serialNumber ? <LedgerCopyButton detailKey={`serial_${rx.id}`} copyKey={`serial_${rx.id}`} value={rx.serialNumber} copiedDetailKey={copiedDetailKey} onCopy={onCopy} /> : null}
-                        </dd>
-                      </div>
+                      {rx.serialNumber ? (
+                        <div>
+                          <dt>Serial</dt>
+                          <dd className="order-details-value">
+                            <LedgerValue mono>{rx.serialNumber}</LedgerValue>
+                            <LedgerCopyButton detailKey={`serial_${rx.id}`} copyKey={`serial_${rx.id}`} value={rx.serialNumber} label="serial number" copiedDetailKey={copiedDetailKey} onCopy={onCopy} />
+                          </dd>
+                        </div>
+                      ) : null}
                       {rx.curaleafPrescriptionId ? (
-                        <div className="order-ledger__row">
-                          <dt>Curaleaf Rx ID</dt>
+                        <div>
+                          <dt>Rx ID</dt>
                           <dd><LedgerValue mono>{rx.curaleafPrescriptionId}</LedgerValue></dd>
                         </div>
                       ) : null}
-                      <div className="order-ledger__row">
-                        <dt>Curaleaf PO state</dt>
-                        <dd><LedgerValue>{rx.purchaseOrderState ?? (rx.placed ? 'ACTIVE' : 'DRAFT')}</LedgerValue></dd>
-                      </div>
-                      {rx.placedAt ? (
-                        <div className="order-ledger__row">
-                          <dt>Placed with Curaleaf</dt>
-                          <dd><LedgerValue>{formatDate(rx.placedAt, true)}</LedgerValue></dd>
-                        </div>
-                      ) : null}
-                      {rx.prescriberGmcNumber || rx.prescriberGphcNumber ? (
-                        <div className="order-ledger__row">
-                          <dt>Prescriber registration</dt>
-                          <dd><LedgerValue>{rx.prescriberGmcNumber ? `GMC #${rx.prescriberGmcNumber}` : `GPhC #${rx.prescriberGphcNumber}`}</LedgerValue></dd>
+                      {rx.prescriber || registration ? (
+                        <div>
+                          <dt>Prescriber</dt>
+                          <dd><LedgerValue>{[rx.prescriber, registration].filter(Boolean).join(' · ')}</LedgerValue></dd>
                         </div>
                       ) : null}
                     </dl>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </section>
 
-            <section className="order-ledger__card">
-              <header className="order-ledger__card-head">
-                <span><small>Courier & logistics</small><strong>Consignment & destination</strong></span>
-                <Truck size={15} aria-hidden="true" />
-              </header>
-              <dl className="order-ledger__facts">
-                <div className="order-ledger__row">
-                  <dt>Courier service</dt>
-                  <dd><LedgerValue>{courierLabel ?? 'Not yet dispatched'}</LedgerValue></dd>
-                </div>
-                <div className="order-ledger__row">
-                  <dt>Delivery destination</dt>
-                  <dd><LedgerValue>{deliveryDestination ?? 'Not yet dispatched'}</LedgerValue></dd>
-                </div>
-                <div className="order-ledger__row">
-                  <dt>Fulfilment model</dt>
-                  <dd><LedgerValue muted>Curaleaf dispatch → dispensary goods-in → in-person collection</LedgerValue></dd>
-                </div>
-              </dl>
-              {consignments.length ? (
-                <ul className="order-ledger__consignments">
-                  {consignments.map((consignment, index) => (
-                    <li key={consignment.id} className="order-ledger__consignment">
-                      <div className="order-ledger__consignment-head">
-                        <strong>Consignment {index + 1}</strong>
-                        <span className={`order-ledger__status order-ledger__status--${consignment.status.replace(/_/g, '-')}`}>{consignment.statusLabel}</span>
-                      </div>
-                      <dl className="order-ledger__facts order-ledger__facts--nested">
-                        <div className="order-ledger__row">
-                          <dt>Shipment ID</dt>
-                          <dd className="order-ledger__row-value">
-                            <LedgerValue mono title={consignment.id}>{shortConsignmentId(consignment.id)}</LedgerValue>
-                            <LedgerCopyButton detailKey={`shp_${consignment.id}`} copyKey={`shp_${consignment.id}`} value={consignment.id} copiedDetailKey={copiedDetailKey} onCopy={onCopy} compact />
-                          </dd>
-                        </div>
-                        {consignment.poRef ? (
-                          <div className="order-ledger__row">
-                            <dt>PO reference</dt>
-                            <dd><LedgerValue mono>{consignment.poRef}</LedgerValue></dd>
-                          </div>
-                        ) : null}
-                        <div className="order-ledger__row">
-                          <dt>Packs in consignment</dt>
-                          <dd><LedgerValue>{consignment.packCount} pack{consignment.packCount === 1 ? '' : 's'}</LedgerValue></dd>
-                        </div>
-                        {consignment.createdAt ? (
-                          <div className="order-ledger__row">
-                            <dt>Dispatched</dt>
-                            <dd><LedgerValue>{formatDate(consignment.createdAt, true)}</LedgerValue></dd>
-                          </div>
-                        ) : null}
-                        {consignment.shipmentCharge ? (
-                          <div className="order-ledger__row">
-                            <dt>Shipment charge</dt>
-                            <dd><LedgerValue>£{consignment.shipmentCharge}</LedgerValue></dd>
-                          </div>
-                        ) : null}
-                        {consignment.shippingAddress ? (
-                          <div className="order-ledger__row">
-                            <dt>Ship-to address</dt>
-                            <dd><LedgerValue>{consignment.shippingAddress}</LedgerValue></dd>
-                          </div>
-                        ) : null}
-                      </dl>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="order-ledger__empty">Not yet dispatched — consignment details appear when Curaleaf creates a shipment.</p>
-              )}
-            </section>
-
-            <section className="order-ledger__card">
-              <header className="order-ledger__card-head">
-                <span><small>Customer</small><strong>Contact details</strong></span>
-                <UserRound size={15} aria-hidden="true" />
-              </header>
-              <dl className="order-ledger__facts">
-                <div className="order-ledger__row">
-                  <dt><Mail size={12} aria-hidden="true" /> Email</dt>
-                  <dd><LedgerValue>{patient?.email ?? 'Not recorded'}</LedgerValue></dd>
-                </div>
-                <div className="order-ledger__row">
-                  <dt><Phone size={12} aria-hidden="true" /> Mobile</dt>
-                  <dd><LedgerValue>{patient?.mobile ?? 'Not recorded'}</LedgerValue></dd>
-                </div>
-                <div className="order-ledger__row">
-                  <dt><UserRound size={12} aria-hidden="true" /> Date of birth</dt>
-                  <dd><LedgerValue>{patient?.dob ? formatPatientDob(patient.dob) : 'Not recorded'}</LedgerValue></dd>
-                </div>
-                <div className="order-ledger__row">
-                  <dt><MapPin size={12} aria-hidden="true" /> Address</dt>
-                  <dd><LedgerValue>{cleanStreetAddress || 'Not recorded'}</LedgerValue></dd>
-                </div>
-                {patientPostcode ? (
-                  <div className="order-ledger__row">
-                    <dt><MapPin size={12} aria-hidden="true" /> Postcode</dt>
-                    <dd><LedgerValue>{patientPostcode}</LedgerValue></dd>
+            <section className="order-details-block">
+              <h3>Patient</h3>
+              <dl className="order-details-kv">
+                {patient?.email ? (
+                  <div>
+                    <dt>Email</dt>
+                    <dd><LedgerValue>{patient.email}</LedgerValue></dd>
+                  </div>
+                ) : null}
+                {patient?.mobile ? (
+                  <div>
+                    <dt>Mobile</dt>
+                    <dd><LedgerValue>{patient.mobile}</LedgerValue></dd>
+                  </div>
+                ) : null}
+                {patient?.dob ? (
+                  <div>
+                    <dt>DOB</dt>
+                    <dd><LedgerValue>{formatPatientDob(patient.dob)}</LedgerValue></dd>
+                  </div>
+                ) : null}
+                {cleanStreetAddress || patientPostcode ? (
+                  <div>
+                    <dt>Address</dt>
+                    <dd><LedgerValue>{[cleanStreetAddress, patientPostcode].filter(Boolean).join(', ')}</LedgerValue></dd>
                   </div>
                 ) : null}
               </dl>
-            </section>
-
-            <section className="order-ledger__card">
-              <header className="order-ledger__card-head">
-                <span><small>Financial breakdown</small><strong>{order.payment.status === 'paid' ? 'Payment cleared' : 'Payment outstanding'}</strong></span>
-                {order.payment.route === 'worldpay' ? <CreditCard size={15} aria-hidden="true" /> : <Banknote size={15} aria-hidden="true" />}
-              </header>
-              <dl className="order-ledger__facts">
-                {order.prescriptions.flatMap(rx => rx.items).map(item => (
-                  <div key={item.productId} className="order-ledger__row">
-                    <dt>{resolveProductName(item)} <span className="order-ledger__meta">{item.qty} × {money(item.retail)}</span></dt>
-                    <dd><LedgerValue>{money(item.retail * item.qty)}</LedgerValue></dd>
-                  </div>
-                ))}
-                {order.dispensingFee ? (
-                  <div className="order-ledger__row">
-                    <dt>Dispensing fee</dt>
-                    <dd><LedgerValue>{money(order.dispensingFee)}</LedgerValue></dd>
-                  </div>
-                ) : null}
-                <div className="order-ledger__row order-ledger__row--total">
-                  <dt>Total {order.payment.status === 'paid' ? 'paid' : 'due'}</dt>
-                  <dd><LedgerValue>{money(order.payment.amount)}</LedgerValue></dd>
-                </div>
-                {Math.abs(computedTotal - order.payment.amount) > 0.009 ? (
-                  <div className="order-ledger__row">
-                    <dt>Line-item subtotal</dt>
-                    <dd><LedgerValue muted>{money(computedTotal)}</LedgerValue></dd>
-                  </div>
-                ) : null}
-                <div className="order-ledger__row">
-                  <dt>Payment route</dt>
-                  <dd><LedgerValue>{order.payment.route === 'worldpay' ? 'Worldpay' : 'Pharmacy managed'}</LedgerValue></dd>
-                </div>
-                <div className="order-ledger__row">
-                  <dt>Requested</dt>
-                  <dd><LedgerValue>{formatDate(order.payment.sentAt, true)}</LedgerValue></dd>
-                </div>
-                {order.payment.paidAt ? (
-                  <div className="order-ledger__row">
-                    <dt>Paid at</dt>
-                    <dd><LedgerValue>{formatDate(order.payment.paidAt, true)}</LedgerValue></dd>
-                  </div>
-                ) : null}
-                <div className="order-ledger__row">
-                  <dt>Reference</dt>
-                  <dd className="order-ledger__row-value">
-                    <LedgerValue mono>{paymentReference ?? 'Pending'}</LedgerValue>
-                    {paymentReference ? <LedgerCopyButton detailKey="pay_ref" copyKey="pay_ref" value={paymentReference} copiedDetailKey={copiedDetailKey} onCopy={onCopy} /> : null}
-                  </dd>
-                </div>
-              </dl>
+              {!patient?.email && !patient?.mobile && !patient?.dob && !cleanStreetAddress && !patientPostcode ? (
+                <p className="order-details-empty">No contact details on this record.</p>
+              ) : null}
             </section>
           </div>
 
-          <section className="order-ledger__card order-ledger__card--timeline">
-            <header className="order-ledger__card-head">
-              <span><small>Audit trail</small><strong>Activity timeline</strong></span>
-              <Clock3 size={15} aria-hidden="true" />
-            </header>
+          {consignments.length ? (
+            <section className="order-details-block">
+              <h3>Dispatch</h3>
+              <p className="order-details-summary">
+                {[courierLabel, deliveryDestination].filter(Boolean).join(' · ') || 'Curaleaf courier'}
+              </p>
+              <ul className="order-details-consignments">
+                {consignments.map((consignment, index) => (
+                  <li key={consignment.id}>
+                    <span>
+                      <strong>{consignments.length > 1 ? `Shipment ${index + 1}` : 'Shipment'}</strong>
+                      {' · '}
+                      {consignment.statusLabel}
+                      {consignment.packCount ? ` · ${consignment.packCount} pack${consignment.packCount === 1 ? '' : 's'}` : ''}
+                    </span>
+                    <span className="order-details-value">
+                      <LedgerValue mono>{shortConsignmentId(consignment.id)}</LedgerValue>
+                      <LedgerCopyButton detailKey={`shp_${consignment.id}`} copyKey={`shp_${consignment.id}`} value={consignment.id} label="consignment ID" copiedDetailKey={copiedDetailKey} onCopy={onCopy} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <section className="order-details-block">
+            <h3>{order.payment.status === 'paid' ? 'Payment' : 'Amount due'}</h3>
+            <dl className="order-details-kv">
+              {order.prescriptions.flatMap(rx => rx.items.map((item, itemIdx) => (
+                <div key={`${rx.id}-${item.productId}-${itemIdx}`}>
+                  <dt className="order-details-product">
+                    <span className="order-details-product-name" title={resolveProductName(item)}>{resolveProductName(item)}</span>
+                    <span className="order-details-qty">{item.qty} × {money(item.retail)}</span>
+                  </dt>
+                  <dd><LedgerValue>{money(item.retail * item.qty)}</LedgerValue></dd>
+                </div>
+              )))}
+              {order.dispensingFee ? (
+                <div>
+                  <dt>Dispensing fee</dt>
+                  <dd><LedgerValue>{money(order.dispensingFee)}</LedgerValue></dd>
+                </div>
+              ) : null}
+              <div className="order-details-total">
+                <dt>Total</dt>
+                <dd><LedgerValue>{money(order.payment.amount)}</LedgerValue></dd>
+              </div>
+            </dl>
+            <p className="order-details-summary">
+              {[
+                order.payment.route === 'worldpay' ? 'Worldpay' : 'Pharmacy managed',
+                order.payment.paidAt ? `Paid ${formatDate(order.payment.paidAt, true)}` : order.payment.sentAt ? `Requested ${formatDate(order.payment.sentAt, true)}` : null,
+                paymentReference && !order.prescriptions.some(rx => rx.poRef === paymentReference) ? `Ref ${paymentReference}` : null,
+              ].filter(Boolean).join(' · ')}
+            </p>
+          </section>
+
+          <section className="order-details-block order-details-block--timeline">
+            <h3>Timeline</h3>
             <OrderTimeline order={order} />
           </section>
         </div>
@@ -2933,14 +2830,21 @@ function OrderTimeline({ order }: { order: PatientOrder & { handoutAt?: Date | s
     return <p className="order-ledger__empty">No activity recorded yet.</p>;
   }
   return (
-    <ol className="order-crm-timeline order-ledger__timeline">
+    <ol className="order-crm-timeline order-details-timeline">
       {events.map((event, index) => (
         <li key={`${event.label}-${index}`}>
           <span aria-hidden="true" />
           <div>
-            <strong>{event.label}</strong>
-            <small>{event.detail}</small>
-            <time dateTime={event.date ? new Date(event.date).toISOString() : undefined}>{formatDate(event.date, true)}</time>
+            <strong>
+              {event.label}
+              {event.date ? (
+                <>
+                  {' '}
+                  <time dateTime={new Date(event.date).toISOString()}>{formatDate(event.date, true)}</time>
+                </>
+              ) : null}
+            </strong>
+            {event.detail ? <small>{event.detail}</small> : null}
           </div>
         </li>
       ))}

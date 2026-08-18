@@ -1010,6 +1010,18 @@ export interface PharmacyOverview {
     readyForCollection: number;
     urgentTotal: number;
   };
+  prescriptionStarts: {
+    firstCount: number;
+    repeatCount: number;
+    items: Array<{
+      id: string;
+      kind: 'first' | 'repeat';
+      ageDays: number;
+      maskedPatientLabel: string;
+      lastOrderReference: string | null;
+      recordTarget: { kind: 'patient'; id: string };
+    }>;
+  };
   priorityItems: Array<{
     id: string;
     kind: 'payment' | 'supplier' | 'collection' | 'repeat' | 'cancellation';
@@ -1036,6 +1048,7 @@ export interface PharmacyOverview {
   integrations: Array<{
     integration: 'curaleaf' | 'worldpay';
     state: 'connected' | 'degraded' | 'unavailable' | 'not-configured';
+    environment: 'test' | 'production' | null;
     checkedAt: string | null;
   }>;
 }
