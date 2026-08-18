@@ -4,6 +4,7 @@ import { dataConnect } from '../../bootstrap/firebase.js';
 import { HttpError } from '../../domain/common/errors.js';
 import { assertPlatformScope, assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
+import { pharmacyFinanceRecognition } from './finance-recognition.js';
 
 const organisationIdSchema = z.string().regex(/^(?:[a-f\d]{32}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i);
 
@@ -135,15 +136,7 @@ export function createPortalFinanceRouter(): Router {
       const patientMap = new Map(rawPatients.map(p => [p.id, `${p.firstName} ${p.surname}`.trim() || p.email]));
 
       const datedRows = rawOrders.map(order => {
-        const isPaid = order.paymentStatus === 'PAID' || Boolean(order.paidAt);
-        const isCollected = order.fulfilmentStatus === 'COLLECTED';
-        const isRefunded = order.paymentStatus === 'REFUNDED' || order.status === 'REFUNDED' || Boolean(order.refundedAt);
-        const isCancelled = order.status === 'CANCELLED' || order.paymentStatus === 'CANCELLED';
-        // Revenue recognised only when: paid AND collected AND not refunded AND not cancelled
-        const recognised = isPaid && isCollected && !isRefunded && !isCancelled;
-        // Track paid-but-pending-collection separately
-        const pendingRecognition = isPaid && !isCollected && !isRefunded && !isCancelled;
-        const refundPending = isCancelled && isPaid && !isRefunded;
+        const flags = pharmacyFinanceRecognition(order);
         const snapshot = (order.quoteSnapshot ?? {}) as any;
         const rawLines = snapshot?.lineItems || snapshot?.items || snapshot?.prescriptions?.flatMap((rx: any) => rx.items) || [];
         const lines = Array.isArray(rawLines) ? rawLines.map((item: any) => {
@@ -190,15 +183,14 @@ export function createPortalFinanceRouter(): Router {
           patientName: patientMap.get(order.patientId) || 'Patient record',
           createdAt: String(order.createdAt),
           updatedAt: String(order.updatedAt || order.createdAt),
-          recognisedAt: recognised ? String(order.paidAt || order.updatedAt || order.createdAt) : null,
-          refundedAt: isRefunded ? String(order.cancelledAt || order.updatedAt) : null,
+          recognisedAt: flags.recognised ? String(order.paidAt || order.updatedAt || order.createdAt) : null,
+          refundedAt: flags.refunded ? String(flags.refundConfirmedAt || order.cancelledAt || order.updatedAt) : null,
           financialEventAt,
           paymentStatus: String(order.paymentStatus).toLowerCase(),
           fulfilmentStatus: String(order.fulfilmentStatus).toLowerCase(),
-          recognised,
-          pendingRecognition,
-          refunded: isRefunded,
-          refundPending,
+          recognised: flags.recognised,
+          refunded: flags.refunded,
+          refundPending: flags.refundPending,
           productRevenuePence,
           dispensingFeePence,
           patientRevenuePence,
@@ -219,15 +211,11 @@ export function createPortalFinanceRouter(): Router {
       const recognisedRows = rangedRows.filter(r => r.recognised);
       const refundedRows = rangedRows.filter(r => r.refunded);
       const refundPendingRows = rangedRows.filter(r => r.refundPending);
-      const pendingRecognitionRows = rangedRows.filter(r => r.pendingRecognition);
       const pendingPaymentRows = rangedRows.filter(r => ['pending', 'awaiting_manual_payment', 'awaiting_payment'].includes(r.paymentStatus));
 
       const totals = {
         prescriptionCount: rangedRows.length,
         paidPrescriptionCount: recognisedRows.length,
-        // Paid and placed with Curaleaf but not yet collected by patient
-        pendingRecognitionCount: pendingRecognitionRows.length,
-        pendingRecognitionPence: pendingRecognitionRows.reduce((sum, r) => sum + r.patientRevenuePence, 0),
         pendingPrescriptionCount: pendingPaymentRows.length,
         refundedPrescriptionCount: refundedRows.length,
         refundedPatientPence: refundedRows.reduce((sum, r) => sum + r.patientRevenuePence, 0),

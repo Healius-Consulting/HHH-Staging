@@ -136,7 +136,7 @@ export default function PharmacyFinance() {
             <div className="summary-tile">
               <span className="summary-tile__label">Patient product revenue</span>
               <strong className="summary-tile__value">{pounds(totals.productRevenuePence)}</strong>
-              <small className="summary-tile__detail">Collected orders only</small>
+              <small className="summary-tile__detail">Paid orders</small>
               <PoundSterling className="summary-tile__arrow" size={16} aria-hidden="true" />
             </div>
             <div className="summary-tile">
@@ -196,24 +196,14 @@ export default function PharmacyFinance() {
               </div>
             </div>
           )}
-          {/* Pending recognition — paid but not yet collected */}
-          {(totals as any).pendingRecognitionCount > 0 && (
-            <div className="alert-warning pharmacy-finance__notice" role="status">
-              <AlertCircle size={17} aria-hidden="true" />
-              <div>
-                <strong>{(totals as any).pendingRecognitionCount} paid order{(totals as any).pendingRecognitionCount === 1 ? '' : 's'} awaiting patient collection</strong>
-                <span>These {pounds((totals as any).pendingRecognitionPence)} are paid and placed with Curaleaf but will only appear in revenue once collected by the patient.</span>
-              </div>
-            </div>
-          )}
 
           <section className="card card-flush pharmacy-finance__ledger">
             <div className="section-heading section-heading--padded">
               <div>
                 <p className="section-label">Prescription ledger</p>
-                <h3>{financialOrders.length} collected order{financialOrders.length === 1 ? '' : 's'} · {periodLabel}</h3>
+                <h3>{financialOrders.length} paid order{financialOrders.length === 1 ? '' : 's'} · {periodLabel}</h3>
               </div>
-              <span>Refunded and pending-collection orders excluded</span>
+              <span>Refunded orders excluded</span>
             </div>
 
             {financialOrders.length === 0 ? (
