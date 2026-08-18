@@ -16,6 +16,7 @@ import {
   FileCode2,
   FileText,
   Info,
+  Layers2,
   Mail,
   MapPin,
   Package,
@@ -158,20 +159,20 @@ function recordStageMeta(record: OrderRecord) {
   if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'warning', icon: AlertTriangle };
   if (resolution === 'refunded') return { label: 'Refunded', description: 'Cancellation closed and patient refund completed', tone: 'refunded', icon: Banknote };
   if (resolution === 'resolved') return { label: 'Resolved', description: 'Cancellation closed with no action outstanding', tone: 'resolved', icon: CheckCircle2 };
-  if (record.stage === 'dispatched' && orderHasPartialCollection(record.order) && !orderHasInTransitPacks(record.order) && !orderHasUncollectedReceivedPacks(record.order)) {
+  if (orderHasPartialCollection(record.order) && !orderHasInTransitPacks(record.order) && !orderHasUncollectedReceivedPacks(record.order)) {
     return {
       label: 'Part collected',
       description: 'Arrived packs handed out; remainder still with Curaleaf',
-      tone: 'collected',
-      icon: Check,
+      tone: 'partial',
+      icon: Layers2,
     };
   }
-  if (record.stage === 'dispatched' && orderHasPartialPharmacyReceipt(record.order)) {
+  if (orderHasPartialPharmacyReceipt(record.order) && !orderHasInTransitPacks(record.order)) {
     return {
       label: 'Part delivered',
       description: 'First consignment checked in; remainder still with Curaleaf',
-      tone: 'dispatched',
-      icon: Truck,
+      tone: 'partial',
+      icon: Layers2,
     };
   }
   return STAGE_META[record.stage];
@@ -1065,7 +1066,7 @@ function OrderListRow({ record, selected, now, onSelect }: { record: OrderRecord
   const cancellationResolution = orderCancellationResolution(record.order);
   const isCancellation = cancellationResolution !== 'none';
   return (
-    <button type="button" className={`order-crm-row${isCancellation ? ` order-crm-row--cancelled order-crm-row--${cancellationResolution}` : ''}${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={onSelect}>
+    <button type="button" className={`order-crm-row${meta.tone === 'partial' ? ' order-crm-row--partial' : ''}${isCancellation ? ` order-crm-row--cancelled order-crm-row--${cancellationResolution}` : ''}${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={onSelect}>
       <span className={`order-crm-row__stage order-tone--${meta.tone}`}><Icon size={15} /></span>
       <span className="order-crm-row__identity"><strong title={patientName}>{compactPatientName(patientName)}</strong><small>{record.order.redoContext ? 'Replacement' : 'Order'} {orderReference(record.order)} · {record.order.prescriptions.length} Rx</small></span>
       <span className="order-crm-row__position"><strong>{money(record.order.payment.amount)}</strong><small>{shipmentListCopy(record, now) ?? formatDate(record.order.date)}</small></span>
