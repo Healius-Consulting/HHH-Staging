@@ -263,11 +263,13 @@ export async function executeCuraleafOrderPlacement(
     console.warn('[Curaleaf] Existing purchase-order lookup note:', lookupErr);
   }
 
-  const rxList = Array.isArray(snapshot?.prescriptions) ? snapshot.prescriptions : [];
-  const rxData = rxList[0] || {};
-  const prescriberInfo = rxData.prescriber || {};
+  const rxList = Array.isArray(snapshot.prescriptions) ? snapshot.prescriptions as Array<Record<string, unknown>> : [];
+  const rxData = (rxList[0] && typeof rxList[0] === 'object' ? rxList[0] : {}) as Record<string, unknown>;
+  const prescriberInfo = (rxData.prescriber && typeof rxData.prescriber === 'object'
+    ? rxData.prescriber
+    : {}) as Record<string, unknown>;
 
-  const prescriberGphc = prescriberInfo.gphcNumber || null;
+  const prescriberGphc = typeof prescriberInfo.gphcNumber === 'string' ? prescriberInfo.gphcNumber : null;
   const prescriberGmc = prescriberInfo.gmcNumber ? Number(prescriberInfo.gmcNumber) : null;
   const prescriberPin = String(prescriberInfo.pin || '');
 
@@ -321,19 +323,29 @@ export async function executeCuraleafOrderPlacement(
   }
 
   // Step 2: Extract line items & formulas for prescription submission.
-  const rawItems = snapshot?.lineItems || snapshot?.items || rxList.flatMap((rx: any) => rx.items) || [];
+  const rxDataItems = Array.isArray(rxData.items) ? rxData.items as Array<Record<string, unknown>> : [];
+  const rawItems: Array<Record<string, unknown>> = Array.isArray(snapshot.lineItems)
+    ? snapshot.lineItems as Array<Record<string, unknown>>
+    : Array.isArray(snapshot.items)
+      ? snapshot.items as Array<Record<string, unknown>>
+      : rxList.flatMap(rx => Array.isArray(rx.items) ? rx.items as Array<Record<string, unknown>> : []);
   const lineItems: Array<{ productId: string; count: number; formulaId?: string; unitsNeededCount?: number }> = [];
 
   for (const item of rawItems) {
     const id = String(item.productId || item.packId || item.id || '');
     const count = Number(item.quantity || item.qty || item.count || 1);
-    const formulaId = item.formulaId || rxData.items?.[0]?.formulaId;
+    const rawFormulaId = item.formulaId ?? rxDataItems[0]?.formulaId;
+    const formulaId = typeof rawFormulaId === 'string' ? rawFormulaId : undefined;
+    const rawUnitsNeeded = item.unitsNeededCount;
+    const unitsNeededCount = typeof rawUnitsNeeded === 'number'
+      ? rawUnitsNeeded
+      : count * 10;
     if (id && count > 0) {
       lineItems.push({
         productId: id,
         count,
         formulaId: formulaId && formulaId !== id ? formulaId : undefined,
-        unitsNeededCount: item.unitsNeededCount || count * 10,
+        unitsNeededCount,
       });
     }
   }
@@ -371,18 +383,24 @@ export async function executeCuraleafOrderPlacement(
   let curaleafPrescriptionId: string | null = priorCuraleaf?.prescriptionId ?? null;
   if (!curaleafPrescriptionId) {
     try {
+      const serialNumber = typeof rxData.serialNumber === 'string'
+        ? rxData.serialNumber
+        : `RX-${order.orderNumber || (order.id || 'ORDER').slice(0, 8)}`;
+      const issueDate = typeof rxData.issueDate === 'string'
+        ? rxData.issueDate
+        : new Date().toISOString().split('T')[0];
       const rxRes = await curaleafApiRequest<{ id: string; state?: string }>(connection, '/v1/prescriptions/', {
         method: 'POST',
         body: JSON.stringify({
-          serialNumber: rxData.serialNumber || `RX-${order.orderNumber || (order.id || 'ORDER').slice(0, 8)}`,
+          serialNumber,
           prescriberId,
-          issueDate: rxData.issueDate || new Date().toISOString().split('T')[0],
+          issueDate,
           items: rxItems,
         }),
       });
       if (rxRes?.id) {
         curaleafPrescriptionId = rxRes.id;
-        console.log(`[Curaleaf] Prescription submitted: ${curaleafPrescriptionId} (serial: ${rxData.serialNumber})`);
+        console.log(`[Curaleaf] Prescription submitted: ${curaleafPrescriptionId} (serial: ${serialNumber})`);
       }
     } catch (err) {
       console.warn('[Curaleaf] Prescription create note:', err);
