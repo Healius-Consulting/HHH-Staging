@@ -2158,11 +2158,12 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   });
 
   const hasSupplierSection = Boolean(prescription.placed && (prescription.fulfilmentLines?.length || isDispatchedPhase || isPartiallyDelivered || isDelivered || isReady));
+  const totalAwaitingDispatchPacks = displayLines.reduce((sum, line) => sum + line.awaitingDispatchPacks, 0);
+  const arrivingPacks = totalConsignmentPacks || totalDispatchedPacks;
 
   return (
     <div className="order-rx-pair">
-      {/* Box 1: Pharmacy Prescription Ordered Details */}
-      <article className="order-rx-card">
+      <article className={`order-rx-card${hasSupplierSection ? ' order-rx-card--unified' : ''}`}>
         <header>
           <span><small>Prescription {index + 1}</small><strong>{prescription.prescriber || 'Prescriber pending'}</strong></span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2185,312 +2186,285 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
           </div>
         ) : null}
 
-        <div className="order-rx-lines">
-          {prescription.items.map(item => (
-            <div key={item.productId}>
-              <span>
-                <strong>{resolveProductName(item)}</strong>
-                <small>{item.qty} pack{item.qty === 1 ? '' : 's'}{item.retail ? ` · ${money(item.retail * item.qty)}` : ''}</small>
-              </span>
-              <span className="pack-qty-badge">{item.qty} pack{item.qty === 1 ? '' : 's'}</span>
-            </div>
-          ))}
-        </div>
-      </article>
-
-      {/* Box 2: Curaleaf Allocation, In-Transit Progress & Consignment Check-In */}
-      {hasSupplierSection ? (
-        <article className="order-rx-card order-rx-card--supplier">
-          {shipmentIds.length > 1 ? (
-            <div className="order-shipments-segmented-bar">
-              <div className="order-shipments-segmented-bar__meta">
-                <Truck size={13} />
-                <span><strong>{shipmentIds.length} Consignments Dispatched</strong> · Select parcel to inspect & check in:</span>
-              </div>
-              <div className="order-shipments-segmented-tabs">
-                {shipmentIds.map((id, shipmentIndex) => {
-                  const state = prescription.shipmentStates?.[id];
-                  const isSelected = id === selectedShipmentId;
-                  const formattedState = state ? state.replaceAll('_', ' ') : 'In Transit';
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`order-shipments-tab ${isSelected ? 'order-shipments-tab--active' : ''}`}
-                      onClick={() => setSelectedShipmentId(id)}
-                    >
-                      <span className="order-shipments-tab__title">Consignment {shipmentIndex + 1}</span>
-                      <span className={`order-shipments-tab__badge order-shipments-tab__badge--${state || 'in_transit'}`}>
-                        {formattedState}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="order-supplier-fulfilment">
-            <header className="order-supplier-fulfilment__header">
-              <div>
-                <small>Curaleaf Live Allocation & Progress</small>
-                <strong>
-                  {isCollected
-                    ? 'Delivered to Pharmacy — Checked In'
-                    : isPartiallyDelivered
-                      ? 'Partial check-in — remainder open with Curaleaf'
-                      : hasShippedNotCheckedIn && prescription.dispatchStatus === 'partial'
-                        ? 'Partial dispatch — check in arriving consignment'
-                      : isDelivered || isReady
-                        ? 'Arrived consignment checked in'
-                        : prescription.dispatchStatus === 'complete'
-                          ? 'Fulfilled by Curaleaf — Dispatched'
-                          : prescription.dispatchStatus === 'partial'
-                            ? 'Partial dispatch — remainder awaiting dispatch at Curaleaf'
-                            : isDispatchedPhase
-                              ? 'Dispatched with courier — check in arriving consignment'
-                              : prescription.purchaseOrderState === 'FULLY_ALLOCATED'
-                                ? 'Fully dispensed by Curaleaf'
-                                : prescription.purchaseOrderState === 'PROCESSING'
-                                  ? 'Dispensing at Curaleaf'
-                                  : 'Curaleaf purchase order active'}
-                </strong>
-              </div>
-              {deliveryGuidance ? (
-                <span className="order-delivery-estimate-badge">
-                  <Truck size={12} /> {deliveryRange(deliveryGuidance)}
+        {!hasSupplierSection ? (
+          <div className="order-rx-lines">
+            {prescription.items.map(item => (
+              <div key={item.productId}>
+                <span>
+                  <strong>{resolveProductName(item)}</strong>
+                  <small>{item.qty} pack{item.qty === 1 ? '' : 's'}{item.retail ? ` · ${money(item.retail * item.qty)}` : ''}</small>
                 </span>
-              ) : null}
-            </header>
-            <div className="order-supplier-fulfilment__body">
-              {displayLines.map(line => {
-                const steps = fulfilmentPipelineSteps(line);
-
-                return (
-                  <div key={line.productId} className={`order-fulfilment-row ${line.quantityMismatch ? 'has-mismatch' : ''}`}>
-                    <div className="order-fulfilment-row__header">
-                      <div>
-                        <strong>{line.displayName}</strong>
-                        {line.quantityMismatch ? (
-                          <span className="mismatch-tag">
-                            PO reports {line.supplierReportedOrdered} pack{line.supplierReportedOrdered === 1 ? '' : 's'} (Mismatch)
-                          </span>
-                        ) : (
-                          <small>Live Curaleaf Lab Allocation</small>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="order-fulfilment-pipeline" role="list" aria-label="Curaleaf fulfilment progress">
-                      <div className={pipelineStepClass('pipeline-step pipeline-step--ordered', steps.ordered)} role="listitem">
-                        <span className="pipeline-step__num" aria-hidden="true">1</span>
-                        <div className="pipeline-step__content">
-                          <span className="pipeline-step__label">Ordered</span>
-                          <strong className="pipeline-step__value">{line.orderedPacks} <small>pk</small></strong>
-                        </div>
-                      </div>
-
-                      <div className={pipelineStepClass('pipeline-step pipeline-step--picked', steps.dispensed)} role="listitem">
-                        <span className="pipeline-step__num" aria-hidden="true">2</span>
-                        <div className="pipeline-step__content">
-                          <span className="pipeline-step__label">Curaleaf Dispensed</span>
-                          <strong className="pipeline-step__value">{line.allocatedPacks}/{line.orderedPacks} <small>pk</small></strong>
-                        </div>
-                      </div>
-
-                      <div className={pipelineStepClass('pipeline-step pipeline-step--transit', steps.inTransit)} role="listitem">
-                        <span className="pipeline-step__num" aria-hidden="true">3</span>
-                        <div className="pipeline-step__content">
-                          <span className="pipeline-step__label">In Transit</span>
-                          <strong className="pipeline-step__value">
-                            {line.inTransitPacks} <small>pk</small>
-                            {line.isSplit && line.awaitingDispatchPacks > 0 ? (
-                              <span className="pipeline-step__split-tag" title={`${line.awaitingDispatchPacks} pack(s) awaiting next dispatch`}>
-                                +{line.awaitingDispatchPacks} split
-                              </span>
-                            ) : null}
-                          </strong>
-                        </div>
-                      </div>
-
-                      <div className={pipelineStepClass('pipeline-step pipeline-step--received', steps.checkedIn)} role="listitem">
-                        <span className="pipeline-step__num" aria-hidden="true">4</span>
-                        <div className="pipeline-step__content">
-                          <span className="pipeline-step__label">Checked In</span>
-                          <strong className="pipeline-step__value">{line.receivedPacks}/{line.orderedPacks} <small>pk</small></strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="order-fulfilment-bar">
-                      <div className="order-fulfilment-bar__fill--allocated" style={{ width: `${line.percentAllocated}%` }} />
-                      {line.inTransitPacks > 0 || (line.isSplit && line.awaitingDispatchPacks > 0) ? <div className="order-fulfilment-bar__fill--transit" style={{ width: `${line.percentInTransit}%` }} /> : null}
-                      <div className="order-fulfilment-bar__fill--received" style={{ width: `${line.percentReceived}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                <span className="pack-qty-badge">{item.qty} pack{item.qty === 1 ? '' : 's'}</span>
+              </div>
+            ))}
           </div>
-          {receiving ? (
-            <div className="order-goods-in">
-              <header className="order-goods-in__header">
-                <div>
-                  <span className="order-goods-in__eyebrow">Curaleaf Consignment Manifest</span>
-                  <h3 className="order-goods-in__title">
-                    {prescription.status === 'partially-received'
-                      ? 'Check in arriving consignment'
-                      : 'Check in arriving consignment from Curaleaf'}
-                  </h3>
+        ) : (
+          <>
+            {shipmentIds.length > 1 ? (
+              <div className="order-shipments-segmented-bar">
+                <div className="order-shipments-segmented-bar__meta">
+                  <Truck size={13} />
+                  <span><strong>{shipmentIds.length} Consignments Dispatched</strong> · Select parcel to inspect & check in:</span>
                 </div>
-                <div className="order-goods-in__header-actions">
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm order-goods-in__chase-btn"
-                    onClick={() => onChaseCuraleaf?.(prescription, selectedShipmentId || undefined)}
-                  >
-                    <PhoneCall size={12} /> Chase Curaleaf / Issue
-                  </button>
+                <div className="order-shipments-segmented-tabs">
+                  {shipmentIds.map((id, shipmentIndex) => {
+                    const state = prescription.shipmentStates?.[id];
+                    const isSelected = id === selectedShipmentId;
+                    const formattedState = state ? state.replaceAll('_', ' ') : 'In Transit';
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`order-shipments-tab ${isSelected ? 'order-shipments-tab--active' : ''}`}
+                        onClick={() => setSelectedShipmentId(id)}
+                      >
+                        <span className="order-shipments-tab__title">Consignment {shipmentIndex + 1}</span>
+                        <span className={`order-shipments-tab__badge order-shipments-tab__badge--${state || 'in_transit'}`}>
+                          {formattedState}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-              </header>
+              </div>
+            ) : null}
 
-              <div className="order-goods-in__items">
+            <div className="order-supplier-fulfilment">
+              <header className="order-supplier-fulfilment__header">
+                <div>
+                  <small>Curaleaf fulfilment</small>
+                  <strong>
+                    {isCollected
+                      ? 'Delivered to Pharmacy — Checked In'
+                      : isPartiallyDelivered
+                        ? 'Partial check-in — remainder open with Curaleaf'
+                        : hasShippedNotCheckedIn && prescription.dispatchStatus === 'partial'
+                          ? 'Partial dispatch — check in arriving consignment'
+                          : isDelivered || isReady
+                            ? 'Arrived consignment checked in'
+                            : prescription.dispatchStatus === 'complete'
+                              ? 'Fulfilled by Curaleaf — Dispatched'
+                              : prescription.dispatchStatus === 'partial'
+                                ? 'Partial dispatch — remainder awaiting dispatch at Curaleaf'
+                                : isDispatchedPhase
+                                  ? 'Dispatched with courier — check in arriving consignment'
+                                  : prescription.purchaseOrderState === 'FULLY_ALLOCATED'
+                                    ? 'Fully dispensed by Curaleaf'
+                                    : prescription.purchaseOrderState === 'PROCESSING'
+                                      ? 'Dispensing at Curaleaf'
+                                      : 'Curaleaf purchase order active'}
+                  </strong>
+                </div>
+                {deliveryGuidance ? (
+                  <span className="order-delivery-estimate-badge">
+                    <Truck size={12} /> {deliveryRange(deliveryGuidance)}
+                  </span>
+                ) : null}
+              </header>
+              <div className="order-supplier-fulfilment__body">
                 {displayLines.map(line => {
-                  const dispatchedQty = line.consignmentPacks || line.dispatchedPacks;
-                  const isPartial = line.isSplit;
+                  const steps = fulfilmentPipelineSteps(line);
 
                   return (
-                    <div key={line.productId} className="order-goods-in__item-card order-goods-in__item-card--complete">
-                      <div className="order-goods-in__item-main">
-                        <div className="order-goods-in__item-details">
-                          <strong className="order-goods-in__item-name">{line.displayName}</strong>
-                          <div className="order-goods-in__item-meta">
-                            <span className="pill pill-subtle">Ordered: <strong>{line.orderedPacks} pack{line.orderedPacks === 1 ? '' : 's'}</strong></span>
-                            <span className="pill pill-blue">Dispatched: <strong>{dispatchedQty} pack{dispatchedQty === 1 ? '' : 's'}</strong></span>
-                            {isPartial ? (
-                              <span className="pill pill-amber" style={{ background: '#fef3c7', color: '#b45309' }}>
-                                {line.awaitingDispatchPacks} pack{line.awaitingDispatchPacks === 1 ? '' : 's'} still open with Curaleaf
-                              </span>
-                            ) : (
-                              <span className="pill pill-green"><Check size={11} /> Full quantity in consignment</span>
-                            )}
+                    <div key={line.productId} className={`order-fulfilment-row ${line.quantityMismatch ? 'has-mismatch' : ''}`}>
+                      <div className="order-fulfilment-row__header">
+                        <div className="order-fulfilment-row__product">
+                          <strong>{line.displayName}</strong>
+                          <span className="pack-qty-badge pack-qty-badge--inline">{line.orderedPacks} pk</span>
+                          {line.quantityMismatch ? (
+                            <span className="mismatch-tag">
+                              PO reports {line.supplierReportedOrdered} pk (mismatch)
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="order-fulfilment-pipeline" role="list" aria-label="Curaleaf fulfilment progress">
+                        <div className={pipelineStepClass('pipeline-step pipeline-step--ordered', steps.ordered)} role="listitem">
+                          <span className="pipeline-step__num" aria-hidden="true">1</span>
+                          <div className="pipeline-step__content">
+                            <span className="pipeline-step__label">Ordered</span>
+                            <strong className="pipeline-step__value">{line.orderedPacks} <small>pk</small></strong>
                           </div>
                         </div>
 
-                        <div className="order-goods-in__manifest-count">
-                          <span className="order-goods-in__manifest-badge">
-                            <PackageCheck size={14} /> {dispatchedQty} pack{dispatchedQty === 1 ? '' : 's'} arriving
-                          </span>
+                        <div className={pipelineStepClass('pipeline-step pipeline-step--picked', steps.dispensed)} role="listitem">
+                          <span className="pipeline-step__num" aria-hidden="true">2</span>
+                          <div className="pipeline-step__content">
+                            <span className="pipeline-step__label">Curaleaf Dispensed</span>
+                            <strong className="pipeline-step__value">{line.allocatedPacks}/{line.orderedPacks} <small>pk</small></strong>
+                          </div>
                         </div>
+
+                        <div className={pipelineStepClass('pipeline-step pipeline-step--transit', steps.inTransit)} role="listitem">
+                          <span className="pipeline-step__num" aria-hidden="true">3</span>
+                          <div className="pipeline-step__content">
+                            <span className="pipeline-step__label">In Transit</span>
+                            <strong className="pipeline-step__value">
+                              {line.inTransitPacks} <small>pk</small>
+                              {line.isSplit && line.awaitingDispatchPacks > 0 ? (
+                                <span className="pipeline-step__split-tag" title={`${line.awaitingDispatchPacks} pack(s) awaiting next dispatch`}>
+                                  +{line.awaitingDispatchPacks} split
+                                </span>
+                              ) : null}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div className={pipelineStepClass('pipeline-step pipeline-step--received', steps.checkedIn)} role="listitem">
+                          <span className="pipeline-step__num" aria-hidden="true">4</span>
+                          <div className="pipeline-step__content">
+                            <span className="pipeline-step__label">Checked In</span>
+                            <strong className="pipeline-step__value">{line.receivedPacks}/{line.orderedPacks} <small>pk</small></strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="order-fulfilment-bar">
+                        <div className="order-fulfilment-bar__fill--allocated" style={{ width: `${line.percentAllocated}%` }} />
+                        {line.inTransitPacks > 0 || (line.isSplit && line.awaitingDispatchPacks > 0) ? <div className="order-fulfilment-bar__fill--transit" style={{ width: `${line.percentInTransit}%` }} /> : null}
+                        <div className="order-fulfilment-bar__fill--received" style={{ width: `${line.percentReceived}%` }} />
                       </div>
                     </div>
                   );
                 })}
               </div>
+            </div>
 
-              <div className="order-goods-in__footer">
-                <div className="order-goods-in__summary-pill">
-                  <span className="order-goods-in__status-badge order-goods-in__status-badge--ready">
-                    <CheckCircle2 size={14} /> Curaleaf shipment manifest verified ({totalConsignmentPacks || totalDispatchedPacks} pk)
-                  </span>
+            {receiving ? (
+              <div className="order-goods-in order-goods-in--compact">
+                <header className="order-goods-in__header">
+                  <div>
+                    <span className="order-goods-in__eyebrow">Goods-in check</span>
+                    <h3 className="order-goods-in__title">Accept arriving consignment</h3>
+                  </div>
+                  <div className="order-goods-in__header-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm order-goods-in__chase-btn"
+                      onClick={() => onChaseCuraleaf?.(prescription, selectedShipmentId || undefined)}
+                    >
+                      <PhoneCall size={12} /> Chase Curaleaf / Issue
+                    </button>
+                  </div>
+                </header>
+
+                <div className="order-goods-in__consignment-summary">
+                  <div className="order-goods-in__consignment-stats">
+                    <span className="pill pill-blue"><PackageCheck size={11} /> {arrivingPacks} pack{arrivingPacks === 1 ? '' : 's'} arriving</span>
+                    {totalAwaitingDispatchPacks > 0 ? (
+                      <span className="pill pill-amber">{totalAwaitingDispatchPacks} pack{totalAwaitingDispatchPacks === 1 ? '' : 's'} still with Curaleaf</span>
+                    ) : (
+                      <span className="pill pill-green"><Check size={11} /> Full quantity in consignment</span>
+                    )}
+                  </div>
+                  <small>Verify the physical delivery matches the line items above, then accept to record pharmacy check-in.</small>
                 </div>
-                <div className="order-goods-in__actions">
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={busy || (totalConsignmentPacks || totalDispatchedPacks) < 1}
-                    onClick={() => {
-                      const allArrived: Record<string, number> = {};
-                      prescription.items.forEach(it => { allArrived[it.productId] = consignmentPacksFor(it.productId); });
-                      onReceiptDraftChange({ quantities: allArrived });
-                      onConfirmDelivery(selectedShipmentId || undefined);
-                    }}
-                  >
-                    <PackageCheck size={15} />
-                    {busy ? 'Recording delivery…' : `Accept Delivery (${totalConsignmentPacks || totalDispatchedPacks} pk)`}
-                  </button>
+
+                <div className="order-goods-in__footer">
+                  <div className="order-goods-in__summary-pill">
+                    <span className="order-goods-in__status-badge order-goods-in__status-badge--ready">
+                      <CheckCircle2 size={14} /> Manifest verified ({arrivingPacks} pk)
+                    </span>
+                  </div>
+                  <div className="order-goods-in__actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busy || arrivingPacks < 1}
+                      onClick={() => {
+                        const allArrived: Record<string, number> = {};
+                        prescription.items.forEach(it => { allArrived[it.productId] = consignmentPacksFor(it.productId); });
+                        onReceiptDraftChange({ quantities: allArrived });
+                        onConfirmDelivery(selectedShipmentId || undefined);
+                      }}
+                    >
+                      <PackageCheck size={15} />
+                      {busy ? 'Recording delivery…' : `Accept Delivery (${arrivingPacks} pk)`}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : null}
-          {!receiving && !partialReadyControl && !readyControl && !partialHandoutControl && !fullHandoutControl && !collectionControl && hasShippedNotCheckedIn ? (
-            <div className="order-ready-control order-ready-control--hint">
-              <span>
-                <PackageCheck size={16} style={{ color: 'var(--tenant-primary)' }} />
+            ) : null}
+            {!receiving && !partialReadyControl && !readyControl && !partialHandoutControl && !fullHandoutControl && !collectionControl && hasShippedNotCheckedIn ? (
+              <div className="order-ready-control order-ready-control--hint">
                 <span>
-                  <strong>Check in arriving packs before partial handover</strong>
-                  <small>{totalShippedPacks - totalReceivedPacks} pack(s) dispatched from Curaleaf are not checked in yet. Accept delivery below when the consignment arrives, then mark ready and hand over partial quantity.</small>
+                  <PackageCheck size={16} style={{ color: 'var(--tenant-primary)' }} />
+                  <span>
+                    <strong>Check in arriving packs before partial handover</strong>
+                    <small>{totalShippedPacks - totalReceivedPacks} pack(s) dispatched from Curaleaf are not checked in yet. Accept delivery when the consignment arrives, then mark ready and hand over partial quantity.</small>
+                  </span>
                 </span>
-              </span>
-            </div>
-          ) : null}
-          {partialReadyControl ? (
-            <div className="order-ready-control" style={{ background: 'color-mix(in srgb, #f59e0b 8%, var(--bg-surface))', borderColor: 'color-mix(in srgb, #f59e0b 30%, var(--border))' }}>
-              <span>
-                <Clock3 size={16} style={{ color: '#d97706' }} />
+              </div>
+            ) : null}
+            {partialReadyControl ? (
+              <div className="order-ready-control" style={{ background: 'color-mix(in srgb, #f59e0b 8%, var(--bg-surface))', borderColor: 'color-mix(in srgb, #f59e0b 30%, var(--border))' }}>
                 <span>
-                  <strong>Arrived consignment checked in ({totalConsignmentPacks || totalDispatchedPacks} pk)</strong>
-                  <small>Mark these packs ready for collection. {remainingOpen ? `${Math.max(0, totalOrderedPacks - totalDispatchedPacks)} pack(s) remain open with Curaleaf for a later shipment.` : 'Perform pharmacy dispensing checks before patient collection.'}</small>
+                  <Clock3 size={16} style={{ color: '#d97706' }} />
+                  <span>
+                    <strong>Arrived consignment checked in ({arrivingPacks} pk)</strong>
+                    <small>Mark these packs ready for collection. {remainingOpen ? `${Math.max(0, totalOrderedPacks - totalDispatchedPacks)} pack(s) remain open with Curaleaf for a later shipment.` : 'Perform pharmacy dispensing checks before patient collection.'}</small>
+                  </span>
                 </span>
-              </span>
-              <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => onReadyForCollection(selectedShipmentId || undefined)}>
-                <Mail size={13} /> {busy ? 'Queuing…' : 'Mark arrived packs ready to collect'}
-              </button>
-            </div>
-          ) : null}
-          {readyControl ? (
-            <div className="order-ready-control" style={{ background: 'color-mix(in srgb, var(--tenant-primary) 6%, var(--bg-surface))', borderColor: 'color-mix(in srgb, var(--tenant-primary) 25%, var(--border))' }}>
-              <span>
-                <CheckCircle2 size={18} style={{ color: 'var(--tenant-primary)' }} />
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => onReadyForCollection(selectedShipmentId || undefined)}>
+                  <Mail size={13} /> {busy ? 'Queuing…' : 'Mark arrived packs ready to collect'}
+                </button>
+              </div>
+            ) : null}
+            {readyControl ? (
+              <div className="order-ready-control" style={{ background: 'color-mix(in srgb, var(--tenant-primary) 6%, var(--bg-surface))', borderColor: 'color-mix(in srgb, var(--tenant-primary) 25%, var(--border))' }}>
                 <span>
-                  <strong>All packs checked in ({totalOrderedPacks} pk)</strong>
-                  <small>Verified by {prescription.goodsInBy ?? 'Pharmacy staff'}{prescription.goodsInAt ? ` on ${formatDate(prescription.goodsInAt, true)}` : ''}. Perform pharmacy dispensing checks before patient collection.</small>
+                  <CheckCircle2 size={18} style={{ color: 'var(--tenant-primary)' }} />
+                  <span>
+                    <strong>All packs checked in ({totalOrderedPacks} pk)</strong>
+                    <small>Verified by {prescription.goodsInBy ?? 'Pharmacy staff'}{prescription.goodsInAt ? ` on ${formatDate(prescription.goodsInAt, true)}` : ''}. Perform pharmacy dispensing checks before patient collection.</small>
+                  </span>
                 </span>
-              </span>
-              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onReadyForCollection(selectedShipmentId || undefined)}>
-                <Mail size={13} /> {busy ? 'Queuing email…' : 'Mark ready to collect & email patient'}
-              </button>
-            </div>
-          ) : null}
-          {partialHandoutControl && onOpenHandout ? (
-            <div className="order-ready-control" style={{ background: 'color-mix(in srgb, var(--tenant-primary) 6%, var(--bg-surface))', borderColor: 'color-mix(in srgb, var(--tenant-primary) 25%, var(--border))' }}>
-              <span>
-                <PackageCheck size={16} style={{ color: 'var(--tenant-primary)' }} />
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onReadyForCollection(selectedShipmentId || undefined)}>
+                  <Mail size={13} /> {busy ? 'Queuing email…' : 'Mark ready to collect & email patient'}
+                </button>
+              </div>
+            ) : null}
+            {partialHandoutControl && onOpenHandout ? (
+              <div className="order-ready-control" style={{ background: 'color-mix(in srgb, var(--tenant-primary) 6%, var(--bg-surface))', borderColor: 'color-mix(in srgb, var(--tenant-primary) 25%, var(--border))' }}>
                 <span>
-                  <strong>Arrived packs ready — partial handover available</strong>
-                  <small>Hand over only the checked-in packs now. Remaining quantity stays open with Curaleaf and the split dispatch banner remains visible.</small>
+                  <PackageCheck size={16} style={{ color: 'var(--tenant-primary)' }} />
+                  <span>
+                    <strong>Arrived packs ready — partial handover available</strong>
+                    <small>Hand over only the checked-in packs now. Remaining quantity stays open with Curaleaf and the split dispatch banner remains visible.</small>
+                  </span>
                 </span>
-              </span>
-              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onOpenHandout(true, selectedShipmentId || undefined)}>
-                <Check size={13} /> Hand over partial ({arrivedNotCollectedPacks} pk)
-              </button>
-            </div>
-          ) : null}
-          {fullHandoutControl && onOpenHandout ? (
-            <div className="order-ready-control">
-              <span>
-                <PackageCheck size={16} />
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onOpenHandout(true, selectedShipmentId || undefined)}>
+                  <Check size={13} /> Hand over partial ({arrivedNotCollectedPacks} pk)
+                </button>
+              </div>
+            ) : null}
+            {fullHandoutControl && onOpenHandout ? (
+              <div className="order-ready-control">
                 <span>
-                  <strong>All packs ready for handover</strong>
-                  <small>Every ordered pack has been checked in and is ready for patient collection.</small>
+                  <PackageCheck size={16} />
+                  <span>
+                    <strong>All packs ready for handover</strong>
+                    <small>Every ordered pack has been checked in and is ready for patient collection.</small>
+                  </span>
                 </span>
-              </span>
-              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onOpenHandout(false, selectedShipmentId || undefined)}>
-                <Check size={13} /> Hand over
-              </button>
-            </div>
-          ) : null}
-          {collectionControl ? (
-            <div className="order-ready-confirmed">
-              <Mail size={16} />
-              <span>
-                <strong>Medication ready for patient collection</strong>
-                <small>Collection email notification queued{prescription.readyAt ? ` on ${formatDate(prescription.readyAt, true)}` : ''}. Hand out medication when patient arrives at dispensary.</small>
-              </span>
-            </div>
-          ) : null}
-        </article>
-      ) : null}
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onOpenHandout(false, selectedShipmentId || undefined)}>
+                  <Check size={13} /> Hand over
+                </button>
+              </div>
+            ) : null}
+            {collectionControl ? (
+              <div className="order-ready-confirmed">
+                <Mail size={16} />
+                <span>
+                  <strong>Medication ready for patient collection</strong>
+                  <small>Collection email notification queued{prescription.readyAt ? ` on ${formatDate(prescription.readyAt, true)}` : ''}. Hand out medication when patient arrives at dispensary.</small>
+                </span>
+              </div>
+            ) : null}
+          </>
+        )}
+      </article>
     </div>
   );
 }
