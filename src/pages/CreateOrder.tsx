@@ -19,7 +19,7 @@ import {
   type UnresolvedOrderReason,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
-import { confirmPortalOrderRefund, createOrderDraft, createPortalOrder, createPortalOrderRefund, createWorldpaySession, deleteOrderDraft, deletePrescriptionFile, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, updateOrderDraft, uploadPrescriptionFile } from '../shared/api';
+import { createOrderDraft, createPortalOrder, createWorldpaySession, deleteOrderDraft, deletePrescriptionFile, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, updateOrderDraft, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
@@ -59,8 +59,6 @@ export default function CreateOrder() {
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [editingClinicFormularyRxId, setEditingClinicFormularyRxId] = useState<number | null>(null);
   const [selectedUnresolvedOrderId, setSelectedUnresolvedOrderId] = useState<number | null>(null);
-  const [redoRefundReference, setRedoRefundReference] = useState('');
-  const [redoRefundBusy, setRedoRefundBusy] = useState(false);
   const durableDraftEnabled = isApiConfigured && !isLocalPortalPreview && state.workspaceMode === 'live';
   const durableDraftPayload = useMemo(() => activeOrder ? {
     localOrderId: activeOrder.id,
@@ -214,7 +212,10 @@ export default function CreateOrder() {
   const quoteCurrent = wholesaleKnown && quotedSignature === currentQuoteSignature;
   const currentUnavailableProductIds = quotedSignature === currentQuoteSignature ? quotedUnavailableProductIds : [];
   const quoteAvailable = quoteCurrent && currentUnavailableProductIds.length === 0;
-  const dispensingFeeValid = !activeOrder || activeOrder.dispensingFee === 0 || activeOrder.dispensingFee >= 5 && activeOrder.dispensingFee <= 15;
+  const dispensingFeeValid = !activeOrder
+    || activeOrder.redoContext?.priceResolution === 'continue_as_fee'
+    || activeOrder.dispensingFee === 0
+    || activeOrder.dispensingFee >= 5 && activeOrder.dispensingFee <= 15;
   const quoteGateComplete = !requiresLiveCuraleafEvidence || quoteAvailable;
   const replacementUsesNewPayment = activeOrder?.redoContext?.priceResolution === 'refund_and_recharge';
   const paymentRouteReady = Boolean(activeOrder?.redoContext?.isPaidRedo && !replacementUsesNewPayment) || selectedPaymentRoute === 'manual' || canUseWorldpay;
@@ -223,13 +224,12 @@ export default function CreateOrder() {
     : 0;
   const paidRedoAmountMatches = !activeOrder?.redoContext?.isPaidRedo || Math.abs(paidRedoAmountDifference) < 0.005;
   const redoPriceResolutionReady = paidRedoAmountMatches
-    || activeOrder?.redoContext?.priceResolution === 'absorb' && paidRedoAmountDifference > 0
-    || replacementUsesNewPayment && redoSourceOrder?.refund?.status === 'completed';
+    || activeOrder?.redoContext?.priceResolution === 'absorb' && paidRedoAmountDifference > 0;
   const readyForPayment = prescriptionReady && quoteGateComplete && paymentRouteReady && redoPriceResolutionReady && dispensingFeeValid;
   const paymentGate = activeOrder ? [
     ...readiness,
     { label: requiresLiveCuraleafEvidence ? 'Live Curaleaf price and stock quote verified' : 'Curaleaf quote optional in training', complete: quoteGateComplete },
-    { label: 'Dispensing charge is £0 or £5–£15', complete: dispensingFeeValid },
+    { label: activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? 'Price drop taken into the dispensing charge' : 'Dispensing charge is £0 or £5–£15', complete: dispensingFeeValid },
     { label: activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Original verified payment route retained' : selectedPaymentRoute === 'worldpay' ? 'Worldpay merchant connection verified' : 'Pharmacy-managed payment route selected', complete: paymentRouteReady },
     ...(activeOrder.redoContext?.isPaidRedo ? [{ label: 'Replacement price decision recorded', complete: redoPriceResolutionReady }] : []),
   ] : [];
@@ -674,38 +674,14 @@ export default function CreateOrder() {
     dispatch({ type: 'ADD_TOAST', message: `The pharmacy will absorb ${money(paidRedoAmountDifference)}. The patient’s verified payment stays unchanged.`, toastType: 'info' });
   };
 
-  const beginRefundAndRecharge = async () => {
-    if (!activeOrder?.redoContext || !redoSourceOrder || redoRefundBusy) return;
-    dispatch({ type: 'SET_REDO_PRICE_RESOLUTION', orderId: activeOrder.id, resolution: 'refund_and_recharge' });
-    if (redoSourceOrder.refund) return;
-    setRedoRefundBusy(true);
-    try {
-      if (!isLocalPortalPreview && state.workspaceMode === 'live' && redoSourceOrder.backendId) {
-        const refund = await createPortalOrderRefund(redoSourceOrder.backendId, { organisationId: state.currentOrganisationId, reason: 'replacement_price_changed', resolution: 'replace_new_payment' });
-        dispatch({ type: 'SET_ORDER_REFUND', orderId: redoSourceOrder.id, refund });
-      } else {
-        dispatch({ type: 'START_ORDER_REFUND', orderId: redoSourceOrder.id, reason: 'replacement_price_changed', resolution: 'replace_new_payment' });
-      }
-      dispatch({ type: 'ADD_TOAST', message: `Replacement held. Refund ${money(redoSourceOrder.payment.amount)} using payment ID ${redoSourceOrder.payment.ref ?? 'shown below'}.`, toastType: 'warning' });
-    } catch (error) {
-      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The refund task could not be created.', toastType: 'error' });
-    } finally { setRedoRefundBusy(false); }
-  };
-
-  const confirmRedoRefund = async () => {
-    if (!redoSourceOrder?.refund || redoRefundReference.trim().length < 3 || redoRefundBusy) return;
-    setRedoRefundBusy(true);
-    try {
-      if (!isLocalPortalPreview && state.workspaceMode === 'live' && redoSourceOrder.backendId) {
-        const refund = await confirmPortalOrderRefund(redoSourceOrder.backendId, redoSourceOrder.refund.id, { organisationId: state.currentOrganisationId, externalReference: redoRefundReference.trim() });
-        dispatch({ type: 'SET_ORDER_REFUND', orderId: redoSourceOrder.id, refund });
-      } else {
-        dispatch({ type: 'CONFIRM_ORDER_REFUND', orderId: redoSourceOrder.id, externalReference: redoRefundReference.trim() });
-      }
-      dispatch({ type: 'ADD_TOAST', message: 'Old payment refund confirmed. The replacement can now create a fresh payment link.', toastType: 'success' });
-    } catch (error) {
-      dispatch({ type: 'ADD_TOAST', message: error instanceof Error ? error.message : 'The refund could not be confirmed.', toastType: 'error' });
-    } finally { setRedoRefundBusy(false); }
+  const chooseContinueAsFee = () => {
+    if (!activeOrder || !redoSourceOrder || paidRedoAmountDifference >= 0) return;
+    const productTotal = orderRevenue(activeOrder) - activeOrder.dispensingFee;
+    const targetFee = Math.max(0, Math.round((redoSourceOrder.payment.amount - productTotal) * 100) / 100);
+    const extra = Math.abs(paidRedoAmountDifference);
+    dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: targetFee });
+    dispatch({ type: 'SET_REDO_PRICE_RESOLUTION', orderId: activeOrder.id, resolution: 'continue_as_fee' });
+    dispatch({ type: 'ADD_TOAST', message: `${money(extra)} was added to the dispensing fee so the original payment can be carried over.`, toastType: 'info' });
   };
 
   const beginPatientChange = () => {
@@ -1196,25 +1172,28 @@ export default function CreateOrder() {
                   </> : null}
                 </div>
                 <div className="rx-dispensing-charge">
-                  <span><strong>Dispensing charge</strong><small>optional dispensing fee may be added. please ensure you remain competitive.</small></span>
-                  <div className="rx-dispensing-presets" role="group" aria-label="Set dispensing charge">{[5, 10, 15].map(amount => <button type="button" key={amount} aria-pressed={activeOrder.dispensingFee === amount} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount })}>{money(amount)}</button>)}<button type="button" aria-pressed={activeOrder.dispensingFee === 0} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: 0 })}>No charge</button></div>
-                  <label className="rx-dispensing-custom"><span>Custom</span><span className="money-input"><span>£</span><input type="number" min="5" max="15" step="0.01" value={activeOrder.dispensingFee || ''} onFocus={event => event.currentTarget.select()} onChange={event => { const amount = Number(event.target.value); dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: event.target.value === '' ? 0 : Math.max(5, Math.min(15, amount)) }); }} aria-label="Custom dispensing charge" /></span></label>
+                  <span><strong>Dispensing charge</strong><small>{activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? 'Includes the patient-price drop so the original payment can be carried over.' : 'optional dispensing fee may be added. please ensure you remain competitive.'}</small></span>
+                  <div className="rx-dispensing-presets" role="group" aria-label="Set dispensing charge">{[5, 10, 15].map(amount => <button type="button" key={amount} aria-pressed={activeOrder.dispensingFee === amount} disabled={activeOrder.redoContext?.priceResolution === 'continue_as_fee'} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount })}>{money(amount)}</button>)}<button type="button" aria-pressed={activeOrder.dispensingFee === 0} disabled={activeOrder.redoContext?.priceResolution === 'continue_as_fee'} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: 0 })}>No charge</button></div>
+                  <label className="rx-dispensing-custom"><span>Custom</span><span className="money-input"><span>£</span><input type="number" min="5" max={activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? undefined : 15} step="0.01" value={activeOrder.dispensingFee || ''} disabled={activeOrder.redoContext?.priceResolution === 'continue_as_fee'} onFocus={event => event.currentTarget.select()} onChange={event => { const amount = Number(event.target.value); dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: event.target.value === '' ? 0 : activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? Math.max(0, amount) : Math.max(5, Math.min(15, amount)) }); }} aria-label="Custom dispensing charge" /></span></label>
                 </div>
                 <div className="rx-patient-total"><span><small>Patient total</small><em>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)} products + {money(activeOrder.dispensingFee)} dispensing</em></span><strong>{money(orderRevenue(activeOrder))}</strong></div>
                 {activeOrder.redoContext?.isPaidRedo && redoSourceOrder ? (
                   <div className={`rx-redo-balance${paidRedoAmountMatches ? ' is-matched' : ' is-different'}`}>
                     <span><small>Verified payment carried by order {orderReference(redoSourceOrder)}</small><strong>{money(redoSourceOrder.payment.amount)}</strong></span>
                     <span><small>Replacement difference</small><strong>{paidRedoAmountDifference === 0 ? money(0) : `${paidRedoAmountDifference > 0 ? '+' : '−'}${money(Math.abs(paidRedoAmountDifference))}`}</strong></span>
-                    <p>{paidRedoAmountMatches ? 'Amounts match. The original verified payment may be carried over after authentication.' : activeOrder.redoContext.priceResolution === 'absorb' ? `The pharmacy will contribute ${money(paidRedoAmountDifference)}; the patient is not charged again.` : replacementUsesNewPayment ? redoSourceOrder.refund?.status === 'completed' ? 'Old payment refunded. Saving creates a fresh payment link for the replacement total.' : 'Replacement held until the old Worldpay refund is confirmed.' : 'Choose how to handle the price difference before continuing.'}</p>
+                    <p>{paidRedoAmountMatches
+                      ? 'Amounts match. The original verified payment may be carried over after authentication.'
+                      : activeOrder.redoContext.priceResolution === 'absorb'
+                        ? `The pharmacy will contribute ${money(paidRedoAmountDifference)}; the patient is not charged again.`
+                        : activeOrder.redoContext.priceResolution === 'continue_as_fee'
+                          ? `${money(Math.abs(paidRedoAmountDifference))} will be added to the dispensing fee so the original payment can be carried over.`
+                          : paidRedoAmountDifference > 0
+                            ? 'Absorb the increase or cancel this replacement.'
+                            : 'Take the drop into the dispensing fee or cancel this replacement.'}</p>
                     {!paidRedoAmountMatches ? <div className="rx-redo-balance__choices">
-                      <button type="button" className={`btn btn-sm ${replacementUsesNewPayment ? 'btn-primary' : 'btn-secondary'}`} disabled={redoRefundBusy} onClick={() => void beginRefundAndRecharge()}><RefreshCw size={12} /> Hold, refund & new link</button>
                       {paidRedoAmountDifference > 0 ? <button type="button" className={`btn btn-sm ${activeOrder.redoContext.priceResolution === 'absorb' ? 'btn-primary' : 'btn-secondary'}`} onClick={chooseAbsorbDifference}><Banknote size={12} /> Absorb {money(paidRedoAmountDifference)}</button> : null}
+                      {paidRedoAmountDifference < 0 ? <button type="button" className={`btn btn-sm ${activeOrder.redoContext.priceResolution === 'continue_as_fee' ? 'btn-primary' : 'btn-secondary'}`} onClick={chooseContinueAsFee}><Banknote size={12} /> Take {money(Math.abs(paidRedoAmountDifference))} into dispensing fee</button> : null}
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingDraftDeleteId(activeOrder.id)}><X size={12} /> Cancel replacement</button>
-                    </div> : null}
-                    {replacementUsesNewPayment && redoSourceOrder.refund?.status === 'pending_confirmation' ? <div className="rx-redo-refund-confirm">
-                      <span><small>Refund in Worldpay</small><code>{redoSourceOrder.refund.paymentReference}</code><em>Refund {money(redoSourceOrder.refund.amountPence / 100)}, then enter its confirmation ID.</em></span>
-                      <input className="input" value={redoRefundReference} onChange={event => setRedoRefundReference(event.target.value)} placeholder="Worldpay refund / command ID" />
-                      <button type="button" className="btn btn-primary btn-sm" disabled={redoRefundBusy || redoRefundReference.trim().length < 3} onClick={() => void confirmRedoRefund()}>{redoRefundBusy ? 'Recording…' : 'Confirm refund'}</button>
                     </div> : null}
                   </div>
                 ) : null}
@@ -1230,7 +1209,7 @@ export default function CreateOrder() {
                 <div className="rx-payment-actions">
                   <span className="section-label">Payment route</span>
                   {activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? (
-                    <div className="rx-payment-route-toggle"><div className="is-selected"><ShieldCheck size={17} /><span><strong>Verified payment carry-over</strong><small>{activeOrder.redoContext.priceResolution === 'absorb' ? 'Original payment retained · pharmacy pays difference' : 'No second charge to the patient'}</small></span><CheckCircle size={14} /></div></div>
+                    <div className="rx-payment-route-toggle"><div className="is-selected"><ShieldCheck size={17} /><span><strong>Verified payment carry-over</strong><small>{activeOrder.redoContext.priceResolution === 'absorb' ? 'Original payment retained · pharmacy pays difference' : activeOrder.redoContext.priceResolution === 'continue_as_fee' ? 'Original payment retained · difference added to dispensing fee' : 'No second charge to the patient'}</small></span><CheckCircle size={14} /></div></div>
                   ) : (
                     <div className="rx-payment-route-toggle" role="radiogroup" aria-label="Pharmacy payment route">
                       <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'worldpay'} disabled={!canUseWorldpay} className={selectedPaymentRoute === 'worldpay' ? 'is-selected' : ''} onClick={() => dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'worldpay' })}><CreditCard size={17} /><span><strong>Worldpay</strong><small>{canUseWorldpay ? 'Fresh hosted checkout' : 'Not configured'}</small></span>{selectedPaymentRoute === 'worldpay' ? <CheckCircle size={14} /> : null}</button>

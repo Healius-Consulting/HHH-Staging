@@ -23,6 +23,10 @@ export function hasDispatchedRemainder(line: { ordered: number; shipped: number 
 
 type OrderPrescription = PatientOrder['prescriptions'][number];
 
+export function prescriptionIsCancelled(prescription: OrderPrescription) {
+  return prescription.status === 'cancelled' || prescription.purchaseOrderState === 'CANCELLED';
+}
+
 function prescriptionUsesPackProgress(prescription: OrderPrescription) {
   return (prescription.fulfilmentLines ?? []).length > 0;
 }
@@ -114,6 +118,7 @@ export function orderInTransitProductNames(order: PatientOrder) {
 }
 
 export function prescriptionStatusLabel(prescription: OrderPrescription) {
+  if (prescriptionIsCancelled(prescription)) return 'Cancelled purchase order';
   const totals = prescriptionPackTotals(prescription);
   const remainingOpen = (prescription.fulfilmentLines ?? []).some(line =>
     line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered,
@@ -145,6 +150,7 @@ export function prescriptionStatusLabel(prescription: OrderPrescription) {
 }
 
 export function prescriptionStatusChipTone(prescription: OrderPrescription) {
+  if (prescriptionIsCancelled(prescription)) return 'cancelled';
   const totals = prescriptionPackTotals(prescription);
   const remainingOpen = (prescription.fulfilmentLines ?? []).some(line =>
     line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered,

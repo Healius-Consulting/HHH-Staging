@@ -430,7 +430,7 @@ export interface PortalOrderInput {
     originalTotalPence?: number;
     priceDifferencePence?: number;
     requireCuraleafAuth?: true;
-    priceResolution?: 'absorb' | 'refund_and_recharge';
+    priceResolution?: 'absorb' | 'continue_as_fee' | 'refund_and_recharge';
   };
 }
 
@@ -586,7 +586,7 @@ export interface PortalOrderRecord {
     recommendation?: ExpiryCheckState['recommendation'];
     rootOrderId?: string | number;
     replacementSequence?: number;
-    priceResolution?: 'absorb' | 'refund_and_recharge';
+    priceResolution?: 'absorb' | 'continue_as_fee' | 'refund_and_recharge';
   };
   expiryCheck?: ExpiryCheckState;
   pricingQuote?: CuraleafPricingSnapshot;

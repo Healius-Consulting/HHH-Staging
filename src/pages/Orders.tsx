@@ -57,6 +57,7 @@ import {
   orderPackTotals,
   orderSplitPackSnapshot,
   orderStage,
+  prescriptionIsCancelled,
   prescriptionStatusLabel,
   prescriptionStatusChipTone,
   stageMatchesFilter,
@@ -164,20 +165,23 @@ function recordStageMeta(record: OrderRecord) {
       description: resolution === 'needs-action'
         ? 'Curaleaf cancelled the supplier purchase order. Review the pharmacy call or case notes and complete the refund follow-up.'
         : 'Curaleaf cancelled the supplier purchase order; its pharmacy call or case context remains in the audit trail.',
-      tone: resolution === 'needs-action' ? 'warning' : 'neutral',
+      tone: resolution === 'needs-action' ? 'danger' : 'neutral',
       icon: XCircle,
     };
   }
-  if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'warning', icon: AlertTriangle };
+  if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'danger', icon: AlertTriangle };
   if (quoteReviewIsOpen(record.order)) {
     const review = record.order.quoteReview;
+    const delta = review?.patientDeltaPence ?? 0;
     return {
       label: review?.type === 'out_of_stock' ? 'Stock hold' : 'Quote review',
-      description: review?.status === 'awaiting_top_up'
-        ? 'Waiting for the patient to pay the price-difference top-up'
-        : review?.status === 'awaiting_refund'
-          ? 'Waiting for the pharmacy to confirm the price-difference refund'
-          : 'Curaleaf quote changed after payment. Review before placement.',
+      description: review?.type === 'out_of_stock'
+        ? 'Curaleaf reports a line out of stock. Refresh the quote or cancel this order.'
+        : delta > 0
+          ? 'Patient price increased after payment. Absorb the difference or cancel this order.'
+          : delta < 0
+            ? 'Patient price dropped after payment. Take the difference into the dispensing fee or cancel this order.'
+            : 'Curaleaf quote changed after payment. Absorb the supplier change or cancel this order.',
       tone: 'warning',
       icon: AlertTriangle,
     };
@@ -524,7 +528,7 @@ export default function Orders() {
     setCallCuraleafModalOrder(null);
   };
 
-  const handleQuoteReviewResolve = async (order: PatientOrder, action: 'absorb' | 'continue_as_fee' | 'request_top_up' | 'request_refund' | 'refresh') => {
+  const handleQuoteReviewResolve = async (order: PatientOrder, action: 'absorb' | 'continue_as_fee' | 'refresh') => {
     if (!order.backendId || quoteReviewBusyOrderId) return;
     setQuoteReviewBusyOrderId(order.id);
     try {
@@ -539,17 +543,9 @@ export default function Orders() {
         refund: result.order.refund,
         dispensingFee: result.order.dispensingFeePence / 100,
       });
-      if (result.paymentUrl) {
-        await navigator.clipboard.writeText(result.paymentUrl).catch(() => undefined);
-      }
-      const amount = result.amountPence != null ? money(result.amountPence / 100) : null;
       const messages: Record<typeof action, string> = {
         absorb: `Price change absorbed for ${orderReference(order)}. Placement will continue.`,
         continue_as_fee: `Price drop recorded as dispensing fee for ${orderReference(order)}. Placement will continue.`,
-        request_top_up: result.paymentUrl
-          ? `Top-up link copied for ${orderReference(order)}${amount ? ` (${amount})` : ''}.`
-          : `Top-up requested for ${orderReference(order)}.`,
-        request_refund: `Difference refund opened for ${orderReference(order)}. Confirm it after Worldpay.`,
         refresh: result.order.quoteReview && ['required', 'awaiting_top_up', 'awaiting_refund'].includes(result.order.quoteReview.status)
           ? `Quote still needs review for ${orderReference(order)}.`
           : `Quote rechecked for ${orderReference(order)}. Placement can continue.`,
@@ -1288,7 +1284,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   onConfirmRefund: () => void;
   refundBusy: boolean;
   quoteReviewBusy: boolean;
-  onQuoteReviewResolve: (action: 'absorb' | 'continue_as_fee' | 'request_top_up' | 'request_refund' | 'refresh') => void;
+  onQuoteReviewResolve: (action: 'absorb' | 'continue_as_fee' | 'refresh') => void;
   cancellationEditorOpen: boolean;
   cancellationNote: string;
   cancellationReference: string;
@@ -1354,7 +1350,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
     : 'Not recorded';
 
   return (
-    <article className="order-crm-record">
+    <article className={`order-crm-record order-crm-record--${meta.tone}`}>
       <header className="order-crm-record__header">
         <div className="order-crm-record__hero">
           <div className="order-crm-record__identity">
@@ -1417,11 +1413,9 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
       {reviewOpen ? (
         <QuoteReviewPanel
           order={order}
-          busy={quoteReviewBusy || refundBusy}
-          refundReference={refundReference}
-          onRefundReferenceChange={onRefundReferenceChange}
-          onConfirmRefund={onConfirmRefund}
+          busy={quoteReviewBusy || refundBusy || cancellationBusy}
           onResolve={onQuoteReviewResolve}
+          onCancel={onRequestCancellation}
         />
       ) : null}
 
@@ -1440,7 +1434,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
       ) : null}
 
       <div className="order-crm-record__body">
-        <section className="order-crm-main">
+        <section className={`order-crm-main${order.prescriptions.length > 0 && order.prescriptions.every(prescriptionIsCancelled) ? ' order-crm-main--cancelled' : ''}`}>
           <div className="order-crm-section-heading"><span><small>Prescription fulfilment</small><strong>{order.prescriptions.length} prescription{order.prescriptions.length === 1 ? '' : 's'}</strong></span><FileText size={16} /></div>
           <div className="order-crm-prescriptions">
             {order.prescriptions.map((prescription, index) => <PrescriptionCard
@@ -1850,29 +1844,29 @@ function formatQuoteReviewValue(value: string | boolean) {
   return String(value);
 }
 
-function QuoteReviewPanel({ order, busy, refundReference, onRefundReferenceChange, onConfirmRefund, onResolve }: {
+function QuoteReviewPanel({ order, busy, onResolve, onCancel }: {
   order: PatientOrder;
   busy: boolean;
-  refundReference: string;
-  onRefundReferenceChange: (value: string) => void;
-  onConfirmRefund: () => void;
-  onResolve: (action: 'absorb' | 'continue_as_fee' | 'request_top_up' | 'request_refund' | 'refresh') => void;
+  onResolve: (action: 'absorb' | 'continue_as_fee' | 'refresh') => void;
+  onCancel: () => void;
 }) {
   const review = order.quoteReview;
   if (!review || !['required', 'awaiting_top_up', 'awaiting_refund'].includes(review.status)) return null;
   const delta = review.patientDeltaPence ?? 0;
+  const priceUp = review.type === 'patient_price_changed' && delta > 0;
+  const priceDown = review.type === 'patient_price_changed' && delta < 0;
   const title = review.type === 'out_of_stock'
     ? 'Curaleaf reports a line out of stock'
     : review.type === 'patient_price_changed'
       ? delta > 0 ? 'Patient price increased after payment' : 'Patient price dropped after payment'
       : 'Supplier cost changed after payment';
   const detail = review.type === 'out_of_stock'
-    ? 'Placement is held. Refresh the quote after Curaleaf restocks. This cannot be absorbed.'
-    : review.type === 'patient_price_changed' && delta > 0
-      ? `Absorb ${money(delta / 100)} or send a payment link for that difference only.`
-      : review.type === 'patient_price_changed'
-        ? `Refund ${money(Math.abs(delta) / 100)} or continue and record it as dispensing fee.`
-        : 'Wholesale-only change. Absorb to continue placement. No patient payment link.';
+    ? 'Placement is held. Refresh the quote after Curaleaf restocks, or cancel this order to refund or replace it.'
+    : priceUp
+      ? `Absorb ${money(delta / 100)} so placement can continue, or cancel this order to refund or replace it.`
+      : priceDown
+        ? `Take ${money(Math.abs(delta) / 100)} into the dispensing fee so placement can continue, or cancel this order to refund or replace it.`
+        : 'Wholesale-only change. Absorb to continue placement, or cancel this order to refund or replace it.';
   return (
     <section className="quote-review-panel" aria-labelledby="quote-review-title">
       <header className="quote-review-panel__header">
@@ -1893,57 +1887,25 @@ function QuoteReviewPanel({ order, busy, refundReference, onRefundReferenceChang
           ))}
         </ul>
       ) : null}
-      {review.status === 'awaiting_top_up' ? (
-        <div className="quote-review-panel__waiting">
-          <Clock3 size={16} />
-          <span><strong>Waiting for the patient top-up</strong><small>Placement resumes when that difference payment is paid. {review.hostedPaymentUrl ? 'The current link was copied when it was created.' : ''}</small></span>
-          {review.hostedPaymentUrl ? (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void navigator.clipboard.writeText(review.hostedPaymentUrl!)}>Copy top-up link</button>
-          ) : null}
-        </div>
-      ) : null}
-      {review.status === 'awaiting_refund' ? (
-        <div className="quote-review-panel__waiting">
-          <Banknote size={16} />
-          <span><strong>Confirm the difference refund in Worldpay</strong><small>Refund {money(Math.abs(review.patientDeltaPence ?? 0) / 100)} using payment {order.payment.ref ?? orderReference(order)}, then enter the Worldpay reference. The order stays paid until then.</small></span>
-          <label>
-            <span>Refund confirmation reference</span>
-            <input className="input" value={refundReference} onChange={event => onRefundReferenceChange(event.target.value)} placeholder="Worldpay refund / command ID" />
-          </label>
-          <button type="button" className="btn btn-primary" disabled={busy || refundReference.trim().length < 3} onClick={onConfirmRefund}>
-            <CheckCircle2 size={13} /> {busy ? 'Recording…' : 'Confirm difference refund'}
+      <div className="quote-review-panel__actions">
+        {review.type === 'out_of_stock' ? (
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('refresh')}>
+            <RefreshCw size={13} /> {busy ? 'Checking…' : 'Refresh quote'}
           </button>
-        </div>
-      ) : null}
-      {review.status === 'required' ? (
-        <div className="quote-review-panel__actions">
-          {review.type === 'out_of_stock' ? (
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('refresh')}>
-              <RefreshCw size={13} /> {busy ? 'Checking…' : 'Refresh quote'}
-            </button>
-          ) : null}
-          {review.type === 'patient_price_changed' && delta > 0 ? (
-            <>
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('absorb')}>Absorb {money(delta / 100)}</button>
-              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => onResolve('request_top_up')}>Send {money(delta / 100)} payment link</button>
-            </>
-          ) : null}
-          {review.type === 'patient_price_changed' && delta < 0 ? (
-            <>
-              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => onResolve('request_refund')}>Refund {money(Math.abs(delta) / 100)}</button>
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('continue_as_fee')}>Continue as dispensing fee</button>
-            </>
-          ) : null}
-          {review.type === 'supplier_cost_changed' ? (
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('absorb')}>Absorb and place</button>
-          ) : null}
-          {review.type !== 'out_of_stock' ? (
-            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => onResolve('refresh')}>
-              <RefreshCw size={13} /> Recheck quote
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
+        {priceUp ? (
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('absorb')}>Absorb {money(delta / 100)}</button>
+        ) : null}
+        {priceDown ? (
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('continue_as_fee')}>Take {money(Math.abs(delta) / 100)} into dispensing fee</button>
+        ) : null}
+        {review.type === 'supplier_cost_changed' ? (
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('absorb')}>Absorb and place</button>
+        ) : null}
+        <button type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>
+          <XCircle size={13} /> Cancel order
+        </button>
+      </div>
     </section>
   );
 }
@@ -2407,6 +2369,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
     if (!selectedShipmentId || !shipmentIds.includes(selectedShipmentId)) setSelectedShipmentId(shipmentIds.find(id => prescription.shipmentStates?.[id] !== 'collected') ?? shipmentIds[0] ?? '');
   }, [prescription.shipmentStates, selectedShipmentId, shipmentIds]);
   const selectedShipmentState = selectedShipmentId ? prescription.shipmentStates?.[selectedShipmentId] : undefined;
+  const isCancelled = prescriptionIsCancelled(prescription);
   const statusLabel = prescriptionStatusLabel(prescription);
   const statusChipTone = prescriptionStatusChipTone(prescription);
   const totalReceivedPacks = (prescription.fulfilmentLines ?? []).reduce((sum, line) => sum + (line.received ?? 0), 0);
@@ -2523,7 +2486,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
 
   return (
     <div className="order-rx-pair">
-      <article className={`order-rx-card${hasSupplierSection ? ' order-rx-card--unified' : ''}`}>
+      <article className={`order-rx-card${hasSupplierSection ? ' order-rx-card--unified' : ''}${isCancelled ? ' order-rx-card--cancelled' : ''}`}>
         <header>
           <span><small>Prescription {index + 1}</small><strong>{prescription.prescriber || 'Prescriber pending'}</strong></span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2594,7 +2557,9 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 <div>
                   <small>Curaleaf fulfilment</small>
                   <strong>
-                    {isCollected
+                    {isCancelled
+                      ? 'Curaleaf cancelled this purchase order'
+                      : isCollected
                       ? 'Delivered to Pharmacy — Checked In'
                       : isPartiallyDelivered
                         ? 'Partial check-in — remainder awaiting dispatch'
@@ -2615,7 +2580,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                                       : 'Curaleaf purchase order active'}
                   </strong>
                 </div>
-                {deliveryGuidance ? (
+                {!isCancelled && deliveryGuidance ? (
                   <span className="order-delivery-estimate-badge">
                     <Truck size={12} /> {deliveryRange(deliveryGuidance)}
                   </span>
@@ -2632,11 +2597,28 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                     />
                   ))}
                 </div>
-                <FulfilmentProgressRail progress={combinedProgress} lineCount={displayLines.length} />
+                {isCancelled ? (
+                  <div className="order-fulfilment-stopped" role="status">
+                    <XCircle size={18} aria-hidden="true" />
+                    <span>
+                      <strong>Fulfilment stopped</strong>
+                      <small>
+                        {combinedProgress.orderedPacks} pack{combinedProgress.orderedPacks === 1 ? '' : 's'} ordered
+                        {' · '}
+                        {combinedProgress.allocatedPacks} dispensed
+                        {' · '}
+                        {combinedProgress.inTransitPacks + combinedProgress.receivedPacks} dispatched
+                        . Nothing further will ship. Use paid-order resolution above to refund or replace.
+                      </small>
+                    </span>
+                  </div>
+                ) : (
+                  <FulfilmentProgressRail progress={combinedProgress} lineCount={displayLines.length} />
+                )}
               </div>
             </div>
 
-            {receiving ? (
+            {isCancelled ? null : receiving ? (
               <div className="order-goods-in order-goods-in--compact">
                 <header className="order-goods-in__header">
                   <div>
@@ -2691,7 +2673,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 </div>
               </div>
             ) : null}
-            {!receiving && !partialReadyControl && !readyControl && !partialHandoutControl && !fullHandoutControl && !collectionControl && hasShippedNotCheckedIn ? (
+            {!isCancelled && !receiving && !partialReadyControl && !readyControl && !partialHandoutControl && !fullHandoutControl && !collectionControl && hasShippedNotCheckedIn ? (
               <div className="order-ready-control order-ready-control--hint">
                 <span>
                   <PackageCheck size={16} style={{ color: 'var(--tenant-primary)' }} />
@@ -2702,7 +2684,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 </span>
               </div>
             ) : null}
-            {partialReadyControl ? (
+            {!isCancelled && partialReadyControl ? (
               <div className="order-ready-control" style={{ background: 'color-mix(in srgb, #f59e0b 8%, var(--bg-surface))', borderColor: 'color-mix(in srgb, #f59e0b 30%, var(--border))' }}>
                 <span>
                   <Clock3 size={16} style={{ color: '#d97706' }} />
@@ -2716,7 +2698,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 </button>
               </div>
             ) : null}
-            {readyControl ? (
+            {!isCancelled && readyControl ? (
               <div className="order-ready-control" style={{ background: 'color-mix(in srgb, var(--tenant-primary) 6%, var(--bg-surface))', borderColor: 'color-mix(in srgb, var(--tenant-primary) 25%, var(--border))' }}>
                 <span>
                   <CheckCircle2 size={18} style={{ color: 'var(--tenant-primary)' }} />
@@ -2730,7 +2712,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 </button>
               </div>
             ) : null}
-            {partialHandoutControl && onOpenHandout ? (
+            {!isCancelled && partialHandoutControl && onOpenHandout ? (
               <div className="order-ready-control" style={{ background: 'color-mix(in srgb, var(--tenant-primary) 6%, var(--bg-surface))', borderColor: 'color-mix(in srgb, var(--tenant-primary) 25%, var(--border))' }}>
                 <span>
                   <PackageCheck size={16} style={{ color: 'var(--tenant-primary)' }} />
@@ -2744,7 +2726,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 </button>
               </div>
             ) : null}
-            {fullHandoutControl && onOpenHandout ? (
+            {!isCancelled && fullHandoutControl && onOpenHandout ? (
               <div className="order-ready-control">
                 <span>
                   <PackageCheck size={16} />
@@ -2758,7 +2740,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 </button>
               </div>
             ) : null}
-            {collectionControl ? (
+            {!isCancelled && collectionControl ? (
               <div className="order-ready-confirmed">
                 <Mail size={16} />
                 <span>

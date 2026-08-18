@@ -58,6 +58,27 @@ describe('quote review compare', () => {
     assert.equal(down[0]?.category, 'patient_price');
   });
 
+  it('holds a price increase for absorb and a drop for continue-as-fee', () => {
+    const up = evaluateQuoteReview({
+      snapshot: { quote: baseline },
+      latestRaw: { ...baseline, items: [{ ...baseline.items[0]!, patientPackPrice: '90.00' }] },
+    });
+    const down = evaluateQuoteReview({
+      snapshot: { quote: baseline },
+      latestRaw: { ...baseline, items: [{ ...baseline.items[0]!, patientPackPrice: '80.00' }] },
+    });
+    assert.equal(up.hold, true);
+    assert.equal(down.hold, true);
+    if (up.hold) {
+      assert.equal(up.review.type, 'patient_price_changed');
+      assert.equal(up.review.patientDeltaPence, 500);
+    }
+    if (down.hold) {
+      assert.equal(down.review.type, 'patient_price_changed');
+      assert.equal(down.review.patientDeltaPence, -500);
+    }
+  });
+
   it('holds wholesale-only changes as supplier cost', () => {
     const result = evaluateQuoteReview({
       snapshot: { quote: baseline },

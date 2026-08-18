@@ -157,7 +157,7 @@ export interface OrderRedoContext {
   rootOrderId?: number;
   rootBackendId?: string;
   replacementSequence?: number;
-  priceResolution?: 'absorb' | 'refund_and_recharge';
+  priceResolution?: 'absorb' | 'continue_as_fee' | 'refund_and_recharge';
   isPaidRedo: boolean;
   reason: UnresolvedOrderReason;
 }
@@ -715,7 +715,7 @@ export type Action =
   | { type: 'SEND_PAYMENT_LINK'; orderId: number }
   | { type: 'START_MANUAL_PAYMENT'; orderId: number }
   | { type: 'CARRY_OVER_PAYMENT'; orderId: number; sourceOrderId: number }
-  | { type: 'SET_REDO_PRICE_RESOLUTION'; orderId: number; resolution: 'absorb' | 'refund_and_recharge' | undefined }
+  | { type: 'SET_REDO_PRICE_RESOLUTION'; orderId: number; resolution: 'absorb' | 'continue_as_fee' | 'refund_and_recharge' | undefined }
   | { type: 'START_ORDER_REFUND'; orderId: number; reason: OrderRefundState['reason']; resolution: OrderRefundState['resolution'] }
   | { type: 'CONFIRM_ORDER_REFUND'; orderId: number; externalReference: string }
   | { type: 'SET_ORDER_REFUND'; orderId: number; refund: OrderRefundState }
@@ -1718,7 +1718,8 @@ function reducer(state: AppState, action: Action): AppState {
       if (!order?.redoContext?.isPaidRedo || order.redoContext.originalOrderId !== source?.id || source.payment.status !== 'paid') return state;
       const amount = orderRevenue(order);
       const absorbedDifference = order.redoContext.priceResolution === 'absorb' ? Math.max(0, amount - source.payment.amount) : 0;
-      if (Math.abs(amount - source.payment.amount) >= 0.005 && absorbedDifference <= 0) return state;
+      const feeAligned = order.redoContext.priceResolution === 'continue_as_fee' && Math.abs(amount - source.payment.amount) < 0.005;
+      if (Math.abs(amount - source.payment.amount) >= 0.005 && absorbedDifference <= 0 && !feeAligned) return state;
       const nextState = {
         ...state,
         orders: state.orders.map(candidate => {
@@ -1782,6 +1783,7 @@ function reducer(state: AppState, action: Action): AppState {
           ...order,
           lifecycleStatus: hasCuraleafOrder ? order.lifecycleStatus : 'cancelled',
           payment: hasCuraleafOrder || order.payment.status === 'paid' ? order.payment : { ...order.payment, status: 'cancelled' },
+          quoteReview: undefined,
           cancellation: {
             status: hasCuraleafOrder ? 'curaleaf_contact_required' : order.payment.status === 'paid' ? 'refund_required' : 'cancelled',
             reason: action.reason,

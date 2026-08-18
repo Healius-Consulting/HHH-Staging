@@ -674,9 +674,9 @@ export function approveCuraleafQuoteReview(orderId: string, input: { organisatio
 
 export function resolvePortalQuoteReview(orderId: string, input: {
   organisationId: string;
-  action: 'absorb' | 'continue_as_fee' | 'request_top_up' | 'request_refund' | 'refresh';
+  action: 'absorb' | 'continue_as_fee' | 'refresh';
 }) {
-  return apiRequest<{ action: string; paymentUrl?: string; amountPence?: number; refundId?: string; order: import('./contracts').PortalOrderRecord }>(
+  return apiRequest<{ action: string; order: import('./contracts').PortalOrderRecord }>(
     `/v1/portal/orders/${encodeURIComponent(orderId)}/quote-review/resolve`,
     { method: 'POST', body: JSON.stringify(input) },
   );

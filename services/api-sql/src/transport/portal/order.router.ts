@@ -612,7 +612,7 @@ export function createPortalOrderRouter(): Router {
       const orderId = String(req.params.id || '');
       const input = z.object({
         organisationId: z.string().optional(),
-        action: z.enum(['absorb', 'continue_as_fee', 'request_top_up', 'request_refund', 'refresh']),
+        action: z.enum(['absorb', 'continue_as_fee', 'refresh']),
       }).parse(req.body);
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
@@ -629,13 +629,14 @@ export function createPortalOrderRouter(): Router {
         quantity: Number(item.quantity || item.count || 1),
       })).filter(item => item.packId && item.quantity > 0);
 
-      const persistAndMaybePlace = async (nextSnapshot: unknown, extra?: { dispensingFeePence?: number; place?: boolean }) => {
+      const persistAndMaybePlace = async (nextSnapshot: unknown, extra?: { dispensingFeePence?: number; medicineTotalPence?: number; place?: boolean }) => {
         await orderRepo.updateQuoteSnapshot({
           id: orderId,
           organisationId: scope.organisationId,
           quoteSnapshot: nextSnapshot,
           fulfilmentStatus: 'SUPPLIER_PENDING',
           dispensingFeePence: extra?.dispensingFeePence,
+          medicineTotalPence: extra?.medicineTotalPence,
         });
         let placement = null;
         if (extra?.place && connection?.secretResourceName) {
@@ -683,6 +684,9 @@ export function createPortalOrderRouter(): Router {
 
       if (input.action === 'absorb') {
         if (review.type === 'out_of_stock') throw new HttpError(409, 'Out-of-stock lines cannot be absorbed.', 'STOCK_HOLD');
+        if (review.type === 'patient_price_changed' && review.patientDeltaPence <= 0) {
+          throw new HttpError(409, 'Absorb is only for a patient-price increase.', 'QUOTE_REVIEW_ACTION');
+        }
         const approved = stampQuoteReviewOnSnapshot({
           ...snapshot,
           pharmacyContributionPence: Math.max(0, review.patientDeltaPence),
@@ -711,68 +715,10 @@ export function createPortalOrderRouter(): Router {
         });
         const result = await persistAndMaybePlace(approved, {
           dispensingFeePence: Number(order.dispensingFeePence || 0) + extraFee,
+          medicineTotalPence: Math.max(0, Number(order.medicineTotalPence || 0) + review.patientDeltaPence),
           place: true,
         });
         res.status(200).json({ action: 'continue_as_fee', order: toPortalOrder(result.order as any) });
-        return;
-      }
-
-      if (input.action === 'request_top_up') {
-        if (review.patientDeltaPence <= 0) throw new HttpError(409, 'A top-up is only for a patient-price increase.', 'QUOTE_REVIEW_ACTION');
-        const worldpay = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY').catch(() => null);
-        const transactionReference = `WP-TOPUP-${Date.now().toString(36).toUpperCase()}`;
-        const session = await createWorldpayHostedSession(worldpay, scope.organisationId, {
-          orderNumber: order.orderNumber || orderId,
-          transactionReference,
-          amountPence: review.patientDeltaPence,
-          currency: order.currency || 'GBP',
-          statementNarrative: (order.orderNumber || 'HHH').slice(0, 24),
-          successUrl: `https://holistichealthhub.cc/payment/success?ref=${encodeURIComponent(transactionReference)}`,
-          cancelUrl: `https://holistichealthhub.cc/payment/cancelled?ref=${encodeURIComponent(transactionReference)}`,
-        });
-        const payment = await paymentRepo.createPayment({
-          organisationId: scope.organisationId,
-          orderId,
-          patientId: order.patientId,
-          status: 'PENDING',
-          amountPence: review.patientDeltaPence,
-          currency: order.currency || 'GBP',
-          route: 'WORLDPAY',
-          transactionReference: session.transactionReference,
-          hostedPaymentUrl: session.url,
-        });
-        const waiting = stampQuoteReviewOnSnapshot(snapshot, {
-          ...review,
-          status: 'awaiting_top_up',
-          topUpPaymentId: payment.id,
-          hostedPaymentUrl: session.url,
-        });
-        await persistAndMaybePlace(waiting);
-        res.status(200).json({
-          action: 'request_top_up',
-          paymentUrl: session.url,
-          amountPence: review.patientDeltaPence,
-          order: toPortalOrder({ ...order, quoteSnapshot: waiting } as any),
-        });
-        return;
-      }
-
-      if (input.action === 'request_refund') {
-        if (review.patientDeltaPence >= 0) throw new HttpError(409, 'A difference refund is only for a patient-price drop.', 'QUOTE_REVIEW_ACTION');
-        const refundId = `qref-${Date.now().toString(36)}`;
-        const waiting = stampQuoteReviewOnSnapshot({
-          ...snapshot,
-          refund: {
-            id: refundId,
-            status: 'pending_confirmation',
-            amountPence: Math.abs(review.patientDeltaPence),
-            kind: 'quote_difference',
-            requestedAt: now,
-            requestedBy: scope.uid,
-          },
-        }, { ...review, status: 'awaiting_refund', refundId, refundAmountPence: Math.abs(review.patientDeltaPence) });
-        const result = await persistAndMaybePlace(waiting);
-        res.status(200).json({ action: 'request_refund', refundId, order: toPortalOrder(result.order as any) });
         return;
       }
 

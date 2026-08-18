@@ -1430,8 +1430,7 @@ const orderSchema = z.object({
   patientId: idSchema,
   lineItems: z.array(orderLineItemSchema).min(1).max(50),
   prescriptions: z.array(orderPrescriptionSchema).min(1).max(20),
-  dispensingFeePence: z.number().int().nonnegative().max(FLOW_CONFIG.dispensingFeeMaxPence).default(0)
-    .refine(validDispensingFeePence, 'Dispensing fee must be £0 or between £5 and £15.'),
+  dispensingFeePence: z.number().int().nonnegative().default(0),
   currency: z.literal('GBP').default('GBP'),
   paymentRoute: z.enum(['manual', 'worldpay']).optional(),
   redoContext: z.object({
@@ -1440,8 +1439,19 @@ const orderSchema = z.object({
     originalTotalPence: z.number().int().nonnegative().optional(),
     priceDifferencePence: z.number().int().default(0),
     requireCuraleafAuth: z.boolean().default(true),
-    priceResolution: z.enum(['absorb', 'refund_and_recharge']).optional(),
+    priceResolution: z.enum(['absorb', 'continue_as_fee', 'refund_and_recharge']).optional(),
   }).optional(),
+}).superRefine((order, context) => {
+  const feeAligned = order.redoContext?.priceResolution === 'continue_as_fee';
+  if (feeAligned ? order.dispensingFeePence < 0 : !validDispensingFeePence(order.dispensingFeePence)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['dispensingFeePence'],
+      message: feeAligned
+        ? 'Dispensing fee must be zero or a positive amount when a price drop is taken into the fee.'
+        : 'Dispensing fee must be £0 or between £5 and £15.',
+    });
+  }
 });
 
 const WORLDPAY_MIN_LINK_EXPIRY_SECONDS = 300;
@@ -2051,7 +2061,7 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       sourceWasExpired: boolean;
       rootOrderId: string;
       replacementSequence: number;
-      priceResolution?: 'absorb' | 'refund_and_recharge';
+      priceResolution?: 'absorb' | 'continue_as_fee' | 'refund_and_recharge';
     } | null = null;
     if (input.redoContext) {
       const originalOrderId = String(input.redoContext.originalOrderId);

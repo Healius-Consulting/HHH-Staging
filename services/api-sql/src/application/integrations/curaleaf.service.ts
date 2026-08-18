@@ -464,11 +464,8 @@ export async function executeCuraleafOrderPlacement(
 
   // Step 3: Stock and price re-check. Hold before creating a Rocky prescription.
   const blockingReview = readQuoteReview(snapshot);
-  if (blockingReview?.status === 'awaiting_top_up') {
-    return { skipped: true, reason: 'Quote review awaiting patient top-up', quoteReview: blockingReview };
-  }
-  if (blockingReview?.status === 'awaiting_refund') {
-    return { skipped: true, reason: 'Quote review awaiting difference refund', quoteReview: blockingReview };
+  if (blockingReview?.status === 'awaiting_top_up' || blockingReview?.status === 'awaiting_refund' || blockingReview?.status === 'required') {
+    return { skipped: true, reason: 'Quote review required', quoteReview: blockingReview };
   }
   if (lineItems.length > 0) {
     let latestQuote: unknown;

@@ -10955,6 +10955,15 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--tenant-primary) 5%, var(--bg-surface)), var(--bg-surface));
 }
+.order-crm-record--danger .order-crm-record__header{
+  border-bottom-color: color-mix(in srgb, var(--color-danger) 28%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-danger) 10%, var(--bg-surface)), var(--bg-surface));
+}
+.order-crm-record--danger .order-journey-rail,
+.order-crm-record--danger .order-journey-rail--premium{
+  background: color-mix(in srgb, var(--color-danger) 5%, var(--bg-elevated));
+}
 
 .order-crm-record__hero{
   display: flex;
@@ -11832,6 +11841,63 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 
 .order-crm-record__body{ display: block; }
 .order-crm-main{ min-width: 0; padding: 18px; }
+.order-crm-main--cancelled{
+  background: color-mix(in srgb, var(--color-danger) 4%, var(--bg-surface));
+}
+.order-rx-card--cancelled{
+  border-color: color-mix(in srgb, var(--color-danger) 38%, var(--border));
+  background: color-mix(in srgb, var(--color-danger) 5%, var(--bg-surface));
+}
+.order-rx-card--cancelled > header{
+  background: color-mix(in srgb, var(--color-danger) 9%, var(--bg-surface));
+}
+.order-rx-card--cancelled > header small{
+  color: var(--color-danger);
+  font-size: 10px;
+}
+.order-rx-card--cancelled > header strong{
+  font-size: 14px;
+  font-weight: 750;
+}
+.order-rx-card--cancelled .rx-status-chip{
+  min-height: 26px;
+  padding: 0 11px;
+  font-size: 11px;
+}
+.order-rx-card--cancelled .order-supplier-fulfilment__header{
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--bg-surface));
+  border-bottom-color: color-mix(in srgb, var(--color-danger) 22%, var(--border));
+}
+.order-rx-card--cancelled .order-supplier-fulfilment__header small{
+  color: var(--color-danger);
+  font-size: 10px;
+}
+.order-rx-card--cancelled .order-supplier-fulfilment__header strong{
+  font-size: 14px;
+  font-weight: 750;
+}
+.order-fulfilment-stopped{
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 32%, var(--border));
+  border-radius: 9px;
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--bg-surface));
+}
+.order-fulfilment-stopped > span{ display: grid; gap: 4px; min-width: 0; }
+.order-fulfilment-stopped strong{
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 750;
+}
+.order-fulfilment-stopped small{
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .order-crm-card {
   padding: 16px;
   border: 1px solid var(--border);
@@ -12185,9 +12251,9 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 }
 .order-supplier-fulfilment__header small {
   display: block;
-  color: var(--text-tertiary);
-  font-size: 8.5px;
-  font-weight: 700;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
   text-transform: uppercase;
   letter-spacing: .06em;
 }
@@ -12195,8 +12261,8 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   display: block;
   margin-top: 2px;
   color: var(--text-primary);
-  font-size: 11.5px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 700;
 }
 .order-delivery-estimate-badge {
   display: inline-flex;
@@ -12332,9 +12398,9 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   display: block;
 }
 .order-fulfilment-item-card__metric small{
-  color: var(--text-tertiary);
-  font-size: 8px;
-  font-weight: 700;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
   letter-spacing: .03em;
   text-transform: uppercase;
 }
@@ -13375,6 +13441,7 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .rx-redo-balance.is-different{ border-color: color-mix(in srgb, var(--color-warning) 42%, var(--border)); background: color-mix(in srgb, var(--color-warning) 7%, var(--bg-surface)); }
 .rx-redo-balance.is-different > span:last-of-type strong{ color: var(--color-warning); }
 .rx-redo-balance__choices{ display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 6px; }
+.rx-redo-balance__choices .btn{ min-height: 44px; }
 .rx-redo-refund-confirm{ display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); gap: 7px; margin-top: 2px; padding: 10px; border: 1px solid color-mix(in srgb, var(--color-warning) 32%, var(--border)); border-radius: 8px; background: var(--bg-surface); }
 .rx-redo-refund-confirm > span{ display: grid; gap: 2px; }
 .rx-redo-refund-confirm small{ color: var(--text-tertiary); font-size: 8px; font-weight: 700; text-transform: uppercase; }

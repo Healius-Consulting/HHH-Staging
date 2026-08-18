@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderStage, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
+import { hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderStage, prescriptionStatusChipTone, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
 import type { PatientOrder } from '../src/context/AppContext.tsx';
 
 const taxonomy: Array<[OrderStage, StageFilter]> = [
@@ -279,5 +279,11 @@ test('Curaleaf cancel wins over an expired or archived flag on the same paid ord
   const staged = orderStage(order);
   assert.equal(staged.stage, 'cancelled');
   assert.equal(staged.unresolvedReason, 'cancelled');
+});
+
+test('a CANCELLED purchase order is labelled cancelled even if rx status lagged', () => {
+  const prescription = { status: 'processing', purchaseOrderState: 'CANCELLED', items: [], fulfilmentLines: [] } as PatientOrder['prescriptions'][number];
+  assert.equal(prescriptionStatusLabel(prescription), 'Cancelled purchase order');
+  assert.equal(prescriptionStatusChipTone(prescription), 'cancelled');
 });
 
