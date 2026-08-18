@@ -136,8 +136,8 @@ export default function PharmacyOverview() {
                 : `${overview.enquiries.pendingCount} new enquiries have been received`}
             </h2>
             <p>
-              HHH admin is reviewing {overview.enquiries.pendingCount === 1 ? 'the request' : 'these requests'}.
-              Patient identity and health answers remain unavailable to the pharmacy unless HHH completes the referral and activates a patient record.
+              HHH admin may accept this pharmacy or move the enquiry.
+              Open Patients to see who is currently assigned to you. Referral marks them referred.
             </p>
           </div>
           <span className="status-badge status-badge--intake_live">With HHH admin</span>

@@ -9,7 +9,7 @@ export function SetupRequired({ onOpenSetup, mode = 'setup' }: { onOpenSetup: ()
         <p className="section-label">Limited access</p>
         <h2>{intakeOnly ? 'This action requires full pharmacy activation' : 'Complete pharmacy setup to use this workspace'}</h2>
         <p>{intakeOnly
-          ? 'Eligibility-link attribution and HHH-managed enquiry notices are active. Patient details, prescriptions, orders, payments and Curaleaf actions remain locked until HHH completes the referral and the LIVE integration gate is complete.'
+          ? 'Assigned enquiries are visible in Patients. Prescriptions, orders, payments and Curaleaf actions remain locked until HHH refers the patient and the LIVE integration gate is complete.'
           : 'Patient processing, payments and Curaleaf actions remain locked until the mandatory pharmacy checks are complete. You can still use Overview, Catalogue, and Settings & Assets.'}</p>
         <button type="button" className="btn btn-primary" onClick={onOpenSetup}><Settings size={16} /> Continue setup</button>
       </section>

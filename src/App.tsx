@@ -303,7 +303,7 @@ function StaffWorkspace() {
         {state.workspaceMode === 'intake' && (
           <div className="intake-live-banner" role="status">
             <strong>Eligibility intake live</strong>
-            <span>New attributed enquiries remain with HHH for review. This pharmacy sees only a privacy-safe notice until HHH completes the referral and activates a patient record.</span>
+            <span>New QR and website-chosen enquiries appear in Patients immediately. HHH may accept that pharmacy or move the enquiry. Referral marks the patient referred.</span>
           </div>
         )}
         <div id="pharmacy-main-content" className="page-container" tabIndex={-1}>{renderScreen()}</div>

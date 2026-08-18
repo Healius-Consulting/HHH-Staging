@@ -490,6 +490,8 @@ type EligibilitySubmission @table {
   triedTwoTreatments: Boolean!
   psychiatricExclusion: Boolean!
   heardAbout: String
+  conditionCodes: [String!]
+  primaryConditionCode: String
   idempotencyKeyHash: String! @unique
   assignmentStatus: AssignmentStatus! @default(value: AWAITING_HHH_ALLOCATION)
   assignmentVersion: Int! @default(value: 0)

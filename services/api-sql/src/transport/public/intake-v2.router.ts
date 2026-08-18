@@ -3,21 +3,20 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { ELIGIBILITY_CONDITION_IDS } from '../../domain/eligibility/conditions.js';
 import { HttpError } from '../../domain/common/errors.js';
+import { asUuid, uuidKey } from '../../domain/common/uuid.js';
+import { normaliseUkPostcode } from '../../domain/geography/postcode.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
+import { SqlPostcodeSearchRepository } from '../../repositories/sql/postcode-search.sql.js';
 import { sha256 } from '../../security/session-utils.js';
+import type { CreateSubmissionInput } from '../../repositories/ports/intake.port.js';
 
 export const referralTokenSchema = z.string().min(12).max(160).regex(/^[A-Za-z0-9_-]+$/);
+const opaqueIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 const conditionIdSchema = z.enum(ELIGIBILITY_CONDITION_IDS);
 
-const resolveTokenSchema = z.object({
-  token: referralTokenSchema,
-}).strict();
-
-export const fixedPharmacyIntakeSchema = z.object({
-  type: z.literal('future_pharmacy_qr'),
-  referralToken: referralTokenSchema,
+const answersSchema = z.object({
   firstName: z.string().trim().min(1).max(100),
   surname: z.string().trim().min(1).max(100),
   dob: z.iso.date(),
@@ -32,8 +31,14 @@ export const fixedPharmacyIntakeSchema = z.object({
   consentShare: z.literal(true),
   marketing: z.boolean().default(false),
   heardAbout: z.string().trim().max(100).default(''),
-  consentVersion: z.enum(['pharmacy-qr-v2.0', 'pharmacy-qr-v2.1']),
+  consentVersion: z.enum(['general-public-v2.0', 'pharmacy-qr-v2.0', 'general-public-v2.1', 'pharmacy-qr-v2.1']),
   idempotencyKey: z.string().uuid(),
+});
+
+export const fixedPharmacyIntakeSchema = answersSchema.extend({
+  type: z.literal('future_pharmacy_qr'),
+  referralToken: referralTokenSchema,
+  consentVersion: z.enum(['pharmacy-qr-v2.0', 'pharmacy-qr-v2.1']),
 }).strict().refine(input => new Set(input.conditions).size === input.conditions.length, {
   path: ['conditions'],
   message: 'Conditions must be unique.',
@@ -41,6 +46,41 @@ export const fixedPharmacyIntakeSchema = z.object({
   path: ['primaryCondition'],
   message: 'Primary condition must be one of the selected conditions.',
 });
+
+export const generalWebsiteIntakeSchema = answersSchema.extend({
+  type: z.literal('general_hhh_website'),
+  searchId: opaqueIdSchema,
+  selectedDirectoryProfileId: opaqueIdSchema.nullable(),
+  consentVersion: z.enum(['general-public-v2.0', 'general-public-v2.1']),
+}).strict().refine(input => new Set(input.conditions).size === input.conditions.length, {
+  path: ['conditions'],
+  message: 'Conditions must be unique.',
+}).refine(input => input.conditions.includes(input.primaryCondition), {
+  path: ['primaryCondition'],
+  message: 'Primary condition must be one of the selected conditions.',
+});
+
+export const intakeSchema = z.discriminatedUnion('type', [
+  answersSchema.extend({ type: z.literal('general_hhh_website'), searchId: opaqueIdSchema, selectedDirectoryProfileId: opaqueIdSchema.nullable() }),
+  answersSchema.extend({ type: z.literal('future_pharmacy_qr'), referralToken: referralTokenSchema }),
+]).refine(input => input.conditions.includes(input.primaryCondition), {
+  path: ['primaryCondition'],
+  message: 'Primary condition must be one of the selected conditions.',
+}).refine(input => new Set(input.conditions).size === input.conditions.length, {
+  path: ['conditions'],
+  message: 'Conditions must be unique.',
+}).refine(input => (
+  input.type === 'general_hhh_website'
+    ? input.consentVersion === 'general-public-v2.1' || input.consentVersion === 'general-public-v2.0'
+    : input.consentVersion === 'pharmacy-qr-v2.1' || input.consentVersion === 'pharmacy-qr-v2.0'
+), {
+  path: ['consentVersion'],
+  message: 'Consent version does not match intake source.',
+});
+
+const resolveTokenSchema = z.object({
+  token: referralTokenSchema,
+}).strict();
 
 const resolveLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -61,11 +101,45 @@ export function caseReference(id: string, submittedAt: string) {
   return `HHH-${day}-${id.replaceAll('-', '').slice(0, 8).toUpperCase()}`;
 }
 
+function answersPayload(input: z.infer<typeof intakeSchema>, assignment: {
+  sourceOrganisationId?: string | null;
+  assignedOrganisationId?: string | null;
+  sourceType: CreateSubmissionInput['sourceType'];
+  assignmentStatus: CreateSubmissionInput['assignmentStatus'];
+}): CreateSubmissionInput {
+  return {
+    sourceOrganisationId: assignment.sourceOrganisationId ? asUuid(assignment.sourceOrganisationId) : null,
+    assignedOrganisationId: assignment.assignedOrganisationId ? asUuid(assignment.assignedOrganisationId) : null,
+    sourceType: assignment.sourceType,
+    firstName: input.firstName,
+    surname: input.surname,
+    dob: input.dob,
+    mobile: input.mobile,
+    email: input.email.trim().toLowerCase(),
+    emailHash: sha256(input.email.trim().toLowerCase()),
+    postcode: input.postcode.trim().toUpperCase(),
+    triedTwoTreatments: input.tried2,
+    psychiatricExclusion: input.psychExclusion,
+    heardAbout: input.heardAbout,
+    conditionCodes: input.conditions,
+    primaryConditionCode: input.primaryCondition,
+    idempotencyKeyHash: sha256(input.idempotencyKey),
+    assignmentStatus: assignment.assignmentStatus,
+    pharmacyAccessStatus: 'WITHHELD',
+    consentVersion: input.consentVersion,
+    referralConsent: input.consentReferral,
+    dataSharingConsent: input.consentShare,
+    marketingConsent: input.marketing,
+    privacyNoticeVersion: '2026-v2.1',
+  };
+}
+
 export function createPublicIntakeV2Router(): Router {
   const router = Router();
   const organisationRepo = new SqlOrganisationRepository();
   const intakeRepo = new SqlIntakeRepository();
   const identityRepo = new SqlIdentityRepository();
+  const searchRepo = new SqlPostcodeSearchRepository();
 
   router.post('/public/referral-tokens/resolve', resolveLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -81,10 +155,46 @@ export function createPublicIntakeV2Router(): Router {
 
   router.post('/public/intakes', submissionLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const input = fixedPharmacyIntakeSchema.parse(req.body);
-      const resolution = await organisationRepo.findDirectoryByTokenHash(sha256(input.referralToken));
-      if (!resolution || resolution.intakeVersion !== 'v2') {
-        throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
+      const input = intakeSchema.parse(req.body);
+      let sourceOrganisationId: string | null = null;
+      let assignedOrganisationId: string | null = null;
+      let sourceType: CreateSubmissionInput['sourceType'] = 'GENERAL_HHH_WEBSITE';
+      let assignmentStatus: CreateSubmissionInput['assignmentStatus'] = 'AWAITING_HHH_ALLOCATION';
+      let provisionalPharmacyName: string | null = null;
+      let warning: 'SELECTED_PHARMACY_UNAVAILABLE' | null = null;
+
+      if (input.type === 'future_pharmacy_qr') {
+        const resolution = await organisationRepo.findDirectoryByTokenHash(sha256(input.referralToken));
+        if (!resolution || resolution.intakeVersion !== 'v2') {
+          throw new HttpError(404, 'Pharmacy link not found.', 'NOT_FOUND');
+        }
+        sourceOrganisationId = resolution.pharmacy.id;
+        assignedOrganisationId = resolution.pharmacy.id;
+        sourceType = 'PHARMACY_QR';
+        assignmentStatus = 'PROVISIONAL';
+        provisionalPharmacyName = resolution.pharmacy.tradingName;
+      } else {
+        const search = await searchRepo.findSessionById(asUuid(input.searchId));
+        if (!search || Date.parse(search.expiresAt) <= Date.now()) {
+          throw new HttpError(409, 'The postcode search has expired. Search again.', 'SEARCH_EXPIRED');
+        }
+        if (normaliseUkPostcode(input.postcode) !== search.postcode) {
+          throw new HttpError(409, 'The postcode changed. Search again.', 'SEARCH_POSTCODE_MISMATCH');
+        }
+        if (input.selectedDirectoryProfileId) {
+          const selectedKey = uuidKey(input.selectedDirectoryProfileId);
+          const allowed = (search.resultOrganisationIds ?? []).some((id) => uuidKey(id) === selectedKey);
+          if (!allowed) throw new HttpError(400, 'Select a pharmacy from the current search.', 'INVALID_SELECTION');
+          const organisation = await organisationRepo.findOrganisationById(asUuid(input.selectedDirectoryProfileId));
+          if (organisation) {
+            sourceOrganisationId = organisation.id;
+            assignedOrganisationId = organisation.id;
+            assignmentStatus = 'PROVISIONAL';
+            provisionalPharmacyName = organisation.tradingName;
+          } else {
+            warning = 'SELECTED_PHARMACY_UNAVAILABLE';
+          }
+        }
       }
 
       const idempotencyKeyHash = sha256(input.idempotencyKey);
@@ -92,59 +202,39 @@ export function createPublicIntakeV2Router(): Router {
       let created = false;
 
       if (!submission) {
-        const result = await intakeRepo.createSubmission({
-          sourceOrganisationId: resolution.pharmacy.id,
-          assignedOrganisationId: resolution.pharmacy.id,
-          sourceType: 'PHARMACY_QR',
-          firstName: input.firstName,
-          surname: input.surname,
-          dob: input.dob,
-          mobile: input.mobile,
-          email: input.email.trim().toLowerCase(),
-          emailHash: sha256(input.email.trim().toLowerCase()),
-          postcode: input.postcode.trim().toUpperCase(),
-          triedTwoTreatments: input.tried2,
-          psychiatricExclusion: input.psychExclusion,
-          heardAbout: input.heardAbout,
-          idempotencyKeyHash,
-          assignmentStatus: 'PROVISIONAL',
-          pharmacyAccessStatus: 'WITHHELD',
-          consentVersion: input.consentVersion,
-          referralConsent: input.consentReferral,
-          dataSharingConsent: input.consentShare,
-          marketingConsent: input.marketing,
-          privacyNoticeVersion: '2026-v2.1',
-        });
+        const result = await intakeRepo.createSubmission(answersPayload(input, {
+          sourceOrganisationId,
+          assignedOrganisationId,
+          sourceType,
+          assignmentStatus,
+        }));
         if (!result.id) throw new Error('Eligibility submission did not return an identifier.');
         submission = await intakeRepo.findSubmissionById(result.id);
         if (!submission) throw new Error('Eligibility submission could not be verified after creation.');
         created = true;
       }
 
-      await Promise.all(input.conditions.map(conditionCode => intakeRepo.upsertSubmissionCondition(
-        submission!.id,
-        conditionCode,
-        conditionCode === input.primaryCondition,
-      )));
+      await intakeRepo.saveSubmissionConditions(submission.id, input.conditions, input.primaryCondition);
 
       if (created) {
         await identityRepo.appendAudit({
-          organisationId: resolution.pharmacy.id,
+          organisationId: assignedOrganisationId ?? sourceOrganisationId,
           event: 'eligibility.submitted',
           recordType: 'EligibilitySubmission',
           recordId: submission.id,
           surface: 'public',
-          details: { sourceType: 'PHARMACY_QR', conditionCount: input.conditions.length },
+          details: { sourceType, conditionCount: input.conditions.length },
         });
       }
 
       const submittedAt = submission.submittedAt || new Date().toISOString();
+      res.setHeader('Cache-Control', 'no-store');
       res.status(created ? 201 : 200).json({
         caseReference: caseReference(submission.id, submittedAt),
         submittedAt,
-        assignmentStatus: 'provisional',
-        provisionalPharmacyName: resolution.pharmacy.tradingName,
-        warning: null,
+        assignmentStatus: assignmentStatus.toLowerCase(),
+        provisionalPharmacyName,
+        warning,
       });
     } catch (error) {
       next(error);

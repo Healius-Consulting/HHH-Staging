@@ -206,12 +206,16 @@ function PatientDirectoryTag({ status }: { status: ReturnType<typeof deriveStatu
   );
 }
 
+function enquiryDisplayName(enquiry: PendingEnquiry) {
+  return `${enquiry.firstName} ${enquiry.surname}`.trim() || enquiry.caseReference;
+}
+
 function directoryEmptyCopy(tab: PatientDirectoryFilter, hasSearch: boolean): { title: string; detail: string; icon: typeof Users } {
   if (hasSearch) {
     return tab === 'enquiries'
       ? {
           title: 'No matching enquiries',
-          detail: 'Try a different case reference.',
+          detail: 'Try a different name, contact detail, condition, or case reference.',
           icon: Search,
         }
       : {
@@ -224,7 +228,7 @@ function directoryEmptyCopy(tab: PatientDirectoryFilter, hasSearch: boolean): { 
     case 'enquiries':
       return {
         title: 'No open enquiries',
-        detail: 'New eligibility enquiries remain with HHH admin until review completes and a patient record is activated.',
+        detail: 'New QR or website-chosen enquiries appear here until HHH refers them or moves them to another pharmacy.',
         icon: Inbox,
       };
     case 'active':
@@ -323,14 +327,25 @@ export default function Patients() {
     let list = [...enquiries];
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter(enquiry => enquiry.caseReference.toLowerCase().includes(q));
+      list = list.filter(enquiry => {
+        const name = enquiryDisplayName(enquiry).toLowerCase();
+        return (
+          name.includes(q)
+          || enquiry.caseReference.toLowerCase().includes(q)
+          || (enquiry.email ?? '').toLowerCase().includes(q)
+          || (enquiry.mobile ?? '').includes(q)
+          || (enquiry.dob ?? '').toLowerCase().includes(q)
+          || formatPatientDob(enquiry.dob).toLowerCase().includes(q)
+          || (enquiry.conditions ?? []).some(condition => conditionLabel(condition).toLowerCase().includes(q))
+        );
+      });
     }
     if (sortKey === 'status') {
       list.sort((a, b) => a.displayStatus.localeCompare(b.displayStatus));
     } else if (sortKey === 'id') {
       list.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
     } else {
-      list.sort((a, b) => a.caseReference.localeCompare(b.caseReference, 'en', { sensitivity: 'base' }));
+      list.sort((a, b) => enquiryDisplayName(a).localeCompare(enquiryDisplayName(b), 'en', { sensitivity: 'base' }));
     }
     return list;
   }, [enquiries, search, sortKey]);
@@ -536,7 +551,7 @@ export default function Patients() {
           <Search size={16} />
           <input
             type="search"
-            placeholder={activeTab === 'enquiries' ? 'Search by case reference...' : 'Search by name, condition, DOB, email, or mobile...'}
+            placeholder={activeTab === 'enquiries' ? 'Search by name, condition, DOB, email, or mobile...' : 'Search by name, condition, DOB, email, or mobile...'}
             aria-label={activeTab === 'enquiries' ? 'Search enquiry directory' : 'Search patient directory'}
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -547,7 +562,7 @@ export default function Patients() {
           <select aria-label="Sort patient directory" value={sortKey} onChange={e => setSortKey(e.target.value as SortKey)}>
             {activeTab === 'enquiries' ? (
               <>
-                <option value="name">Case reference (A–Z)</option>
+                <option value="name">Name (A–Z)</option>
                 <option value="status">Status</option>
                 <option value="id">Newest</option>
               </>
@@ -567,8 +582,8 @@ export default function Patients() {
         {activeTab === 'enquiries' ? (
           <>
             <header className="patient-directory-key">
-              <div className="patient-directory-key__title"><span>HHH-managed enquiries</span><strong>{processedEnquiries.length}</strong></div>
-              <p className="patient-directory-key__lead">Patient identity stays with HHH until referral is activated. No orders can be created from this view.</p>
+              <div className="patient-directory-key__title"><span>Assigned enquiries</span><strong>{processedEnquiries.length}</strong></div>
+              <p className="patient-directory-key__lead">These people are currently assigned to this pharmacy. HHH may still move them. Referral marks them referred; orders stay locked until then.</p>
             </header>
 
             {processedEnquiries.length === 0 ? (
@@ -579,17 +594,25 @@ export default function Patients() {
               </div>
             ) : (
               <ul className="patient-directory-list">
-                {processedEnquiries.map((enquiry: PendingEnquiry) => (
+                {processedEnquiries.map((enquiry: PendingEnquiry) => {
+                  const name = enquiryDisplayName(enquiry);
+                  const primaryCondition = enquiry.primaryCondition ?? enquiry.conditions?.[0] ?? '';
+                  const sourceLabel = portalSourceLabel(enquiry.sourceType);
+                  return (
                   <li key={enquiry.id}>
-                    <article className="patient-directory-card patient-directory-card--enquiry" aria-label={`Enquiry ${enquiry.caseReference}`}>
+                    <article className="patient-directory-card patient-directory-card--enquiry" aria-label={`Enquiry ${name}`}>
                       <div className="patient-directory-card__identity">
-                        <div className="avatar patient-directory-card__avatar"><Inbox size={14} aria-hidden="true" /></div>
+                        <div className="avatar patient-directory-card__avatar">{initials(name)}</div>
                         <div className="patient-directory-card__copy">
-                          <strong title={enquiry.caseReference}>{enquiry.caseReference}</strong>
+                          <strong title={name}>{compactPatientName(name)}</strong>
                           <span className="patient-directory-card__meta">
-                            <span><CalendarDays size={12} aria-hidden="true" />{fmtDate(enquiry.submittedAt)}</span>
-                            <span>HHH intake case</span>
+                            <span><CalendarDays size={12} aria-hidden="true" />{formatPatientDob(enquiry.dob)}</span>
+                            <span><Mail size={12} aria-hidden="true" />{enquiry.email}</span>
+                            <span><Phone size={12} aria-hidden="true" />{enquiry.mobile}</span>
                           </span>
+                          {primaryCondition ? (
+                            <span className="patient-directory-card__condition">{conditionLabel(primaryCondition)}</span>
+                          ) : null}
                         </div>
                       </div>
                       <div className="patient-directory-card__status">
@@ -597,10 +620,13 @@ export default function Patients() {
                           {enquiry.displayStatus}
                         </span>
                       </div>
-                      <span className="patient-directory-card__referral text-muted text-sm">Awaiting HHH referral</span>
+                      <span className="patient-directory-card__referral text-muted text-sm">
+                        {sourceLabel ? `${sourceLabel} · ` : ''}Awaiting HHH referral
+                      </span>
                     </article>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </>

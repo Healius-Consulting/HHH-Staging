@@ -9,6 +9,8 @@ export interface PatientSourceSubmissionRecord {
   psychiatricExclusion: boolean;
   heardAbout: string | null;
   marketingConsent: boolean;
+  conditionCodes?: string[] | null;
+  primaryConditionCode?: string | null;
 }
 
 export interface PatientRecord {

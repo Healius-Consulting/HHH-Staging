@@ -1462,7 +1462,7 @@ export default function AdminPortal() {
     return (
       <>
         <AdminIntakeV2 />
-        <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>HHH referral boundary</strong><p>New applications remain HHH-only until the referral and patient activation above succeed. This does not diagnose, prescribe, replace a doctor’s prescription, or replace the pharmacy’s legal and professional checks before dispensing.</p></div></section>
+        <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>HHH referral boundary</strong><p>The current assigned pharmacy can see this enquiry. Completing referral above marks them referred for that pharmacy. This does not diagnose, prescribe, replace a doctor’s prescription, or replace the pharmacy’s legal and professional checks before dispensing.</p></div></section>
         <section className="card admin-referral-section">
           <div className="admin-directory-head"><div><p className="section-label">Legacy compatibility</p><h2>Previous-form applications</h2><p>Only schema-v1 applications use this older workflow. New main-site and dedicated-link cases are managed in the HHH intake workspace above.</p></div><span className="pill pill-amber">{pending.length} waiting</span></div>
           {pending.length ? <div className="admin-referral-list">{pending.map(submission => referralCard(submission, 'queue'))}</div> : <div className="empty-state">No onboarding decisions are waiting.</div>}
@@ -1482,7 +1482,7 @@ export default function AdminPortal() {
   const renderReferrals = () => (
     <>
       <AdminIntakeV2 />
-      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>HHH-only intake boundary</strong><p>Admin staff receive and manage every eligibility enquiry. A pharmacy receives only an aggregate “with HHH admin” notice until HHH completes the referral and activates a patient record.</p></div></section>
+      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>HHH referral boundary</strong><p>Admin staff review every eligibility enquiry. The current assigned pharmacy can already see the person as an enquiry. Completing referral marks them referred for that pharmacy.</p></div></section>
     </>
   );
 

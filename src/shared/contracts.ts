@@ -451,6 +451,14 @@ export interface PortalPendingEnquiryRecord {
   caseReference: string;
   displayStatus: 'New enquiry' | 'Under HHH review';
   sourceType: 'general_hhh_website' | 'future_pharmacy_qr' | 'legacy_pharmacy_qr';
+  firstName: string;
+  surname: string;
+  dob: string;
+  email: string;
+  mobile: string;
+  postcode: string;
+  conditions: string[];
+  primaryCondition: string | null;
 }
 
 export interface PortalPatientRecord {

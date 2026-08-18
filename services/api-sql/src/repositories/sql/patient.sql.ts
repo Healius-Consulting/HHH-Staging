@@ -1,4 +1,6 @@
 import { dataConnect } from '../../bootstrap/firebase.js';
+import { asUuid } from '../../domain/common/uuid.js';
+import { formConditionRecords, primaryConditionCode } from '../../domain/eligibility/form-conditions.js';
 import type { PatientRecord, PatientRepositoryPort } from '../ports/patient.port.js';
 
 const PATIENT_FIELDS = `
@@ -28,6 +30,12 @@ const PATIENT_FIELDS = `
     psychiatricExclusion
     heardAbout
     marketingConsent
+    conditionCodes
+    primaryConditionCode
+    eligibilityConditions_on_submission {
+      conditionCode
+      primary
+    }
   }
 `;
 
@@ -75,15 +83,33 @@ const LIST_ACTIVE_PATIENTS_GQL = `
 
 type RawPatient = Omit<PatientRecord, 'conditions' | 'sourceSubmission'> & {
   patientConditions_on_patient?: PatientRecord['conditions'];
-  sourceSubmission?: PatientRecord['sourceSubmission'];
+  sourceSubmission?: PatientRecord['sourceSubmission'] & {
+    eligibilityConditions_on_submission?: PatientRecord['conditions'];
+  };
 };
 
 function mapPatient(raw: RawPatient): PatientRecord {
   const { patientConditions_on_patient, sourceSubmission, ...patient } = raw;
+  const joined = sourceSubmission?.eligibilityConditions_on_submission;
+  const fromForm = formConditionRecords({
+    conditionCodes: sourceSubmission?.conditionCodes,
+    primaryConditionCode: sourceSubmission?.primaryConditionCode,
+    conditions: joined?.length ? joined : patientConditions_on_patient,
+  });
   return {
     ...patient,
-    conditions: patientConditions_on_patient ?? [],
-    sourceSubmission: sourceSubmission ?? null,
+    conditions: fromForm.length ? fromForm : patientConditions_on_patient ?? [],
+    sourceSubmission: sourceSubmission
+      ? {
+        sourceType: sourceSubmission.sourceType,
+        triedTwoTreatments: sourceSubmission.triedTwoTreatments,
+        psychiatricExclusion: sourceSubmission.psychiatricExclusion,
+        heardAbout: sourceSubmission.heardAbout,
+        marketingConsent: sourceSubmission.marketingConsent,
+        conditionCodes: fromForm.map((record) => record.conditionCode),
+        primaryConditionCode: primaryConditionCode(fromForm),
+      }
+      : null,
   };
 }
 
@@ -125,7 +151,7 @@ export class SqlPatientRepository implements PatientRepositoryPort {
   async listTenantPatients(organisationId: string, limit = 500): Promise<PatientRecord[]> {
     const result = await dataConnect.executeGraphql<{ patients: RawPatient[] }, any>(
       LIST_TENANT_PATIENTS_GQL,
-      { variables: { organisationId, limit } },
+      { variables: { organisationId: asUuid(organisationId), limit } },
     );
     return (result.data.patients ?? []).map(mapPatient);
   }
@@ -149,7 +175,7 @@ export class SqlPatientRepository implements PatientRepositoryPort {
   async findPatientById(organisationId: string, patientId: string): Promise<PatientRecord | null> {
     const result = await dataConnect.executeGraphql<{ patients: RawPatient[] }, any>(
       GET_TENANT_PATIENT_GQL,
-      { variables: { organisationId, patientId } },
+      { variables: { organisationId: asUuid(organisationId), patientId: asUuid(patientId) } },
     );
     const raw = result.data.patients?.[0];
     return raw ? mapPatient(raw) : null;

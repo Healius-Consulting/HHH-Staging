@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { caseReference, fixedPharmacyIntakeSchema, referralTokenSchema } from './intake-v2.router.js';
+import { caseReference, fixedPharmacyIntakeSchema, intakeSchema, referralTokenSchema } from './intake-v2.router.js';
 
 const token = '0a93ebde7ab143cfafd7c2a34329b3587148fb1ff9fb4e6fbf02f517fac05d30';
 
@@ -46,6 +46,31 @@ describe('public SQL intake v2 validation', () => {
       ...validInput(),
       primaryCondition: 'anxiety',
     }).success, false);
+  });
+
+  it('accepts a general website intake with conditions on the form', () => {
+    const parsed = intakeSchema.safeParse({
+      type: 'general_hhh_website',
+      searchId: '11111111-1111-4111-8111-111111111111',
+      selectedDirectoryProfileId: '70913a30-71c3-4a41-952e-d532927af58c',
+      firstName: 'Test',
+      surname: 'Applicant',
+      dob: '1990-01-01',
+      mobile: '07000000000',
+      email: 'test@example.test',
+      postcode: 'SW1A 1AA',
+      conditions: ['endometriosis', 'chronic-pain'],
+      primaryCondition: 'endometriosis',
+      tried2: true,
+      psychExclusion: false,
+      consentReferral: true,
+      consentShare: true,
+      marketing: false,
+      heardAbout: 'Website',
+      consentVersion: 'general-public-v2.1',
+      idempotencyKey: '11111111-1111-4111-8111-111111111111',
+    });
+    assert.equal(parsed.success, true);
   });
 
   it('creates a stable, non-PII case reference', () => {

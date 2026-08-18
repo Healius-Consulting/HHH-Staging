@@ -11,6 +11,7 @@ import type { OrderDraftRecord, OrderRecord } from '../../repositories/ports/ord
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
 import type { PatientRecord } from '../../repositories/ports/patient.port.js';
 import type { TenantPendingEnquiryRecord } from '../../repositories/ports/intake.port.js';
+import { formConditionRecords, primaryConditionCode } from '../../domain/eligibility/form-conditions.js';
 import { sqlIntakeCaseReference } from './intake-contracts.js';
 import { pendingEnquiryDisplayStatus, portalSourceType } from './intake-source.js';
 
@@ -85,18 +86,35 @@ export function toPortalOrganisation(organisation: OrganisationRecord) {
 
 export function toPortalPendingEnquiry(record: TenantPendingEnquiryRecord) {
   const sourceType = portalSourceType(record.sourceType);
+  const fromForm = formConditionRecords({
+    conditionCodes: record.conditionCodes,
+    primaryConditionCode: record.primaryConditionCode,
+  });
   return {
     id: record.id,
     submittedAt: record.submittedAt,
     caseReference: sqlIntakeCaseReference(record.id, record.submittedAt),
     displayStatus: pendingEnquiryDisplayStatus(record.followUpStatus),
     sourceType: sourceType ?? 'legacy_pharmacy_qr' as const,
+    firstName: record.firstName,
+    surname: record.surname,
+    dob: record.dob,
+    email: record.email,
+    mobile: record.mobile,
+    postcode: record.postcode,
+    conditions: fromForm.map(condition => condition.conditionCode),
+    primaryCondition: primaryConditionCode(fromForm),
   };
 }
 
 export function toPortalPatient(patient: PatientRecord) {
-  const conditions = patient.conditions.map(condition => condition.conditionCode);
-  const primaryCondition = patient.conditions.find(condition => condition.primary)?.conditionCode ?? conditions[0] ?? null;
+  const fromForm = formConditionRecords({
+    conditionCodes: patient.sourceSubmission?.conditionCodes,
+    primaryConditionCode: patient.sourceSubmission?.primaryConditionCode,
+    conditions: patient.conditions,
+  });
+  const conditions = fromForm.map(condition => condition.conditionCode);
+  const primary = primaryConditionCode(fromForm);
   const source = patient.sourceSubmission;
   return {
     id: patient.id,
@@ -110,7 +128,7 @@ export function toPortalPatient(patient: PatientRecord) {
     postcode: patient.postcode,
     status: lower(patient.status),
     conditions,
-    primaryCondition,
+    primaryCondition: primary,
     referralSource: source?.sourceType ? portalSourceType(source.sourceType) : null,
     triedTwoTreatments: source?.triedTwoTreatments ?? null,
     psychiatricExclusion: source?.psychiatricExclusion ?? null,

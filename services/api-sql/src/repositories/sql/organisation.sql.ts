@@ -1,4 +1,5 @@
 import { dataConnect } from '../../bootstrap/firebase.js';
+import { asUuid } from '../../domain/common/uuid.js';
 import type {
   OrganisationRecord,
   OrganisationRepositoryPort,
@@ -307,7 +308,7 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
   async findOrganisationById(id: string): Promise<OrganisationRecord | null> {
     const result = await dataConnect.executeGraphql<{ organisation: OrganisationRecord | null }, any>(
       GET_ORGANISATION_BY_ID_GQL,
-      { variables: { id } }
+      { variables: { id: asUuid(id) } }
     );
     return result.data.organisation ?? null;
   }

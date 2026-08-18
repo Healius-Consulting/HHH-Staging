@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
+import { asUuid, sameUuid } from '../../domain/common/uuid.js';
 import type { PlatformSubmissionRecord } from '../../repositories/ports/intake.port.js';
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
@@ -172,11 +173,12 @@ export function createPortalIntakeV2Router(): Router {
   router.post('/portal/admin/intake/:caseId/reassign', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertPlatformScope(req.context!);
-      const caseId = caseIdSchema.parse(req.params.caseId);
+      const caseId = asUuid(caseIdSchema.parse(req.params.caseId));
       const input = pendingAssignmentSchema.parse(req.body);
+      const destinationOrganisationId = asUuid(input.destinationOrganisationId);
       const [record, destination] = await Promise.all([
         intakeRepo.findSubmissionById(caseId) as Promise<PlatformSubmissionRecord | null>,
-        organisationRepo.findOrganisationById(input.destinationOrganisationId),
+        organisationRepo.findOrganisationById(destinationOrganisationId),
       ]);
       if (!record) throw new HttpError(404, 'The requested record was not found.', 'NOT_FOUND');
       assertPending(record);
@@ -186,13 +188,13 @@ export function createPortalIntakeV2Router(): Router {
       if (!canReceiveReferral(destination)) {
         throw new HttpError(409, 'The selected pharmacy is not currently eligible to receive referrals.', 'DESTINATION_UNAVAILABLE');
       }
-      if (record.assignedOrganisationId === input.destinationOrganisationId) {
+      if (sameUuid(record.assignedOrganisationId, destinationOrganisationId)) {
         throw new HttpError(409, 'This pharmacy is already the current pending destination.', 'DESTINATION_UNCHANGED');
       }
       const newVersion = record.assignmentVersion + 1;
       await intakeRepo.reassignPendingSubmission({
         id: caseId,
-        newOrganisationId: input.destinationOrganisationId,
+        newOrganisationId: destinationOrganisationId,
         expectedAssignmentVersion: record.assignmentVersion,
         newAssignmentVersion: newVersion,
         actorUid: scope.uid,
@@ -200,7 +202,7 @@ export function createPortalIntakeV2Router(): Router {
         note: input.note,
       });
       await identityRepo.appendAudit({
-        organisationId: input.destinationOrganisationId,
+        organisationId: destinationOrganisationId,
         actorUid: scope.uid,
         actorRole: scope.role,
         event: 'eligibility.pending_destination_changed',
@@ -211,14 +213,14 @@ export function createPortalIntakeV2Router(): Router {
         surface: 'admin',
         details: {
           previousOrganisationId: record.assignedOrganisationId,
-          newOrganisationId: input.destinationOrganisationId,
+          newOrganisationId: destinationOrganisationId,
           reasonCode: input.reasonCode,
           notePresent: Boolean(input.note),
           sourceOrganisationId: record.sourceOrganisationId,
         },
       });
       res.setHeader('Cache-Control', 'no-store');
-      res.status(200).json({ id: caseId, assignedOrganisationId: input.destinationOrganisationId, assignmentVersion: newVersion, pharmacyAccessStatus: 'withheld' });
+      res.status(200).json({ id: caseId, assignedOrganisationId: destinationOrganisationId, assignmentVersion: newVersion, pharmacyAccessStatus: 'withheld' });
     } catch (error) {
       next(error);
     }

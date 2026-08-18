@@ -129,6 +129,8 @@ describe('SQL pharmacy compatibility contracts', () => {
         psychiatricExclusion: false,
         heardAbout: 'Pharmacy poster',
         marketingConsent: true,
+        conditionCodes: ['chronic-pain', 'anxiety'],
+        primaryConditionCode: 'chronic-pain',
       },
     });
     assert.equal(mapped.status, 'referred');
@@ -139,6 +141,25 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.psychiatricExclusion, false);
     assert.equal(mapped.heardAbout, 'Pharmacy poster');
     assert.equal(mapped.marketingConsent, true);
+  });
+
+  it('prefers eligibility form conditions over copied patient-condition rows', () => {
+    const mapped = toPortalPatient({
+      ...patient,
+      conditions: [{ conditionCode: 'stale-copy', primary: true }],
+      sourceSubmission: {
+        sourceType: 'GENERAL_HHH_WEBSITE',
+        triedTwoTreatments: true,
+        psychiatricExclusion: false,
+        heardAbout: null,
+        marketingConsent: false,
+        conditionCodes: ['endometriosis', 'chronic-pain'],
+        primaryConditionCode: 'endometriosis',
+      },
+    });
+    assert.deepEqual(mapped.conditions, ['endometriosis', 'chronic-pain']);
+    assert.equal(mapped.primaryCondition, 'endometriosis');
+    assert.equal(mapped.referralSource, 'general_hhh_website');
   });
 
   it('maps a migrated SQL order to the rich list contract', () => {
@@ -462,17 +483,26 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.prescriptionFlow?.['rx-beach']?.shipmentStates?.['b13179c4-9515-4181-abd8-d1b87b50faa4'], 'received');
   });
 
-  it('maps a pending tenant enquiry without patient PII', () => {
+  it('maps a pending tenant enquiry with assigned-pharmacy patient identity', () => {
     const mapped = toPortalPendingEnquiry({
       id: '12345678-1234-4123-8123-123456789012',
       submittedAt: '2026-08-17T09:15:00.000Z',
       followUpStatus: 'NOT_STARTED',
       sourceType: 'PHARMACY_QR',
+      firstName: 'Avery',
+      surname: 'Morgan',
+      dob: '1991-04-12',
+      email: 'avery@example.test',
+      mobile: '07000000000',
+      postcode: 'NG16 3AA',
+      conditionCodes: ['chronic-pain'],
+      primaryConditionCode: 'chronic-pain',
     });
     assert.equal(mapped.caseReference, 'HHH-20260817-12345678');
     assert.equal(mapped.displayStatus, 'New enquiry');
     assert.equal(mapped.sourceType, 'future_pharmacy_qr');
-    assert.equal(JSON.stringify(mapped).includes('firstName'), false);
+    assert.equal(mapped.firstName, 'Avery');
+    assert.equal(mapped.primaryCondition, 'chronic-pain');
   });
 
   it('maps an in-progress HHH review enquiry', () => {
@@ -481,6 +511,14 @@ describe('SQL pharmacy compatibility contracts', () => {
       submittedAt: '2026-08-17T09:15:00.000Z',
       followUpStatus: 'IN_PROGRESS',
       sourceType: 'GENERAL_HHH_WEBSITE',
+      firstName: 'Jordan',
+      surname: 'Taylor',
+      dob: '1988-02-02',
+      email: 'jordan@example.test',
+      mobile: '07111111111',
+      postcode: 'SW1A 1AA',
+      conditionCodes: ['anxiety'],
+      primaryConditionCode: 'anxiety',
     });
     assert.equal(mapped.displayStatus, 'Under HHH review');
     assert.equal(mapped.sourceType, 'general_hhh_website');
@@ -521,12 +559,21 @@ describe('SQL pharmacy compatibility contracts', () => {
         submittedAt: '2026-08-17T09:15:00.000Z',
         followUpStatus: 'NOT_STARTED',
         sourceType: 'PHARMACY_QR',
+        firstName: 'Avery',
+        surname: 'Morgan',
+        dob: '1991-04-12',
+        email: 'avery@example.test',
+        mobile: '07000000000',
+        postcode: 'NG16 3AA',
+        conditionCodes: ['chronic-pain'],
+        primaryConditionCode: 'chronic-pain',
       }],
     });
     assert.equal(directory.counts.patients, 1);
     assert.equal(directory.counts.pendingEnquiries, 1);
     assert.equal(directory.patients[0]?.conditions[0], 'chronic_pain');
     assert.equal(directory.enquiries[0]?.displayStatus, 'New enquiry');
+    assert.equal(directory.enquiries[0]?.firstName, 'Avery');
   });
 
   it('builds a PII-masked tenant overview from SQL rows', () => {

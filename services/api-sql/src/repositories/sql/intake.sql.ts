@@ -1,5 +1,7 @@
 import { dataConnect } from '../../bootstrap/firebase.js';
 import { HttpError } from '../../domain/common/errors.js';
+import { asUuid } from '../../domain/common/uuid.js';
+import { formConditionRecords } from '../../domain/eligibility/form-conditions.js';
 import type {
   ActivateSubmissionInput,
   CreateSubmissionInput,
@@ -30,6 +32,8 @@ const GET_SUBMISSION_BY_ID_GQL = `
       triedTwoTreatments
       psychiatricExclusion
       heardAbout
+      conditionCodes
+      primaryConditionCode
       idempotencyKeyHash
       assignmentStatus
       assignmentVersion
@@ -60,9 +64,21 @@ const LIST_TENANT_PENDING_ENQUIRIES_GQL = `
   query ListTenantPendingEnquiries($organisationId: UUID!, $limit: Int!) {
     eligibilitySubmissions(
       where: {
-        assignedOrganisationId: { eq: $organisationId }
-        pharmacyAccessStatus: { eq: WITHHELD }
-        outcomeStatus: { eq: OPEN }
+        _and: [
+          { pharmacyAccessStatus: { eq: WITHHELD } }
+          { outcomeStatus: { eq: OPEN } }
+          {
+            _or: [
+              { assignedOrganisationId: { eq: $organisationId } }
+              {
+                _and: [
+                  { assignedOrganisationId: { isNull: true } }
+                  { sourceOrganisationId: { eq: $organisationId } }
+                ]
+              }
+            ]
+          }
+        ]
       }
       limit: $limit
     ) {
@@ -70,6 +86,14 @@ const LIST_TENANT_PENDING_ENQUIRIES_GQL = `
       submittedAt
       followUpStatus
       sourceType
+      firstName
+      surname
+      dob
+      email
+      mobile
+      postcode
+      conditionCodes
+      primaryConditionCode
     }
   }
 `;
@@ -90,6 +114,8 @@ const LIST_PLATFORM_SUBMISSIONS_GQL = `
       triedTwoTreatments
       psychiatricExclusion
       heardAbout
+      conditionCodes
+      primaryConditionCode
       assignmentStatus
       assignmentVersion
       pharmacyAccessStatus
@@ -139,6 +165,8 @@ const CREATE_SUBMISSION_GQL = `
     $triedTwoTreatments: Boolean!
     $psychiatricExclusion: Boolean!
     $heardAbout: String
+    $conditionCodes: [String!]
+    $primaryConditionCode: String
     $idempotencyKeyHash: String!
     $assignmentStatus: AssignmentStatus!
     $pharmacyAccessStatus: AccessStatus!
@@ -162,6 +190,8 @@ const CREATE_SUBMISSION_GQL = `
       triedTwoTreatments: $triedTwoTreatments
       psychiatricExclusion: $psychiatricExclusion
       heardAbout: $heardAbout
+      conditionCodes: $conditionCodes
+      primaryConditionCode: $primaryConditionCode
       idempotencyKeyHash: $idempotencyKeyHash
       assignmentStatus: $assignmentStatus
       pharmacyAccessStatus: $pharmacyAccessStatus
@@ -185,6 +215,23 @@ const GET_SUBMISSION_BY_IDEMPOTENCY_HASH_GQL = `
       assignmentStatus
       submittedAt
     }
+  }
+`;
+
+const UPDATE_SUBMISSION_CONDITIONS_GQL = `
+  mutation UpdateEligibilitySubmissionConditions(
+    $id: UUID!
+    $conditionCodes: [String!]
+    $primaryConditionCode: String
+  ) {
+    eligibilitySubmission_update(
+      key: { id: $id }
+      data: {
+        conditionCodes: $conditionCodes
+        primaryConditionCode: $primaryConditionCode
+        updatedAt_expr: "request.time"
+      }
+    )
   }
 `;
 
@@ -380,7 +427,7 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
   async findSubmissionById(id: string): Promise<any | null> {
     const result = await dataConnect.executeGraphql<{ eligibilitySubmission: any | null }, any>(
       GET_SUBMISSION_BY_ID_GQL,
-      { variables: { id } }
+      { variables: { id: asUuid(id) } }
     );
     return result.data.eligibilitySubmission ?? null;
   }
@@ -390,7 +437,7 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
       eligibilitySubmissions: TenantPendingEnquiryRecord[];
     }, any>(
       LIST_TENANT_PENDING_ENQUIRIES_GQL,
-      { variables: { organisationId, limit } }
+      { variables: { organisationId: asUuid(organisationId), limit } }
     );
     return (result.data.eligibilitySubmissions ?? [])
       .sort((left, right) => right.submittedAt.localeCompare(left.submittedAt));
@@ -404,10 +451,17 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
   }
 
   async listSubmissionConditions(submissionId: string): Promise<SubmissionConditionRecord[]> {
+    const submission = await this.findSubmissionById(submissionId) as PlatformSubmissionRecord | null;
+    const fromForm = formConditionRecords({
+      conditionCodes: submission?.conditionCodes,
+      primaryConditionCode: submission?.primaryConditionCode,
+    });
+    if (fromForm.length) return fromForm;
+
     const result = await dataConnect.executeGraphql<{
       eligibilityConditions: SubmissionConditionRecord[];
-    }, any>(LIST_SUBMISSION_CONDITIONS_GQL, { variables: { submissionId } });
-    return result.data.eligibilityConditions ?? [];
+    }, any>(LIST_SUBMISSION_CONDITIONS_GQL, { variables: { submissionId: asUuid(submissionId) } });
+    return formConditionRecords({ conditions: result.data.eligibilityConditions ?? [] });
   }
 
   async createSubmission(input: CreateSubmissionInput): Promise<{ id?: string }> {
@@ -428,6 +482,8 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
           triedTwoTreatments: input.triedTwoTreatments,
           psychiatricExclusion: input.psychiatricExclusion,
           heardAbout: input.heardAbout ?? null,
+          conditionCodes: input.conditionCodes,
+          primaryConditionCode: input.primaryConditionCode,
           idempotencyKeyHash: input.idempotencyKeyHash,
           assignmentStatus: input.assignmentStatus,
           pharmacyAccessStatus: input.pharmacyAccessStatus,
@@ -451,10 +507,28 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
     return result.data.eligibilitySubmissions?.[0] ?? null;
   }
 
-  async upsertSubmissionCondition(submissionId: string, conditionCode: string, primary: boolean): Promise<void> {
-    await dataConnect.executeGraphql(UPSERT_SUBMISSION_CONDITION_GQL, {
-      variables: { submissionId, conditionCode, primary },
+  async saveSubmissionConditions(submissionId: string, conditionCodes: string[], primaryConditionCode: string): Promise<void> {
+    await dataConnect.executeGraphql(UPDATE_SUBMISSION_CONDITIONS_GQL, {
+      variables: { id: asUuid(submissionId), conditionCodes, primaryConditionCode },
     });
+    const records = formConditionRecords({ conditionCodes, primaryConditionCode });
+    await Promise.all(records.map(async (condition) => {
+      try {
+        await dataConnect.executeGraphql(UPSERT_SUBMISSION_CONDITION_GQL, {
+          variables: {
+            submissionId: asUuid(submissionId),
+            conditionCode: condition.conditionCode,
+            primary: condition.primary,
+          },
+        });
+      } catch (error) {
+        console.warn('[Eligibility] Catalogue condition link skipped:', {
+          submissionId,
+          conditionCode: condition.conditionCode,
+          error,
+        });
+      }
+    }));
   }
 
   async reassignPendingSubmission(input: ReassignSubmissionInput): Promise<void> {
@@ -462,14 +536,14 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
       const current = await this.findSubmissionById(input.id) as PlatformSubmissionRecord | null;
       await dataConnect.executeGraphql<any, any>(REASSIGN_SUBMISSION_GQL, {
         variables: {
-          id: input.id,
-          newOrganisationId: input.newOrganisationId,
+          id: asUuid(input.id),
+          newOrganisationId: asUuid(input.newOrganisationId),
           expectedAssignmentVersion: input.expectedAssignmentVersion,
           newAssignmentVersion: input.newAssignmentVersion,
           actorUid: input.actorUid,
           reasonCode: input.reasonCode,
           note: input.note,
-          previousOrganisationId: current?.assignedOrganisationId ?? null,
+          previousOrganisationId: current?.assignedOrganisationId ? asUuid(current.assignedOrganisationId) : null,
           notePresent: Boolean(input.note),
         },
       });
@@ -480,7 +554,9 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
 
   async updateSubmissionFollowUp(input: UpdateSubmissionFollowUpInput): Promise<void> {
     try {
-      await dataConnect.executeGraphql<any, any>(UPDATE_SUBMISSION_FOLLOW_UP_GQL, { variables: input });
+      await dataConnect.executeGraphql<any, any>(UPDATE_SUBMISSION_FOLLOW_UP_GQL, {
+        variables: { ...input, id: asUuid(input.id) },
+      });
     } catch (error) {
       rethrowMutationError(error);
     }
@@ -488,7 +564,14 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
 
   async activateSubmission(input: ActivateSubmissionInput): Promise<void> {
     try {
-      await dataConnect.executeGraphql<any, any>(ACTIVATE_SUBMISSION_GQL, { variables: input });
+      await dataConnect.executeGraphql<any, any>(ACTIVATE_SUBMISSION_GQL, {
+        variables: {
+          ...input,
+          id: asUuid(input.id),
+          patientId: asUuid(input.patientId),
+          organisationId: asUuid(input.organisationId),
+        },
+      });
     } catch (error) {
       rethrowMutationError(error);
     }
@@ -499,7 +582,7 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
     await Promise.all(conditions.map(condition =>
       dataConnect.executeGraphql(UPSERT_PATIENT_CONDITION_GQL, {
         variables: {
-          patientId,
+          patientId: asUuid(patientId),
           conditionCode: condition.conditionCode,
           primary: condition.primary,
         },
@@ -509,7 +592,9 @@ export class SqlIntakeRepository implements IntakeRepositoryPort {
 
   async declineSubmission(input: DeclineSubmissionInput): Promise<void> {
     try {
-      await dataConnect.executeGraphql<any, any>(DECLINE_SUBMISSION_GQL, { variables: input });
+      await dataConnect.executeGraphql<any, any>(DECLINE_SUBMISSION_GQL, {
+        variables: { ...input, id: asUuid(input.id) },
+      });
     } catch (error) {
       rethrowMutationError(error);
     }

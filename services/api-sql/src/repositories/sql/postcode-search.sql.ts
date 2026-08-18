@@ -1,4 +1,5 @@
 import { dataConnect } from '../../bootstrap/firebase.js';
+import { asUuid } from '../../domain/common/uuid.js';
 
 export interface PostcodeSearchSessionRecord {
   id: string;
@@ -79,7 +80,7 @@ export class SqlPostcodeSearchRepository implements PostcodeSearchRepositoryPort
   async findSessionById(id: string): Promise<PostcodeSearchSessionRecord | null> {
     const result = await dataConnect.executeGraphql<{ postcodeSearchSession: PostcodeSearchSessionRecord | null }, any>(
       GET_POSTCODE_SEARCH_SESSION_GQL,
-      { variables: { id } },
+      { variables: { id: asUuid(id) } },
     );
     return result.data.postcodeSearchSession ?? null;
   }

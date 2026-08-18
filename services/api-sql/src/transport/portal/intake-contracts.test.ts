@@ -22,7 +22,7 @@ const submission: PlatformSubmissionRecord = {
 };
 
 describe('SQL admin intake projections', () => {
-  it('keeps a dedicated intake HHH-only until activation', () => {
+  it('keeps a dedicated intake unactivated until referral', () => {
     const projected = toAdminIntakeQueueItem(submission);
     assert.equal(projected.caseReference, 'HHH-20260817-12345678');
     assert.equal(projected.sourceType, 'future_pharmacy_qr');

@@ -10,6 +10,7 @@ type ReviewStatus = 'not_started' | 'due' | 'attempted' | 'in_progress' | 'compl
 const assignmentReasons = ['patient_preference', 'capacity', 'delivery_or_collection', 'geographic_coverage', 'service_compatibility', 'administrative_correction'] as const;
 const words = (value: unknown) => String(value ?? '').replaceAll('_', ' ');
 const dateTime = (value: unknown) => value ? new Date(String(value)).toLocaleString('en-GB') : 'Not recorded';
+const sameId = (left: string, right: string) => left.replaceAll('-', '').toLowerCase() === right.replaceAll('-', '').toLowerCase();
 
 const previewGeneral: V2EligibilityQueueItem = {
   id: 'preview-general', caseReference: 'HHH-PREVIEW-001', patientDisplayName: 'Avery Morgan',
@@ -170,7 +171,7 @@ export default function AdminIntakeV2() {
         applyDetail({ ...detail, effectiveAssignedOrganisationId: destination, assignedOrganisationId: destination, assignedOrganisationName: candidates.find(candidate => candidate.id === destination)?.tradingName, assignmentVersion: Number(detail.assignmentVersion ?? 0) + 1 });
       }
       setAllocationNote('');
-      setMessage('Pending destination updated. The previous pharmacy no longer receives an enquiry notice. Patient details remain HHH-only.');
+      setMessage('Pending destination updated. The previous pharmacy can no longer see this enquiry; it now appears for the new pharmacy.');
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'The pending destination could not be changed.');
     } finally {
@@ -233,7 +234,7 @@ export default function AdminIntakeV2() {
   }, [allRecords, queueQuery]);
 
   const currentDestinationId = String(detail?.effectiveAssignedOrganisationId ?? '');
-  const destinationSaved = Boolean(currentDestinationId) && destination === currentDestinationId;
+  const destinationSaved = Boolean(currentDestinationId) && sameId(destination, currentDestinationId);
   const reviewComplete = detail?.followUpStatus === 'completed';
   const sourceName = String(detail?.sourceOrganisationName ?? (detail?.sourceType === 'general_hhh_website' ? 'Main HHH website' : 'Original QR pharmacy'));
   const destinationName = String(detail?.assignedOrganisationName ?? candidates.find(candidate => candidate.id === currentDestinationId)?.tradingName ?? 'Not assigned');
@@ -241,7 +242,7 @@ export default function AdminIntakeV2() {
   return <div className="admin-v2-intake">
     <section className="admin-v2-intake__boundary" aria-label="Patient intake security boundary">
       <ShieldCheck size={19} />
-      <span><strong>HHH-only intake workspace</strong><small>QR origin is retained for audit only. Pharmacy notice and patient access always follow the current assignment.</small></span>
+      <span><strong>HHH intake workspace</strong><small>The current assigned pharmacy can see this person as an enquiry. Referral is the gate that marks them referred. Moving assignment transfers visibility.</small></span>
       <button type="button" className="btn btn-sm" onClick={() => void load()} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh</button>
     </section>
 
@@ -261,9 +262,9 @@ export default function AdminIntakeV2() {
 
       <main className="admin-v2-intake__detail">
         {!selected ? <div className="admin-v2-intake__placeholder"><ClipboardList size={28} /><h2>Select a patient</h2><p>Choose someone from the protected queue to review their form, update the intended pharmacy, and complete the referral.</p></div> : detailLoading || !detail ? <div className="empty-state"><LoaderCircle className="spin" size={22} /> Loading full authorised form…</div> : <>
-          <header className="admin-v2-intake__detail-head"><div><p className="section-label">{selected.caseReference}</p><h2>{selected.patientDisplayName}</h2><p>Submitted {dateTime(selected.submittedAt)}</p></div><span className="pill pill-info"><LockKeyhole size={12} /> HHH only</span></header>
+          <header className="admin-v2-intake__detail-head"><div><p className="section-label">{selected.caseReference}</p><h2>{selected.patientDisplayName}</h2><p>Submitted {dateTime(selected.submittedAt)}</p></div><span className="pill pill-info"><LockKeyhole size={12} /> HHH review</span></header>
 
-          <section className="admin-v2-case__notice"><ShieldCheck size={18} /><span><strong>Pharmacy patient details are withheld</strong><small>Only HHH admins can view this form. A pharmacy receives the patient record only after the final referral is completed.</small></span></section>
+          <section className="admin-v2-case__notice"><ShieldCheck size={18} /><span><strong>Enquiry visibility follows the current pharmacy</strong><small>The assigned pharmacy can already see this person in Patients. Completing referral marks them referred. Moving assignment removes them from the previous pharmacy.</small></span></section>
 
           <div className="admin-v2-case__summary">
             <section><h3><UserRound size={16} /> Patient and contact</h3><dl><div><dt>Date of birth</dt><dd>{String(detail.dob ?? '—')}</dd></div><div><dt>Postcode</dt><dd>{String(detail.postcode ?? '—')}</dd></div><div><dt>Email</dt><dd>{String(detail.email ?? '—')}</dd></div><div><dt>Mobile</dt><dd>{String(detail.mobile ?? '—')}</dd></div></dl></section>
@@ -273,14 +274,14 @@ export default function AdminIntakeV2() {
           <div className="admin-v2-intake__forms">
             <section className="admin-v2-panel admin-v2-intake__assignment">
               <header><span><MapPin size={16} /><strong>Current pharmacy assignment</strong></span><span className="pill pill-neutral">Pending</span></header>
-              <div className="admin-v2-intake__route"><span><small>Original source</small><strong>{sourceName}</strong><p>Audit attribution only</p></span><span aria-hidden="true">→</span><span><small>Current destination</small><strong>{destinationName}</strong><p>Controls the privacy-safe notice</p></span></div>
-              <p>Dedicated QR submissions can be moved before referral. Saving a new destination removes the old pharmacy’s notice and creates no patient access.</p>
+              <div className="admin-v2-intake__route"><span><small>Original source</small><strong>{sourceName}</strong><p>Audit attribution only</p></span><span aria-hidden="true">→</span><span><small>Current destination</small><strong>{destinationName}</strong><p>Who can see this enquiry now</p></span></div>
+              <p>Accept the chosen or QR pharmacy, or move the enquiry before referral. Saving a new destination removes the original pharmacy’s access and gives the new pharmacy the enquiry.</p>
               <div className="search-box"><Search size={15} /><input value={candidateQuery} onChange={event => setCandidateQuery(event.target.value)} placeholder="Search eligible pharmacies" aria-label="Search eligible pharmacies" /></div>
               <button type="button" className="btn btn-sm" onClick={() => void findCandidates()} disabled={busy}>Search pharmacies</button>
               <label>Pending destination<select className="input" value={destination} onChange={event => setDestination(event.target.value)}><option value="">Select a pharmacy</option>{candidates.map(candidate => <option key={String(candidate.id)} value={String(candidate.id)}>{String(candidate.tradingName)} · GPhC {String(candidate.gphcNumber ?? 'not recorded')}</option>)}</select></label>
               <label>Reason<select className="input" value={reason} onChange={event => setReason(event.target.value as typeof reason)}><option value="patient_preference">Patient preference</option><option value="capacity">Capacity</option><option value="delivery_or_collection">Delivery or collection needs</option><option value="geographic_coverage">Geographic coverage</option><option value="service_compatibility">Service compatibility</option><option value="administrative_correction">Administrative correction</option></select></label>
               <label>Private HHH note<textarea className="input" rows={3} value={allocationNote} onChange={event => setAllocationNote(event.target.value)} /></label>
-              <button type="button" className="btn" disabled={busy || !destination || destination === currentDestinationId} onClick={() => void saveDestination()}>Move pending enquiry</button>
+              <button type="button" className="btn" disabled={busy || !destination || sameId(destination, currentDestinationId)} onClick={() => void saveDestination()}>Move pending enquiry</button>
             </section>
 
             <section className="admin-v2-panel">
@@ -292,7 +293,7 @@ export default function AdminIntakeV2() {
 
             <section className="admin-v2-panel admin-v2-intake__activation">
               <header><span><Send size={16} /><strong>Complete referral</strong></span></header>
-              <div className={`admin-v2-referral-gate ${reviewComplete && destinationSaved ? 'is-ready' : ''}`}><span>{reviewComplete && destinationSaved ? <CheckCircle2 size={17} /> : <LockKeyhole size={17} />}</span><div><strong>{reviewComplete && destinationSaved ? 'Ready to activate' : 'Referral gate not complete'}</strong><small>{!destinationSaved ? 'Save the current pharmacy destination first.' : !reviewComplete ? 'Mark the HHH review as completed first.' : `The patient will become visible only to ${destinationName}.`}</small></div></div>
+              <div className={`admin-v2-referral-gate ${reviewComplete && destinationSaved ? 'is-ready' : ''}`}><span>{reviewComplete && destinationSaved ? <CheckCircle2 size={17} /> : <LockKeyhole size={17} />}</span><div><strong>{reviewComplete && destinationSaved ? 'Ready to refer' : 'Referral gate not complete'}</strong><small>{!destinationSaved ? 'Save the current pharmacy destination first.' : !reviewComplete ? 'Mark the HHH review as completed first.' : `The patient will be marked referred for ${destinationName}.`}</small></div></div>
               <label>Onboarding decision note<textarea className="input" rows={3} value={onboardingNote} onChange={event => setOnboardingNote(event.target.value)} /></label>
               <div className="admin-v2-intake__decision-actions"><button type="button" className="btn btn-primary" disabled={busy || !reviewComplete || !destinationSaved} onClick={() => void decideOnboarding('approved')}><Send size={15} /> Refer and activate patient</button><button type="button" className="btn" disabled={busy} onClick={() => void decideOnboarding('declined')}>Decline application</button></div>
             </section>

@@ -12,6 +12,8 @@ export interface CreateSubmissionInput {
   triedTwoTreatments: boolean;
   psychiatricExclusion: boolean;
   heardAbout?: string | null;
+  conditionCodes: string[];
+  primaryConditionCode: string;
   idempotencyKeyHash: string;
   assignmentStatus: 'AWAITING_HHH_ALLOCATION' | 'PROVISIONAL' | 'CONFIRMED';
   pharmacyAccessStatus: 'WITHHELD' | 'ACTIVATED';
@@ -43,6 +45,14 @@ export interface TenantPendingEnquiryRecord {
   submittedAt: string;
   followUpStatus: string;
   sourceType: 'GENERAL_HHH_WEBSITE' | 'PHARMACY_QR' | 'LEGACY_PHARMACY_QR';
+  firstName: string;
+  surname: string;
+  dob: string;
+  email: string;
+  mobile: string;
+  postcode: string;
+  conditionCodes?: string[] | null;
+  primaryConditionCode?: string | null;
 }
 
 export interface IdempotentSubmissionRecord {
@@ -60,6 +70,8 @@ export interface PlatformSubmissionRecord extends SubmissionQueueItem {
   triedTwoTreatments: boolean;
   psychiatricExclusion: boolean;
   heardAbout: string | null;
+  conditionCodes?: string[] | null;
+  primaryConditionCode?: string | null;
   assignmentVersion: number;
   pharmacyAccessStatus: string;
   onboardingDecision: string;
@@ -126,7 +138,7 @@ export interface IntakeRepositoryPort {
   createSubmission(input: CreateSubmissionInput): Promise<{ id?: string }>;
   findSubmissionById(id: string): Promise<any | null>;
   findSubmissionByIdempotencyHash(idempotencyKeyHash: string): Promise<IdempotentSubmissionRecord | null>;
-  upsertSubmissionCondition(submissionId: string, conditionCode: string, primary: boolean): Promise<void>;
+  saveSubmissionConditions(submissionId: string, conditionCodes: string[], primaryConditionCode: string): Promise<void>;
   listTenantPendingEnquiries(organisationId: string, limit?: number): Promise<TenantPendingEnquiryRecord[]>;
   listPlatformSubmissions(limit?: number): Promise<PlatformSubmissionRecord[]>;
   listSubmissionConditions(submissionId: string): Promise<SubmissionConditionRecord[]>;

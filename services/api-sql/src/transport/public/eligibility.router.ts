@@ -57,7 +57,7 @@ export function createPublicEligibilityRouter(): Router {
         }
       }
 
-      await intakeRepo.createSubmission({
+      const result = await intakeRepo.createSubmission({
         sourceOrganisationId,
         assignedOrganisationId,
         sourceType,
@@ -71,6 +71,8 @@ export function createPublicEligibilityRouter(): Router {
         triedTwoTreatments: input.tried2,
         psychiatricExclusion: input.psychExclusion,
         heardAbout: input.heardAbout,
+        conditionCodes: input.conditions,
+        primaryConditionCode: input.primaryCondition,
         idempotencyKeyHash,
         assignmentStatus,
         pharmacyAccessStatus,
@@ -80,6 +82,11 @@ export function createPublicEligibilityRouter(): Router {
         marketingConsent: input.marketing,
         privacyNoticeVersion: '2026-v2',
       });
+      const submissionId = result.id
+        ?? (await intakeRepo.findSubmissionByIdempotencyHash(idempotencyKeyHash))?.id;
+      if (submissionId) {
+        await intakeRepo.saveSubmissionConditions(submissionId, input.conditions, input.primaryCondition);
+      }
 
       res.status(201).json({
         caseReference: idempotencyKeyHash.slice(0, 10).toUpperCase(),
