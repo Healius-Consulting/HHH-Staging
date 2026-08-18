@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const SERVICE_ID = 'hhh-platform-service';
 const LOCATION = 'europe-west2';
+const PROJECT_ID = process.env.FIREBASE_PROJECT ?? 'hhh26-4ebd2';
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 export async function executeGraphqlViaFirebaseCli<TData>(
   operation: string,
@@ -22,13 +25,14 @@ export async function executeGraphqlViaFirebaseCli<TData>(
       [
         'dataconnect:execute',
         queryPath,
+        '--project', PROJECT_ID,
         '--service', SERVICE_ID,
         '--location', LOCATION,
         '--variables', `@${varsPath}`,
         '--no-debug-details',
       ],
       {
-        cwd: join(process.cwd(), '../..'),
+        cwd: REPO_ROOT,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
       },

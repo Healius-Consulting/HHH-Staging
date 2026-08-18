@@ -13,9 +13,14 @@ type GraphqlExecutor = {
   executeGraphql<TData>(operation: string, variables?: Record<string, unknown>): Promise<{ data: TData }>;
 };
 
-const MIGRATION_ACTOR_UID = 'system:migration';
 const DISPENSE_KEY = 'full';
 const DRY_RUN = process.env.DRY_RUN === '1';
+
+const RESOLVE_MIGRATION_ACTOR_GQL = `
+  query ResolveMigrationActor {
+    staffUsers(where: { role: { eq: HHH_ADMIN } }, limit: 1) { uid }
+  }
+`;
 
 const LIST_COLLECTED_ORDERS_GQL = `
   query ListCollectedOrdersForReferralBackfill($limit: Int!) {
@@ -140,8 +145,16 @@ function eventTimestamp(order: CollectedOrderRow) {
   return order.collectedAt ?? order.updatedAt;
 }
 
+async function resolveMigrationActorUid(graphql: GraphqlExecutor) {
+  const result = await graphql.executeGraphql<{ staffUsers: Array<{ uid: string }> }>(RESOLVE_MIGRATION_ACTOR_GQL);
+  const uid = result.data.staffUsers?.[0]?.uid;
+  if (!uid) throw new Error('No HHH_ADMIN staff user found for migration dispense attribution.');
+  return uid;
+}
+
 async function backfillReferralFees() {
   const graphql = await createGraphqlExecutor();
+  const migrationActorUid = await resolveMigrationActorUid(graphql);
   const dryRunLabel = DRY_RUN ? ' (DRY RUN)' : '';
   console.log(`Backfilling historical referral fees${dryRunLabel}...\n`);
 
@@ -195,7 +208,7 @@ async function backfillReferralFees() {
           patientId: order.patientId,
           orderId: order.id,
           dispenseKey: DISPENSE_KEY,
-          recordedByUid: MIGRATION_ACTOR_UID,
+          recordedByUid: migrationActorUid,
         });
         dispensesCreated += 1;
       } else {
