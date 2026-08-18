@@ -152,14 +152,16 @@ describe('portal order handout', () => {
     const patientRepo: PatientRepositoryPort = {
       listTenantPatients: async () => [],
       listPlatformPatients: async () => [],
+      listActivePatients: async () => [],
       findPatientById: async () => patient(),
       updatePatientStatus: async () => undefined,
     };
     const patientFinanceRepo: PatientFinanceRepositoryPort = {
       findDispenseEvent: async () => null,
+      listRecentDispenseEvents: async () => [],
       insertDispenseEvent: async data => { dispenseCalls.push({ orderId: data.orderId, dispenseKey: data.dispenseKey }); },
       hasNewReferralFee: async () => true,
-      insertReferralFeeEvent: async () => undefined,
+      insertReferralFeeEvent: async () => true,
     };
     const orderRepo: HandoutOrderRepo = {
       updateQuoteSnapshot: async data => { quoteUpdates.push({ fulfilmentStatus: String(data.fulfilmentStatus) }); },
@@ -203,14 +205,16 @@ describe('portal order handout', () => {
     const patientRepo: PatientRepositoryPort = {
       listTenantPatients: async () => [],
       listPlatformPatients: async () => [],
+      listActivePatients: async () => [],
       findPatientById: async () => patient(),
       updatePatientStatus: async () => undefined,
     };
     const patientFinanceRepo: PatientFinanceRepositoryPort = {
       findDispenseEvent: async () => null,
+      listRecentDispenseEvents: async () => [],
       insertDispenseEvent: async () => undefined,
       hasNewReferralFee: async () => true,
-      insertReferralFeeEvent: async () => undefined,
+      insertReferralFeeEvent: async () => true,
     };
     const orderRepo: HandoutOrderRepo = {
       updateQuoteSnapshot: async () => undefined,

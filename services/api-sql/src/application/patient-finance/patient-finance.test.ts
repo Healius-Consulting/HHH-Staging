@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   activatePatientForOrder,
+  anniversaryDate,
+  ANNUAL_PATIENT_FEE_PENCE,
   assertPatientEligibleForOrder,
+  evaluateAnnualFeeAccrual,
+  estimateNextAppointmentFromDispenses,
   recordCollectedDispense,
   REFERRAL_FEE_PENCE,
 } from './patient-finance.js';
@@ -52,6 +56,7 @@ describe('patient finance', () => {
     const patientRepo: PatientRepositoryPort = {
       listTenantPatients: async () => [],
       listPlatformPatients: async () => [],
+      listActivePatients: async () => [],
       findPatientById: async () => patient({ status }),
       updatePatientStatus: async data => {
         status = data.status;
@@ -60,9 +65,10 @@ describe('patient finance', () => {
     };
     const patientFinanceRepo: PatientFinanceRepositoryPort = {
       findDispenseEvent: async () => null,
+      listRecentDispenseEvents: async () => [],
       insertDispenseEvent: async () => undefined,
       hasNewReferralFee: async () => false,
-      insertReferralFeeEvent: async () => undefined,
+      insertReferralFeeEvent: async () => true,
     };
 
     const first = await activatePatientForOrder(
@@ -86,16 +92,19 @@ describe('patient finance', () => {
     const patientRepo: PatientRepositoryPort = {
       listTenantPatients: async () => [],
       listPlatformPatients: async () => [],
+      listActivePatients: async () => [],
       findPatientById: async () => patient({ status: 'ACTIVE' }),
       updatePatientStatus: async () => undefined,
     };
     const patientFinanceRepo: PatientFinanceRepositoryPort = {
       findDispenseEvent: async (_orderId, dispenseKey) => dispenses.includes(dispenseKey) ? { id: 'd1', orderId: 'order-1', dispenseKey } : null,
+      listRecentDispenseEvents: async () => [],
       insertDispenseEvent: async data => { dispenses.push(data.dispenseKey); },
       hasNewReferralFee: async () => hasFee,
       insertReferralFeeEvent: async data => {
         hasFee = true;
         fees.push({ amountPence: data.amountPence, kind: data.kind });
+        return true;
       },
     };
 
@@ -128,5 +137,62 @@ describe('patient finance', () => {
     assert.equal(fees.length, 1);
     assert.equal(fees[0]?.amountPence, REFERRAL_FEE_PENCE);
     assert.equal(fees[0]?.kind, 'NEW_REFERRAL');
+  });
+
+  it('computes anniversary dates with month-end clamping', () => {
+    assert.equal(anniversaryDate('2024-02-29T10:00:00.000Z', 2025), '2025-02-28');
+    assert.equal(anniversaryDate('2023-04-12', 2026), '2026-04-12');
+  });
+
+  it('accrues annual fees only on matching London anniversary', () => {
+    assert.deepEqual(
+      evaluateAnnualFeeAccrual({
+        activatedAt: '2024-04-12T09:00:00.000Z',
+        statusChangedAt: '2024-04-12T09:00:00.000Z',
+        todayLondon: '2026-04-12',
+      }),
+      { dueDate: '2026-04-12' },
+    );
+    assert.equal(
+      evaluateAnnualFeeAccrual({
+        activatedAt: '2024-04-12T09:00:00.000Z',
+        statusChangedAt: null,
+        todayLondon: '2026-04-13',
+      }),
+      null,
+    );
+    assert.equal(
+      evaluateAnnualFeeAccrual({
+        activatedAt: '2026-04-12T09:00:00.000Z',
+        statusChangedAt: null,
+        todayLondon: '2026-04-12',
+      }),
+      null,
+    );
+    assert.equal(
+      evaluateAnnualFeeAccrual({
+        activatedAt: '2024-04-12T09:00:00.000Z',
+        statusChangedAt: '2026-05-01T00:00:00.000Z',
+        todayLondon: '2026-04-12',
+      }),
+      null,
+    );
+  });
+
+  it('estimates next appointment from dispense history', () => {
+    const firstOnly = estimateNextAppointmentFromDispenses([
+      { dispensedAt: '2026-01-15T12:00:00.000Z' },
+    ]);
+    assert.equal(firstOnly?.toISOString(), '2026-02-15T12:00:00.000Z');
+
+    const repeat = estimateNextAppointmentFromDispenses([
+      { dispensedAt: '2026-04-01T12:00:00.000Z' },
+      { dispensedAt: '2026-01-15T12:00:00.000Z' },
+    ]);
+    assert.equal(repeat?.toISOString(), '2026-07-01T12:00:00.000Z');
+  });
+
+  it('documents annual patient fee amount', () => {
+    assert.equal(ANNUAL_PATIENT_FEE_PENCE, 4_000);
   });
 });

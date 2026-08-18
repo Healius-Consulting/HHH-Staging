@@ -36,8 +36,10 @@ export function dateOnlyInLondon(date: Date) {
 
 /** Anniversary date in a given calendar year, clamping day for shorter months (e.g. 29 Feb → 28 Feb). */
 export function anniversaryDate(originalDate: string, year: number): string | null {
-  const [, monthValue, dayValue] = /^(\d{4})-(\d{2})-(\d{2})/.exec(originalDate) ?? [];
-  if (!monthValue || !dayValue) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(originalDate);
+  if (!match?.[2] || !match[3]) return null;
+  const monthValue = match[2];
+  const dayValue = match[3];
   const month = Number(monthValue);
   const day = Number(dayValue);
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -174,6 +176,59 @@ export async function recordCollectedDispense(
   }
 
   return { patientId: input.patientId, feeCreated, idempotent: false };
+}
+
+export async function accrueAnnualPatientFees(deps: PatientFinanceDeps, asOf = new Date()) {
+  const today = dateOnlyInLondon(asOf);
+  const patients = await deps.patientRepo.listActivePatients(2_000);
+  let created = 0;
+  let skipped = 0;
+  for (const patient of patients) {
+    const evaluation = evaluateAnnualFeeAccrual({
+      activatedAt: patient.activatedAt,
+      statusChangedAt: patient.statusChangedAt,
+      todayLondon: today,
+    });
+    if (!evaluation) {
+      skipped += 1;
+      continue;
+    }
+    const inserted = await deps.patientFinanceRepo.insertReferralFeeEvent({
+      organisationId: patient.organisationId,
+      patientId: patient.id,
+      kind: 'ANNUAL_PATIENT',
+      amountPence: ANNUAL_PATIENT_FEE_PENCE,
+      dueDate: evaluation.dueDate,
+      status: 'accrued',
+      idempotencyKey: annualFeeIdempotencyKey(patient.id, evaluation.dueDate),
+    });
+    if (inserted) created += 1;
+    else skipped += 1;
+  }
+  return { asOf: today, activePatientsChecked: patients.length, created, skipped };
+}
+
+export async function updatePatientRetentionStates(deps: PatientFinanceDeps, asOf = new Date()) {
+  const patients = await deps.patientRepo.listActivePatients(2_000);
+  const summary = { checked: patients.length, skipped: 0, inactive: 0 };
+  for (const patient of patients) {
+    const dispenses = await deps.patientFinanceRepo.listRecentDispenseEvents(patient.id, 2);
+    const nextApptEst = estimateNextAppointmentFromDispenses(dispenses);
+    if (!nextApptEst) {
+      summary.skipped += 1;
+      continue;
+    }
+    if (asOf.getTime() <= nextApptEst.getTime()) continue;
+    if (asOf.getTime() < nextApptEst.getTime() + RETENTION_GRACE_MS) continue;
+    await deps.patientRepo.updatePatientStatus({
+      id: patient.id,
+      organisationId: patient.organisationId,
+      status: 'INACTIVE',
+      statusChangedAt: asOf.toISOString(),
+    });
+    summary.inactive += 1;
+  }
+  return summary;
 }
 
 export async function promotePatientAfterCuraleafPlacement(
