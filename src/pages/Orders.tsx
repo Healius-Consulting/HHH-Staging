@@ -2171,10 +2171,6 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                           <span className="mismatch-tag">
                             PO reports {line.supplierReportedOrdered} pack{line.supplierReportedOrdered === 1 ? '' : 's'} (Mismatch)
                           </span>
-                        ) : line.isSplit ? (
-                          <span className="mismatch-tag" style={{ background: '#fef3c7', color: '#b45309' }}>
-                            Partial Dispatch ({line.dispatchedPacks} sent · {line.awaitingDispatchPacks} awaiting)
-                          </span>
                         ) : (
                           <small>Live Curaleaf Lab Allocation</small>
                         )}
