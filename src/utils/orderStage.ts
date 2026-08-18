@@ -51,6 +51,27 @@ export function orderPackTotals(order: PatientOrder) {
   }, { ordered: 0, shipped: 0, received: 0, collected: 0, remaining: 0 });
 }
 
+export function orderSplitPackSnapshot(order: PatientOrder) {
+  const totals = orderPackTotals(order);
+  return {
+    total: totals.ordered,
+    collected: totals.collected,
+    atPharmacy: Math.max(0, totals.received - totals.collected),
+    inTransit: Math.max(0, totals.shipped - totals.received),
+    withCuraleaf: Math.max(0, totals.ordered - totals.shipped),
+  };
+}
+
+export function orderIsSplitFulfilment(order: PatientOrder) {
+  const snapshot = orderSplitPackSnapshot(order);
+  if (snapshot.total <= 0) return false;
+  if (order.prescriptions.some(prescription => prescription.dispatchStatus === 'partial')) return true;
+  if (snapshot.withCuraleaf > 0 && (snapshot.inTransit > 0 || snapshot.atPharmacy > 0 || snapshot.collected > 0)) return true;
+  if (snapshot.collected > 0 && snapshot.collected < snapshot.total) return true;
+  if (snapshot.atPharmacy > 0 && snapshot.atPharmacy + snapshot.collected < snapshot.total) return true;
+  return snapshot.inTransit > 0 && snapshot.inTransit < snapshot.total;
+}
+
 export function orderHasInTransitPacks(order: PatientOrder) {
   return order.prescriptions.some(prescription => prescriptionHasInTransitPacks(prescription));
 }

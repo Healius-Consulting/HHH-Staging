@@ -53,7 +53,9 @@ import {
   orderHasPartialCollection,
   orderHasPartialPharmacyReceipt,
   orderHasUncollectedReceivedPacks,
+  orderIsSplitFulfilment,
   orderPackTotals,
+  orderSplitPackSnapshot,
   orderStage,
   prescriptionStatusLabel,
   stageMatchesFilter,
@@ -158,6 +160,16 @@ function recordStageMeta(record: OrderRecord) {
   if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'warning', icon: AlertTriangle };
   if (resolution === 'refunded') return { label: 'Refunded', description: 'Cancellation closed and patient refund completed', tone: 'refunded', icon: Banknote };
   if (resolution === 'resolved') return { label: 'Resolved', description: 'Cancellation closed with no action outstanding', tone: 'resolved', icon: CheckCircle2 };
+  const split = orderSplitPackSnapshot(record.order);
+  const isSplit = orderIsSplitFulfilment(record.order);
+  if (isSplit && orderHasUncollectedReceivedPacks(record.order)) {
+    return {
+      label: 'Part ready',
+      description: `${split.atPharmacy} pack(s) checked in · ${split.withCuraleaf + split.inTransit} still with Curaleaf or courier`,
+      tone: 'partial',
+      icon: Layers2,
+    };
+  }
   if (orderHasPartialCollection(record.order) && !orderHasInTransitPacks(record.order) && !orderHasUncollectedReceivedPacks(record.order)) {
     return {
       label: 'Part collected',
@@ -170,6 +182,24 @@ function recordStageMeta(record: OrderRecord) {
     return {
       label: 'Part delivered',
       description: 'First consignment checked in; remainder still with Curaleaf',
+      tone: 'partial',
+      icon: Layers2,
+    };
+  }
+  if (isSplit && orderHasInTransitPacks(record.order)) {
+    return {
+      label: 'Part in transit',
+      description: split.withCuraleaf > 0
+        ? `${split.inTransit} of ${split.total} packs with courier · ${split.withCuraleaf} with Curaleaf`
+        : `${split.inTransit} of ${split.total} packs with courier`,
+      tone: 'partial',
+      icon: Layers2,
+    };
+  }
+  if (isSplit && split.withCuraleaf > 0 && !orderHasInTransitPacks(record.order)) {
+    return {
+      label: 'Awaiting next shipment',
+      description: `${split.withCuraleaf} pack(s) open with Curaleaf after first consignment`,
       tone: 'partial',
       icon: Layers2,
     };
@@ -325,13 +355,23 @@ export default function Orders() {
     record.stage === 'ready'
   ) : [];
 
-  const currentDelivery = activeFilter === 'current' ? filtered.filter(record => {
+  const deliveryCandidate = activeFilter === 'current' ? filtered.filter(record => {
     if (record.stage === 'ready') return false;
     const isDeliveryOrPartial = record.stage === 'dispatched' || record.stage === 'delivered' || record.order.prescriptions.some(rx =>
       rx.status === 'partially-received' || rx.dispatchStatus === 'partial' || rx.status === 'dispatched' || Boolean(rx.shipmentIds?.length)
     );
     return isDeliveryOrPartial;
   }) : [];
+
+  const currentSplitDelivery = deliveryCandidate.filter(record =>
+    orderIsSplitFulfilment(record.order)
+    && (orderHasInTransitPacks(record.order)
+      || orderHasPartialPharmacyReceipt(record.order)
+      || orderHasUncollectedReceivedPacks(record.order)
+      || orderHasPartialCollection(record.order)),
+  );
+
+  const currentDelivery = deliveryCandidate.filter(record => !currentSplitDelivery.includes(record));
 
   const currentPicking = activeFilter === 'current' ? filtered.filter(record => {
     if (['ready', 'dispatched', 'delivered'].includes(record.stage)) return false;
@@ -744,7 +784,8 @@ export default function Orders() {
                 <>
                   {currentActionRequired.length ? <OrderListGroup label="Action required" detail="Exceptions & cancellations" records={currentActionRequired} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentReady.length ? <OrderListGroup label="Ready to collect" detail="Medication ready for patient pickup" records={currentReady} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
-                  {currentDelivery.length ? <OrderListGroup label="In delivery & arrived" detail="In transit with courier or arrived for check-in" records={currentDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentSplitDelivery.length ? <OrderListGroup label="Split shipments" detail="Partial consignments in transit, at pharmacy, or awaiting the next dispatch" records={currentSplitDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentDelivery.length ? <OrderListGroup label="In delivery & arrived" detail="Full consignments in transit or arrived for check-in" records={currentDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentPicking.length ? <OrderListGroup label="Curaleaf dispensing" detail="Curaleaf allocating and packing medication" records={currentPicking} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentProcessing.length ? <OrderListGroup label="Processing" detail="Order confirmed; awaiting lab picking queue" records={currentProcessing} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentAwaitingPayment.length ? <OrderListGroup label="Awaiting payment" detail="Payment link sent to patient" records={currentAwaitingPayment} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
@@ -1739,8 +1780,27 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
 }
 
 function shipmentListCopy(record: OrderRecord, now: Date) {
-  if (record.stage !== 'dispatched') return null;
+  const split = orderSplitPackSnapshot(record.order);
+  const isSplit = orderIsSplitFulfilment(record.order);
   const guidance = deliveryGuidanceForOrder(record.order);
+
+  if (isSplit && orderHasInTransitPacks(record.order)) {
+    const eta = guidance ? formatDeliveryDate(guidance.windowEnd) : null;
+    const overdue = guidance ? londonDateKey(now) > guidance.windowEnd : false;
+    if (overdue && eta) return `${split.inTransit} of ${split.total} packs overdue · expected ${eta}`;
+    if (eta) return `${split.inTransit} of ${split.total} packs in transit · expected ${eta}`;
+    return `${split.inTransit} of ${split.total} packs in transit`;
+  }
+
+  if (isSplit && orderHasUncollectedReceivedPacks(record.order)) {
+    return `${split.atPharmacy} pack(s) ready for handout · ${split.withCuraleaf + split.inTransit} outstanding`;
+  }
+
+  if (isSplit && split.withCuraleaf > 0) {
+    return `${split.withCuraleaf} pack(s) with Curaleaf · first consignment complete`;
+  }
+
+  if (record.stage !== 'dispatched') return null;
   if (!guidance) return null;
   return londonDateKey(now) > guidance.windowEnd
     ? `Expected by ${formatDeliveryDate(guidance.windowEnd)} — not received?`

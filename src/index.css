@@ -10773,6 +10773,10 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-crm-row:last-child{ border-bottom: 0; }
 .order-crm-row:hover{ background: var(--bg-elevated); }
 .order-crm-row.selected{ background: var(--tenant-primary-soft); box-shadow: inset 3px 0 0 var(--tenant-primary); }
+.order-crm-row--partial.selected{
+  background: color-mix(in srgb, var(--color-warning) 8%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 var(--color-warning);
+}
 .order-crm-row:active{ transform: translateX(1px); }
 .order-crm-row--cancelled{ min-height: 82px; }
 .order-crm-row--refunded.selected{ background: color-mix(in srgb, var(--info-500) 13%, var(--bg-surface)); box-shadow: inset 3px 0 0 var(--info-500); }
