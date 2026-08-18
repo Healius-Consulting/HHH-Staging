@@ -120,6 +120,7 @@ function orderRecordPriority(record: OrderRecord) {
   const cancellationResolution = orderCancellationResolution(record.order);
   if (cancellationResolution === 'needs-action') return 0;
   if (record.stage === 'rejected') return 1;
+  if (record.stage === 'awaiting-payment') return 2;
   if (record.stage === 'ready') return 10;
   if (record.stage === 'delivered') return 20;
 
@@ -134,7 +135,6 @@ function orderRecordPriority(record: OrderRecord) {
   if (isPicking) return 40;
 
   if (record.stage === 'curaleaf-pending' || record.stage === 'paid') return 50;
-  if (record.stage === 'awaiting-payment') return 60;
   if (record.stage === 'collected') return 90;
   if (cancellationResolution !== 'none' || record.stage === 'archived' || record.stage === 'cancelled') return 99;
   return 70;
@@ -351,10 +351,10 @@ export default function Orders() {
   const cancellationNeedsAction = activeFilter === 'cancelled' ? filtered.filter(record => orderCancellationResolution(record.order) === 'needs-action') : [];
   const cancellationClosed = activeFilter === 'cancelled' ? filtered.filter(record => ['resolved', 'refunded'].includes(orderCancellationResolution(record.order))) : [];
 
-  const currentActionRequired = activeFilter === 'current' ? filtered.filter(record => {
+  const currentNeedsAction = activeFilter === 'current' ? filtered.filter(record => {
     const resolution = orderCancellationResolution(record.order);
-    return resolution === 'needs-action' || record.stage === 'rejected';
-  }) : [];
+    return resolution === 'needs-action' || record.stage === 'rejected' || record.stage === 'awaiting-payment';
+  }).sort((left, right) => orderRecordPriority(left) - orderRecordPriority(right)) : [];
 
   const currentReady = activeFilter === 'current' ? filtered.filter(record =>
     record.stage === 'ready'
@@ -402,10 +402,6 @@ export default function Orders() {
     if (isPicking) return false;
     return ['paid', 'curaleaf-pending'].includes(record.stage);
   }) : [];
-
-  const currentAwaitingPayment = activeFilter === 'current' ? filtered.filter(record =>
-    record.stage === 'awaiting-payment'
-  ) : [];
 
   const applyCancellationResponse = (order: PatientOrder, record: Awaited<ReturnType<typeof requestPortalOrderCancellation>>) => {
     if (!record.cancellation) return;
@@ -787,13 +783,12 @@ export default function Orders() {
                 </>
               ) : activeFilter === 'current' ? (
                 <>
-                  {currentActionRequired.length ? <OrderListGroup label="Action required" detail="Exceptions & cancellations" records={currentActionRequired} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentNeedsAction.length ? <OrderListGroup label="Needs action" detail="Awaiting payment, exceptions and cancellations" records={currentNeedsAction} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentReady.length ? <OrderListGroup label="Ready to collect" detail="Medication ready for patient pickup" records={currentReady} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentSplitDelivery.length ? <OrderListGroup label="Split shipments" detail="Partial consignments in transit, at pharmacy, or awaiting the next dispatch" records={currentSplitDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentDelivery.length ? <OrderListGroup label="In delivery & arrived" detail="Full consignments in transit or arrived for check-in" records={currentDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentPicking.length ? <OrderListGroup label="Curaleaf dispensing" detail="Curaleaf allocating and packing medication" records={currentPicking} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                   {currentProcessing.length ? <OrderListGroup label="Processing" detail="Order confirmed; awaiting lab picking queue" records={currentProcessing} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
-                  {currentAwaitingPayment.length ? <OrderListGroup label="Awaiting payment" detail="Payment link sent to patient" records={currentAwaitingPayment} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                 </>
               ) : (
                 filtered.map(record => (
