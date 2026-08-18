@@ -1,12 +1,9 @@
 # SQL API rewrite workspace
 
-Status: planning scaffold. This folder is not a deployable package and is not
-included in the root npm workspaces yet.
+Status: live backend deployed as apiLondon (Firebase Functions in this folder).
 
-The running API remains `services/api`. This folder is the clean-room workspace
-for replacing its Firestore persistence with Firebase SQL Connect without
-changing the browser-facing `/v1` contract or weakening the existing security
-boundary.
+The live backend is `services/api-sql`. The former `services/api` Firestore
+service remains in the repo as a legacy/archived reference only during cutover.
 
 ## Why this is separate
 
