@@ -271,12 +271,14 @@ export function stampQuoteReviewOnSnapshot(snapshot: unknown, review: QuoteRevie
 
 export function supplierPurchaseOrderCancelled(snapshot: unknown) {
   const curaleaf = asRecord(asRecord(snapshot).curaleaf);
-  return String(curaleaf.purchaseOrderState || curaleaf.state || '').toUpperCase() === 'CANCELLED';
+  const state = String(curaleaf.purchaseOrderState || curaleaf.state || '').toUpperCase();
+  return state === 'CANCELLED' || state === 'REJECTED';
 }
 
 export function supplierPrescriptionCancelled(snapshot: unknown) {
   const curaleaf = asRecord(asRecord(snapshot).curaleaf);
-  return String(curaleaf.prescriptionState || '').toUpperCase() === 'CANCELLED';
+  const state = String(curaleaf.prescriptionState || '').toUpperCase();
+  return state === 'CANCELLED' || state === 'REJECTED';
 }
 
 export function supplierOrderCancelled(snapshot: unknown) {

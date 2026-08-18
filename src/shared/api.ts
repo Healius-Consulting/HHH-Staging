@@ -451,7 +451,7 @@ export function recordPortalCuraleafCancellation(orderId: string, input: {
   });
 }
 
-export function createPortalOrderRefund(orderId: string, input: { organisationId: string; reason: 'patient_cancelled' | 'replacement_price_changed'; resolution: 'cancel' | 'replace_new_payment' }) {
+export function createPortalOrderRefund(orderId: string, input: { organisationId: string; reason?: 'patient_cancelled'; resolution?: 'cancel' }) {
   return apiRequest<import('./contracts').OrderRefundState>(`/v1/portal/orders/${encodeURIComponent(orderId)}/refunds/manual`, {
     method: 'POST',
     body: JSON.stringify(input),

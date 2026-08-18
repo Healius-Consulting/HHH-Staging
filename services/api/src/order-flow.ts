@@ -71,3 +71,42 @@ export function patientRetentionState(nextAppointment: string | null | undefined
 export function messageId(parts: Array<string | number>) {
   return createHash('sha256').update(parts.join(':')).digest('hex');
 }
+
+export type RedoPriceResolution = 'absorb' | 'continue_as_fee';
+
+export function activeRedoPriceResolution(value: unknown): RedoPriceResolution | undefined {
+  return value === 'absorb' || value === 'continue_as_fee' ? value : undefined;
+}
+
+export function settlePaidRedoTotals(input: {
+  priceResolution?: unknown;
+  quotedTotalPence: number;
+  originalTotalPence: number;
+}): { ok: true; totalPence: number; pharmacyContributionPence: number } | { ok: false; code: string; message: string } {
+  if (input.priceResolution === 'refund_and_recharge') {
+    return {
+      ok: false,
+      code: 'REDO_REFUND_RECHARGE_REMOVED',
+      message: 'Cancel the source order and use paid-order resolution instead of creating a new payment link.',
+    };
+  }
+  const difference = input.quotedTotalPence - input.originalTotalPence;
+  if (difference === 0) {
+    return { ok: true, totalPence: input.quotedTotalPence, pharmacyContributionPence: 0 };
+  }
+  if (input.priceResolution === 'absorb' && difference > 0) {
+    return { ok: true, totalPence: input.originalTotalPence, pharmacyContributionPence: difference };
+  }
+  if (input.priceResolution === 'continue_as_fee') {
+    return {
+      ok: false,
+      code: 'REDO_PAYMENT_AMOUNT_MISMATCH',
+      message: 'Take the price drop into the dispensing fee so the replacement total matches the original payment, or cancel the order.',
+    };
+  }
+  return {
+    ok: false,
+    code: 'REDO_PAYMENT_AMOUNT_MISMATCH',
+    message: 'Absorb an increase, take a drop into the dispensing fee, or cancel the order for refund or replacement.',
+  };
+}

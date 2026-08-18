@@ -426,7 +426,7 @@ export function supplierFulfilmentStatus(input: {
   const purchaseOrder = input.purchaseOrder;
   const shipments = input.shipments ?? [];
   const lines = input.lines;
-  if (purchaseOrder?.state === 'CANCELLED') return 'EXCEPTION';
+  if (purchaseOrder?.state === 'CANCELLED' || purchaseOrder?.state === 'REJECTED') return 'EXCEPTION';
   if (lines.length > 0 && lines.every(line => line.ordered > 0 && line.collected >= line.ordered)) return 'COLLECTED';
   if (lines.some(line => line.received > 0) && lines.some(line => line.received < line.ordered || line.remaining > 0)) {
     return 'PARTIALLY_RECEIVED';

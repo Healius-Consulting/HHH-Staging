@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderStage, prescriptionStatusChipTone, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
+import { hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderRequiresCuraleafCancel, orderStage, prescriptionStatusChipTone, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
 import type { PatientOrder } from '../src/context/AppContext.tsx';
 
 const taxonomy: Array<[OrderStage, StageFilter]> = [
@@ -44,6 +44,24 @@ test('cancelled orders distinguish outstanding work from closed outcomes', () =>
   assert.equal(orderCancellationResolution({ ...base, cancellation: { status: 'cancelled' } } as PatientOrder), 'resolved');
   assert.equal(orderCancellationResolution({ ...base, payment: { status: 'paid' }, cancellation: { status: 'refund_required' } } as PatientOrder), 'needs-action');
   assert.equal(orderCancellationResolution({ ...base, payment: { status: 'paid' }, cancellation: { status: 'refund_required' }, refund: { status: 'completed' } } as PatientOrder), 'refunded');
+});
+
+test('pharmacy cancel is local until Curaleaf accepts the prescription or creates a purchase order', () => {
+  const pending = {
+    payment: { status: 'paid' },
+    prescriptions: [{ curaleafPrescriptionId: 'rx-1', curaleafPrescriptionState: 'PENDING', placed: false, poRef: 'ORD-1', purchaseOrderState: null }],
+  } as PatientOrder;
+  const accepted = {
+    payment: { status: 'paid' },
+    prescriptions: [{ curaleafPrescriptionId: 'rx-1', curaleafPrescriptionState: 'ACTIVE', placed: false, poRef: 'ORD-1' }],
+  } as PatientOrder;
+  const withPo = {
+    payment: { status: 'paid' },
+    prescriptions: [{ curaleafPrescriptionId: 'rx-1', curaleafPrescriptionState: 'ACTIVE', placed: true, poRef: 'ORD-1', purchaseOrderState: 'CREATED' }],
+  } as PatientOrder;
+  assert.equal(orderRequiresCuraleafCancel(pending), false);
+  assert.equal(orderRequiresCuraleafCancel(accepted), true);
+  assert.equal(orderRequiresCuraleafCancel(withPo), true);
 });
 
 test('mixed ready and in-flight prescriptions do not classify the order as ready', () => {

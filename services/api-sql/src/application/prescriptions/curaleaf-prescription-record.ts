@@ -19,6 +19,7 @@ export type CuraleafPrescriptionState = 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CA
 
 export function asCuraleafPrescriptionState(value: unknown): CuraleafPrescriptionState | null {
   const state = String(value || '').trim().toUpperCase();
+  if (state === 'REJECTED') return 'CANCELLED';
   if (state === 'ACTIVE' || state === 'FULFILLED' || state === 'EXPIRED' || state === 'CANCELLED' || state === 'PENDING') {
     return state;
   }

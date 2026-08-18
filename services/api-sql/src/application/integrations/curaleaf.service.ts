@@ -10,7 +10,13 @@ import {
   purgeOrderPrescriptionFiles,
 } from '../prescriptions/prescription-file-purge.js';
 import { persistCuraleafPrescriptionIdentity } from '../prescriptions/curaleaf-prescription-record.js';
-import { stampCuraleafCancellationOnSnapshot } from './curaleaf-events.js';
+import {
+  isCuraleafPrescriberRejected,
+  isCuraleafRejectedRequest,
+  isCuraleafTerminalRejection,
+  stampCuraleafCancellationOnSnapshot,
+  stampCuraleafRejectionOnSnapshot,
+} from './curaleaf-events.js';
 import {
   curaleafCancellationBlocksPlacement,
   evaluateQuoteReview,
@@ -195,7 +201,8 @@ export async function curaleafApiRequest<T = any>(
       throw new HttpError(
         response.status === 429 || response.status === 409 ? response.status : 502,
         body?.message || `Curaleaf rejected the request (${response.status}).`,
-        'CURALEAF_REQUEST_FAILED'
+        'CURALEAF_REQUEST_FAILED',
+        { curaleafStatus: response.status },
       );
     }
 
@@ -277,6 +284,38 @@ async function uploadLocalPrescriptionCopyToCuraleaf(
   return { uploaded };
 }
 
+async function persistPlacementRejection(input: {
+  organisationId: string;
+  order: { id: string; quoteSnapshot?: unknown };
+  source: 'prescriber' | 'prescription' | 'purchase_order';
+  reason: string;
+  purchaseOrderId?: string | null;
+  prescriptionId?: string | null;
+  prescriberId?: string | null;
+}) {
+  const nextSnapshot = stampCuraleafRejectionOnSnapshot(input.order.quoteSnapshot, {
+    source: input.source,
+    purchaseOrderId: input.purchaseOrderId,
+    prescriptionId: input.prescriptionId,
+    prescriberId: input.prescriberId,
+    note: input.reason,
+  });
+  await new SqlOrderRepository().updateQuoteSnapshot({
+    id: input.order.id,
+    organisationId: input.organisationId,
+    quoteSnapshot: nextSnapshot,
+    fulfilmentStatus: 'EXCEPTION',
+  });
+  return {
+    skipped: true as const,
+    rejected: true as const,
+    reason: input.reason,
+    prescriberId: input.prescriberId ?? null,
+    prescriptionId: input.prescriptionId ?? null,
+    purchaseOrder: null,
+  };
+}
+
 export async function executeCuraleafOrderPlacement(
   connection: IntegrationConnectionRecord,
   order: {
@@ -329,7 +368,7 @@ export async function executeCuraleafOrderPlacement(
       null,
     );
     if (matchedPurchaseOrder?.id) {
-      if (String(matchedPurchaseOrder.state || matchedPurchaseOrder.purchaseOrderState || '').toUpperCase() === 'CANCELLED') {
+      if (isCuraleafTerminalRejection(matchedPurchaseOrder.state || matchedPurchaseOrder.purchaseOrderState)) {
         const cancelledSnapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
           action: 'confirmed',
           purchaseOrderId: String(matchedPurchaseOrder.id),
@@ -372,14 +411,28 @@ export async function executeCuraleafOrderPlacement(
 
   // Step 1: Ensure prescriber exists — match by GPhC/GMC + PIN, create only if not found.
   let prescriberId: string | null = priorCuraleaf?.prescriberId ?? null;
+  let prescriberRejectError: unknown = null;
   if (!prescriberId) {
     try {
-      const prescriberRes = await curaleafApiRequest<{ prescribers?: Array<{ id: string; gphcNumber?: string | null; gmcNumber?: number | null; pin?: string }> }>(
+      const prescriberRes = await curaleafApiRequest<{
+        prescribers?: Array<{
+          id: string;
+          gphcNumber?: string | null;
+          gmcNumber?: number | null;
+          pin?: string;
+          state?: string;
+        }>;
+      }>(
         connection,
         '/v1/prescribers/'
-      ).catch(() => null);
+      ).catch((error) => {
+        prescriberRejectError = error;
+        return null;
+      });
 
-      const allPrescribers = prescriberRes?.prescribers ?? [];
+      const allPrescribers = (prescriberRes?.prescribers ?? []).filter(
+        (prescriber) => !isCuraleafPrescriberRejected(prescriber.state),
+      );
       const matched = allPrescribers.find(p =>
         (prescriberGphc && p.gphcNumber === prescriberGphc && p.pin === prescriberPin) ||
         (prescriberGmc && p.gmcNumber === prescriberGmc && p.pin === prescriberPin)
@@ -389,27 +442,42 @@ export async function executeCuraleafOrderPlacement(
         prescriberId = matched.id;
         console.log(`[Curaleaf] Matched existing prescriber ${prescriberId} (${prescriberGphc || prescriberGmc})`);
       } else {
-        const createdPrescriber = await curaleafApiRequest<{ id: string }>(connection, '/v1/prescribers/', {
-          method: 'POST',
-          body: JSON.stringify({
-            name: prescriberInfo.name || 'Unknown Prescriber',
-            initials: prescriberInfo.initials || 'XX',
-            pin: prescriberPin || '000',
-            gmcNumber: prescriberGmc,
-            gphcNumber: prescriberGphc,
-          }),
-        }).catch(() => null);
-        if (createdPrescriber?.id) {
-          prescriberId = createdPrescriber.id;
-          console.log(`[Curaleaf] Created new prescriber ${prescriberId}`);
+        try {
+          const createdPrescriber = await curaleafApiRequest<{ id: string; state?: string }>(connection, '/v1/prescribers/', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: prescriberInfo.name || 'Unknown Prescriber',
+              initials: prescriberInfo.initials || 'XX',
+              pin: prescriberPin || '000',
+              gmcNumber: prescriberGmc,
+              gphcNumber: prescriberGphc,
+            }),
+          });
+          if (createdPrescriber?.id && !isCuraleafPrescriberRejected(createdPrescriber.state)) {
+            prescriberId = createdPrescriber.id;
+            console.log(`[Curaleaf] Created new prescriber ${prescriberId}`);
+          } else if (isCuraleafPrescriberRejected(createdPrescriber?.state)) {
+            prescriberRejectError = new HttpError(422, 'Curaleaf archived the prescriber.', 'CURALEAF_REQUEST_FAILED', { curaleafStatus: 422 });
+          }
+        } catch (error) {
+          prescriberRejectError = error;
         }
       }
     } catch (err) {
+      prescriberRejectError = err;
       console.warn('[Curaleaf] Prescriber verification note:', err);
     }
   }
 
   if (!prescriberId) {
+    if (isCuraleafRejectedRequest(prescriberRejectError)) {
+      return persistPlacementRejection({
+        organisationId: connection.organisationId,
+        order,
+        source: 'prescriber',
+        reason: 'Prescriber was rejected by Curaleaf',
+      });
+    }
     return {
       skipped: true,
       reason: 'Prescriber could not be verified with Curaleaf',
@@ -506,6 +574,7 @@ export async function executeCuraleafOrderPlacement(
 
   // Step 4: Submit prescription and capture the Curaleaf prescription ID.
   let curaleafPrescriptionId: string | null = priorCuraleaf?.prescriptionId ?? null;
+  let prescriptionRejectError: unknown = null;
   if (!curaleafPrescriptionId) {
     try {
       const serialNumber = typeof rxData.serialNumber === 'string'
@@ -523,16 +592,36 @@ export async function executeCuraleafOrderPlacement(
           items: rxItems,
         }),
       });
+      if (rxRes?.id && isCuraleafTerminalRejection(rxRes.state)) {
+        return persistPlacementRejection({
+          organisationId: connection.organisationId,
+          order,
+          source: 'prescription',
+          reason: 'Prescription was rejected by Curaleaf',
+          prescriptionId: rxRes.id,
+          prescriberId,
+        });
+      }
       if (rxRes?.id) {
         curaleafPrescriptionId = rxRes.id;
         console.log(`[Curaleaf] Prescription submitted: ${curaleafPrescriptionId} (serial: ${serialNumber})`);
       }
     } catch (err) {
+      prescriptionRejectError = err;
       console.warn('[Curaleaf] Prescription create note:', err);
     }
   }
 
   if (!curaleafPrescriptionId) {
+    if (isCuraleafRejectedRequest(prescriptionRejectError)) {
+      return persistPlacementRejection({
+        organisationId: connection.organisationId,
+        order,
+        source: 'prescription',
+        reason: 'Prescription was rejected by Curaleaf',
+        prescriberId,
+      });
+    }
     return {
       skipped: true,
       reason: 'Prescription could not be submitted to Curaleaf',
@@ -586,7 +675,17 @@ export async function executeCuraleafOrderPlacement(
         purchaseOrder: null,
       };
     }
-    if (prescriptionState === 'EXPIRED' || prescriptionState === 'CANCELLED') {
+    if (prescriptionState === 'EXPIRED' || isCuraleafTerminalRejection(prescriptionState)) {
+      if (isCuraleafTerminalRejection(prescriptionState)) {
+        return persistPlacementRejection({
+          organisationId: connection.organisationId,
+          order,
+          source: 'prescription',
+          reason: 'Prescription was rejected by Curaleaf',
+          prescriptionId: curaleafPrescriptionId,
+          prescriberId,
+        });
+      }
       await persistCuraleafPrescriptionIdentity({
         organisationId: connection.organisationId,
         orderId: order.id,
@@ -636,6 +735,16 @@ export async function executeCuraleafOrderPlacement(
     );
   } catch (poErr) {
     console.warn('[Curaleaf] purchase-order-from-prescriptions failed:', poErr);
+    if (isCuraleafRejectedRequest(poErr)) {
+      return persistPlacementRejection({
+        organisationId: connection.organisationId,
+        order,
+        source: 'purchase_order',
+        reason: 'Purchase order was rejected by Curaleaf',
+        prescriptionId: curaleafPrescriptionId,
+        prescriberId,
+      });
+    }
     return {
       skipped: true,
       reason: 'Purchase order could not be created from prescription',

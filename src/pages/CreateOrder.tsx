@@ -217,8 +217,8 @@ export default function CreateOrder() {
     || activeOrder.dispensingFee === 0
     || activeOrder.dispensingFee >= 5 && activeOrder.dispensingFee <= 15;
   const quoteGateComplete = !requiresLiveCuraleafEvidence || quoteAvailable;
-  const replacementUsesNewPayment = activeOrder?.redoContext?.priceResolution === 'refund_and_recharge';
-  const paymentRouteReady = Boolean(activeOrder?.redoContext?.isPaidRedo && !replacementUsesNewPayment) || selectedPaymentRoute === 'manual' || canUseWorldpay;
+  const paidRedo = Boolean(activeOrder?.redoContext?.isPaidRedo);
+  const paymentRouteReady = paidRedo || selectedPaymentRoute === 'manual' || canUseWorldpay;
   const paidRedoAmountDifference = activeOrder?.redoContext?.isPaidRedo && redoSourceOrder
     ? Math.round((orderRevenue(activeOrder) - redoSourceOrder.payment.amount) * 100) / 100
     : 0;
@@ -230,7 +230,7 @@ export default function CreateOrder() {
     ...readiness,
     { label: requiresLiveCuraleafEvidence ? 'Live Curaleaf price and stock quote verified' : 'Curaleaf quote optional in training', complete: quoteGateComplete },
     { label: activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? 'Price drop taken into the dispensing charge' : 'Dispensing charge is £0 or £5–£15', complete: dispensingFeeValid },
-    { label: activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Original verified payment route retained' : selectedPaymentRoute === 'worldpay' ? 'Worldpay merchant connection verified' : 'Pharmacy-managed payment route selected', complete: paymentRouteReady },
+    { label: paidRedo ? 'Original verified payment route retained' : selectedPaymentRoute === 'worldpay' ? 'Worldpay merchant connection verified' : 'Pharmacy-managed payment route selected', complete: paymentRouteReady },
     ...(activeOrder.redoContext?.isPaidRedo ? [{ label: 'Replacement price decision recorded', complete: redoPriceResolutionReady }] : []),
   ] : [];
   const outstandingPaymentGates = paymentGate.filter(item => !item.complete);
@@ -238,7 +238,7 @@ export default function CreateOrder() {
     { label: 'Patient', detail: patient ? 'Approved and linked' : 'Select approved patient', complete: Boolean(patient), active: !patient },
     { label: 'Prescription', detail: prescriptionReady ? `${activeOrder.prescriptions.length} record${activeOrder.prescriptions.length === 1 ? '' : 's'} verified` : `${readiness.filter(item => item.complete).length}/${readiness.length} checks passed`, complete: prescriptionReady, active: Boolean(patient) && !prescriptionReady },
     { label: 'Curaleaf quote', detail: requiresLiveCuraleafEvidence ? quoteAvailable ? 'Price and stock verified' : 'Required before payment' : quoteAvailable ? 'Training quote checked' : 'Optional in training', complete: quoteGateComplete, active: prescriptionReady && !quoteGateComplete },
-    { label: 'Payment', detail: readyForPayment ? replacementUsesNewPayment ? 'New payment ready' : activeOrder.redoContext?.isPaidRedo ? 'Carry-over ready' : `${selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy route'} ready` : activeOrder.redoContext?.isPaidRedo && !redoPriceResolutionReady ? 'Price decision needed' : `${outstandingPaymentGates.length} blocker${outstandingPaymentGates.length === 1 ? '' : 's'}`, complete: false, active: readyForPayment },
+    { label: 'Payment', detail: readyForPayment ? paidRedo ? 'Carry-over ready' : `${selectedPaymentRoute === 'worldpay' ? 'Worldpay' : 'Pharmacy route'} ready` : paidRedo && !redoPriceResolutionReady ? 'Price decision needed' : `${outstandingPaymentGates.length} blocker${outstandingPaymentGates.length === 1 ? '' : 's'}`, complete: false, active: readyForPayment },
   ] : [];
   const activeOrderRef = activeOrder ? orderReference(activeOrder) : '';
   const confirmingDraft = confirmingDraftDeleteId === null ? null : draftOrders.find(order => order.id === confirmingDraftDeleteId) ?? null;
@@ -420,7 +420,9 @@ export default function CreateOrder() {
               originalOrderId: activeOrder.redoContext.originalBackendId ?? activeOrder.redoContext.originalOrderId,
               isPaidRedo: activeOrder.redoContext.isPaidRedo,
               requireCuraleafAuth: true as const,
-              priceResolution: activeOrder.redoContext.priceResolution,
+              priceResolution: activeOrder.redoContext.priceResolution === 'absorb' || activeOrder.redoContext.priceResolution === 'continue_as_fee'
+                ? activeOrder.redoContext.priceResolution
+                : undefined,
             },
           } : {}),
         });
@@ -432,8 +434,8 @@ export default function CreateOrder() {
             items: persisted.lineItems.map(item => ({ productId: item.productId, patientPrice: item.unitPricePence / 100 })),
           });
         }
-        if (activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment) {
-          dispatch({ type: 'CARRY_OVER_PAYMENT', orderId: activeOrder.id, sourceOrderId: activeOrder.redoContext.originalOrderId });
+        if (paidRedo) {
+          dispatch({ type: 'CARRY_OVER_PAYMENT', orderId: activeOrder.id, sourceOrderId: activeOrder.redoContext!.originalOrderId });
           dispatch({ type: 'ADD_TOAST', message: 'The verified payment was carried over. No second patient payment was requested.', toastType: 'success' });
         } else if (selectedPaymentRoute === 'worldpay') {
           if (!canUseWorldpay) throw new Error('This pharmacy’s Worldpay connection is not verified. Change the default route in Settings.');
@@ -449,8 +451,8 @@ export default function CreateOrder() {
           dispatch({ type: 'START_MANUAL_PAYMENT', orderId: activeOrder.id });
           dispatch({ type: 'ADD_TOAST', message: 'Order saved. Confirm the pharmacy payment before sending its prescriptions to Curaleaf.', toastType: 'success' });
         }
-      } else if (activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment) {
-        dispatch({ type: 'CARRY_OVER_PAYMENT', orderId: activeOrder.id, sourceOrderId: activeOrder.redoContext.originalOrderId });
+      } else if (paidRedo) {
+        dispatch({ type: 'CARRY_OVER_PAYMENT', orderId: activeOrder.id, sourceOrderId: activeOrder.redoContext!.originalOrderId });
         dispatch({ type: 'ADD_TOAST', message: 'Training payment carry-over recorded. No second payment request was created.', toastType: 'info' });
       } else if (selectedPaymentRoute === 'worldpay') {
         if (!canUseWorldpay) return;
@@ -1152,7 +1154,7 @@ export default function CreateOrder() {
               <section className="rx-checkout-panel card" id="rx-order-review">
                 <header>
                   <p className="section-label">Step 4 · Order {activeOrderRef}</p>
-                  <strong>{replacementUsesNewPayment ? 'Review and restart payment' : activeOrder.redoContext?.isPaidRedo ? 'Review and carry over payment' : 'Review and request payment'}</strong>
+                  <strong>{paidRedo ? 'Review and carry over payment' : 'Review and request payment'}</strong>
                   <small>{patient?.name ?? 'Patient not linked'} · {activeOrder.prescriptions.length} prescription record{activeOrder.prescriptions.length === 1 ? '' : 's'}</small>
                 </header>
                 <dl className="rx-order-totals">
@@ -1208,16 +1210,16 @@ export default function CreateOrder() {
                 </details>
                 <div className="rx-payment-actions">
                   <span className="section-label">Payment route</span>
-                  {activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? (
-                    <div className="rx-payment-route-toggle"><div className="is-selected"><ShieldCheck size={17} /><span><strong>Verified payment carry-over</strong><small>{activeOrder.redoContext.priceResolution === 'absorb' ? 'Original payment retained · pharmacy pays difference' : activeOrder.redoContext.priceResolution === 'continue_as_fee' ? 'Original payment retained · difference added to dispensing fee' : 'No second charge to the patient'}</small></span><CheckCircle size={14} /></div></div>
+                  {paidRedo ? (
+                    <div className="rx-payment-route-toggle"><div className="is-selected"><ShieldCheck size={17} /><span><strong>Verified payment carry-over</strong><small>{activeOrder.redoContext?.priceResolution === 'absorb' ? 'Original payment retained · pharmacy pays difference' : activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? 'Original payment retained · difference added to dispensing fee' : 'No second charge to the patient'}</small></span><CheckCircle size={14} /></div></div>
                   ) : (
                     <div className="rx-payment-route-toggle" role="radiogroup" aria-label="Pharmacy payment route">
                       <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'worldpay'} disabled={!canUseWorldpay} className={selectedPaymentRoute === 'worldpay' ? 'is-selected' : ''} onClick={() => dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'worldpay' })}><CreditCard size={17} /><span><strong>Worldpay</strong><small>{canUseWorldpay ? 'Fresh hosted checkout' : 'Not configured'}</small></span>{selectedPaymentRoute === 'worldpay' ? <CheckCircle size={14} /> : null}</button>
                       <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'manual'} className={selectedPaymentRoute === 'manual' ? 'is-selected' : ''} onClick={() => dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'manual' })}><Banknote size={17} /><span><strong>Manual payment</strong><small>EPOS, cash or transfer</small></span>{selectedPaymentRoute === 'manual' ? <CheckCircle size={14} /> : null}</button>
                     </div>
                   )}
-                  <p className="rx-payment-route-note">{activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'The original payment remains linked only after the replacement prescription passes every gate.' : 'The selected route becomes immutable when the order enters payment.'}</p>
-                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : activeOrder.redoContext?.isPaidRedo && !replacementUsesNewPayment ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? replacementUsesNewPayment ? 'Save & create new Worldpay link' : 'send payment link' : 'Continue with manual payment'}</button>
+                  <p className="rx-payment-route-note">{paidRedo ? 'The original payment remains linked only after the replacement prescription passes every gate.' : 'The selected route becomes immutable when the order enters payment.'}</p>
+                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : paidRedo ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? 'send payment link' : 'Continue with manual payment'}</button>
                 </div>
                 {!readyForPayment && <p className="rx-checkout-blocker"><AlertTriangle size={13} /><span><strong>Payment remains locked</strong>{outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}{outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}</span></p>}
               </section>

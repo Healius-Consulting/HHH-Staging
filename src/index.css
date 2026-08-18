@@ -13442,12 +13442,6 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .rx-redo-balance.is-different > span:last-of-type strong{ color: var(--color-warning); }
 .rx-redo-balance__choices{ display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 6px; }
 .rx-redo-balance__choices .btn{ min-height: 44px; }
-.rx-redo-refund-confirm{ display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); gap: 7px; margin-top: 2px; padding: 10px; border: 1px solid color-mix(in srgb, var(--color-warning) 32%, var(--border)); border-radius: 8px; background: var(--bg-surface); }
-.rx-redo-refund-confirm > span{ display: grid; gap: 2px; }
-.rx-redo-refund-confirm small{ color: var(--text-tertiary); font-size: 8px; font-weight: 700; text-transform: uppercase; }
-.rx-redo-refund-confirm code{ color: var(--text-primary); font-size: 9px; overflow-wrap: anywhere; }
-.rx-redo-refund-confirm em{ color: var(--text-secondary); font-size: 8px; font-style: normal; line-height: 1.4; }
-.rx-redo-refund-confirm .btn{ justify-self: start; }
 
 .rx-checkout-blocker > span{ display: grid; gap: 2px; }
 .rx-checkout-blocker strong{ display: block; color: var(--text-primary); font-size: 8px; }

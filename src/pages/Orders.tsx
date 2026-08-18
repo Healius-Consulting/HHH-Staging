@@ -55,6 +55,7 @@ import {
   orderHasUncollectedReceivedPacks,
   orderIsSplitFulfilment,
   orderPackTotals,
+  orderRequiresCuraleafCancel,
   orderSplitPackSnapshot,
   orderStage,
   prescriptionIsCancelled,
@@ -487,7 +488,7 @@ export default function Orders() {
         dispatch({ type: 'REQUEST_ORDER_CANCELLATION', orderId: order.id, reason: 'other', note: cancelNote.trim() || undefined });
       }
       if (order.patientId) dispatch({ type: 'LOG_INTERACTION', patientId: order.patientId, interactionType: 'Order cancellation requested', detail: `Cancellation requested for ${orderReference(order)}. ${order.payment.status === 'paid' ? 'Paid order requires pharmacy action.' : 'No settled patient payment recorded.'}` });
-      const hasCuraleafOrder = order.payment.status === 'paid' && order.prescriptions.some(prescription => prescription.placed || prescription.poRef);
+      const hasCuraleafOrder = orderRequiresCuraleafCancel(order);
       dispatch({ type: 'ADD_TOAST', message: hasCuraleafOrder ? 'Cancellation opened. Contact Curaleaf and record their confirmation before refunding or reordering.' : order.payment.status === 'paid' ? 'Paid cancellation flagged for pharmacy refund action.' : 'Order cancelled and its payment link retired in the platform.', toastType: hasCuraleafOrder || order.payment.status === 'paid' ? 'warning' : 'success' });
       setCancelOrderId(null);
       setCancelNote('');
@@ -558,15 +559,15 @@ export default function Orders() {
     }
   };
 
-  const requestRefund = async (order: PatientOrder, reason: 'patient_cancelled' | 'replacement_price_changed', resolution: 'cancel' | 'replace_new_payment') => {
+  const requestRefund = async (order: PatientOrder) => {
     if (order.refund || refundBusyOrderId) return;
     setRefundBusyOrderId(order.id);
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live' && order.backendId) {
-        const refund = await createPortalOrderRefund(order.backendId, { organisationId: state.currentOrganisationId, reason, resolution });
+        const refund = await createPortalOrderRefund(order.backendId, { organisationId: state.currentOrganisationId, reason: 'patient_cancelled', resolution: 'cancel' });
         dispatch({ type: 'SET_ORDER_REFUND', orderId: order.id, refund });
       } else {
-        dispatch({ type: 'START_ORDER_REFUND', orderId: order.id, reason, resolution });
+        dispatch({ type: 'START_ORDER_REFUND', orderId: order.id, reason: 'patient_cancelled', resolution: 'cancel' });
       }
       dispatch({ type: 'ADD_TOAST', message: `Refund task created for ${orderReference(order)}. Complete it in ${order.payment.route === 'worldpay' ? 'Worldpay' : 'the pharmacy payment system'}, then record the confirmation.`, toastType: 'warning' });
     } catch (error) {
@@ -582,11 +583,11 @@ export default function Orders() {
       if (!isLocalPortalPreview && state.workspaceMode === 'live' && order.backendId) {
         const refund = await confirmPortalOrderRefund(order.backendId, order.refund.id, { organisationId: state.currentOrganisationId, externalReference });
         dispatch({ type: 'SET_ORDER_REFUND', orderId: order.id, refund });
-        if (order.quoteReview?.status === 'awaiting_refund') {
+        if (order.quoteReview) {
           dispatch({
             type: 'SET_QUOTE_REVIEW',
             orderId: order.id,
-            quoteReview: { ...order.quoteReview, status: 'approved' },
+            quoteReview: undefined,
             refund,
           });
         }
@@ -898,7 +899,7 @@ export default function Orders() {
               paymentLinkBusy={paymentLinkBusyOrderId === selected.order.id}
               refundReference={refundReferences[selected.order.id] ?? ''}
               onRefundReferenceChange={value => setRefundReferences(current => ({ ...current, [selected.order.id]: value }))}
-              onRequestRefund={(reason, resolution) => void requestRefund(selected.order, reason, resolution)}
+              onRequestRefund={() => void requestRefund(selected.order)}
               onConfirmRefund={() => void confirmRefund(selected.order)}
               refundBusy={refundBusyOrderId === selected.order.id}
               quoteReviewBusy={quoteReviewBusyOrderId === selected.order.id}
@@ -1280,7 +1281,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   paymentLinkBusy: boolean;
   refundReference: string;
   onRefundReferenceChange: (value: string) => void;
-  onRequestRefund: (reason: 'patient_cancelled' | 'replacement_price_changed', resolution: 'cancel' | 'replace_new_payment') => void;
+  onRequestRefund: () => void;
   onConfirmRefund: () => void;
   refundBusy: boolean;
   quoteReviewBusy: boolean;
@@ -1315,7 +1316,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   const paymentFormVisible = stage === 'awaiting-payment' && order.payment.route === 'pharmacy';
   const curaleafCancellationLocked = Boolean(order.curaleafCancellation && order.curaleafCancellation.status !== 'confirmed');
   const mayCancel = !order.cancellation && !['collected', 'cancelled'].includes(stage);
-  const hasCuraleafOrder = order.payment.status === 'paid' && order.prescriptions.some(prescription => prescription.placed || prescription.poRef);
+  const hasCuraleafOrder = orderRequiresCuraleafCancel(order);
   const remainingOpen = order.prescriptions.some(prescription =>
     (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
   );
@@ -1915,7 +1916,7 @@ function CancellationClosureSummary({ order, resolution }: { order: PatientOrder
   const closedAt = refunded ? order.refund?.confirmedAt : order.curaleafCancellation?.confirmedAt ?? order.cancellation?.requestedAt;
   const supplierCopy = order.curaleafCancellation?.status === 'confirmed'
     ? 'Curaleaf cancellation confirmed.'
-    : order.prescriptions.some(prescription => prescription.placed || prescription.poRef)
+    : orderRequiresCuraleafCancel(order)
       ? 'Supplier cancellation recorded.'
       : 'No supplier order required cancellation.';
   return (
@@ -1985,7 +1986,7 @@ function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked,
   refundReference: string;
   onRefundReferenceChange: (value: string) => void;
   onReplace: () => void;
-  onRequestRefund: (reason: 'patient_cancelled' | 'replacement_price_changed', resolution: 'cancel' | 'replace_new_payment') => void;
+  onRequestRefund: () => void;
   onConfirmRefund: () => void;
 }) {
   const method = order.payment.route === 'worldpay' ? 'Worldpay portal' : 'Pharmacy payment system';
@@ -2004,7 +2005,7 @@ function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked,
       {!order.refund ? (
         <div className="order-resolution__choices">
           {canReplace ? <button type="button" className="btn btn-primary btn-sm" onClick={onReplace}><RefreshCw size={13} /> Create replacement</button> : null}
-          <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => onRequestRefund('patient_cancelled', 'cancel')}><XCircle size={13} /> Cancel & prepare full refund</button>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onRequestRefund}><XCircle size={13} /> Cancel & prepare full refund</button>
           <small>Refunds are completed in {method}. HHH records the task and confirmation but does not move the money automatically.</small>
         </div>
       ) : order.refund.status === 'pending_confirmation' ? (

@@ -1,15 +1,16 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
 import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingCatalogue, getDevCuraleafCatalogue, getOrderDrafts, getPortalPatientDirectory, getPortalOrders, isApiConfigured } from '../shared/api';
-import type { PortalPendingEnquiryRecord } from '../shared/contracts';
+import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderDraftRecord, OrderRefundState, PortalOrderRecord, PortalPendingEnquiryRecord, RedoPriceResolution } from '../shared/contracts';
+import { activeRedoPriceResolution } from '../shared/contracts';
 import { mapPortalEnquiryRecord, mapPortalPatientRecord } from '../utils/pharmacyPatientDirectory';
-import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderDraftRecord, OrderRefundState, PortalOrderRecord } from '../shared/contracts';
 import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
 import { formatShippingAddress } from '../utils/shippingAddress';
 import { nextDraftIdAfterDeletion, preferredDraftIndex, preferredDraftPaymentRoute } from '../utils/createOrderDraft';
+import { orderRequiresCuraleafCancel } from '../utils/orderStage';
 import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeEligibilityStatus } from '../utils/eligibilityPresentation';
 
 /* ═══════════════════════════════════════════════════════════
@@ -157,7 +158,7 @@ export interface OrderRedoContext {
   rootOrderId?: number;
   rootBackendId?: string;
   replacementSequence?: number;
-  priceResolution?: 'absorb' | 'continue_as_fee' | 'refund_and_recharge';
+  priceResolution?: RedoPriceResolution;
   isPaidRedo: boolean;
   reason: UnresolvedOrderReason;
 }
@@ -715,7 +716,7 @@ export type Action =
   | { type: 'SEND_PAYMENT_LINK'; orderId: number }
   | { type: 'START_MANUAL_PAYMENT'; orderId: number }
   | { type: 'CARRY_OVER_PAYMENT'; orderId: number; sourceOrderId: number }
-  | { type: 'SET_REDO_PRICE_RESOLUTION'; orderId: number; resolution: 'absorb' | 'continue_as_fee' | 'refund_and_recharge' | undefined }
+  | { type: 'SET_REDO_PRICE_RESOLUTION'; orderId: number; resolution: RedoPriceResolution | undefined }
   | { type: 'START_ORDER_REFUND'; orderId: number; reason: OrderRefundState['reason']; resolution: OrderRefundState['resolution'] }
   | { type: 'CONFIRM_ORDER_REFUND'; orderId: number; externalReference: string }
   | { type: 'SET_ORDER_REFUND'; orderId: number; refund: OrderRefundState }
@@ -1010,7 +1011,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
       rootOrderId: rootIndex >= 0 ? rootIndex + 1 : sourceIndex >= 0 ? sourceIndex + 1 : orderId,
       rootBackendId,
       replacementSequence: record.redoContext.replacementSequence ?? Math.max(1, redoSequence),
-      priceResolution: record.redoContext.priceResolution,
+      priceResolution: activeRedoPriceResolution(record.redoContext.priceResolution),
       isPaidRedo: Boolean(record.redoContext.isPaidRedo),
       reason: record.redoContext.unresolvedReason ?? 'expired',
     } : undefined,
@@ -1033,7 +1034,9 @@ function mapPortalDraft(record: OrderDraftRecord, index: number, defaultPaymentR
     paymentRoute: record.payload.paymentRoute === 'worldpay' ? 'worldpay' : record.payload.paymentRoute === 'manual' ? 'manual' : defaultPaymentRoute,
     payment: { status: 'none', route: null, amount: 0, ref: null, sentAt: null, paidAt: null, manualTender: null, manualReference: null, manualNotes: null, manualRecordedBy: null },
     prescriptions,
-    redoContext: payload.redoContext,
+    redoContext: payload.redoContext
+      ? { ...payload.redoContext, priceResolution: activeRedoPriceResolution(payload.redoContext.priceResolution) }
+      : undefined,
   };
 }
 
@@ -1771,6 +1774,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'CONFIRM_ORDER_REFUND':
       return mapOrder(state, action.orderId, order => order.refund?.status === 'pending_confirmation' ? {
         ...order,
+        quoteReview: undefined,
         refund: { ...order.refund, status: 'completed', externalReference: action.externalReference, confirmedAt: new Date().toISOString(), confirmedBy: state.staffSession?.name ?? 'Pharmacy staff' },
       } : order);
     case 'SET_ORDER_REFUND':
@@ -1778,7 +1782,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'REQUEST_ORDER_CANCELLATION':
       return mapOrder(state, action.orderId, order => {
         const requestedAt = new Date().toISOString();
-        const hasCuraleafOrder = order.prescriptions.some(prescription => prescription.placed || prescription.poRef);
+        const hasCuraleafOrder = orderRequiresCuraleafCancel(order);
         return {
           ...order,
           lifecycleStatus: hasCuraleafOrder ? order.lifecycleStatus : 'cancelled',

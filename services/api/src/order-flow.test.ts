@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FLOW_CONFIG, validDispensingFeePence } from './flow-config.js';
-import { addCalendarMonths, deterministicSubOrderId, messageId, patientRetentionState, paymentLinkExpiryAt, prescriptionIsCurrent } from './order-flow.js';
+import { addCalendarMonths, activeRedoPriceResolution, deterministicSubOrderId, messageId, patientRetentionState, paymentLinkExpiryAt, prescriptionIsCurrent, settlePaidRedoTotals } from './order-flow.js';
 
 test('master-flow defaults retain the dated Curaleaf and pricing decisions', () => {
   assert.equal(FLOW_CONFIG.linkExpiryHours, 72);
@@ -35,6 +35,28 @@ test('expired and cancelled prescriptions are excluded from link expiry', () => 
 test('sub-order and message idempotency keys are deterministic', () => {
   assert.equal(deterministicSubOrderId('order', 'scan', 0), deterministicSubOrderId('order', 'scan', 0));
   assert.equal(messageId(['order', 'shipment', 'ready']), messageId(['order', 'shipment', 'ready']));
+});
+
+test('paid redo carry-over absorbs an increase and rejects a new payment link', () => {
+  assert.deepEqual(settlePaidRedoTotals({ priceResolution: 'continue_as_fee', quotedTotalPence: 9_000, originalTotalPence: 9_000 }), {
+    ok: true,
+    totalPence: 9_000,
+    pharmacyContributionPence: 0,
+  });
+  assert.deepEqual(settlePaidRedoTotals({ priceResolution: 'absorb', quotedTotalPence: 9_500, originalTotalPence: 9_000 }), {
+    ok: true,
+    totalPence: 9_000,
+    pharmacyContributionPence: 500,
+  });
+  const rejected = settlePaidRedoTotals({ priceResolution: 'refund_and_recharge', quotedTotalPence: 9_500, originalTotalPence: 9_000 });
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.equal(rejected.code, 'REDO_REFUND_RECHARGE_REMOVED');
+  assert.equal(activeRedoPriceResolution('refund_and_recharge'), undefined);
+  assert.equal(activeRedoPriceResolution('absorb'), 'absorb');
+  assert.equal(activeRedoPriceResolution('continue_as_fee'), 'continue_as_fee');
+  const mismatch = settlePaidRedoTotals({ priceResolution: 'continue_as_fee', quotedTotalPence: 8_500, originalTotalPence: 9_000 });
+  assert.equal(mismatch.ok, false);
+  if (!mismatch.ok) assert.equal(mismatch.code, 'REDO_PAYMENT_AMOUNT_MISMATCH');
 });
 
 test('calendar-month anchoring clamps month-end and retention becomes inactive after 28 overdue days', () => {

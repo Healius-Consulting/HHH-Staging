@@ -376,6 +376,12 @@ export interface CuraleafActivity {
   shipmentTotal: number;
 }
 
+export type RedoPriceResolution = 'absorb' | 'continue_as_fee';
+
+export function activeRedoPriceResolution(value: unknown): RedoPriceResolution | undefined {
+  return value === 'absorb' || value === 'continue_as_fee' ? value : undefined;
+}
+
 export interface PortalOrderInput {
   draftId?: string;
   organisationId: string;
@@ -430,7 +436,7 @@ export interface PortalOrderInput {
     originalTotalPence?: number;
     priceDifferencePence?: number;
     requireCuraleafAuth?: true;
-    priceResolution?: 'absorb' | 'continue_as_fee' | 'refund_and_recharge';
+    priceResolution?: RedoPriceResolution;
   };
 }
 
@@ -586,7 +592,7 @@ export interface PortalOrderRecord {
     recommendation?: ExpiryCheckState['recommendation'];
     rootOrderId?: string | number;
     replacementSequence?: number;
-    priceResolution?: 'absorb' | 'continue_as_fee' | 'refund_and_recharge';
+    priceResolution?: RedoPriceResolution;
   };
   expiryCheck?: ExpiryCheckState;
   pricingQuote?: CuraleafPricingSnapshot;

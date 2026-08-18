@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   applyCancelledPurchaseOrderSnapshot,
+  curaleafRequiresSupplierCancel,
+  isCuraleafRejectedRequest,
   orderMatchesCancelledPrescription,
   orderMatchesCancelledPurchaseOrder,
   stampCuraleafCancellationOnSnapshot,
+  stampCuraleafRejectionOnSnapshot,
 } from '../integrations/curaleaf-events.js';
+import { HttpError } from '../../domain/common/errors.js';
 import {
   compareQuotes,
   curaleafCancellationBlocksPlacement,
@@ -170,5 +174,46 @@ describe('Curaleaf cancelled purchase orders', () => {
       curaleaf: { prescriptionId: 'rx-1' },
     }), true);
     assert.equal(curaleafCancellationBlocksPlacement({ quote: baseline }), false);
+  });
+
+  it('requires Curaleaf to cancel only after an accepted prescription or purchase order', () => {
+    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriptionId: 'rx-1', prescriptionState: 'PENDING' } }), false);
+    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriberId: 'pr-1' } }), false);
+    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriptionId: 'rx-1', prescriptionState: 'ACTIVE' } }), true);
+    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { purchaseOrderId: 'po-1', purchaseOrderState: 'CREATED' } }), true);
+    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriptionState: 'CANCELLED', prescriptionId: 'rx-1' } }), false);
+  });
+
+  it('auto-closes the HHH order when Curaleaf rejects the prescriber, prescription, or purchase order', () => {
+    const rejected = stampCuraleafRejectionOnSnapshot({
+      quoteReview: { status: 'required' },
+      curaleaf: { prescriberId: 'pr-1', prescriptionId: 'rx-1', prescriptionState: 'PENDING' },
+    }, { source: 'prescription', prescriptionId: 'rx-1', now: '2026-08-18T21:30:00.000Z' }) as Record<string, unknown>;
+    assert.equal((rejected.cancellation as { status: string }).status, 'refund_required');
+    assert.equal((rejected.curaleafCancellation as { status: string }).status, 'confirmed');
+    assert.equal((rejected.curaleaf as { prescriptionState: string }).prescriptionState, 'CANCELLED');
+    assert.equal(rejected.quoteReview, null);
+
+    const poRejected = stampCuraleafRejectionOnSnapshot({ curaleaf: { prescriptionId: 'rx-1', prescriptionState: 'ACTIVE' } }, {
+      source: 'purchase_order',
+      prescriptionId: 'rx-1',
+      now: '2026-08-18T21:31:00.000Z',
+    }) as Record<string, unknown>;
+    assert.equal((poRejected.curaleaf as { purchaseOrderState: string }).purchaseOrderState, 'CANCELLED');
+    assert.equal((poRejected.cancellation as { status: string }).status, 'refund_required');
+
+    const prescriberRejected = stampCuraleafRejectionOnSnapshot({ curaleaf: { prescriberId: 'pr-1' } }, {
+      source: 'prescriber',
+      prescriberId: 'pr-1',
+      now: '2026-08-18T21:32:00.000Z',
+    }) as Record<string, unknown>;
+    assert.equal((prescriberRejected.curaleaf as { prescriberState: string }).prescriberState, 'ARCHIVED');
+    assert.equal((prescriberRejected.cancellation as { status: string }).status, 'refund_required');
+  });
+
+  it('treats Curaleaf 400/403/422 as rejections and leaves 5xx/429 retryable', () => {
+    assert.equal(isCuraleafRejectedRequest(new HttpError(502, 'Curaleaf rejected the request (400).', 'CURALEAF_REQUEST_FAILED', { curaleafStatus: 400 })), true);
+    assert.equal(isCuraleafRejectedRequest(new HttpError(502, 'unavailable', 'CURALEAF_REQUEST_FAILED', { curaleafStatus: 502 })), false);
+    assert.equal(isCuraleafRejectedRequest(new HttpError(429, 'limited', 'CURALEAF_REQUEST_FAILED')), false);
   });
 });

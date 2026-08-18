@@ -31,7 +31,7 @@ import type { Company, CuraleafValidationRecord, PrescriptionPlacement } from '.
 import { autoSubmitPaidPrescriptions, prepareManualPrescriptionsForOrder } from './curaleaf-reconciliation.js';
 import { loadUploadedPrescriptionFile } from './prescription-file.js';
 import { FLOW_CONFIG, validDispensingFeePence } from './flow-config.js';
-import { deterministicSubOrderId, messageId, paymentLinkExpiryAt, prescriptionIsCurrent } from './order-flow.js';
+import { deterministicSubOrderId, messageId, paymentLinkExpiryAt, prescriptionIsCurrent, settlePaidRedoTotals } from './order-flow.js';
 import { queuePatientMessage } from './notification-outbox.js';
 import { callCuraleafExtension } from './supplier-extension.js';
 import { migrateMasterFlowV2 } from './flow-migration.js';
@@ -2061,7 +2061,7 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       sourceWasExpired: boolean;
       rootOrderId: string;
       replacementSequence: number;
-      priceResolution?: 'absorb' | 'continue_as_fee' | 'refund_and_recharge';
+      priceResolution?: 'absorb' | 'continue_as_fee';
     } | null = null;
     if (input.redoContext) {
       const originalOrderId = String(input.redoContext.originalOrderId);
@@ -2085,19 +2085,20 @@ app.post('/v1/portal/orders', async (request, response, next) => {
       if (!evaluation.unresolvedReason || !evaluation.redoEligible) {
         throw new HttpError(409, 'Only archived 28-day or Curaleaf-rejected orders can be redone.', 'REDO_NOT_ELIGIBLE');
       }
-      if (input.redoContext.isPaidRedo && !evaluation.isPaid && input.redoContext.priceResolution !== 'refund_and_recharge') {
-        throw new HttpError(409, 'Payment carry-over is only allowed when the original order was paid.', 'REDO_PAYMENT_CARRYOVER_INVALID');
-      }
       if (input.redoContext.priceResolution === 'refund_and_recharge') {
-        const refund = originalOrder.refund && typeof originalOrder.refund === 'object' ? originalOrder.refund as Record<string, unknown> : {};
-        if (refund.status !== 'completed') throw new HttpError(409, 'Confirm the original Worldpay refund before issuing a replacement payment link.', 'REFUND_CONFIRMATION_REQUIRED');
+        throw new HttpError(409, 'Cancel the source order and use paid-order resolution instead of creating a new payment link.', 'REDO_REFUND_RECHARGE_REMOVED');
+      }
+      if (input.redoContext.isPaidRedo && !evaluation.isPaid) {
+        throw new HttpError(409, 'Payment carry-over is only allowed when the original order was paid.', 'REDO_PAYMENT_CARRYOVER_INVALID');
       }
       authoritativeRedoContext = {
         originalOrderId,
         rootOrderId: String((originalOrder.redoContext as Record<string, unknown> | undefined)?.rootOrderId ?? originalOrder.redoOfOrderId ?? originalOrderId),
         replacementSequence: Number((originalOrder.redoContext as Record<string, unknown> | undefined)?.replacementSequence ?? (originalOrder.redoOfOrderId ? 1 : 0)) + 1,
-        isPaidRedo: evaluation.isPaid && input.redoContext.priceResolution !== 'refund_and_recharge',
-        priceResolution: input.redoContext.priceResolution,
+        isPaidRedo: evaluation.isPaid,
+        priceResolution: input.redoContext.priceResolution === 'absorb' || input.redoContext.priceResolution === 'continue_as_fee'
+          ? input.redoContext.priceResolution
+          : undefined,
         originalTotalPence: Number(originalOrder.totalPence ?? input.redoContext.originalTotalPence ?? 0),
         priceDifferencePence: input.redoContext.priceDifferencePence ?? 0,
         requireCuraleafAuth: true,
@@ -2217,13 +2218,15 @@ app.post('/v1/portal/orders', async (request, response, next) => {
     let pharmacyContributionPence = 0;
     if (authoritativeRedoContext) {
       authoritativeRedoContext.priceDifferencePence = quotedTotalPence - authoritativeRedoContext.originalTotalPence;
-      if (authoritativeRedoContext.priceDifferencePence !== 0 && authoritativeRedoContext.isPaidRedo) {
-        if (authoritativeRedoContext.priceResolution === 'absorb' && authoritativeRedoContext.priceDifferencePence > 0) {
-          pharmacyContributionPence = authoritativeRedoContext.priceDifferencePence;
-          totalPence = authoritativeRedoContext.originalTotalPence;
-        } else {
-          throw new HttpError(409, 'Choose pharmacy absorption or complete the old-payment refund before recreating this order.', 'REDO_PAYMENT_AMOUNT_MISMATCH');
-        }
+      if (authoritativeRedoContext.isPaidRedo) {
+        const settled = settlePaidRedoTotals({
+          priceResolution: authoritativeRedoContext.priceResolution,
+          quotedTotalPence,
+          originalTotalPence: authoritativeRedoContext.originalTotalPence,
+        });
+        if (!settled.ok) throw new HttpError(409, settled.message, settled.code);
+        totalPence = settled.totalPence;
+        pharmacyContributionPence = settled.pharmacyContributionPence;
       }
     }
     const lineRevenuePence = normalisedPrescriptions.flatMap(prescription => prescription.items.map(item => {

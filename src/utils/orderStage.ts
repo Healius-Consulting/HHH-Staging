@@ -226,6 +226,27 @@ function orderAllOrderedPacksReceived(order: PatientOrder) {
 }
 
 /**
+ * Pharmacy can auto-cancel in HHH until Curaleaf has accepted the prescription
+ * or created a purchase order. After that, Curaleaf customer service must cancel.
+ */
+export function orderRequiresCuraleafCancel(order: PatientOrder): boolean {
+  if (order.curaleafCancellation?.status === 'confirmed') return false;
+  if (order.prescriptions.some(prescription =>
+    prescription.purchaseOrderState === 'CANCELLED'
+    || prescription.curaleafPrescriptionState === 'CANCELLED'
+    || prescription.status === 'cancelled'
+  )) {
+    return false;
+  }
+  return order.prescriptions.some(prescription =>
+    prescription.curaleafPrescriptionState === 'ACTIVE'
+    || prescription.curaleafPrescriptionState === 'FULFILLED'
+    || prescription.placed
+    || (prescription.purchaseOrderState != null && prescription.purchaseOrderState !== 'CANCELLED')
+  );
+}
+
+/**
  * Cancellation is an order outcome, not a patient status. Keep unfinished
  * supplier/refund work operational while demoting closed cancellations.
  */

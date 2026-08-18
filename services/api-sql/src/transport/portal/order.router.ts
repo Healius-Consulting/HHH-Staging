@@ -2,8 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { curaleafApiRequest, executeCuraleafOrderPlacement, fetchCuraleafPurchaseOrders, fetchCuraleafShipments, fetchCuraleafQuote } from '../../application/integrations/curaleaf.service.js';
-import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
-import { stampCuraleafCancellationOnSnapshot } from '../../application/integrations/curaleaf-events.js';
+import { curaleafRequiresSupplierCancel, stampCuraleafCancellationOnSnapshot } from '../../application/integrations/curaleaf-events.js';
 import {
   curaleafCancellationBlocksPlacement,
   evaluateQuoteReview,
@@ -382,6 +381,10 @@ export function createPortalOrderRouter(): Router {
       const taxPence = input.taxPence ?? 0;
       const calculatedTotal = medicineTotalPence + dispensingFeePence + deliveryPence + taxPence;
       const totalPence = input.totalPence && input.totalPence > 0 ? input.totalPence : calculatedTotal;
+      const redoContext = input.redoContext && typeof input.redoContext === 'object' ? input.redoContext as Record<string, unknown> : null;
+      if (redoContext?.priceResolution === 'refund_and_recharge') {
+        throw new HttpError(409, 'Cancel the source order and use paid-order resolution instead of creating a new payment link.', 'REDO_REFUND_RECHARGE_REMOVED');
+      }
       const paymentRoute = input.paymentRoute.toUpperCase() === 'WORLDPAY' ? 'WORLDPAY' as const : 'MANUAL' as const;
       const orderNumber = input.orderNumber || `ORD-${Date.now().toString(36).toUpperCase()}`;
 
@@ -577,23 +580,21 @@ export function createPortalOrderRouter(): Router {
       }).parse(req.body);
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
-      const snapshotRoot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
-      const curaleaf = snapshotRoot.curaleaf && typeof snapshotRoot.curaleaf === 'object' ? snapshotRoot.curaleaf : {};
-      const hasRockyOrder = Boolean(curaleaf.purchaseOrderId || curaleaf.id || curaleaf.prescriptionId || supplierOrderCancelled(order.quoteSnapshot));
+      const requiresCuraleafCancel = curaleafRequiresSupplierCancel(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot);
       const snapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
-        action: supplierOrderCancelled(order.quoteSnapshot) || !hasRockyOrder ? 'confirmed' : 'requested',
+        action: supplierOrderCancelled(order.quoteSnapshot) || !requiresCuraleafCancel ? 'confirmed' : 'requested',
         reason: input.reason,
         note: input.note,
         actorUid: scope.uid,
       });
-      const exception = hasRockyOrder || order.paymentStatus === 'PAID' || supplierOrderCancelled(snapshot);
+      const exception = requiresCuraleafCancel || order.paymentStatus === 'PAID' || supplierOrderCancelled(snapshot);
       await orderRepo.updateQuoteSnapshot({
         id: orderId,
         organisationId: scope.organisationId,
         quoteSnapshot: snapshot,
         fulfilmentStatus: exception ? 'EXCEPTION' : undefined,
       });
-      if (!hasRockyOrder && order.paymentStatus !== 'PAID') {
+      if (!requiresCuraleafCancel && order.paymentStatus !== 'PAID') {
         await orderRepo.updateOrderStatus({
           id: orderId,
           organisationId: scope.organisationId,
@@ -865,54 +866,26 @@ export function createPortalOrderRouter(): Router {
 
       const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
       const review = readQuoteReview(snapshot);
-      const quoteDifference = snapshot.refund?.kind === 'quote_difference' || review?.status === 'awaiting_refund';
       const now = new Date().toISOString();
 
-      if (quoteDifference) {
-        if (curaleafCancellationBlocksPlacement(order.quoteSnapshot)) {
-          throw new HttpError(409, 'This Curaleaf order was cancelled. Record the paid-order refund instead of a quote-difference refund.', 'CURALEAF_ORDER_CANCELLED');
-        }
-        const approved = stampQuoteReviewOnSnapshot({
-          ...snapshot,
-          refund: {
-            ...(snapshot.refund || {}),
-            id: refundId,
-            status: 'completed',
-            externalReference: input.externalReference,
-            confirmedAt: now,
-            confirmedBy: scope.uid,
-          },
-        }, review ? {
-          ...review,
-          status: 'approved',
-          approvedAt: now,
-          approvedFingerprint: review.fingerprint,
-        } : null);
+      if (review || snapshot.refund?.kind === 'quote_difference') {
         await orderRepo.updateQuoteSnapshot({
           id: orderId,
           organisationId: scope.organisationId,
-          quoteSnapshot: approved,
-          fulfilmentStatus: 'SUPPLIER_PENDING',
+          quoteSnapshot: stampQuoteReviewOnSnapshot({
+            ...snapshot,
+            refund: {
+              id: refundId,
+              status: 'completed',
+              kind: 'paid_order',
+              amountPence: Number(order.totalPence || 0),
+              externalReference: input.externalReference,
+              confirmedAt: now,
+              confirmedBy: scope.uid,
+            },
+          }, null),
+          fulfilmentStatus: 'EXCEPTION',
         });
-        const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
-        if (connection?.secretResourceName) {
-          await executeCuraleafOrderPlacement(connection, {
-            ...order,
-            quoteSnapshot: approved,
-            paymentStatus: 'PAID',
-            paidAt: order.paidAt,
-            status: 'PROCESSING',
-          });
-        }
-        res.status(200).json({
-          id: refundId,
-          status: 'completed',
-          amountPence: Number(snapshot.refund?.amountPence || review?.refundAmountPence || 0),
-          externalReference: input.externalReference,
-          confirmedAt: now,
-          kind: 'quote_difference',
-        });
-        return;
       }
 
       await paymentRepo.updatePaymentStatus(orderId, 'CANCELLED', orderId);

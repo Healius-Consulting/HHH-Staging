@@ -45,6 +45,7 @@ function realPurchaseOrderId(po: { id?: unknown; purchaseOrderId?: unknown } | n
 
 function asPrescriptionState(value: unknown): 'ACTIVE' | 'FULFILLED' | 'EXPIRED' | 'CANCELLED' | 'PENDING' | undefined {
   const state = String(value || '').trim().toUpperCase();
+  if (state === 'REJECTED') return 'CANCELLED';
   if (state === 'ACTIVE' || state === 'FULFILLED' || state === 'EXPIRED' || state === 'CANCELLED' || state === 'PENDING') {
     return state;
   }
@@ -188,7 +189,10 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
   const persistedCuraleaf = snapshot?.curaleaf && typeof snapshot.curaleaf === 'object' ? snapshot.curaleaf : null;
   const po = order.curaleaf || persistedCuraleaf;
   const isHhhCancelled = order.status === 'CANCELLED';
-  const isSupplierCancelled = po?.state === 'CANCELLED' || po?.purchaseOrderState === 'CANCELLED' || po?.prescriptionState === 'CANCELLED';
+  const isSupplierCancelled = po?.state === 'CANCELLED' || po?.state === 'REJECTED'
+    || po?.purchaseOrderState === 'CANCELLED' || po?.purchaseOrderState === 'REJECTED'
+    || po?.prescriptionState === 'CANCELLED' || po?.prescriptionState === 'REJECTED'
+    || snapshot?.curaleafCancellation?.status === 'confirmed';
   const isCancelledOrder = isHhhCancelled || isSupplierCancelled;
   const isPaid = (order.paymentStatus === 'PAID' || Boolean(order.paidAt)) && order.paymentStatus !== 'CANCELLED';
   const quoteReview = snapshot?.quoteReview && typeof snapshot.quoteReview === 'object' && !isSupplierCancelled
