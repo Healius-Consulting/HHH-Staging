@@ -2053,6 +2053,113 @@ type FulfilmentDisplayLine = {
   supplierReportedOrdered?: number;
 };
 
+type FulfilmentProgressSnapshot = {
+  orderedPacks: number;
+  allocatedPacks: number;
+  dispatchedPacks: number;
+  inTransitPacks: number;
+  receivedPacks: number;
+  awaitingDispatchPacks: number;
+  isSplit: boolean;
+  percentReceived: number;
+  percentAllocated: number;
+  percentInTransit: number;
+};
+
+function aggregateFulfilmentProgress(lines: FulfilmentDisplayLine[]): FulfilmentProgressSnapshot {
+  const orderedPacks = lines.reduce((sum, line) => sum + line.orderedPacks, 0);
+  const allocatedPacks = lines.reduce((sum, line) => sum + line.allocatedPacks, 0);
+  const dispatchedPacks = lines.reduce((sum, line) => sum + line.dispatchedPacks, 0);
+  const inTransitPacks = lines.reduce((sum, line) => sum + line.inTransitPacks, 0);
+  const receivedPacks = lines.reduce((sum, line) => sum + line.receivedPacks, 0);
+  const awaitingDispatchPacks = lines.reduce((sum, line) => sum + line.awaitingDispatchPacks, 0);
+
+  return {
+    orderedPacks,
+    allocatedPacks,
+    dispatchedPacks,
+    inTransitPacks,
+    receivedPacks,
+    awaitingDispatchPacks,
+    isSplit: lines.some(line => line.isSplit),
+    percentReceived: orderedPacks > 0 ? Math.min(100, Math.round((receivedPacks / orderedPacks) * 100)) : 0,
+    percentAllocated: orderedPacks > 0 ? Math.min(100, Math.round((allocatedPacks / orderedPacks) * 100)) : 0,
+    percentInTransit: orderedPacks > 0 && inTransitPacks > 0
+      ? Math.min(100, Math.round(((receivedPacks + inTransitPacks) / orderedPacks) * 100))
+      : 0,
+  };
+}
+
+function FulfilmentProgressRail({
+  progress,
+  lineCount,
+}: {
+  progress: FulfilmentProgressSnapshot;
+  lineCount: number;
+}) {
+  const steps = fulfilmentPipelineSteps(progress);
+
+  return (
+    <section className="order-fulfilment-progress" aria-label="Combined prescription fulfilment progress">
+      <header className="order-fulfilment-progress__header">
+        <small>Combined progress</small>
+        <strong>
+          {lineCount} line item{lineCount === 1 ? '' : 's'} · {progress.orderedPacks} pack{progress.orderedPacks === 1 ? '' : 's'} total
+        </strong>
+      </header>
+
+      <div className="order-fulfilment-pipeline" role="list" aria-label="Curaleaf fulfilment progress">
+        <div className={pipelineStepClass('pipeline-step pipeline-step--ordered', steps.ordered)} role="listitem">
+          <span className="pipeline-step__num" aria-hidden="true">1</span>
+          <div className="pipeline-step__content">
+            <span className="pipeline-step__label">Ordered</span>
+            <strong className="pipeline-step__value">{progress.orderedPacks} <small>pk</small></strong>
+          </div>
+        </div>
+
+        <div className={pipelineStepClass('pipeline-step pipeline-step--picked', steps.dispensed)} role="listitem">
+          <span className="pipeline-step__num" aria-hidden="true">2</span>
+          <div className="pipeline-step__content">
+            <span className="pipeline-step__label">Curaleaf Dispensed</span>
+            <strong className="pipeline-step__value">{progress.allocatedPacks}/{progress.orderedPacks} <small>pk</small></strong>
+          </div>
+        </div>
+
+        <div className={pipelineStepClass('pipeline-step pipeline-step--transit', steps.inTransit)} role="listitem">
+          <span className="pipeline-step__num" aria-hidden="true">3</span>
+          <div className="pipeline-step__content">
+            <span className="pipeline-step__label">In Transit</span>
+            <strong className="pipeline-step__value">
+              {progress.inTransitPacks} <small>pk</small>
+              {progress.isSplit && progress.awaitingDispatchPacks > 0 ? (
+                <span className="pipeline-step__split-tag" title={`${progress.awaitingDispatchPacks} pack(s) awaiting next dispatch`}>
+                  +{progress.awaitingDispatchPacks} split
+                </span>
+              ) : null}
+            </strong>
+          </div>
+        </div>
+
+        <div className={pipelineStepClass('pipeline-step pipeline-step--received', steps.checkedIn)} role="listitem">
+          <span className="pipeline-step__num" aria-hidden="true">4</span>
+          <div className="pipeline-step__content">
+            <span className="pipeline-step__label">Checked In</span>
+            <strong className="pipeline-step__value">{progress.receivedPacks}/{progress.orderedPacks} <small>pk</small></strong>
+          </div>
+        </div>
+      </div>
+
+      <div className="order-fulfilment-bar">
+        <div className="order-fulfilment-bar__fill--allocated" style={{ width: `${progress.percentAllocated}%` }} />
+        {progress.inTransitPacks > 0 || (progress.isSplit && progress.awaitingDispatchPacks > 0)
+          ? <div className="order-fulfilment-bar__fill--transit" style={{ width: `${progress.percentInTransit}%` }} />
+          : null}
+        <div className="order-fulfilment-bar__fill--received" style={{ width: `${progress.percentReceived}%` }} />
+      </div>
+    </section>
+  );
+}
+
 function FulfilmentItemCard({
   line,
   index,
@@ -2065,7 +2172,6 @@ function FulfilmentItemCard({
   const [open, setOpen] = useState(defaultOpen);
   const margin = lineMargin(line.item);
   const contribution = line.item.cost === null ? null : lineRevenue(line.item) - lineCost(line.item);
-  const steps = fulfilmentPipelineSteps(line);
   const panelId = `fulfilment-item-${line.productId}`;
 
   return (
@@ -2123,53 +2229,6 @@ function FulfilmentItemCard({
               PO reports {line.supplierReportedOrdered} pk (mismatch)
             </span>
           ) : null}
-
-          <div className="order-fulfilment-pipeline" role="list" aria-label="Curaleaf fulfilment progress">
-            <div className={pipelineStepClass('pipeline-step pipeline-step--ordered', steps.ordered)} role="listitem">
-              <span className="pipeline-step__num" aria-hidden="true">1</span>
-              <div className="pipeline-step__content">
-                <span className="pipeline-step__label">Ordered</span>
-                <strong className="pipeline-step__value">{line.orderedPacks} <small>pk</small></strong>
-              </div>
-            </div>
-
-            <div className={pipelineStepClass('pipeline-step pipeline-step--picked', steps.dispensed)} role="listitem">
-              <span className="pipeline-step__num" aria-hidden="true">2</span>
-              <div className="pipeline-step__content">
-                <span className="pipeline-step__label">Curaleaf Dispensed</span>
-                <strong className="pipeline-step__value">{line.allocatedPacks}/{line.orderedPacks} <small>pk</small></strong>
-              </div>
-            </div>
-
-            <div className={pipelineStepClass('pipeline-step pipeline-step--transit', steps.inTransit)} role="listitem">
-              <span className="pipeline-step__num" aria-hidden="true">3</span>
-              <div className="pipeline-step__content">
-                <span className="pipeline-step__label">In Transit</span>
-                <strong className="pipeline-step__value">
-                  {line.inTransitPacks} <small>pk</small>
-                  {line.isSplit && line.awaitingDispatchPacks > 0 ? (
-                    <span className="pipeline-step__split-tag" title={`${line.awaitingDispatchPacks} pack(s) awaiting next dispatch`}>
-                      +{line.awaitingDispatchPacks} split
-                    </span>
-                  ) : null}
-                </strong>
-              </div>
-            </div>
-
-            <div className={pipelineStepClass('pipeline-step pipeline-step--received', steps.checkedIn)} role="listitem">
-              <span className="pipeline-step__num" aria-hidden="true">4</span>
-              <div className="pipeline-step__content">
-                <span className="pipeline-step__label">Checked In</span>
-                <strong className="pipeline-step__value">{line.receivedPacks}/{line.orderedPacks} <small>pk</small></strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="order-fulfilment-bar">
-            <div className="order-fulfilment-bar__fill--allocated" style={{ width: `${line.percentAllocated}%` }} />
-            {line.inTransitPacks > 0 || (line.isSplit && line.awaitingDispatchPacks > 0) ? <div className="order-fulfilment-bar__fill--transit" style={{ width: `${line.percentInTransit}%` }} /> : null}
-            <div className="order-fulfilment-bar__fill--received" style={{ width: `${line.percentReceived}%` }} />
-          </div>
         </div>
       ) : null}
     </article>
@@ -2308,6 +2367,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   const hasSupplierSection = Boolean(prescription.placed && (prescription.fulfilmentLines?.length || isDispatchedPhase || isPartiallyDelivered || isDelivered || isReady));
   const totalAwaitingDispatchPacks = displayLines.reduce((sum, line) => sum + line.awaitingDispatchPacks, 0);
   const arrivingPacks = totalConsignmentPacks || totalDispatchedPacks;
+  const combinedProgress = aggregateFulfilmentProgress(displayLines);
 
   return (
     <div className="order-rx-pair">
@@ -2410,14 +2470,17 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 ) : null}
               </header>
               <div className="order-supplier-fulfilment__body">
-                {displayLines.map((line, lineIndex) => (
-                  <FulfilmentItemCard
-                    key={line.productId}
-                    line={line}
-                    index={lineIndex}
-                    defaultOpen={displayLines.length <= 2 || lineIndex === 0}
-                  />
-                ))}
+                <div className="order-fulfilment-item-stack">
+                  {displayLines.map((line, lineIndex) => (
+                    <FulfilmentItemCard
+                      key={line.productId}
+                      line={line}
+                      index={lineIndex}
+                      defaultOpen={displayLines.length <= 2 || lineIndex === 0}
+                    />
+                  ))}
+                </div>
+                <FulfilmentProgressRail progress={combinedProgress} lineCount={displayLines.length} />
               </div>
             </div>
 

@@ -12046,8 +12046,37 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 }
 .order-supplier-fulfilment__body {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   padding: 12px 14px 14px;
+}
+.order-fulfilment-item-stack{
+  display: grid;
+  gap: 10px;
+}
+.order-fulfilment-progress{
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+}
+.order-fulfilment-progress__header small,
+.order-fulfilment-progress__header strong{
+  display: block;
+}
+.order-fulfilment-progress__header small{
+  color: var(--text-tertiary);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.order-fulfilment-progress__header strong{
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
 }
 .order-fulfilment-item-card{
   overflow: hidden;
