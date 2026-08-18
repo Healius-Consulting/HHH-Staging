@@ -42,6 +42,9 @@ export interface CuraleafPurchaseOrderLike {
   customerReference?: string | null;
   issuedDate?: string | null;
   createdAt?: string | null;
+  prescriptionId?: string | null;
+  prescriberId?: string | null;
+  prescriptionState?: string | null;
   shippingAddress?: Array<CuraleafShippingAddressLike | string> | null;
   items?: CuraleafPoItem[] | null;
 }
