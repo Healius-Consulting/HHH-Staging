@@ -4,7 +4,21 @@ import type {
   PrescriptionFileRecord,
   PrescriptionRecord,
   PrescriptionRepositoryPort,
+  UpsertPrescriberInput,
 } from '../ports/prescription.port.js';
+
+const PRESCRIBER_FIELDS = `
+  id
+  name
+  initials
+  pin
+  gmcNumber
+  gphcNumber
+  active
+  supplierIdentifiers
+  createdAt
+  updatedAt
+`;
 
 const GET_PRESCRIPTION_FILE_BY_ID_GQL = `
   query GetPrescriptionFileById($id: UUID!, $organisationId: UUID!) {
@@ -30,15 +44,79 @@ const GET_PRESCRIPTION_FILE_BY_ID_GQL = `
 
 const LIST_ACTIVE_PRESCRIBERS_GQL = `
   query ListActivePrescribers {
-    prescribers(where: { active: { eq: true } }, limit: 200) {
-      id
-      name
-      initials
-      pin
-      gmcNumber
-      gphcNumber
-      active
+    prescribers(where: { active: { eq: true } }, limit: 500) {
+      ${PRESCRIBER_FIELDS}
     }
+  }
+`;
+
+const FIND_PRESCRIBER_BY_PIN_GQL = `
+  query FindPrescriberByPin($pin: String!) {
+    prescribers(where: { pin: { eq: $pin }, active: { eq: true } }, limit: 1) {
+      ${PRESCRIBER_FIELDS}
+    }
+  }
+`;
+
+const FIND_PRESCRIBER_BY_GMC_GQL = `
+  query FindPrescriberByGmc($gmcNumber: Int64!) {
+    prescribers(where: { gmcNumber: { eq: $gmcNumber }, active: { eq: true } }, limit: 1) {
+      ${PRESCRIBER_FIELDS}
+    }
+  }
+`;
+
+const FIND_PRESCRIBER_BY_GPHC_GQL = `
+  query FindPrescriberByGphc($gphcNumber: String!) {
+    prescribers(where: { gphcNumber: { eq: $gphcNumber }, active: { eq: true } }, limit: 1) {
+      ${PRESCRIBER_FIELDS}
+    }
+  }
+`;
+
+const INSERT_PRESCRIBER_GQL = `
+  mutation InsertPrescriber(
+    $name: String!
+    $initials: String!
+    $pin: String!
+    $gmcNumber: Int64
+    $gphcNumber: String
+    $createdByUid: String
+  ) {
+    prescriber_insert(data: {
+      name: $name
+      initials: $initials
+      pin: $pin
+      gmcNumber: $gmcNumber
+      gphcNumber: $gphcNumber
+      active: true
+      supplierIdentifiers: {}
+      createdByUid: $createdByUid
+    })
+  }
+`;
+
+const UPDATE_PRESCRIBER_GQL = `
+  mutation UpdatePrescriber(
+    $id: UUID!
+    $name: String!
+    $initials: String!
+    $pin: String!
+    $gmcNumber: Int64
+    $gphcNumber: String
+  ) {
+    prescriber_update(
+      key: { id: $id }
+      data: {
+        name: $name
+        initials: $initials
+        pin: $pin
+        gmcNumber: $gmcNumber
+        gphcNumber: $gphcNumber
+        active: true
+        updatedAt_expr: "request.time"
+      }
+    )
   }
 `;
 
@@ -122,6 +200,74 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
       LIST_ACTIVE_PRESCRIBERS_GQL
     );
     return result.data.prescribers ?? [];
+  }
+
+  async findActivePrescriberMatch(input: {
+    pin: string;
+    gmcNumber: number | null;
+    gphcNumber: string | null;
+  }): Promise<PrescriberRecord | null> {
+    const normalPin = input.pin.trim();
+    const normalGphc = input.gphcNumber?.trim() ?? '';
+
+    if (normalPin) {
+      const byPin = await dataConnect.executeGraphql<{ prescribers: PrescriberRecord[] }, any>(
+        FIND_PRESCRIBER_BY_PIN_GQL,
+        { variables: { pin: normalPin } },
+      );
+      if (byPin.data.prescribers?.[0]) return byPin.data.prescribers[0];
+    }
+
+    if (input.gmcNumber) {
+      const byGmc = await dataConnect.executeGraphql<{ prescribers: PrescriberRecord[] }, any>(
+        FIND_PRESCRIBER_BY_GMC_GQL,
+        { variables: { gmcNumber: input.gmcNumber } },
+      );
+      if (byGmc.data.prescribers?.[0]) return byGmc.data.prescribers[0];
+    }
+
+    if (normalGphc) {
+      const byGphc = await dataConnect.executeGraphql<{ prescribers: PrescriberRecord[] }, any>(
+        FIND_PRESCRIBER_BY_GPHC_GQL,
+        { variables: { gphcNumber: normalGphc } },
+      );
+      if (byGphc.data.prescribers?.[0]) return byGphc.data.prescribers[0];
+    }
+
+    return null;
+  }
+
+  async upsertPrescriber(input: UpsertPrescriberInput): Promise<PrescriberRecord> {
+    const payload = {
+      name: input.name.trim(),
+      initials: input.initials.trim(),
+      pin: input.pin.trim(),
+      gmcNumber: input.gmcNumber,
+      gphcNumber: input.gphcNumber?.trim() || null,
+      createdByUid: input.createdByUid ?? null,
+    };
+
+    const existing = await this.findActivePrescriberMatch(payload);
+    if (existing) {
+      await dataConnect.executeGraphql(UPDATE_PRESCRIBER_GQL, {
+        variables: {
+          id: existing.id,
+          name: payload.name,
+          initials: payload.initials,
+          pin: payload.pin,
+          gmcNumber: payload.gmcNumber,
+          gphcNumber: payload.gphcNumber,
+        },
+      });
+    } else {
+      await dataConnect.executeGraphql(INSERT_PRESCRIBER_GQL, {
+        variables: payload,
+      });
+    }
+
+    const saved = await this.findActivePrescriberMatch(payload);
+    if (!saved) throw new Error('Prescriber could not be saved.');
+    return saved;
   }
 
   async listTenantPrescriptions(organisationId: string, limit = 200): Promise<PrescriptionRecord[]> {

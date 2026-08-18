@@ -18,6 +18,18 @@ export interface PrescriberRecord {
   gmcNumber: number | null;
   gphcNumber: string | null;
   active: boolean;
+  supplierIdentifiers?: Record<string, unknown> | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UpsertPrescriberInput {
+  name: string;
+  initials: string;
+  pin: string;
+  gmcNumber: number | null;
+  gphcNumber: string | null;
+  createdByUid?: string | null;
 }
 
 export interface PrescriptionRecord {
@@ -50,5 +62,11 @@ export interface PrescriptionRepositoryPort {
   completeFile(id: string, organisationId: string): Promise<boolean>;
   deleteFile(id: string, organisationId: string): Promise<boolean>;
   listActivePrescribers(): Promise<PrescriberRecord[]>;
+  findActivePrescriberMatch(input: {
+    pin: string;
+    gmcNumber: number | null;
+    gphcNumber: string | null;
+  }): Promise<PrescriberRecord | null>;
+  upsertPrescriber(input: UpsertPrescriberInput): Promise<PrescriberRecord>;
   listTenantPrescriptions(organisationId: string, limit?: number): Promise<PrescriptionRecord[]>;
 }
