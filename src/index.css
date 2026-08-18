@@ -10959,6 +10959,18 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 
 .order-journey-rail--premium li.is-complete strong{ color: var(--tenant-primary-strong); }
 
+.order-journey-rail--premium li.is-partial .order-journey-rail__marker{
+  color: #b45309;
+  border-color: #fbbf24;
+  background: #fef3c7;
+  box-shadow: none;
+}
+.order-journey-rail--premium li.is-partial:not(:last-child)::after{
+  background: #fbbf24;
+}
+.order-journey-rail--premium li.is-partial strong{ color: #b45309; }
+.order-journey-rail--premium li.is-partial small{ color: var(--text-secondary); }
+
 .order-journey-rail--premium li.is-active .order-journey-rail__marker{
   color: var(--tenant-primary-strong);
   border-color: var(--tenant-primary);
@@ -12150,6 +12162,18 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 }
 .pipeline-step--complete:not(:last-child)::after {
   background: #10b981;
+}
+
+.pipeline-step--partial .pipeline-step__num {
+  color: #b45309;
+  background: #fef3c7;
+  border-color: #fbbf24;
+}
+.pipeline-step--partial:not(:last-child)::after {
+  background: #fbbf24;
+}
+.pipeline-step--partial .pipeline-step__label {
+  color: #b45309;
 }
 
 .order-fulfilment-bar {

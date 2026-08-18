@@ -1817,37 +1817,51 @@ function JourneyRail({ stage, paymentPaid, order }: { stage: OrderStage; payment
       </ol>
     );
   }
-  const partialReceipt = orderHasPartialPharmacyReceipt(order);
   const packTotals = orderPackTotals(order);
   const curaleafComplete = ['curaleaf-approved', 'dispatched', 'delivered', 'ready', 'collected'].includes(stage);
-  const deliveryComplete = ['delivered', 'ready', 'collected'].includes(stage);
-  const collectionComplete = stage === 'collected' || (packTotals.collected >= packTotals.ordered && packTotals.ordered > 0);
+  const deliveryFullyComplete = packTotals.ordered > 0 && packTotals.received >= packTotals.ordered;
+  const deliveryPartial = packTotals.received > 0 && !deliveryFullyComplete;
+  const collectionFullyComplete = packTotals.ordered > 0 && packTotals.collected >= packTotals.ordered;
   const partialCollection = orderHasPartialCollection(order);
-  const deliveryDetail = deliveryComplete
-    ? (packTotals.received >= packTotals.ordered ? 'Received' : 'Part delivered')
-    : partialReceipt || packTotals.received > 0
+  const hasUncollected = orderHasUncollectedReceivedPacks(order);
+  const deliveryDetail = deliveryFullyComplete
+    ? 'Received'
+    : deliveryPartial
       ? 'Part delivered'
       : stage === 'dispatched'
         ? 'In transit'
         : 'Pending';
-  const collectionDetail = collectionComplete
+  const collectionDetail = collectionFullyComplete
     ? 'Handed out'
     : partialCollection
       ? 'Partial handout'
-      : stage === 'ready'
+      : hasUncollected || stage === 'ready'
         ? 'Ready'
         : 'Pending';
   const phases = [
-    { label: 'Payment', detail: paymentPaid ? 'Cleared' : 'Awaiting', complete: paymentPaid, active: stage === 'awaiting-payment' },
-    { label: 'Curaleaf', detail: curaleafComplete ? 'Approved' : stage === 'curaleaf-pending' ? 'In review' : 'Pending', complete: curaleafComplete, active: stage === 'paid' || stage === 'curaleaf-pending' },
-    { label: 'Delivery', detail: deliveryDetail, complete: deliveryComplete || packTotals.received > 0, active: stage === 'curaleaf-approved' || stage === 'dispatched' },
-    { label: 'Ready to collect', detail: collectionDetail, complete: collectionComplete, active: stage === 'delivered' || stage === 'ready' },
+    { label: 'Payment', detail: paymentPaid ? 'Cleared' : 'Awaiting', complete: paymentPaid, partial: false, active: stage === 'awaiting-payment' },
+    { label: 'Curaleaf', detail: curaleafComplete ? 'Approved' : stage === 'curaleaf-pending' ? 'In review' : 'Pending', complete: curaleafComplete, partial: false, active: stage === 'paid' || stage === 'curaleaf-pending' },
+    {
+      label: 'Delivery',
+      detail: deliveryDetail,
+      complete: deliveryFullyComplete,
+      partial: deliveryPartial,
+      active: !deliveryFullyComplete && !deliveryPartial && (stage === 'curaleaf-approved' || stage === 'dispatched'),
+    },
+    {
+      label: 'Ready to collect',
+      detail: collectionDetail,
+      complete: collectionFullyComplete,
+      partial: partialCollection,
+      active: !collectionFullyComplete && !partialCollection && (stage === 'delivered' || stage === 'ready' || hasUncollected),
+    },
   ];
   return (
     <ol className="order-journey-rail order-journey-rail--premium" aria-label="Order journey">
       {phases.map((phase, index) => {
         let stateClass = 'is-pending';
         if (phase.complete) stateClass = 'is-complete';
+        else if (phase.partial) stateClass = 'is-partial';
         else if (phase.active) stateClass = 'is-active';
         return (
           <li key={phase.label} className={stateClass} aria-current={phase.active ? 'step' : undefined}>
@@ -1858,6 +1872,57 @@ function JourneyRail({ stage, paymentPaid, order }: { stage: OrderStage; payment
       })}
     </ol>
   );
+}
+
+function pipelineStepClass(base: string, state: { complete: boolean; partial: boolean; active: boolean }) {
+  const classes = [base];
+  if (state.complete) classes.push('pipeline-step--complete');
+  else if (state.partial) classes.push('pipeline-step--partial');
+  else if (state.active) classes.push('pipeline-step--active');
+  return classes.join(' ');
+}
+
+function fulfilmentPipelineSteps(line: {
+  orderedPacks: number;
+  allocatedPacks: number;
+  dispatchedPacks: number;
+  inTransitPacks: number;
+  receivedPacks: number;
+  awaitingDispatchPacks: number;
+  isSplit: boolean;
+}) {
+  const ordered = line.orderedPacks;
+  const allocated = line.allocatedPacks;
+  const dispatched = line.dispatchedPacks;
+  const inTransit = line.inTransitPacks;
+  const received = line.receivedPacks;
+  const consignmentDelivered = dispatched > 0 && inTransit === 0 && received >= dispatched;
+  const splitAwaitingNextShipment = line.isSplit && line.awaitingDispatchPacks > 0;
+
+  return {
+    ordered: {
+      complete: ordered > 0,
+      partial: false,
+      active: false,
+    },
+    dispensed: {
+      complete: allocated >= ordered && ordered > 0,
+      partial: allocated > 0 && allocated < ordered,
+      active: allocated === 0 && ordered > 0,
+    },
+    inTransit: {
+      complete: consignmentDelivered && !splitAwaitingNextShipment,
+      partial: inTransit > 0
+        || (consignmentDelivered && splitAwaitingNextShipment)
+        || (dispatched > 0 && inTransit === 0 && received > 0 && received < dispatched),
+      active: inTransit > 0,
+    },
+    checkedIn: {
+      complete: received >= ordered && ordered > 0,
+      partial: received > 0 && received < ordered,
+      active: false,
+    },
+  };
 }
 
 function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDraftChange, onSavePartial, onConfirmDelivery, onReadyForCollection, onManualPlace, onChaseCuraleaf, onOpenHandout }: {
@@ -2094,17 +2159,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
             </header>
             <div className="order-supplier-fulfilment__body">
               {displayLines.map(line => {
-                const isStep1Complete = line.allocatedPacks > 0 || line.dispatchedPacks > 0 || line.isDeliveredOrCheckedIn;
-                const isStep1Active = line.orderedPacks > 0 && !isStep1Complete;
-
-                const isStep2Complete = line.allocatedPacks >= line.orderedPacks || line.dispatchedPacks > 0 || line.isDeliveredOrCheckedIn;
-                const isStep2Active = !isStep2Complete && line.allocatedPacks > 0;
-
-                const isStep3Complete = line.isDeliveredOrCheckedIn;
-                const isStep3Active = !isStep3Complete && line.inTransitPacks > 0;
-
-                const isStep4Complete = line.isDeliveredOrCheckedIn;
-                const isStep4Active = !isStep4Complete && line.receivedPacks > 0;
+                const steps = fulfilmentPipelineSteps(line);
 
                 return (
                   <div key={line.productId} className={`order-fulfilment-row ${line.quantityMismatch ? 'has-mismatch' : ''}`}>
@@ -2126,7 +2181,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                     </div>
                     
                     <div className="order-fulfilment-pipeline" role="list" aria-label="Curaleaf fulfilment progress">
-                      <div className={`pipeline-step pipeline-step--ordered ${isStep1Active ? 'pipeline-step--active' : ''} ${isStep1Complete ? 'pipeline-step--complete' : ''}`} role="listitem">
+                      <div className={pipelineStepClass('pipeline-step pipeline-step--ordered', steps.ordered)} role="listitem">
                         <span className="pipeline-step__num" aria-hidden="true">1</span>
                         <div className="pipeline-step__content">
                           <span className="pipeline-step__label">Ordered</span>
@@ -2134,7 +2189,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                         </div>
                       </div>
 
-                      <div className={`pipeline-step pipeline-step--picked ${isStep2Active ? 'pipeline-step--active' : ''} ${isStep2Complete ? 'pipeline-step--complete' : ''}`} role="listitem">
+                      <div className={pipelineStepClass('pipeline-step pipeline-step--picked', steps.dispensed)} role="listitem">
                         <span className="pipeline-step__num" aria-hidden="true">2</span>
                         <div className="pipeline-step__content">
                           <span className="pipeline-step__label">Curaleaf Dispensed</span>
@@ -2142,7 +2197,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                         </div>
                       </div>
 
-                      <div className={`pipeline-step pipeline-step--transit ${isStep3Active ? 'pipeline-step--active' : ''} ${isStep3Complete ? 'pipeline-step--complete' : ''}`} role="listitem">
+                      <div className={pipelineStepClass('pipeline-step pipeline-step--transit', steps.inTransit)} role="listitem">
                         <span className="pipeline-step__num" aria-hidden="true">3</span>
                         <div className="pipeline-step__content">
                           <span className="pipeline-step__label">In Transit</span>
@@ -2157,7 +2212,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                         </div>
                       </div>
 
-                      <div className={`pipeline-step pipeline-step--received ${isStep4Active ? 'pipeline-step--active' : ''} ${isStep4Complete ? 'pipeline-step--complete' : ''}`} role="listitem">
+                      <div className={pipelineStepClass('pipeline-step pipeline-step--received', steps.checkedIn)} role="listitem">
                         <span className="pipeline-step__num" aria-hidden="true">4</span>
                         <div className="pipeline-step__content">
                           <span className="pipeline-step__label">Checked In</span>
