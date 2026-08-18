@@ -1108,7 +1108,7 @@ function OrderListRow({ record, selected, now, onSelect }: { record: OrderRecord
   return (
     <button
       type="button"
-      className={`order-crm-row${meta.tone === 'partial' ? ' order-crm-row--partial' : ''}${isCancellation ? ` order-crm-row--cancelled order-crm-row--${cancellationResolution}` : ''}${selected ? ' selected' : ''}`}
+      className={`order-crm-row order-crm-row--${meta.tone}${isCancellation ? ' order-crm-row--cancelled' : ''}${selected ? ' selected' : ''}`}
       aria-pressed={selected}
       title={meta.description}
       onClick={onSelect}

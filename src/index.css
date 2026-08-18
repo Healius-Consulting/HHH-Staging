@@ -10744,7 +10744,15 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-crm-list > header small{ color: var(--tenant-primary-strong); font-size: 10px; font-weight: 750; letter-spacing: .065em; text-transform: uppercase; }
 .order-crm-list > header strong{ margin-top: 2px; color: var(--text-primary); font-size: 13px; }
 .order-crm-list > header > span:last-child{ color: var(--text-tertiary); font-size: 9px; text-transform: uppercase; }
-.order-crm-list__rows{ max-height: calc(100vh - 310px); overflow-y: auto; }
+.order-crm-list__rows{
+  max-height: calc(100vh - 310px);
+  overflow-x: clip;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+.order-crm-list__rows::-webkit-scrollbar{ display: none; }
 .order-crm-list-group > header{ display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg-elevated); }
 .order-crm-list-group > header span{ display: grid; gap: 2px; }
 .order-crm-list-group > header strong{ color: var(--text-primary); font-size: 10px; font-weight: 740; letter-spacing: .035em; text-transform: uppercase; }
@@ -10774,14 +10782,90 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-crm-row:last-child{ border-bottom: 0; }
 .order-crm-row:hover{ background: var(--bg-elevated); }
 .order-crm-row.selected{ background: var(--tenant-primary-soft); box-shadow: inset 3px 0 0 var(--tenant-primary); }
-.order-crm-row--partial.selected{
-  background: color-mix(in srgb, var(--color-warning) 8%, var(--bg-surface));
-  box-shadow: inset 3px 0 0 var(--color-warning);
-}
 .order-crm-row:active{ transform: translateX(1px); }
 .order-crm-row--cancelled{ min-height: 82px; }
-.order-crm-row--refunded.selected{ background: color-mix(in srgb, var(--info-500) 13%, var(--bg-surface)); box-shadow: inset 3px 0 0 var(--info-500); }
-.order-crm-row--resolved.selected{ background: color-mix(in srgb, var(--color-success) 10%, var(--bg-surface)); box-shadow: inset 3px 0 0 var(--color-success); }
+
+.order-crm-row--warning, .order-crm-row--partial{
+  background: color-mix(in srgb, #f59e0b 7%, var(--bg-surface));
+}
+.order-crm-row--warning:hover, .order-crm-row--partial:hover{
+  background: color-mix(in srgb, #f59e0b 11%, var(--bg-surface));
+}
+.order-crm-row--warning.selected, .order-crm-row--partial.selected{
+  background: color-mix(in srgb, #f59e0b 14%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 #d97706;
+}
+
+.order-crm-row--paid, .order-crm-row--resolved{
+  background: color-mix(in srgb, #10b981 6%, var(--bg-surface));
+}
+.order-crm-row--paid:hover, .order-crm-row--resolved:hover{
+  background: color-mix(in srgb, #10b981 10%, var(--bg-surface));
+}
+.order-crm-row--paid.selected, .order-crm-row--resolved.selected{
+  background: color-mix(in srgb, #10b981 13%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 #059669;
+}
+
+.order-crm-row--curaleaf-review{
+  background: color-mix(in srgb, #6366f1 6%, var(--bg-surface));
+}
+.order-crm-row--curaleaf-review:hover{ background: color-mix(in srgb, #6366f1 10%, var(--bg-surface)); }
+.order-crm-row--curaleaf-review.selected{
+  background: color-mix(in srgb, #6366f1 13%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 #4f46e5;
+}
+
+.order-crm-row--curaleaf-picking, .order-crm-row--refunded{
+  background: color-mix(in srgb, #0ea5e9 6%, var(--bg-surface));
+}
+.order-crm-row--curaleaf-picking:hover, .order-crm-row--refunded:hover{
+  background: color-mix(in srgb, #0ea5e9 10%, var(--bg-surface));
+}
+.order-crm-row--curaleaf-picking.selected, .order-crm-row--refunded.selected{
+  background: color-mix(in srgb, #0ea5e9 13%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 #0284c7;
+}
+
+.order-crm-row--dispatched{
+  background: color-mix(in srgb, #8b5cf6 6%, var(--bg-surface));
+}
+.order-crm-row--dispatched:hover{ background: color-mix(in srgb, #8b5cf6 10%, var(--bg-surface)); }
+.order-crm-row--dispatched.selected{
+  background: color-mix(in srgb, #8b5cf6 13%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 #7c3aed;
+}
+
+.order-crm-row--delivered, .order-crm-row--ready{
+  background: color-mix(in srgb, #22c55e 6%, var(--bg-surface));
+}
+.order-crm-row--delivered:hover, .order-crm-row--ready:hover{
+  background: color-mix(in srgb, #22c55e 10%, var(--bg-surface));
+}
+.order-crm-row--delivered.selected, .order-crm-row--ready.selected{
+  background: color-mix(in srgb, #22c55e 13%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
+.order-crm-row--danger{
+  background: color-mix(in srgb, #ef4444 7%, var(--bg-surface));
+}
+.order-crm-row--danger:hover{ background: color-mix(in srgb, #ef4444 11%, var(--bg-surface)); }
+.order-crm-row--danger.selected{
+  background: color-mix(in srgb, #ef4444 14%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
+.order-crm-row--collected, .order-crm-row--neutral{
+  background: color-mix(in srgb, #6b7280 5%, var(--bg-surface));
+}
+.order-crm-row--collected:hover, .order-crm-row--neutral:hover{
+  background: color-mix(in srgb, #6b7280 8%, var(--bg-surface));
+}
+.order-crm-row--collected.selected, .order-crm-row--neutral.selected{
+  background: color-mix(in srgb, #6b7280 11%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 #6b7280;
+}
 .order-crm-row__stage{ display: grid; width: 31px; height: 31px; place-items: center; border-radius: 7px; margin-top: 1px; }
 .order-crm-row__identity, .order-crm-row__position{ min-width: 0; }
 .order-crm-row__identity strong, .order-crm-row__identity small, .order-crm-row__position strong, .order-crm-row__position small{ display: block; }
