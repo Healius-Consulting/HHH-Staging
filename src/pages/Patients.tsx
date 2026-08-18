@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronRight, Clock3, Inbox, Lock, Package, Plus, Search, Users, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronDown, ChevronRight, Clock3, Inbox, Lock, Package, Plus, Search, Users, XCircle, type LucideIcon } from 'lucide-react';
 import { getUnresolvedReason, orderReference, useApp, money, orderRevenue, RX_STATUS_LABELS } from '../context/AppContext';
 import type { CRMPatient, EligibilitySubmission, PatientOrder, PendingEnquiry } from '../context/AppContext';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
@@ -86,9 +86,18 @@ const CRM_GROUPS: Array<{ key: PatientCrmGroup; label: string; detail: string }>
   { key: 'declined', label: 'Closed', detail: 'Declined, rejected or suspended records' },
 ];
 
+function supplierOrderCancelled(order: PatientOrder) {
+  return order.prescriptions.some(prescription => prescription.purchaseOrderState === 'CANCELLED' || prescription.status === 'cancelled')
+    || order.curaleafCancellation?.status === 'confirmed'
+    || order.cancellation?.status === 'refund_required'
+    || order.cancellation?.status === 'confirmed'
+    || order.unresolvedReason === 'cancelled';
+}
+
 function orderExceptionReason(order: PatientOrder): 'rejected' | 'expired' | 'cancelled' | null {
   if (order.prescriptions.length > 0 && order.prescriptions.every(prescription => prescription.status === 'collected')) return null;
   if (order.unresolvedReason === 'rejected' || order.quoteReview?.status === 'recreate_required') return 'rejected';
+  if (supplierOrderCancelled(order)) return 'cancelled';
   if (order.unresolvedReason === 'expired' || order.lifecycleStatus === 'archived' || order.isExpired) return 'expired';
   const unresolved = getUnresolvedReason(order);
   if (unresolved === 'cancelled' || unresolved === 'rejected' || unresolved === 'expired') return unresolved;
@@ -592,28 +601,37 @@ function CrmListGroup({ label, detail, records, selectedKey, onSelect }: {
   );
 }
 
+function crmMeta(record: CrmRecord) {
+  return patientCrmStatusMeta({
+    kind: record.kind,
+    journey: record.journey,
+    hasCrmRecord: record.hasCrmRecord,
+    hasOpenOrder: record.hasOpenOrder,
+    needsAction: record.needsAction,
+    readyForCollection: record.readyForCollection,
+    statusLabel: record.status.label,
+  });
+}
+
 function CrmListRow({ record, selected, onSelect }: { record: CrmRecord; selected: boolean; onSelect: () => void }) {
-  const meta = patientCrmStatusMeta({ kind: record.kind, statusLabel: record.status.compactLabel, enquiryAwaitingReferral: record.kind === 'enquiry' });
+  const meta = crmMeta(record);
   const Icon = CRM_ICONS[meta.icon];
-  const secondary = record.kind === 'enquiry'
-    ? [record.enquiry?.caseReference, record.sourceLabel].filter(Boolean).join(' · ')
-    : [record.primaryCondition ? conditionLabel(record.primaryCondition) : null, record.patient?.orders.length ? `${record.patient.orders.length} order${record.patient.orders.length === 1 ? '' : 's'}` : 'No orders yet'].filter(Boolean).join(' · ');
   const stamp = record.kind === 'enquiry' && record.enquiry ? fmtDate(record.enquiry.submittedAt) : formatPatientDob(record.dob);
   return (
     <button
       type="button"
       className={`order-crm-row order-crm-row--${meta.tone}${selected ? ' selected' : ''}`}
       aria-pressed={selected}
+      aria-label={`${compactPatientName(record.name)}, ${meta.label}`}
       title={meta.description}
       onClick={onSelect}
     >
       <span className={`order-crm-row__stage order-tone--${meta.tone}`}><Icon size={15} aria-hidden="true" /></span>
       <span className="order-crm-row__identity">
         <strong title={record.name}>{compactPatientName(record.name)}</strong>
-        <small>{secondary || meta.description}</small>
+        <span className={`order-stage-pill order-tone--${meta.tone}`}>{meta.label}</span>
       </span>
       <span className="order-crm-row__position"><strong>{stamp}</strong><small>{record.kind === 'enquiry' ? 'Received' : 'Date of birth'}</small></span>
-      <span className={`order-stage-pill order-tone--${meta.tone}`}>{meta.label}</span>
     </button>
   );
 }
@@ -643,7 +661,7 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
   onOpenOrder: (order: PatientOrder) => void;
 }) {
   const patient = record.patient!;
-  const meta = patientCrmStatusMeta({ kind: 'patient', statusLabel: record.status.label });
+  const meta = crmMeta(record);
   const Icon = CRM_ICONS[meta.icon];
   const clinical = patientClinicalProfile({ crmPatient: patient.crmPatient, submission: patient.submission });
   const conditions = clinical.conditions;
@@ -788,28 +806,100 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
               .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
               .map(order => {
                 const exceptionReason = orderExceptionReason(order);
-                const paymentLabel = order.refund?.status === 'completed' ? 'Refunded' : order.refund?.status === 'pending_confirmation' ? 'Refund pending' : exceptionReason && order.payment.status === 'paid' ? 'Needs resolution' : order.payment.status === 'paid' ? 'Paid' : order.payment.status === 'sent' ? 'Awaiting payment' : 'Draft';
-                const paymentPill = order.refund?.status === 'completed' ? 'pill-neutral' : order.refund?.status === 'pending_confirmation' ? 'pill-amber' : exceptionReason ? 'pill-red' : order.payment.status === 'paid' ? 'pill-green' : order.payment.status === 'sent' ? 'pill-amber' : 'pill-neutral';
+                const refunded = order.refund?.status === 'completed';
+                const refundPending = order.refund?.status === 'pending_confirmation';
+                const paymentLabel = refunded
+                  ? 'Refunded'
+                  : refundPending
+                    ? 'Refund pending'
+                    : exceptionReason === 'cancelled' && order.payment.status === 'paid' && !order.redoneByOrderId
+                      ? 'Needs refund'
+                      : exceptionReason === 'cancelled'
+                        ? 'Cancelled'
+                        : exceptionReason && order.payment.status === 'paid'
+                          ? 'Needs action'
+                          : order.payment.status === 'paid'
+                            ? 'Paid'
+                            : order.payment.status === 'sent'
+                              ? 'Awaiting payment'
+                              : 'Draft';
+                const cardTone = refunded
+                  ? 'resolved'
+                  : exceptionReason === 'cancelled'
+                    ? 'cancelled'
+                    : exceptionReason === 'rejected'
+                      ? 'rejected'
+                      : exceptionReason === 'expired'
+                        ? 'expired'
+                        : order.payment.status === 'paid'
+                          ? 'paid'
+                          : order.payment.status === 'sent'
+                            ? 'awaiting'
+                            : 'draft';
+                const paymentPill = refunded
+                  ? 'order-tone--resolved'
+                  : refundPending || order.payment.status === 'sent'
+                    ? 'order-tone--warning'
+                    : exceptionReason === 'cancelled' || exceptionReason === 'rejected'
+                      ? 'order-tone--danger'
+                      : exceptionReason === 'expired'
+                        ? 'order-tone--warning'
+                        : order.payment.status === 'paid'
+                          ? 'order-tone--paid'
+                          : 'order-tone--neutral';
                 const productNames = order.prescriptions.flatMap(rx => rx.items.map(item => item.name)).filter(Boolean);
-                const fulfilmentLabel = exceptionReason
-                  ? (exceptionReason === 'rejected' ? 'Curaleaf rejected' : 'Prescription expired')
-                  : order.prescriptions.some(rx => rx.placed)
-                    ? (RX_STATUS_LABELS[order.prescriptions[0].status as keyof typeof RX_STATUS_LABELS] ?? order.prescriptions[0].status)
-                    : 'Not submitted';
+                const fulfilmentLabel = exceptionReason === 'cancelled'
+                  ? (order.prescriptions.some(rx => rx.purchaseOrderState === 'CANCELLED')
+                    ? 'Purchase order cancelled'
+                    : order.prescriptions.some(rx => rx.status === 'cancelled')
+                      ? 'Prescription cancelled'
+                      : 'Cancelled by Curaleaf')
+                  : exceptionReason === 'rejected'
+                    ? 'Curaleaf rejected'
+                    : exceptionReason === 'expired'
+                      ? 'Prescription expired'
+                      : order.prescriptions.some(rx => rx.placed)
+                        ? (RX_STATUS_LABELS[order.prescriptions[0].status as keyof typeof RX_STATUS_LABELS] ?? order.prescriptions[0].status)
+                        : 'Not submitted';
+                const alertTitle = refunded
+                  ? 'Patient refund recorded'
+                  : order.redoneByOrderId
+                    ? 'Replacement order created'
+                    : exceptionReason === 'cancelled'
+                      ? (order.prescriptions.some(rx => rx.purchaseOrderState === 'CANCELLED')
+                        ? 'Curaleaf cancelled this purchase order'
+                        : order.prescriptions.some(rx => rx.status === 'cancelled')
+                          ? 'Curaleaf cancelled this prescription'
+                          : 'Curaleaf cancelled this order')
+                      : exceptionReason === 'rejected'
+                        ? 'Paid Curaleaf rejection'
+                        : 'Paid prescription expired';
+                const alertDetail = order.refund
+                  ? `${order.refund.method === 'worldpay_portal' ? 'Worldpay' : 'Pharmacy'} · ${money(order.refund.amountPence / 100)}`
+                  : order.redoneByOrderId
+                    ? `Continued as replacement order ${order.redoneByOrderId}.`
+                    : exceptionReason === 'cancelled'
+                      ? 'Payment stays paid until you refund or replace this order.'
+                      : 'Choose replacement or refund in Orders.';
+                const AlertIcon = refunded ? CheckCircle : exceptionReason === 'cancelled' ? XCircle : AlertTriangle;
                 return (
-                  <article className="patient-chart-order" key={order.id}>
+                  <article className={`patient-chart-order patient-chart-order--${cardTone}`} key={order.id}>
                     <header>
                       <div>
                         <strong>{order.redoContext ? 'Replacement' : 'Order'} {orderReference(order)}</strong>
-                        <small>{fmtDate(order.date)} · {money(order.payment.amount || orderRevenue(order))} · {fulfilmentLabel}</small>
+                        <span className="patient-chart-order__amount">{money(order.payment.amount || orderRevenue(order))}</span>
                       </div>
-                      <span className={`pill ${paymentPill}`}>{paymentLabel}</span>
+                      <span className={`order-stage-pill ${paymentPill}`}>{paymentLabel}</span>
                     </header>
+                    <dl className="patient-chart-order__facts">
+                      <div><dt>Opened</dt><dd>{fmtDate(order.date)}</dd></div>
+                      <div><dt>Supplier</dt><dd>{fulfilmentLabel}</dd></div>
+                    </dl>
                     {productNames.length ? <p className="patient-chart-order__items">{productNames.join(', ')}</p> : null}
                     {exceptionReason ? (
-                      <div className={`patient-order-resolution${order.refund?.status === 'completed' ? ' is-complete' : ''}`}>
-                        <AlertTriangle size={16} />
-                        <span><strong>{order.refund?.status === 'completed' ? 'Patient refund recorded' : order.redoneByOrderId ? 'Replacement order created' : exceptionReason === 'rejected' ? 'Paid Curaleaf rejection' : 'Paid prescription expired'}</strong><small>{order.refund ? `${order.refund.method === 'worldpay_portal' ? 'Worldpay' : 'Pharmacy'} · ${money(order.refund.amountPence / 100)}` : order.redoneByOrderId ? `Continued as replacement order ${order.redoneByOrderId}.` : 'Choose replacement or refund in Orders.'}</small></span>
+                      <div className={`patient-order-resolution${refunded ? ' is-complete' : exceptionReason === 'cancelled' ? ' is-cancelled' : ''}`}>
+                        <AlertIcon size={18} aria-hidden="true" />
+                        <span><strong>{alertTitle}</strong><small>{alertDetail}</small></span>
                       </div>
                     ) : null}
                     <button type="button" className="btn btn-secondary btn-sm patient-chart-order__open" onClick={() => onOpenOrder(order)}>
@@ -827,7 +917,7 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
 
 function EnquiryCrmDetail({ record }: { record: CrmRecord }) {
   const enquiry = record.enquiry!;
-  const meta = patientCrmStatusMeta({ kind: 'enquiry', statusLabel: record.status.label });
+  const meta = crmMeta(record);
   const Icon = CRM_ICONS[meta.icon];
   const conditions = enquiry.conditions;
   const primaryCondition = enquiry.primaryCondition ?? conditions[0] ?? '';

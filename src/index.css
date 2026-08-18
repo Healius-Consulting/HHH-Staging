@@ -6104,10 +6104,29 @@ html.modal-open .page-container{ overflow: hidden; }
   gap: 10px;
 }
 .patient-chart-order{
-  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 14px 15px;
   border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-left-color: var(--border-strong, var(--border));
   border-radius: 12px;
   background: var(--bg-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+.patient-chart-order--paid,
+.patient-chart-order--resolved{
+  border-left-color: var(--color-success);
+}
+.patient-chart-order--awaiting,
+.patient-chart-order--expired{
+  border-left-color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 5%, var(--bg-surface));
+}
+.patient-chart-order--cancelled,
+.patient-chart-order--rejected{
+  border-left-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 5%, var(--bg-surface));
 }
 .patient-chart-order > header{
   display: flex;
@@ -6118,27 +6137,71 @@ html.modal-open .page-container{ overflow: hidden; }
 .patient-chart-order > header strong{
   display: block;
   color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -.01em;
+}
+.patient-chart-order__amount{
+  display: block;
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.patient-chart-order .order-stage-pill{
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+.patient-chart-order__facts{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+.patient-chart-order__facts dt{
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.patient-chart-order__facts dd{
+  margin: 2px 0 0;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 650;
-}
-.patient-chart-order > header small{
-  display: block;
-  margin-top: 3px;
-  color: var(--text-secondary);
-  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .patient-chart-order__items{
-  margin: 8px 0 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.45;
 }
 .patient-chart-order__open{
-  margin-top: 12px;
+  width: fit-content;
+  min-height: 36px;
   justify-self: start;
 }
 .patient-chart-order .patient-order-resolution{
-  margin: 10px 0 0;
+  margin: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.patient-chart-order .patient-order-resolution strong{
+  font-size: 13px;
+  font-weight: 750;
+}
+.patient-chart-order .patient-order-resolution small{
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.patient-order-resolution.is-cancelled{
+  border-color: color-mix(in srgb, var(--color-danger) 40%, var(--border));
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--bg-surface));
 }
 
 .patient-profile-toolbar{ display: flex; margin-bottom: 12px; }
@@ -6259,6 +6322,7 @@ html.modal-open .page-container{ overflow: hidden; }
   }
   .patient-chart-facts dd{ text-align: left; }
   .patient-chart-order__open{ min-height: 44px; }
+  .patient-chart-order__facts{ grid-template-columns: 1fr; }
 }
 
 @media (max-width: 1250px) {
@@ -13017,6 +13081,23 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .patient-crm-eligibility{ margin: 0; }
 .patient-crm .patient-chart__panels{ margin: 0; }
 .patient-crm .patient-chart-orders{ margin: 0; }
+.patient-crm .order-crm-row{
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-rows: auto;
+  align-items: center;
+}
+.patient-crm .order-crm-row__identity{
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.patient-crm .order-crm-row__identity .order-stage-pill{
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.patient-crm .order-crm-row__position{ padding-top: 0; }
 
 @media (max-width: 1180px){
   .order-crm-controls{ grid-template-columns: 1fr; }

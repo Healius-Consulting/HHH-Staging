@@ -58,8 +58,26 @@ test('grouped all-view ranks action, enquiries and care without overlap', () => 
 });
 
 test('status copy stays textual for colour-independent reading', () => {
-  const meta = patientCrmStatusMeta({ kind: 'enquiry', statusLabel: 'New enquiry', enquiryAwaitingReferral: true });
+  const meta = patientCrmStatusMeta({ ...enquiry, statusLabel: 'New enquiry' });
+  assert.equal(meta.label, 'Enquiry');
   assert.match(meta.description, /HHH/);
   assert.equal(meta.tone, 'info');
   assert.equal(patientCrmRecordKey('patient', 'abc'), 'patient:abc');
+});
+
+test('list tags follow the queue group and use distinct tones', () => {
+  assert.deepEqual(
+    { label: patientCrmStatusMeta(needsAction).label, tone: patientCrmStatusMeta(needsAction).tone },
+    { label: 'Needs action', tone: 'danger' },
+  );
+  assert.deepEqual(
+    { label: patientCrmStatusMeta(onOrder).label, tone: patientCrmStatusMeta(onOrder).tone },
+    { label: 'On order', tone: 'curaleaf-picking' },
+  );
+  assert.deepEqual(
+    { label: patientCrmStatusMeta(active).label, tone: patientCrmStatusMeta(active).tone },
+    { label: 'Active', tone: 'paid' },
+  );
+  assert.equal(patientCrmStatusMeta({ ...onOrder, statusLabel: 'Awaiting payment' }).label, 'Awaiting payment');
+  assert.equal(patientCrmStatusMeta({ ...onOrder, statusLabel: 'Awaiting payment' }).tone, 'warning');
 });

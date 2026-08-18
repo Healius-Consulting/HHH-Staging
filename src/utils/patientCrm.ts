@@ -17,7 +17,7 @@ export const PATIENT_CRM_SECONDARY_FILTERS: Array<{ key: PatientDirectoryFilter;
 ];
 
 export type PatientCrmKind = 'enquiry' | 'patient';
-export type PatientCrmTone = 'warning' | 'danger' | 'ready' | 'paid' | 'info' | 'neutral' | 'collected';
+export type PatientCrmTone = 'warning' | 'danger' | 'ready' | 'paid' | 'info' | 'neutral' | 'collected' | 'curaleaf-picking';
 export type PatientCrmIcon = 'inbox' | 'alert' | 'package' | 'check' | 'users' | 'clock' | 'lock';
 export type PatientCrmGroup = 'needs-action' | 'enquiries' | 'ready' | 'on-order' | 'care' | 'declined';
 
@@ -76,40 +76,32 @@ export function parsePatientCrmRecordKey(value: string | null): { kind: PatientC
   return { kind, id };
 }
 
-export function patientCrmStatusMeta(input: { kind: PatientCrmKind; statusLabel: string; enquiryAwaitingReferral?: boolean }) {
-  const label = input.statusLabel;
-  const lower = label.toLowerCase();
-  if (input.kind === 'enquiry' || input.enquiryAwaitingReferral) {
-    return {
-      label,
-      description: 'Assigned to this pharmacy. HHH may still move them; orders stay locked until referral.',
-      tone: 'info' as const,
-      icon: 'inbox' as const,
-    };
+export function patientCrmStatusMeta(input: PatientCrmFilterInput & { statusLabel?: string }) {
+  const group = patientCrmGroup(input);
+  const label = (input.statusLabel ?? '').toLowerCase();
+  if (group === 'needs-action') {
+    if (label.includes('refund')) {
+      return { label: 'Refund pending', description: 'Confirm the patient refund before closing this case.', tone: 'warning' as const, icon: 'alert' as const };
+    }
+    return { label: 'Needs action', description: 'A paid order or cancellation needs pharmacy follow-up.', tone: 'danger' as const, icon: 'alert' as const };
   }
-  if (lower.includes('needs resolution') || lower.includes('needs action')) {
-    return { label, description: 'A paid order or cancellation needs pharmacy follow-up.', tone: 'danger' as const, icon: 'alert' as const };
+  if (group === 'enquiries') {
+    return { label: 'Enquiry', description: 'Assigned to this pharmacy. HHH may still move them; orders stay locked until referral.', tone: 'info' as const, icon: 'inbox' as const };
   }
-  if (lower.includes('refund confirmation')) {
-    return { label, description: 'Confirm the patient refund before closing this case.', tone: 'warning' as const, icon: 'alert' as const };
+  if (group === 'ready') {
+    return { label: 'Ready to collect', description: 'Medication is checked in and waiting for patient collection.', tone: 'ready' as const, icon: 'package' as const };
   }
-  if (lower.includes('ready for collection')) {
-    return { label, description: 'Medication is checked in and waiting for patient collection.', tone: 'ready' as const, icon: 'package' as const };
+  if (group === 'on-order') {
+    if (label.includes('awaiting payment')) {
+      return { label: 'Awaiting payment', description: 'Payment link is with the patient.', tone: 'warning' as const, icon: 'clock' as const };
+    }
+    return { label: 'On order', description: 'A prescription order is in payment or fulfilment.', tone: 'curaleaf-picking' as const, icon: 'package' as const };
   }
-  if (lower.includes('in fulfilment') || lower.includes('order in progress') || lower.includes('replacement')) {
-    return { label, description: 'A prescription order is moving through payment or fulfilment.', tone: 'info' as const, icon: 'package' as const };
+  if (group === 'declined') {
+    return { label: input.journey === 'suspended' ? 'Suspended' : 'Declined', description: 'This record is closed to ordering.', tone: 'neutral' as const, icon: 'lock' as const };
   }
-  if (lower.includes('awaiting payment')) {
-    return { label, description: 'Payment link is with the patient.', tone: 'warning' as const, icon: 'clock' as const };
+  if (input.journey === 'referred') {
+    return { label: 'Referred', description: 'HHH has referred this patient. Ordering unlocks when the workspace is live.', tone: 'paid' as const, icon: 'check' as const };
   }
-  if (lower.includes('collected') || lower === 'refunded') {
-    return { label, description: 'The latest order cycle is complete.', tone: 'collected' as const, icon: 'check' as const };
-  }
-  if (lower.includes('declined') || lower.includes('rejected') || lower.includes('suspended')) {
-    return { label, description: 'This record is closed to ordering.', tone: 'neutral' as const, icon: 'lock' as const };
-  }
-  if (lower.includes('approved') || lower === 'active' || lower.includes('referred') || lower.includes('onboarded')) {
-    return { label, description: 'HHH has referred this patient. Ordering is available when the workspace is live.', tone: 'paid' as const, icon: 'check' as const };
-  }
-  return { label, description: 'Patient record in the pharmacy CRM.', tone: 'neutral' as const, icon: 'users' as const };
+  return { label: 'Active', description: 'This patient is in care with no open order needing attention.', tone: 'paid' as const, icon: 'check' as const };
 }

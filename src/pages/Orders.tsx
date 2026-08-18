@@ -1388,7 +1388,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
       <ExpiryCountdown order={order} now={now} />
       <ReplacementLineage order={order} allOrders={state.orders} />
 
-      {!cancellationClosed && (cancellationEditorOpen || order.cancellation) ? (
+      {!cancellationClosed && cancellationEditorOpen && !order.cancellation ? (
         <OrderCancellationPanel
           order={order}
           editorOpen={cancellationEditorOpen}
@@ -1411,16 +1411,6 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
         <div className={`order-crm-alert order-crm-alert--${stage === 'rejected' ? 'danger' : 'neutral'}`}>
           {stage === 'rejected' ? <ShieldAlert size={17} /> : <Archive size={17} />}
           <span><strong>{stage === 'rejected' ? 'Curaleaf exception requires attention' : 'Prescription cycle archived'}</strong><small>{stage === 'rejected' ? 'Review the supplier response, then recreate the order against a valid prescription.' : 'This order passed its prescription-cycle deadline and is retained for the audit trail.'}</small></span>
-        </div>
-      ) : null}
-
-      {showSupplierCancel ? (
-        <div className="order-crm-alert order-crm-alert--warning" role="status">
-          <PhoneCall size={17} />
-          <span>
-            <strong>Curaleaf cancelled this order after the pharmacy call</strong>
-            <small>Payment is still recorded as paid. Refund the patient or create a replacement. This is not an unpaid cancellation.</small>
-          </span>
         </div>
       ) : null}
 
@@ -1988,49 +1978,39 @@ function OrderCancellationPanel({ order, editorOpen, note, busy, onClose, onNote
   onNoteChange: (note: string) => void;
   onRequest: () => void;
 }) {
-  if (!order.cancellation && editorOpen) {
-    const unpaid = order.payment.status !== 'paid';
-    return (
-      <section className="order-cancellation-card order-cancellation-card--compose" aria-labelledby="order-cancel-title">
-        <div className="order-cancellation-confirm">
-          <span className="order-cancellation-confirm__icon" aria-hidden="true">
-            <XCircle size={18} />
-          </span>
-          <div className="order-cancellation-confirm__copy">
-            <h2 id="order-cancel-title">Cancel {orderReference(order)}?</h2>
-            <p>
-              {unpaid
-                ? 'The payment request will be retired. This order is cancelled in HHH.'
-                : 'This order will be cancelled. If payment was taken, a refund task will follow.'}
-            </p>
-          </div>
-          <div className="order-cancellation-confirm__actions">
-            <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onClose}>Keep order</button>
-            <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={onRequest}>
-              <XCircle size={13} /> {busy ? 'Cancelling…' : 'Cancel order'}
-            </button>
-          </div>
-        </div>
-        <label className="order-cancellation-note">
-          <span>Cancellation note</span>
-          <textarea
-            className="input"
-            value={note}
-            onChange={event => onNoteChange(event.target.value)}
-            placeholder="Why this order is being cancelled"
-            rows={2}
-          />
-        </label>
-      </section>
-    );
-  }
-
-  if (!order.cancellation) return null;
-
+  if (!editorOpen || order.cancellation) return null;
+  const unpaid = order.payment.status !== 'paid';
   return (
-    <section className={`order-cancellation-card ${order.cancellation.status === 'refund_required' ? 'order-cancellation-card--supplier' : 'order-cancellation-card--confirmed'}`}>
-      {order.cancellation.status === 'refund_required' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
-      <span><strong>{order.cancellation.status === 'refund_required' ? 'Paid cancellation requires pharmacy refund' : 'Order cancelled'}</strong><small>{order.cancellation.status === 'refund_required' ? `Refund the patient in Worldpay using reference ${order.cancellation.paymentReference ?? order.payment.ref ?? 'below'}.` : 'The order has been cancelled and its payment link retired.'}</small></span>
+    <section className="order-cancellation-card order-cancellation-card--compose" aria-labelledby="order-cancel-title">
+      <div className="order-cancellation-confirm">
+        <span className="order-cancellation-confirm__icon" aria-hidden="true">
+          <XCircle size={18} />
+        </span>
+        <div className="order-cancellation-confirm__copy">
+          <h2 id="order-cancel-title">Cancel {orderReference(order)}?</h2>
+          <p>
+            {unpaid
+              ? 'The payment request will be retired. This order is cancelled in HHH.'
+              : 'This order will be cancelled. If payment was taken, a refund task will follow.'}
+          </p>
+        </div>
+        <div className="order-cancellation-confirm__actions">
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onClose}>Keep order</button>
+          <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={onRequest}>
+            <XCircle size={13} /> {busy ? 'Cancelling…' : 'Cancel order'}
+          </button>
+        </div>
+      </div>
+      <label className="order-cancellation-note">
+        <span>Cancellation note</span>
+        <textarea
+          className="input"
+          value={note}
+          onChange={event => onNoteChange(event.target.value)}
+          placeholder="Why this order is being cancelled"
+          rows={2}
+        />
+      </label>
     </section>
   );
 }

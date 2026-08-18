@@ -265,3 +265,19 @@ test('Curaleaf-cancelled paid orders stay in cancelled unresolved, not as unpaid
   assert.equal(orderCancellationResolution(order), 'needs-action');
 });
 
+test('Curaleaf cancel wins over an expired or archived flag on the same paid order', () => {
+  const order = {
+    date: new Date('2026-07-01'),
+    payment: { status: 'paid' },
+    isExpired: true,
+    lifecycleStatus: 'archived',
+    unresolvedReason: 'expired',
+    cancellation: { status: 'refund_required' },
+    curaleafCancellation: { status: 'confirmed' },
+    prescriptions: [{ status: 'cancelled', purchaseOrderState: 'CANCELLED', placed: true }],
+  } as PatientOrder;
+  const staged = orderStage(order);
+  assert.equal(staged.stage, 'cancelled');
+  assert.equal(staged.unresolvedReason, 'cancelled');
+});
+
