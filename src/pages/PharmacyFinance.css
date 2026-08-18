@@ -23,7 +23,7 @@
 
 .pharmacy-finance__tiles .summary-tile--accent {
   border-color: color-mix(in srgb, var(--tenant-primary) 35%, #e2e8f0) !important;
-  background: color-mix(in srgb, var(--tenant-primary) 6%, #ffffff) !important;
+  background: color-mix(in srgb, var(--tenant-primary) 6%, var(--bg-surface)) !important;
 }
 
 .pharmacy-finance__notice {
@@ -64,7 +64,7 @@
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--tenant-primary) 24%, #dbeafe);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--tenant-primary) 5%, #f8fafc);
+  background: color-mix(in srgb, var(--tenant-primary) 5%, var(--bg-surface));
   color: #334155;
 }
 
