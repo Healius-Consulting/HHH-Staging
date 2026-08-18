@@ -58,6 +58,7 @@ import {
   orderSplitPackSnapshot,
   orderStage,
   prescriptionStatusLabel,
+  prescriptionStatusChipTone,
   stageMatchesFilter,
   type OrderStage,
   type StageFilter,
@@ -2049,6 +2050,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
   }, [prescription.shipmentStates, selectedShipmentId, shipmentIds]);
   const selectedShipmentState = selectedShipmentId ? prescription.shipmentStates?.[selectedShipmentId] : undefined;
   const statusLabel = prescriptionStatusLabel(prescription);
+  const statusChipTone = prescriptionStatusChipTone(prescription);
   const totalReceivedPacks = (prescription.fulfilmentLines ?? []).reduce((sum, line) => sum + (line.received ?? 0), 0);
   const totalShippedPacks = (prescription.fulfilmentLines ?? []).reduce((sum, line) => sum + (line.shipped ?? 0), 0);
   const arrivedNotCollectedPacks = (prescription.fulfilmentLines ?? []).reduce((sum, line) => sum + Math.max(0, (line.received ?? 0) - (line.collected ?? 0)), 0);
@@ -2165,7 +2167,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
           <span><small>Prescription {index + 1}</small><strong>{prescription.prescriber || 'Prescriber pending'}</strong></span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{money(rxRevenue(prescription))}</strong>
-            <span className={`rx-status-chip rx-status-chip--${prescription.status}`}>{statusLabel}</span>
+            <span className={`rx-status-chip rx-status-chip--${statusChipTone}`}>{statusLabel}</span>
           </div>
         </header>
         {prescription.manualPlaceRequired ? (

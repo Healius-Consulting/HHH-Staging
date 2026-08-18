@@ -144,6 +144,21 @@ export function prescriptionStatusLabel(prescription: OrderPrescription) {
   } as const)[prescription.status];
 }
 
+export function prescriptionStatusChipTone(prescription: OrderPrescription) {
+  const totals = prescriptionPackTotals(prescription);
+  const remainingOpen = (prescription.fulfilmentLines ?? []).some(line =>
+    line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered,
+  );
+
+  if (prescription.dispatchStatus === 'partial') return 'partial';
+  if (prescription.status === 'partially-received') return 'partial';
+  if (totals.collected > 0 && totals.collected < totals.ordered) return 'partial';
+  if (totals.received > 0 && totals.received < totals.ordered) return 'partial';
+  if (totals.shipped > 0 && totals.shipped < totals.ordered && remainingOpen) return 'partial';
+
+  return prescription.status;
+}
+
 function prescriptionHasCheckedInPacks(prescription: OrderPrescription) {
   if (prescriptionUsesPackProgress(prescription)) {
     return prescriptionPackTotals(prescription).received > 0;
