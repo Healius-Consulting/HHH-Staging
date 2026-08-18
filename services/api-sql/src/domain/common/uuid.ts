@@ -6,6 +6,11 @@ export function asUuid(value: string): string {
   return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
 }
 
+export function uuidFromHex(hex: string): string {
+  const compact = hex.replace(/[^0-9a-f]/gi, '').slice(0, 32).toLowerCase().padEnd(32, '0');
+  return asUuid(compact);
+}
+
 export function uuidKey(value: string): string {
   return value.replaceAll('-', '').toLowerCase();
 }

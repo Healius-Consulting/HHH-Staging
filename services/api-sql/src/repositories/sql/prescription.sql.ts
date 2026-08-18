@@ -39,7 +39,37 @@ const GET_PRESCRIPTION_FILE_BY_ID_GQL = `
       sizeBytes
       status
       verifiedAt
+      createdAt
       deletedAt
+    }
+  }
+`;
+
+const LIST_CLEANUP_CANDIDATE_FILES_GQL = `
+  query ListCleanupCandidateFiles($limit: Int!) {
+    prescriptionFiles(
+      where: { status: { in: [PENDING_UPLOAD, UPLOADED] } }
+      limit: $limit
+    ) {
+      id
+      organisationId
+      patientId
+      storagePath
+      originalFilename
+      contentType
+      sizeBytes
+      status
+      verifiedAt
+      createdAt
+      deletedAt
+    }
+  }
+`;
+
+const LIST_LINKED_PRESCRIPTION_FILE_IDS_GQL = `
+  query ListLinkedPrescriptionFileIds($limit: Int!) {
+    prescriptions(where: { fileId: { isNull: false } }, limit: $limit) {
+      fileId
     }
   }
 `;
@@ -304,6 +334,22 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
       { variables: { id, organisationId } }
     );
     return result.data.prescriptionFiles?.[0] ?? null;
+  }
+
+  async listCleanupCandidateFiles(limit = 1_000): Promise<PrescriptionFileRecord[]> {
+    const result = await dataConnect.executeGraphql<{ prescriptionFiles: PrescriptionFileRecord[] }, any>(
+      LIST_CLEANUP_CANDIDATE_FILES_GQL,
+      { variables: { limit } },
+    );
+    return result.data.prescriptionFiles ?? [];
+  }
+
+  async listLinkedPrescriptionFileIds(limit = 2_000): Promise<string[]> {
+    const result = await dataConnect.executeGraphql<{ prescriptions: Array<{ fileId: string | null }> }, any>(
+      LIST_LINKED_PRESCRIPTION_FILE_IDS_GQL,
+      { variables: { limit } },
+    );
+    return (result.data.prescriptions ?? []).flatMap(row => row.fileId ? [row.fileId] : []);
   }
 
   async listActivePrescribers(): Promise<PrescriberRecord[]> {

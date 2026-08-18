@@ -256,6 +256,42 @@ const LIST_TENANT_ORDERS_GQL = `
   }
 `;
 
+const LIST_PAID_OPEN_ORDERS_GQL = `
+  query ListPaidOpenOrders($limit: Int!) {
+    orders(
+      where: {
+        paymentStatus: { eq: PAID }
+        status: { ne: CANCELLED }
+      }
+      limit: $limit
+    ) {
+      id
+      organisationId
+      patientId
+      draftId
+      orderNumber
+      status
+      paymentStatus
+      fulfilmentStatus
+      paymentRoute
+      currency
+      medicineTotalPence
+      dispensingFeePence
+      deliveryPence
+      taxPence
+      totalPence
+      quoteSnapshot
+      version
+      submittedAt
+      paidAt
+      collectedAt
+      cancelledAt
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
 const UPDATE_ORDER_SNAPSHOT_GQL = `
   mutation UpdateOrderSnapshot($id: UUID!, $quoteSnapshot: Any, $fulfilmentStatus: FulfilmentStatus) {
     order_update(
@@ -400,6 +436,14 @@ export class SqlOrderRepository implements OrderRepositoryPort {
     const result = await dataConnect.executeGraphql<{ orders: OrderRecord[] }, any>(
       LIST_TENANT_ORDERS_GQL,
       { variables: { organisationId, limit } }
+    );
+    return result.data.orders ?? [];
+  }
+
+  async listPaidOpenOrders(limit = 1000): Promise<OrderRecord[]> {
+    const result = await dataConnect.executeGraphql<{ orders: OrderRecord[] }, any>(
+      LIST_PAID_OPEN_ORDERS_GQL,
+      { variables: { limit } },
     );
     return result.data.orders ?? [];
   }

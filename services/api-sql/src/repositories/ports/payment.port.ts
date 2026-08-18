@@ -1,15 +1,27 @@
+export type PaymentSqlStatus =
+  | 'PENDING'
+  | 'PAID'
+  | 'FAILED'
+  | 'REFUNDED'
+  | 'CANCELLED'
+  | 'EXPIRED'
+  | 'REFUND_REQUIRED'
+  | 'RECONCILIATION_REQUIRED';
+
 export interface PaymentRecord {
   id: string;
   organisationId: string;
   orderId: string;
   patientId?: string;
-  status: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED' | 'CANCELLED';
+  status: PaymentSqlStatus;
   amountPence: number;
   currency: string;
   route: 'MANUAL' | 'WORLDPAY';
   transactionReference?: string | null;
   receiptHash: string | null;
   hostedPaymentUrl?: string | null;
+  linkExpiresAt?: string | null;
+  providerPayload?: unknown;
   manualTender?: string | null;
   manualReference?: string | null;
   version: number;
@@ -22,6 +34,7 @@ export interface PaymentRepositoryPort {
   findPaymentByReceiptHash(receiptHash: string): Promise<PaymentRecord | null>;
   findPaymentByOrderId(orderId: string, organisationId: string): Promise<PaymentRecord | null>;
   listTenantPayments(organisationId: string, limit?: number): Promise<PaymentRecord[]>;
+  listPendingWorldpayPayments(limit?: number): Promise<PaymentRecord[]>;
   createPayment(data: {
     organisationId: string;
     orderId: string;
@@ -33,10 +46,19 @@ export interface PaymentRepositoryPort {
     transactionReference?: string | null;
     receiptHash?: string | null;
     hostedPaymentUrl?: string | null;
+    linkExpiresAt?: string | null;
     manualTender?: string | null;
     manualReference?: string | null;
   }): Promise<{ id?: string }>;
   updatePaymentStatus(id: string, status: 'PAID' | 'FAILED' | 'CANCELLED', orderId: string, receiptHash?: string | null): Promise<void>;
+  updatePaymentOutcome(data: {
+    id: string;
+    orderId: string;
+    status: PaymentSqlStatus;
+    receiptHash?: string | null;
+    providerPayload?: unknown;
+    markOrderPaid?: boolean;
+  }): Promise<void>;
   createRefund(data: {
     organisationId: string;
     paymentId: string;

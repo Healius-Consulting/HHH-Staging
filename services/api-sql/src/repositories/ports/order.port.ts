@@ -73,6 +73,7 @@ export interface OrderRepositoryPort {
     cancelledAt?: string | null;
   }): Promise<boolean>;
   listTenantOrders(organisationId: string, limit?: number): Promise<OrderRecord[]>;
+  listPaidOpenOrders(limit?: number): Promise<OrderRecord[]>;
   updateQuoteSnapshot(data: {
     id: string;
     organisationId: string;

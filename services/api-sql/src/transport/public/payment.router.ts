@@ -1,8 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { HttpError } from '../../domain/common/errors.js';
-import { executeCuraleafOrderPlacement } from '../../application/integrations/curaleaf.service.js';
-import { persistCuraleafPrescriptionIdentity } from '../../application/prescriptions/curaleaf-prescription-record.js';
-import { promotePatientAfterCuraleafPlacement } from '../../application/patient-finance/patient-finance.js';
+import { settlePaidWorldpayPayment } from '../../application/payments/worldpay-settlement.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
@@ -18,6 +16,7 @@ export function createPublicPaymentRouter(): Router {
   const patientRepo = new SqlPatientRepository();
   const patientFinanceRepo = new SqlPatientFinanceRepository();
   const patientFinanceDeps = { patientRepo, patientFinanceRepo };
+  const settlementDeps = { paymentRepo, orderRepo, integrationRepo, patientFinanceDeps };
 
   // GET /v1/public/payments/status - Check real-time payment clearance status
   router.get('/public/payments/status', async (req: Request, res: Response, next: NextFunction) => {
@@ -49,54 +48,8 @@ export function createPublicPaymentRouter(): Router {
       // If called from the verified payment success return route, mark as PAID immediately
       const isConfirmedSuccess = req.query.success === 'true' || req.query.outcome === 'success';
       if (payment.status === 'PENDING' && isConfirmedSuccess) {
-        const receiptToken = crypto.randomUUID();
-        const receiptHash = sha256(receiptToken);
-        await paymentRepo.updatePaymentStatus(payment.id, 'PAID', payment.orderId, receiptHash);
-        payment = { ...payment, status: 'PAID', receiptHash };
-
-        // Automated Curaleaf Placement Workflow
-        try {
-          const order = await orderRepo.findOrderById(payment.orderId, payment.organisationId);
-          if (order) {
-            const connection = await integrationRepo.findConnection(payment.organisationId, 'CURALEAF').catch(() => null);
-            let curaleafResult: any = null;
-            if (connection?.secretResourceName) {
-              curaleafResult = await executeCuraleafOrderPlacement(connection, order);
-            }
-
-            if (curaleafResult?.prescriptionId || curaleafResult?.purchaseOrder) {
-              await persistCuraleafPrescriptionIdentity({
-                organisationId: payment.organisationId,
-                orderId: order.id,
-                patientId: order.patientId,
-                snapshot: order.quoteSnapshot,
-                prescriptionId: curaleafResult.prescriptionId,
-                prescriberId: curaleafResult.prescriberId,
-                purchaseOrder: curaleafResult.purchaseOrder ?? null,
-                fulfilmentStatus: curaleafResult.purchaseOrder ? 'SUPPLIER_PROCESSING' : undefined,
-              }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
-            }
-
-            await promotePatientAfterCuraleafPlacement(patientFinanceDeps, order, curaleafResult).catch(err =>
-              console.warn('Patient activation after Curaleaf placement note:', err),
-            );
-
-            await orderRepo.appendPlacementEvent({
-              organisationId: payment.organisationId,
-              orderId: payment.orderId,
-              fromState: 'PENDING_PLACEMENT',
-              toState: 'PLACED',
-              reason: curaleafResult?.skipped
-                ? `Worldpay payment cleared (${payment.transactionReference}) - existing Curaleaf PO retained (${curaleafResult.reason})`
-                : curaleafResult?.purchaseOrder?.id
-                  ? `Worldpay payment cleared (${payment.transactionReference}) - Curaleaf Purchase Order ${curaleafResult.purchaseOrder.id} placed automatically`
-                  : `Worldpay payment cleared (${payment.transactionReference}) - Pharmacy dispensing workflow`,
-              externalReference: curaleafResult?.purchaseOrder?.id || payment.transactionReference,
-            });
-          }
-        } catch (placementErr) {
-          console.warn('[Public Payment] Curaleaf automated placement note:', placementErr);
-        }
+        const settled = await settlePaidWorldpayPayment(payment, settlementDeps);
+        payment = settled.payment;
       }
 
       res.status(200).json({
@@ -155,12 +108,16 @@ export function createPublicPaymentRouter(): Router {
         return;
       }
 
-      if (paymentStatus === 'AUTHORISED' || paymentStatus === 'CAPTURED') {
-        const receiptToken = crypto.randomUUID();
-        const receiptHash = sha256(receiptToken);
-        await paymentRepo.updatePaymentStatus(payment.id, 'PAID', payment.orderId, receiptHash);
+      if (paymentStatus === 'AUTHORISED' || paymentStatus === 'CAPTURED' || paymentStatus === 'sentForSettlement') {
+        if (payment.status === 'PENDING') {
+          await settlePaidWorldpayPayment(payment, settlementDeps);
+        }
       } else if (paymentStatus === 'REFUSED' || paymentStatus === 'CANCELLED') {
-        await paymentRepo.updatePaymentStatus(payment.id, 'FAILED', payment.orderId);
+        await paymentRepo.updatePaymentOutcome({
+          id: payment.id,
+          orderId: payment.orderId,
+          status: paymentStatus === 'CANCELLED' ? 'CANCELLED' : 'FAILED',
+        });
       }
 
       res.status(200).send('<xml status="OK"/>');

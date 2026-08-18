@@ -1,25 +1,31 @@
 import { dataConnect } from '../../bootstrap/firebase.js';
-import type { PaymentRecord, PaymentRepositoryPort } from '../ports/payment.port.js';
+import type { PaymentRecord, PaymentRepositoryPort, PaymentSqlStatus } from '../ports/payment.port.js';
+
+const PAYMENT_FIELDS = `
+  id
+  organisationId
+  orderId
+  patientId
+  status
+  amountPence
+  currency
+  route
+  receiptHash
+  transactionReference
+  hostedPaymentUrl
+  linkExpiresAt
+  providerPayload
+  manualTender
+  manualReference
+  version
+  createdAt
+  updatedAt
+`;
 
 const GET_PAYMENT_BY_WORLDPAY_CODE_GQL = `
   query GetPaymentByWorldpayCode($transactionReference: String!) {
     payments(where: { transactionReference: { eq: $transactionReference } }, limit: 1) {
-      id
-      organisationId
-      orderId
-      patientId
-      status
-      amountPence
-      currency
-      route
-      receiptHash
-      transactionReference
-      hostedPaymentUrl
-      manualTender
-      manualReference
-      version
-      createdAt
-      updatedAt
+      ${PAYMENT_FIELDS}
     }
   }
 `;
@@ -27,22 +33,7 @@ const GET_PAYMENT_BY_WORLDPAY_CODE_GQL = `
 const GET_PAYMENT_BY_RECEIPT_HASH_GQL = `
   query GetPaymentByReceiptHash($receiptHash: String!) {
     payments(where: { receiptHash: { eq: $receiptHash } }, limit: 1) {
-      id
-      organisationId
-      orderId
-      patientId
-      status
-      amountPence
-      currency
-      route
-      receiptHash
-      transactionReference
-      hostedPaymentUrl
-      manualTender
-      manualReference
-      version
-      createdAt
-      updatedAt
+      ${PAYMENT_FIELDS}
     }
   }
 `;
@@ -50,22 +41,7 @@ const GET_PAYMENT_BY_RECEIPT_HASH_GQL = `
 const GET_PAYMENT_BY_ORDER_ID_GQL = `
   query GetPaymentByOrderId($orderId: UUID!, $organisationId: UUID!) {
     payments(where: { orderId: { eq: $orderId }, organisationId: { eq: $organisationId } }, limit: 5) {
-      id
-      organisationId
-      orderId
-      patientId
-      status
-      amountPence
-      currency
-      route
-      receiptHash
-      transactionReference
-      hostedPaymentUrl
-      manualTender
-      manualReference
-      version
-      createdAt
-      updatedAt
+      ${PAYMENT_FIELDS}
     }
   }
 `;
@@ -73,20 +49,21 @@ const GET_PAYMENT_BY_ORDER_ID_GQL = `
 const LIST_TENANT_PAYMENTS_GQL = `
   query ListTenantPayments($organisationId: UUID!, $limit: Int!) {
     payments(where: { organisationId: { eq: $organisationId } }, limit: $limit) {
-      id
-      orderId
-      patientId
-      status
-      amountPence
-      currency
-      route
-      receiptHash
-      transactionReference
-      hostedPaymentUrl
-      manualTender
-      manualReference
-      version
-      createdAt
+      ${PAYMENT_FIELDS}
+    }
+  }
+`;
+
+const LIST_PENDING_WORLDPAY_PAYMENTS_GQL = `
+  query ListPendingWorldpayPayments($limit: Int!) {
+    payments(
+      where: {
+        route: { eq: WORLDPAY }
+        status: { in: [PENDING, CANCELLED, EXPIRED] }
+      }
+      limit: $limit
+    ) {
+      ${PAYMENT_FIELDS}
     }
   }
 `;
@@ -103,6 +80,7 @@ const CREATE_PAYMENT_GQL = `
     $transactionReference: String
     $receiptHash: String
     $hostedPaymentUrl: String
+    $linkExpiresAt: Timestamp
     $manualTender: String
     $manualReference: String
   ) {
@@ -117,6 +95,7 @@ const CREATE_PAYMENT_GQL = `
       transactionReference: $transactionReference
       receiptHash: $receiptHash
       hostedPaymentUrl: $hostedPaymentUrl
+      linkExpiresAt: $linkExpiresAt
       manualTender: $manualTender
       manualReference: $manualReference
       version: 1
@@ -146,6 +125,37 @@ const UPDATE_PAYMENT_STATUS_GQL = `
         status: PROCESSING
         paymentStatus: $status
         paidAt_expr: "request.time"
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const UPDATE_PAYMENT_OUTCOME_GQL = `
+  mutation UpdatePaymentOutcome(
+    $id: UUID!
+    $status: PaymentStatus!
+    $receiptHash: String
+    $providerPayload: Any
+  ) {
+    payment_update(
+      key: { id: $id }
+      data: {
+        status: $status
+        receiptHash: $receiptHash
+        providerPayload: $providerPayload
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const UPDATE_ORDER_PAYMENT_STATUS_GQL = `
+  mutation UpdateOrderPaymentStatus($id: UUID!, $paymentStatus: PaymentStatus!) {
+    order_update(
+      key: { id: $id }
+      data: {
+        paymentStatus: $paymentStatus
         updatedAt_expr: "request.time"
       }
     )
@@ -209,6 +219,14 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
     return result.data.payments ?? [];
   }
 
+  async listPendingWorldpayPayments(limit = 200): Promise<PaymentRecord[]> {
+    const result = await dataConnect.executeGraphql<{ payments: PaymentRecord[] }, any>(
+      LIST_PENDING_WORLDPAY_PAYMENTS_GQL,
+      { variables: { limit } }
+    );
+    return result.data.payments ?? [];
+  }
+
   async createPayment(data: {
     organisationId: string;
     orderId: string;
@@ -220,6 +238,7 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
     transactionReference?: string | null;
     receiptHash?: string | null;
     hostedPaymentUrl?: string | null;
+    linkExpiresAt?: string | null;
     manualTender?: string | null;
     manualReference?: string | null;
   }): Promise<{ id?: string }> {
@@ -237,6 +256,7 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
           transactionReference: data.transactionReference ?? null,
           receiptHash: data.receiptHash ?? null,
           hostedPaymentUrl: data.hostedPaymentUrl ?? null,
+          linkExpiresAt: data.linkExpiresAt ?? null,
           manualTender: data.manualTender ?? null,
           manualReference: data.manualReference ?? null,
         },
@@ -248,6 +268,41 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
   async updatePaymentStatus(id: string, status: 'PAID' | 'FAILED' | 'CANCELLED', orderId: string, receiptHash?: string | null): Promise<void> {
     await dataConnect.executeGraphql<any, any>(UPDATE_PAYMENT_STATUS_GQL, {
       variables: { id, status, orderId, receiptHash: receiptHash ?? null },
+    });
+  }
+
+  async updatePaymentOutcome(data: {
+    id: string;
+    orderId: string;
+    status: PaymentSqlStatus;
+    receiptHash?: string | null;
+    providerPayload?: unknown;
+    markOrderPaid?: boolean;
+  }): Promise<void> {
+    if (data.markOrderPaid || data.status === 'PAID') {
+      await this.updatePaymentStatus(data.id, 'PAID', data.orderId, data.receiptHash);
+      if (data.providerPayload !== undefined) {
+        await dataConnect.executeGraphql<any, any>(UPDATE_PAYMENT_OUTCOME_GQL, {
+          variables: {
+            id: data.id,
+            status: 'PAID',
+            receiptHash: data.receiptHash ?? null,
+            providerPayload: data.providerPayload ?? null,
+          },
+        });
+      }
+      return;
+    }
+    await dataConnect.executeGraphql<any, any>(UPDATE_PAYMENT_OUTCOME_GQL, {
+      variables: {
+        id: data.id,
+        status: data.status,
+        receiptHash: data.receiptHash ?? null,
+        providerPayload: data.providerPayload ?? null,
+      },
+    });
+    await dataConnect.executeGraphql<any, any>(UPDATE_ORDER_PAYMENT_STATUS_GQL, {
+      variables: { id: data.orderId, paymentStatus: data.status },
     });
   }
 

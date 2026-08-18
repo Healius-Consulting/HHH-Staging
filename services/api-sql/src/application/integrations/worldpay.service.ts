@@ -2,10 +2,15 @@ import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { config } from '../../bootstrap/config.js';
 import { HttpError } from '../../domain/common/errors.js';
 import type { IntegrationConnectionRecord } from '../../repositories/ports/integration.port.js';
+import {
+  normaliseWorldpayPaymentQuery,
+  type WorldpayPaymentQuery,
+} from '../payments/worldpay-query.js';
 
 const secretClient = new SecretManagerServiceClient();
 const REQUEST_TIMEOUT_MS = 10_000;
 const HPP_MEDIA_TYPE = 'application/vnd.worldpay.payment_pages-v1.hal+json';
+const PAYMENT_QUERIES_MEDIA_TYPE = 'application/vnd.worldpay.payment-queries-v1.hal+json';
 
 export type WorldpayCredential = {
   username: string;
@@ -30,38 +35,114 @@ function allowedSecretResource(name: string) {
     && name.endsWith('-europe-west2');
 }
 
-async function getCredential(connection: IntegrationConnectionRecord | null, organisationId: string): Promise<WorldpayCredential> {
-  const candidateNames = [
-    connection?.secretResourceName,
+function worldpayAuthorization(credential: WorldpayCredential) {
+  return `Basic ${Buffer.from(`${credential.username}:${credential.password}`).toString('base64')}`;
+}
+
+function paymentQueriesBaseUrl() {
+  return process.env.WORLDPAY_PAYMENT_QUERIES_BASE_URL
+    || process.env.WORLDPAY_VERIFY_BASE_URL
+    || process.env.WORLDPAY_HPP_BASE_URL
+    || 'https://try.access.worldpay.com';
+}
+
+export async function readStoredWorldpayCredential(
+  connection: IntegrationConnectionRecord | null,
+  organisationId: string,
+): Promise<WorldpayCredential | null> {
+  const constructed = [
     `projects/${config.FIREBASE_PROJECT_ID}/secrets/hhh-worldpay-${organisationId}-europe-west2`,
     `projects/${config.FIREBASE_PROJECT_ID}/secrets/hhh-worldpay-${compactId(organisationId)}-europe-west2`,
-    `projects/${config.FIREBASE_PROJECT_ID}/secrets/hhh-worldpay-70913a30-71c3-4a41-952e-d532927af58c-europe-west2`,
+  ].filter(allowedSecretResource);
+  const candidateNames = [
+    connection?.secretResourceName,
+    ...constructed,
   ].filter((name): name is string => Boolean(name));
 
   for (const resourceName of candidateNames) {
     try {
       const [version] = await secretClient.accessSecretVersion({ name: `${resourceName}/versions/latest` });
       const raw = version.payload?.data?.toString('utf8');
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<WorldpayCredential>;
-        if (parsed.username && parsed.password && parsed.entityId) {
-          return {
-            username: parsed.username,
-            password: parsed.password,
-            entityId: parsed.entityId,
-          };
-        }
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as Partial<WorldpayCredential>;
+      if (parsed.username && parsed.password && parsed.entityId) {
+        return {
+          username: parsed.username,
+          password: parsed.password,
+          entityId: parsed.entityId,
+        };
       }
     } catch {
       // Continue to next candidate
     }
   }
+  return null;
+}
 
-  // Guaranteed Try UAT credentials fallback
+async function getCredential(connection: IntegrationConnectionRecord | null, organisationId: string): Promise<WorldpayCredential> {
+  const stored = await readStoredWorldpayCredential(connection, organisationId);
+  if (stored) return stored;
+
+  // Guaranteed Try UAT credentials fallback for hosted payment sessions only.
   return {
     username: 'SIRcnvJ792DZW18R',
     password: 'DtxZxdJxE0F0MGPvaYSgRutypaH7OhgkHMJYsnrVjtpZiChMmgF64dzUMVfencCV',
     entityId: 'PO4098149633',
+  };
+}
+
+async function worldpayFetch(url: URL, init: RequestInit, credential: WorldpayCredential) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Authorization: worldpayAuthorization(credential),
+        Accept: PAYMENT_QUERIES_MEDIA_TYPE,
+        ...init.headers,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new HttpError(504, 'Worldpay did not respond in time.', 'WORLDPAY_TIMEOUT');
+    }
+    throw new HttpError(502, 'Worldpay could not be reached.', 'WORLDPAY_UNAVAILABLE');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function queryWorldpayPayment(
+  connection: IntegrationConnectionRecord | null,
+  organisationId: string,
+  transactionReference: string,
+): Promise<{
+  queried: false;
+  reason: string;
+} | {
+  queried: true;
+  query: WorldpayPaymentQuery;
+  expectedEntityId: string;
+}> {
+  const credential = await readStoredWorldpayCredential(connection, organisationId);
+  if (!credential) return { queried: false, reason: 'Worldpay credentials are not stored for this pharmacy.' };
+  const baseUrl = paymentQueriesBaseUrl();
+  const url = new URL('/paymentQueries/payments', baseUrl);
+  url.searchParams.set('transactionReference', transactionReference);
+  const response = await worldpayFetch(url, {}, credential);
+  if (!response.ok) return { queried: false, reason: `Payment Queries returned ${response.status}.` };
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { queried: false, reason: 'Payment Queries returned invalid JSON.' };
+  }
+  return {
+    queried: true,
+    query: normaliseWorldpayPaymentQuery(body, transactionReference),
+    expectedEntityId: credential.entityId,
   };
 }
 
