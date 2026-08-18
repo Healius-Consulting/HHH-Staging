@@ -213,12 +213,17 @@ export async function executeCuraleafOrderPlacement(
     id: string;
     orderNumber?: string | null;
     status?: string | null;
+    paymentStatus?: string | null;
+    paidAt?: string | null;
     quoteSnapshot?: unknown;
   }
 ) {
-  // If order is cancelled, never place with Curaleaf
   if (order.status === 'CANCELLED') {
     return { skipped: true, reason: 'Order is cancelled' };
+  }
+
+  if (order.paymentStatus !== 'PAID' && !order.paidAt) {
+    return { skipped: true, reason: 'Order is not paid yet' };
   }
 
   const recordedPurchaseOrder = existingCuraleafPurchaseOrder(order);
@@ -233,6 +238,11 @@ export async function executeCuraleafOrderPlacement(
   }
 
   const customerReference = order.orderNumber || `HHH-${order.id}`;
+  const snapshot = (order.quoteSnapshot ?? {}) as Record<string, unknown>;
+  const priorCuraleaf = (snapshot.curaleaf && typeof snapshot.curaleaf === 'object'
+    ? snapshot.curaleaf
+    : null) as { prescriptionId?: string | null; prescriberId?: string | null } | null;
+
   try {
     const livePurchaseOrders = await fetchCuraleafPurchaseOrders(connection);
     const matchedPurchaseOrder = matchPurchaseOrder(
@@ -245,16 +255,14 @@ export async function executeCuraleafOrderPlacement(
         skipped: true,
         reason: 'Purchase order already exists at Curaleaf',
         purchaseOrder: matchedPurchaseOrder,
-        prescriptionId: null,
-        prescriberId: null,
+        prescriptionId: priorCuraleaf?.prescriptionId ?? null,
+        prescriberId: priorCuraleaf?.prescriberId ?? null,
       };
     }
   } catch (lookupErr) {
     console.warn('[Curaleaf] Existing purchase-order lookup note:', lookupErr);
   }
 
-  // Step 1: Ensure Prescriber exists — match by GPhC/GMC + PIN, create only if not found
-  const snapshot = (order.quoteSnapshot ?? {}) as any;
   const rxList = Array.isArray(snapshot?.prescriptions) ? snapshot.prescriptions : [];
   const rxData = rxList[0] || {};
   const prescriberInfo = rxData.prescriber || {};
@@ -263,49 +271,56 @@ export async function executeCuraleafOrderPlacement(
   const prescriberGmc = prescriberInfo.gmcNumber ? Number(prescriberInfo.gmcNumber) : null;
   const prescriberPin = String(prescriberInfo.pin || '');
 
-  let prescriberId: string | null = null;
-  try {
-    const prescriberRes = await curaleafApiRequest<{ prescribers?: Array<{ id: string; gphcNumber?: string | null; gmcNumber?: number | null; pin?: string }> }>(
-      connection,
-      '/v1/prescribers/'
-    ).catch(() => null);
+  // Step 1: Ensure prescriber exists — match by GPhC/GMC + PIN, create only if not found.
+  let prescriberId: string | null = priorCuraleaf?.prescriberId ?? null;
+  if (!prescriberId) {
+    try {
+      const prescriberRes = await curaleafApiRequest<{ prescribers?: Array<{ id: string; gphcNumber?: string | null; gmcNumber?: number | null; pin?: string }> }>(
+        connection,
+        '/v1/prescribers/'
+      ).catch(() => null);
 
-    const allPrescribers = prescriberRes?.prescribers ?? [];
+      const allPrescribers = prescriberRes?.prescribers ?? [];
+      const matched = allPrescribers.find(p =>
+        (prescriberGphc && p.gphcNumber === prescriberGphc && p.pin === prescriberPin) ||
+        (prescriberGmc && p.gmcNumber === prescriberGmc && p.pin === prescriberPin)
+      ) || (allPrescribers.length === 1 ? allPrescribers[0] : null);
 
-    // Match by GPhC number + PIN, or GMC number + PIN
-    const matched = allPrescribers.find(p =>
-      (prescriberGphc && p.gphcNumber === prescriberGphc && p.pin === prescriberPin) ||
-      (prescriberGmc && p.gmcNumber === prescriberGmc && p.pin === prescriberPin)
-    ) || (allPrescribers.length === 1 ? allPrescribers[0] : null);
-
-    if (matched?.id) {
-      prescriberId = matched.id;
-      console.log(`[Curaleaf] Matched existing prescriber ${prescriberId} (${prescriberGphc || prescriberGmc})`);
-    } else {
-      const createdPrescriber = await curaleafApiRequest<{ id: string }>(connection, '/v1/prescribers/', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: prescriberInfo.name || 'Unknown Prescriber',
-          initials: prescriberInfo.initials || 'XX',
-          pin: prescriberPin || '000',
-          gmcNumber: prescriberGmc,
-          gphcNumber: prescriberGphc,
-        }),
-      }).catch(() => null);
-      if (createdPrescriber?.id) {
-        prescriberId = createdPrescriber.id;
-        console.log(`[Curaleaf] Created new prescriber ${prescriberId}`);
+      if (matched?.id) {
+        prescriberId = matched.id;
+        console.log(`[Curaleaf] Matched existing prescriber ${prescriberId} (${prescriberGphc || prescriberGmc})`);
+      } else {
+        const createdPrescriber = await curaleafApiRequest<{ id: string }>(connection, '/v1/prescribers/', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: prescriberInfo.name || 'Unknown Prescriber',
+            initials: prescriberInfo.initials || 'XX',
+            pin: prescriberPin || '000',
+            gmcNumber: prescriberGmc,
+            gphcNumber: prescriberGphc,
+          }),
+        }).catch(() => null);
+        if (createdPrescriber?.id) {
+          prescriberId = createdPrescriber.id;
+          console.log(`[Curaleaf] Created new prescriber ${prescriberId}`);
+        }
       }
+    } catch (err) {
+      console.warn('[Curaleaf] Prescriber verification note:', err);
     }
-  } catch (err) {
-    console.warn('[Curaleaf] Prescriber verification note:', err);
   }
 
   if (!prescriberId) {
-    console.warn('[Curaleaf] No prescriber ID resolved — placement will proceed without prescription link');
+    return {
+      skipped: true,
+      reason: 'Prescriber could not be verified with Curaleaf',
+      prescriberId: null,
+      prescriptionId: null,
+      purchaseOrder: null,
+    };
   }
 
-  // Step 2: Extract line items & formulas
+  // Step 2: Extract line items & formulas for prescription submission.
   const rawItems = snapshot?.lineItems || snapshot?.items || rxList.flatMap((rx: any) => rx.items) || [];
   const lineItems: Array<{ productId: string; count: number; formulaId?: string; unitsNeededCount?: number }> = [];
 
@@ -323,7 +338,22 @@ export async function executeCuraleafOrderPlacement(
     }
   }
 
-  // Step 3: Stock and price re-check quote gate
+  const rxItems = lineItems.filter(item => Boolean(item.formulaId)).map(item => ({
+    formulaId: item.formulaId!,
+    unitsNeededCount: item.unitsNeededCount || item.count * 10,
+  }));
+
+  if (rxItems.length === 0) {
+    return {
+      skipped: true,
+      reason: 'Prescription lines are missing Curaleaf formula IDs',
+      prescriberId,
+      prescriptionId: null,
+      purchaseOrder: null,
+    };
+  }
+
+  // Step 3: Stock and price re-check quote gate.
   if (lineItems.length > 0) {
     try {
       await curaleafApiRequest(connection, '/v1/quotes/', {
@@ -337,16 +367,11 @@ export async function executeCuraleafOrderPlacement(
     }
   }
 
-  // Step 4: Submit Prescription if formula is available and prescriber is resolved
-  let curaleafPrescriptionId: string | null = null;
-  const rxItems = lineItems.filter(item => Boolean(item.formulaId)).map(item => ({
-    formulaId: item.formulaId!,
-    unitsNeededCount: item.unitsNeededCount || item.count * 10,
-  }));
-
-  if (rxItems.length > 0 && prescriberId) {
+  // Step 4: Submit prescription and capture the Curaleaf prescription ID.
+  let curaleafPrescriptionId: string | null = priorCuraleaf?.prescriptionId ?? null;
+  if (!curaleafPrescriptionId) {
     try {
-      const rxRes = await curaleafApiRequest<{ id: string }>(connection, '/v1/prescriptions/', {
+      const rxRes = await curaleafApiRequest<{ id: string; state?: string }>(connection, '/v1/prescriptions/', {
         method: 'POST',
         body: JSON.stringify({
           serialNumber: rxData.serialNumber || `RX-${order.orderNumber || (order.id || 'ORDER').slice(0, 8)}`,
@@ -354,7 +379,7 @@ export async function executeCuraleafOrderPlacement(
           issueDate: rxData.issueDate || new Date().toISOString().split('T')[0],
           items: rxItems,
         }),
-      }).catch(() => null);
+      });
       if (rxRes?.id) {
         curaleafPrescriptionId = rxRes.id;
         console.log(`[Curaleaf] Prescription submitted: ${curaleafPrescriptionId} (serial: ${rxData.serialNumber})`);
@@ -362,54 +387,67 @@ export async function executeCuraleafOrderPlacement(
     } catch (err) {
       console.warn('[Curaleaf] Prescription create note:', err);
     }
-  } else if (rxItems.length > 0 && !prescriberId) {
-    console.warn('[Curaleaf] Skipping prescription submission \u2014 no prescriber ID resolved');
   }
 
-  // Step 5: Submit Purchase Order
-  // Use purchase-order-from-prescriptions when a Curaleaf prescription ID exists (correct linked flow),
-  // otherwise fall back to direct product items (wholesale/catalog order).
-  let purchaseOrderResult: any = null;
+  if (!curaleafPrescriptionId) {
+    return {
+      skipped: true,
+      reason: 'Prescription could not be submitted to Curaleaf',
+      prescriberId,
+      prescriptionId: null,
+      purchaseOrder: null,
+    };
+  }
 
-  if (curaleafPrescriptionId && lineItems.length > 0) {
-    // Prescription-linked flow — Curaleaf will resolve formulas and quantities from the prescription
-    try {
-      purchaseOrderResult = await curaleafApiRequest(connection, '/v1/purchase-order-from-prescriptions/', {
-        method: 'POST',
-        body: JSON.stringify({
-          customerReference,
-          prescriptionIds: [curaleafPrescriptionId],
-        }),
-      });
-      console.log(`[Curaleaf] Purchase order from prescription placed: ${JSON.stringify(purchaseOrderResult)}`);
-    } catch (poErr) {
-      console.warn('[Curaleaf] purchase-order-from-prescriptions failed, falling back to direct items:', poErr);
-      // Fallback to direct items if prescription-linked route fails
-      purchaseOrderResult = await curaleafApiRequest(connection, '/v1/purchase-orders/', {
-        method: 'POST',
-        body: JSON.stringify({
-          customerReference,
-          items: lineItems.map(item => ({ productId: item.productId, count: item.count })),
-        }),
-      }).catch(fallbackErr => {
-        console.warn('[Curaleaf] Direct purchase-orders fallback also failed:', fallbackErr);
-        return null;
-      });
+  // Step 5: Confirm prescription is ready before purchase-order-from-prescriptions.
+  try {
+    const prescriptionDetails = await curaleafApiRequest<{ state?: string }>(
+      connection,
+      `/v1/prescriptions/${encodeURIComponent(curaleafPrescriptionId)}/`,
+    );
+    const prescriptionState = String(prescriptionDetails.state || '').toUpperCase();
+    if (prescriptionState === 'PENDING') {
+      return {
+        skipped: true,
+        reason: 'Prescription pending Curaleaf approval',
+        prescriberId,
+        prescriptionId: curaleafPrescriptionId,
+        purchaseOrder: null,
+      };
     }
-  } else if (lineItems.length > 0) {
-    // Direct catalog/wholesale flow — no prescription registered with Curaleaf
-    try {
-      purchaseOrderResult = await curaleafApiRequest(connection, '/v1/purchase-orders/', {
-        method: 'POST',
-        body: JSON.stringify({
-          customerReference,
-          items: lineItems.map(item => ({ productId: item.productId, count: item.count })),
-        }),
-      });
-      console.log(`[Curaleaf] Direct purchase order placed: ${JSON.stringify(purchaseOrderResult)}`);
-    } catch (poErr) {
-      console.warn('[Curaleaf] Purchase order create note:', poErr);
+    if (prescriptionState === 'EXPIRED' || prescriptionState === 'CANCELLED') {
+      return {
+        skipped: true,
+        reason: `Prescription is ${prescriptionState.toLowerCase()}`,
+        prescriberId,
+        prescriptionId: curaleafPrescriptionId,
+        purchaseOrder: null,
+      };
     }
+  } catch (err) {
+    console.warn('[Curaleaf] Prescription readiness check note:', err);
+  }
+
+  // Step 6: Purchase order from prescription — the only supported placement route.
+  let purchaseOrderResult: Record<string, unknown> | null = null;
+  try {
+    purchaseOrderResult = await curaleafApiRequest(connection, '/v1/purchase-order-from-prescriptions/', {
+      method: 'POST',
+      body: JSON.stringify({
+        customerReference,
+        prescriptionIds: [curaleafPrescriptionId],
+      }),
+    });
+    console.log(`[Curaleaf] Purchase order from prescription placed: ${JSON.stringify(purchaseOrderResult)}`);
+  } catch (poErr) {
+    console.warn('[Curaleaf] purchase-order-from-prescriptions failed:', poErr);
+    return {
+      skipped: true,
+      reason: 'Purchase order could not be created from prescription',
+      prescriberId,
+      prescriptionId: curaleafPrescriptionId,
+      purchaseOrder: null,
+    };
   }
 
   return {

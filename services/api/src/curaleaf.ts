@@ -660,6 +660,13 @@ async function ensureClinicPurchaseOrder(organisationId: string, customerReferen
   return { purchaseOrder: await findCuraleafPurchaseOrder(organisationId, customerReference), created: true };
 }
 
+export function prescriptionLinkedPurchaseOrderPayload(customerReference: string, prescriptionId: string) {
+  return {
+    customerReference,
+    prescriptionIds: [prescriptionId],
+  };
+}
+
 export function manualPurchaseOrderPayload(
   customerReference: string,
   items: Array<{ packId: string; quantity: number }>,
@@ -670,22 +677,6 @@ export function manualPurchaseOrderPayload(
   };
 }
 
-async function ensureManualPurchaseOrder(
-  organisationId: string,
-  customerReference: string,
-  items: Array<{ packId: string; quantity: number }>,
-) {
-  const existing = await findCuraleafPurchaseOrder(organisationId, customerReference);
-  if (existing) return { purchaseOrder: existing, created: false };
-  const payload = manualPurchaseOrderPayload(customerReference, items);
-  await curaleafRequest(organisationId, '/v1/purchase-orders/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return { purchaseOrder: await findCuraleafPurchaseOrder(organisationId, customerReference), created: true };
-}
-
 export async function submitManualPrescription(organisationId: string, input: ManualPrescriptionInput) {
   const registered = await registerManualPrescription(organisationId, input);
   if (registered.prescriptionState !== 'ACTIVE') {
@@ -694,7 +685,7 @@ export async function submitManualPrescription(organisationId: string, input: Ma
   if (!await configuredCuraleafPrescriberExists(organisationId, registered.prescriberId)) {
     throw new HttpError(409, 'The prescriber must be configured and verified before a Curaleaf purchase order can be sent.', 'PRESCRIBER_NOT_CONFIGURED');
   }
-  const placement = await ensureManualPurchaseOrder(organisationId, input.customerReference, input.items);
+  const placement = await ensureClinicPurchaseOrder(organisationId, input.customerReference, registered.prescriptionId);
   if (!placement.purchaseOrder) {
     return {
       status: 'purchase_order_confirmation_pending' as const,
@@ -703,9 +694,10 @@ export async function submitManualPrescription(organisationId: string, input: Ma
       purchaseOrderId: null,
       purchaseOrderState: null,
       placementRequest: {
-        endpoint: '/v1/purchase-orders/',
+        endpoint: '/v1/purchase-order-from-prescriptions/',
         disposition: placement.created ? 'sent' as const : 'existing_not_replayed' as const,
-        items: placement.created ? manualPurchaseOrderPayload(input.customerReference, input.items).items : null,
+        prescriptionIds: placement.created ? [registered.prescriptionId] : null,
+        items: null,
       },
       quote: input.quote,
     };
@@ -717,9 +709,10 @@ export async function submitManualPrescription(organisationId: string, input: Ma
     purchaseOrderId: placement.purchaseOrder?.id ?? null,
     purchaseOrderState: placement.purchaseOrder?.state ?? null,
     placementRequest: {
-      endpoint: '/v1/purchase-orders/',
+      endpoint: '/v1/purchase-order-from-prescriptions/',
       disposition: placement.created ? 'sent' : 'existing_not_replayed',
-      items: manualPurchaseOrderPayload(input.customerReference, input.items).items,
+      prescriptionIds: [registered.prescriptionId],
+      items: null,
     },
     quote: input.quote,
   };
@@ -831,8 +824,9 @@ export async function reconcileManualPrescription(
       purchaseOrderId: existingPurchaseOrder.id,
       purchaseOrderState: existingPurchaseOrder.state,
       placementRequest: {
-        endpoint: '/v1/purchase-orders/',
+        endpoint: '/v1/purchase-order-from-prescriptions/',
         disposition: 'existing_not_replayed' as const,
+        prescriptionIds: null,
         items: null,
       },
     };
@@ -857,7 +851,7 @@ export async function reconcileManualPrescription(
   if (input.allowPurchaseOrderCreate === false) {
     return { status: 'purchase_order_confirmation_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id };
   }
-  const placement = await ensureManualPurchaseOrder(organisationId, input.customerReference, input.items);
+  const placement = await ensureClinicPurchaseOrder(organisationId, input.customerReference, prescription.id);
   if (!placement.purchaseOrder) {
     return { status: 'purchase_order_confirmation_pending' as const, prescriptionState: prescription.state, prescriptionId: prescription.id, prescriberId: prescriber.id, prescriberName: prescriber.name };
   }
@@ -868,9 +862,10 @@ export async function reconcileManualPrescription(
     purchaseOrderId: placement.purchaseOrder?.id ?? null,
     purchaseOrderState: placement.purchaseOrder?.state ?? null,
     placementRequest: {
-      endpoint: '/v1/purchase-orders/',
+      endpoint: '/v1/purchase-order-from-prescriptions/',
       disposition: placement.created ? 'sent' as const : 'existing_not_replayed' as const,
-      items: placement.created ? manualPurchaseOrderPayload(input.customerReference, input.items).items : null,
+      prescriptionIds: placement.created ? [prescription.id] : null,
+      items: null,
     },
   };
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compareQuotes, draftHasPaymentBoundary, normaliseStockStatus, prescriptionFileRemovalAllowed, quoteFingerprint, resolveOrderPaymentRoute, validPrescriptionSignature } from './app.js';
-import { clinicPrescriptionReadyForPurchaseOrder, CuraleafRequestError, manualPurchaseOrderPayload, prescriberDirectoryMatch, prescriptionFormulaMatch } from './curaleaf.js';
+import { clinicPrescriptionReadyForPurchaseOrder, CuraleafRequestError, prescriberDirectoryMatch, prescriptionFormulaMatch, prescriptionLinkedPurchaseOrderPayload } from './curaleaf.js';
 import { eventPollBackoffSeconds } from './curaleaf-events.js';
 import { normalisedFulfilmentLines } from './curaleaf-reconciliation.js';
 
@@ -104,10 +104,10 @@ test('manual prescription matching keeps active formula conflicts and medicine d
   assert.equal(prescriptionFormulaMatch(expectedMedicine, [{ ...retiredSupplierLine[0], formulaName: 'Different medicine' }], [currentProduct]).matches, false);
 });
 
-test('manual purchase orders send product ids and pack counts rather than prescription units', () => {
-  assert.deepEqual(manualPurchaseOrderPayload('HHH-order-rx', [{ packId: 'pack-10g', quantity: 1 }]), {
+test('purchase orders from prescriptions send customer reference and prescription ids', () => {
+  assert.deepEqual(prescriptionLinkedPurchaseOrderPayload('HHH-order-rx', 'rx-123'), {
     customerReference: 'HHH-order-rx',
-    items: [{ productId: 'pack-10g', count: 1 }],
+    prescriptionIds: ['rx-123'],
   });
 });
 

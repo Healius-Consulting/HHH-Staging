@@ -434,6 +434,10 @@ export function createPortalOrderRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
+      if (order.paymentStatus !== 'PAID' && !order.paidAt) {
+        throw new HttpError(409, 'Order must be paid before placing with Curaleaf.', 'ORDER_NOT_PAID');
+      }
+
       await orderRepo.updateOrderStatus({
         id: orderId,
         organisationId: scope.organisationId,

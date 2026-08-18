@@ -53,7 +53,6 @@ import {
   orderHasPartialCollection,
   orderHasPartialPharmacyReceipt,
   orderHasUncollectedReceivedPacks,
-  orderInTransitProductNames,
   orderPackTotals,
   orderStage,
   prescriptionStatusLabel,
@@ -1447,19 +1446,115 @@ function PrePlacementDeliveryGuidance({ now }: { now: Date }) {
   );
 }
 
+type SplitPackSnapshot = {
+  collected: number;
+  atPharmacy: number;
+  inTransit: number;
+  withCuraleaf: number;
+  total: number;
+};
+
+function splitPackSnapshot(packTotals: ReturnType<typeof orderPackTotals>): SplitPackSnapshot {
+  return {
+    collected: packTotals.collected,
+    atPharmacy: Math.max(0, packTotals.received - packTotals.collected),
+    inTransit: Math.max(0, packTotals.shipped - packTotals.received),
+    withCuraleaf: Math.max(0, packTotals.ordered - packTotals.shipped),
+    total: packTotals.ordered,
+  };
+}
+
+function splitPackStatItems(snapshot: SplitPackSnapshot) {
+  return [
+    { value: snapshot.collected, label: snapshot.collected === 1 ? 'Collected' : 'Collected' },
+    { value: snapshot.atPharmacy, label: snapshot.atPharmacy === 1 ? 'At pharmacy' : 'At pharmacy' },
+    { value: snapshot.inTransit, label: snapshot.inTransit === 1 ? 'In transit' : 'In transit' },
+    { value: snapshot.withCuraleaf, label: snapshot.withCuraleaf === 1 ? 'With Curaleaf' : 'With Curaleaf' },
+  ].filter(stat => stat.value > 0);
+}
+
+function orderIsSplitShipment(
+  order: PatientOrder,
+  snapshot: SplitPackSnapshot,
+  awaitingSupplierCount: number,
+) {
+  return awaitingSupplierCount > 0
+    || order.prescriptions.some(rx => rx.dispatchStatus === 'partial')
+    || snapshot.inTransit + snapshot.withCuraleaf > 0
+    || snapshot.collected > 0 && snapshot.collected < snapshot.total;
+}
+
+function SplitOrderDeliveryBanner({
+  tone,
+  icon: Icon,
+  eyebrow,
+  title,
+  desc,
+  stats,
+}: {
+  tone: 'partial' | 'overdue' | 'ready';
+  icon: LucideIcon;
+  eyebrow: string;
+  title: string;
+  desc: string;
+  stats: Array<{ value: number; label: string }>;
+}) {
+  const visibleStats = stats.filter(stat => stat.value > 0);
+  return (
+    <div className={`order-delivery-banner order-delivery-banner--${tone}`} role="status">
+      <div className="order-delivery-banner__main">
+        <div className="order-delivery-banner__icon-wrap">
+          <Icon size={17} />
+        </div>
+        <div className="order-delivery-banner__content">
+          <div className="order-delivery-banner__eyebrow">
+            <span>{eyebrow}</span>
+          </div>
+          <strong className="order-delivery-banner__title">{title}</strong>
+          {visibleStats.length ? (
+            <ul className="order-delivery-banner__stats" aria-label="Pack progress">
+              {visibleStats.map(stat => (
+                <li key={stat.label}>
+                  <strong>{stat.value}</strong>
+                  <span>{stat.label}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="order-delivery-banner__desc">{desc}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Date }) {
   const guidance = deliveryGuidanceForOrder(order);
   if (!guidance) return null;
   const range = deliveryRange(guidance);
   const packTotals = orderPackTotals(order);
+  const splitSnapshot = splitPackSnapshot(packTotals);
+  const splitStats = splitPackStatItems(splitSnapshot);
   const awaitingSupplier = orderAwaitingSupplierShipmentProductNames(order);
-  const inTransitProducts = orderInTransitProductNames(order);
   const hasInTransit = orderHasInTransitPacks(order);
   const hasUncollected = orderHasUncollectedReceivedPacks(order);
   const hasPartialCollection = orderHasPartialCollection(order);
+  const isSplit = orderIsSplitShipment(order, splitSnapshot, awaitingSupplier.length);
 
   if (hasUncollected) {
-    const packsWaiting = packTotals.received - packTotals.collected;
+    const packsWaiting = splitSnapshot.atPharmacy;
+    if (isSplit && (splitSnapshot.inTransit > 0 || splitSnapshot.withCuraleaf > 0)) {
+      return (
+        <SplitOrderDeliveryBanner
+          tone="partial"
+          icon={PackageCheck}
+          eyebrow="Split order · Ready for handout"
+          title={`${packsWaiting} pack${packsWaiting === 1 ? '' : 's'} checked in — verify and hand out to the patient`}
+          desc="Other packs from this order are still in transit or awaiting dispatch with Curaleaf."
+          stats={splitStats}
+        />
+      );
+    }
     return (
       <div className="order-delivery-banner order-delivery-banner--ready" role="status">
         <div className="order-delivery-banner__main">
@@ -1483,81 +1578,50 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
   }
 
   if (hasPartialCollection && awaitingSupplier.length) {
+    const remaining = splitSnapshot.withCuraleaf;
     return (
-      <div className="order-delivery-banner order-delivery-banner--ready" role="status">
-        <div className="order-delivery-banner__main">
-          <div className="order-delivery-banner__icon-wrap">
-            <CheckCircle2 size={17} />
-          </div>
-          <div className="order-delivery-banner__content">
-            <div className="order-delivery-banner__eyebrow">
-              <span>Split order · First consignment complete</span>
-            </div>
-            <strong className="order-delivery-banner__title">
-              {packTotals.collected} of {packTotals.ordered} packs handed out to the patient
-            </strong>
-            <p className="order-delivery-banner__desc">
-              {awaitingSupplier.map(product => `${product}: remaining quantity stays open with Curaleaf for a later shipment.`).join(' ')}
-            </p>
-          </div>
-        </div>
-      </div>
+      <SplitOrderDeliveryBanner
+        tone="partial"
+        icon={Layers2}
+        eyebrow="Split order · First consignment complete"
+        title={`${splitSnapshot.collected} of ${splitSnapshot.total} packs handed out`}
+        desc={`${remaining} remaining pack${remaining === 1 ? '' : 's'} stay with Curaleaf until the next shipment. No action needed until it dispatches.`}
+        stats={splitStats}
+      />
     );
   }
 
-  if (hasInTransit && inTransitProducts.length) {
+  if (hasInTransit && splitSnapshot.inTransit > 0 && isSplit) {
     const overdue = londonDateKey(now) > guidance.windowEnd;
-    const isSplit = awaitingSupplier.length > 0 || order.prescriptions.some(rx => rx.dispatchStatus === 'partial');
-    if (isSplit) {
-      return (
-        <div className={`order-delivery-banner ${overdue ? 'order-delivery-banner--overdue' : 'order-delivery-banner--dispatched'}`} role="status">
-          <div className="order-delivery-banner__main">
-            <div className="order-delivery-banner__icon-wrap">
-              <AlertTriangle size={17} />
-            </div>
-            <div className="order-delivery-banner__content">
-              <div className="order-delivery-banner__eyebrow">
-                <span>Split shipment · Open with Curaleaf</span>
-              </div>
-              <strong className="order-delivery-banner__title">
-                {overdue
-                  ? `Current consignment overdue · expected by ${formatDeliveryDate(guidance.windowEnd)}`
-                  : `Partially dispatched · current consignment expected ${range}`}
-              </strong>
-              <p className="order-delivery-banner__desc">
-                {inTransitProducts.map(product => `${product}: this consignment is in transit to the pharmacy.`).join(' ')}
-                {awaitingSupplier.length
-                  ? ` ${awaitingSupplier.map(product => `${product}: further packs remain with Curaleaf for a later shipment.`).join(' ')}`
-                  : ''}
-              </p>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    // Non-split consignments fall through to the standard in-transit banner below.
+    const inTransit = splitSnapshot.inTransit;
+    const remaining = splitSnapshot.withCuraleaf;
+    return (
+      <SplitOrderDeliveryBanner
+        tone={overdue ? 'overdue' : 'partial'}
+        icon={overdue ? AlertTriangle : Truck}
+        eyebrow="Split order · Consignment in transit"
+        title={overdue
+          ? `${inTransit} of ${splitSnapshot.total} packs overdue · expected by ${formatDeliveryDate(guidance.windowEnd)}`
+          : `${inTransit} of ${splitSnapshot.total} packs in transit · expected ${range}`}
+        desc={remaining > 0
+          ? `Check in when the courier arrives. ${remaining} more pack${remaining === 1 ? '' : 's'} remain with Curaleaf for a later dispatch.`
+          : 'Check in packs when the courier arrives. Pharmacy goods-in verification is required.'}
+        stats={splitStats}
+      />
+    );
   }
 
   if (awaitingSupplier.length && !hasInTransit) {
+    const remaining = splitSnapshot.withCuraleaf;
     return (
-      <div className="order-delivery-banner order-delivery-banner--picking" role="status">
-        <div className="order-delivery-banner__main">
-          <div className="order-delivery-banner__icon-wrap">
-            <Package size={17} />
-          </div>
-          <div className="order-delivery-banner__content">
-            <div className="order-delivery-banner__eyebrow">
-              <span>Split order · Awaiting next shipment</span>
-            </div>
-            <strong className="order-delivery-banner__title">
-              Remaining packs open with Curaleaf
-            </strong>
-            <p className="order-delivery-banner__desc">
-              {awaitingSupplier.map(product => `${product}: remaining quantity is open with Curaleaf and will dispatch in a later shipment.`).join(' ')}
-            </p>
-          </div>
-        </div>
-      </div>
+      <SplitOrderDeliveryBanner
+        tone="partial"
+        icon={Layers2}
+        eyebrow="Split order · Awaiting next shipment"
+        title={`${remaining} pack${remaining === 1 ? '' : 's'} open with Curaleaf`}
+        desc="The first consignment is complete. Curaleaf will dispatch the remaining quantity in a separate shipment."
+        stats={splitStats}
+      />
     );
   }
 

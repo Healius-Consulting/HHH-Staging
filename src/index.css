@@ -11127,6 +11127,48 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   color: var(--text-secondary);
   line-height: 1.5;
 }
+.order-delivery-banner__stats{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.order-delivery-banner__stats li{
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.3;
+  background: color-mix(in srgb, currentColor 8%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+.order-delivery-banner__stats strong{
+  font-weight: 750;
+  font-size: 11px;
+}
+.order-delivery-banner__stats span{
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.order-delivery-banner--partial{
+  border-color: color-mix(in srgb, var(--color-warning) 34%, var(--border));
+  background: color-mix(in srgb, var(--color-warning) 6%, var(--bg-surface));
+}
+.order-delivery-banner--partial .order-delivery-banner__icon-wrap{
+  background: color-mix(in srgb, var(--color-warning) 14%, var(--bg-surface));
+  color: var(--color-warning);
+}
+.order-delivery-banner--partial .order-delivery-banner__eyebrow{
+  color: var(--color-warning);
+}
+.order-delivery-banner--partial .order-delivery-banner__stats li{
+  color: var(--color-warning);
+}
 
 .order-delivery-banner--pending{
   border-color: color-mix(in srgb, var(--tenant-primary) 24%, var(--border));
