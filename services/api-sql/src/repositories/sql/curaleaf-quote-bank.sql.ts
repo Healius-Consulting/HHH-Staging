@@ -1,4 +1,5 @@
 import { dataConnect } from '../../bootstrap/firebase.js';
+import type { IntegrationEnvironment } from '../ports/integration.port.js';
 import type {
   CuraleafQuoteBankEntryRecord,
   CuraleafQuoteBankRepositoryPort,
@@ -6,14 +7,14 @@ import type {
 } from '../ports/curaleaf-quote-bank.port.js';
 
 const ENTRY_FIELDS = `
-  organisationId connectionId packId formulaId quotedQuantity
+  environment packId sourcedConnectionId formulaId quotedQuantity
   wholesalePackPricePence patientPackPricePence inStock stockStatus source quotedAt updatedAt
 `;
 
 const LIST_ENTRIES_GQL = `
-  query ListCuraleafQuoteBankEntries($organisationId: UUID!) {
+  query ListCuraleafQuoteBankEntries($environment: IntegrationEnvironment!) {
     curaleafQuoteBankEntries(
-      where: { organisationId: { eq: $organisationId } }
+      where: { environment: { eq: $environment } }
       limit: 5000
     ) { ${ENTRY_FIELDS} }
   }
@@ -21,9 +22,9 @@ const LIST_ENTRIES_GQL = `
 
 const UPSERT_ENTRY_GQL = `
   mutation UpsertCuraleafQuoteBankEntry(
-    $organisationId: UUID!
-    $connectionId: UUID!
+    $environment: IntegrationEnvironment!
     $packId: String!
+    $sourcedConnectionId: UUID!
     $formulaId: String
     $quotedQuantity: Int!
     $wholesalePackPricePence: Int64!
@@ -34,9 +35,9 @@ const UPSERT_ENTRY_GQL = `
     $quotedAt: Timestamp!
   ) {
     curaleafQuoteBankEntry_upsert(data: {
-      organisationId: $organisationId
-      connectionId: $connectionId
+      environment: $environment
       packId: $packId
+      sourcedConnectionId: $sourcedConnectionId
       formulaId: $formulaId
       quotedQuantity: $quotedQuantity
       wholesalePackPricePence: $wholesalePackPricePence
@@ -52,15 +53,15 @@ const UPSERT_ENTRY_GQL = `
 
 const UPSERT_SYNC_GQL = `
   mutation UpsertCuraleafQuoteBankSync(
-    $organisationId: UUID!
-    $connectionId: UUID!
+    $environment: IntegrationEnvironment!
+    $sourcedConnectionId: UUID!
     $lastDailyRefreshAt: Timestamp
     $packCount: Int!
     $lastError: String
   ) {
     curaleafQuoteBankSync_upsert(data: {
-      organisationId: $organisationId
-      connectionId: $connectionId
+      environment: $environment
+      sourcedConnectionId: $sourcedConnectionId
       lastDailyRefreshAt: $lastDailyRefreshAt
       packCount: $packCount
       lastError: $lastError
@@ -70,10 +71,10 @@ const UPSERT_SYNC_GQL = `
 `;
 
 export class SqlCuraleafQuoteBankRepository implements CuraleafQuoteBankRepositoryPort {
-  async listEntries(organisationId: string): Promise<CuraleafQuoteBankEntryRecord[]> {
+  async listEntries(environment: IntegrationEnvironment): Promise<CuraleafQuoteBankEntryRecord[]> {
     const result = await dataConnect.executeGraphql<{ curaleafQuoteBankEntries: CuraleafQuoteBankEntryRecord[] }, any>(
       LIST_ENTRIES_GQL,
-      { variables: { organisationId } },
+      { variables: { environment } },
     );
     return result.data.curaleafQuoteBankEntries ?? [];
   }
@@ -83,16 +84,16 @@ export class SqlCuraleafQuoteBankRepository implements CuraleafQuoteBankReposito
   }
 
   async upsertSync(input: {
-    organisationId: string;
-    connectionId: string;
+    environment: IntegrationEnvironment;
+    sourcedConnectionId: string;
     lastDailyRefreshAt?: string | null;
     packCount?: number;
     lastError?: string | null;
   }): Promise<void> {
     await dataConnect.executeGraphql(UPSERT_SYNC_GQL, {
       variables: {
-        organisationId: input.organisationId,
-        connectionId: input.connectionId,
+        environment: input.environment,
+        sourcedConnectionId: input.sourcedConnectionId,
         lastDailyRefreshAt: input.lastDailyRefreshAt ?? null,
         packCount: input.packCount ?? 0,
         lastError: input.lastError ?? null,

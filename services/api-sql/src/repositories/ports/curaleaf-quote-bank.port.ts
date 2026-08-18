@@ -1,10 +1,12 @@
+import type { IntegrationEnvironment } from './integration.port.js';
+
 export type CuraleafQuoteBankSource = 'DAILY_REFRESH' | 'LIVE_QUOTE';
 export type CuraleafStockStatus = 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
 
 export interface CuraleafQuoteBankEntryRecord {
-  organisationId: string;
-  connectionId: string;
+  environment: IntegrationEnvironment;
   packId: string;
+  sourcedConnectionId: string | null;
   formulaId: string | null;
   quotedQuantity: number;
   wholesalePackPricePence: number;
@@ -16,19 +18,10 @@ export interface CuraleafQuoteBankEntryRecord {
   updatedAt: string;
 }
 
-export interface CuraleafQuoteBankSyncRecord {
-  organisationId: string;
-  connectionId: string;
-  lastDailyRefreshAt: string | null;
-  packCount: number;
-  lastError: string | null;
-  updatedAt: string;
-}
-
 export interface UpsertCuraleafQuoteBankEntryInput {
-  organisationId: string;
-  connectionId: string;
+  environment: IntegrationEnvironment;
   packId: string;
+  sourcedConnectionId: string;
   formulaId?: string | null;
   quotedQuantity: number;
   wholesalePackPricePence: number;
@@ -40,11 +33,11 @@ export interface UpsertCuraleafQuoteBankEntryInput {
 }
 
 export interface CuraleafQuoteBankRepositoryPort {
-  listEntries(organisationId: string): Promise<CuraleafQuoteBankEntryRecord[]>;
+  listEntries(environment: IntegrationEnvironment): Promise<CuraleafQuoteBankEntryRecord[]>;
   upsertEntry(input: UpsertCuraleafQuoteBankEntryInput): Promise<void>;
   upsertSync(input: {
-    organisationId: string;
-    connectionId: string;
+    environment: IntegrationEnvironment;
+    sourcedConnectionId: string;
     lastDailyRefreshAt?: string | null;
     packCount?: number;
     lastError?: string | null;

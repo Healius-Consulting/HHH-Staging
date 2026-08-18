@@ -1027,12 +1027,11 @@ enum CuraleafStockStatus {
   OUT_OF_STOCK
 }
 
-type CuraleafQuoteBankEntry @table(key: ["organisationId", "packId"]) {
-  organisation: Organisation! @ref(fields: "organisationId")
-  organisationId: UUID! @index
-  connection: IntegrationConnection! @ref(fields: "connectionId")
-  connectionId: UUID! @index
+type CuraleafQuoteBankEntry @table(key: ["environment", "packId"]) {
+  environment: IntegrationEnvironment!
   packId: String!
+  sourcedConnection: IntegrationConnection @ref(fields: "sourcedConnectionId")
+  sourcedConnectionId: UUID @index
   formulaId: String
   quotedQuantity: Int! @default(value: 1)
   wholesalePackPricePence: Int64!
@@ -1045,11 +1044,10 @@ type CuraleafQuoteBankEntry @table(key: ["organisationId", "packId"]) {
   updatedAt: Timestamp! @default(expr: "request.time")
 }
 
-type CuraleafQuoteBankSync @table(key: ["connectionId"]) {
-  organisation: Organisation! @ref(fields: "organisationId")
-  organisationId: UUID! @index
-  connection: IntegrationConnection! @ref(fields: "connectionId")
-  connectionId: UUID!
+type CuraleafQuoteBankSync @table(key: ["environment"]) {
+  environment: IntegrationEnvironment!
+  sourcedConnection: IntegrationConnection @ref(fields: "sourcedConnectionId")
+  sourcedConnectionId: UUID @index
   lastDailyRefreshAt: Timestamp
   packCount: Int! @default(value: 0)
   lastError: String

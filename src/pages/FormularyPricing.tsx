@@ -37,7 +37,7 @@ export default function FormularyPricing() {
           <span>
             <small>Curaleaf-managed catalogue</small>
             <strong>Recommended patient prices are supplied by Curaleaf and are read-only.</strong>
-            <em>Wholesale cost and stock availability come from the Curaleaf quote bank when available, and are confirmed for exact pack quantities at checkout.</em>
+            <em>Wholesale cost and stock availability come from the shared Curaleaf quote bank when available, and are confirmed for exact pack quantities at checkout.</em>
           </span>
         </div>
         <dl className="pricing-position" aria-label="Curaleaf catalogue position">

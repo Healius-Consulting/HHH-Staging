@@ -104,7 +104,7 @@ export function createPortalIntegrationRouter(): Router {
         throw new HttpError(503, 'Curaleaf is not connected for this pharmacy.', 'INTEGRATION_NOT_CONNECTED');
       }
       const catalogue = await fetchCuraleafCatalogue(connection);
-      const quoteBank = await quoteBankRepo.listEntries(organisationId);
+      const quoteBank = await quoteBankRepo.listEntries(connection.environment);
       res.setHeader('Cache-Control', 'private, max-age=300');
       res.status(200).json(mergeQuoteBankIntoCatalogue(
         catalogue as { products: Array<Record<string, unknown>>; fetchedAt: string; [key: string]: unknown },

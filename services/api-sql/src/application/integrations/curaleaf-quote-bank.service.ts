@@ -55,9 +55,9 @@ export function quoteBankEntryFromQuoteItem(
   formulaId?: string | null,
 ) {
   return {
-    organisationId: connection.organisationId,
-    connectionId: connection.id,
+    environment: connection.environment,
     packId: item.packId,
+    sourcedConnectionId: connection.id,
     formulaId: formulaId ?? null,
     quotedQuantity: item.quantity,
     wholesalePackPricePence: curaleafMoneyPence(item.wholesalePackPrice, 'wholesale pack price'),
@@ -86,7 +86,7 @@ export async function upsertCuraleafQuoteBankFromQuote(
 ) {
   const quote = parseCuraleafQuote(rawQuote);
   const quotedAt = new Date().toISOString();
-  const existingEntries = await repo.listEntries(connection.organisationId);
+  const existingEntries = await repo.listEntries(connection.environment);
   const existingByPack = new Map(existingEntries.map(entry => [entry.packId, entry]));
   let updated = 0;
 
@@ -186,8 +186,8 @@ export async function refreshCuraleafQuoteBankDaily(
     }
 
     await repo.upsertSync({
-      organisationId: connection.organisationId,
-      connectionId: connection.id,
+      environment: connection.environment,
+      sourcedConnectionId: connection.id,
       lastDailyRefreshAt: new Date().toISOString(),
       packCount: quotedPacks,
       lastError: null,
@@ -195,8 +195,8 @@ export async function refreshCuraleafQuoteBankDaily(
   } catch (error) {
     lastError = error instanceof Error ? error.message : 'Quote bank refresh failed.';
     await repo.upsertSync({
-      organisationId: connection.organisationId,
-      connectionId: connection.id,
+      environment: connection.environment,
+      sourcedConnectionId: connection.id,
       packCount: quotedPacks,
       lastError,
     });
@@ -204,7 +204,8 @@ export async function refreshCuraleafQuoteBankDaily(
   }
 
   return {
-    organisationId: connection.organisationId,
+    environment: connection.environment,
+    sourcedConnectionId: connection.id,
     activePacks: activePacks.length,
     quotedPacks,
     updatedPacks,
@@ -212,13 +213,23 @@ export async function refreshCuraleafQuoteBankDaily(
   };
 }
 
+function referenceConnections(connections: IntegrationConnectionRecord[]) {
+  const byEnvironment = new Map<string, IntegrationConnectionRecord>();
+  for (const connection of connections) {
+    if (connection.integration !== 'CURALEAF' || connection.status !== 'ACTIVE' || !connection.secretResourceName) continue;
+    if (!byEnvironment.has(connection.environment)) {
+      byEnvironment.set(connection.environment, connection);
+    }
+  }
+  return [...byEnvironment.values()];
+}
+
 export async function refreshAllCuraleafQuoteBanks(
   connections: IntegrationConnectionRecord[],
   repo: CuraleafQuoteBankRepositoryPort,
 ) {
   const results = [];
-  for (const connection of connections) {
-    if (connection.integration !== 'CURALEAF' || connection.status !== 'ACTIVE' || !connection.secretResourceName) continue;
+  for (const connection of referenceConnections(connections)) {
     try {
       const result = await refreshCuraleafQuoteBankDaily(connection, repo);
       results.push({
@@ -227,7 +238,8 @@ export async function refreshAllCuraleafQuoteBanks(
       });
     } catch (error) {
       results.push({
-        organisationId: connection.organisationId,
+        environment: connection.environment,
+        sourcedConnectionId: connection.id,
         ok: false,
         error: error instanceof Error ? error.message : 'Quote bank refresh failed.',
       });
