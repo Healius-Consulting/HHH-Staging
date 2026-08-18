@@ -5,17 +5,18 @@ import {
   prescriptionFlowMap,
   snapshotObject,
 } from '../orders/order-maintenance.js';
-import { patientMessageIdempotencyKey } from '../notifications/patient-messages.js';
+import { listPharmacyRecipients, queueEmailToRecipients } from '../notifications/email-outbox.js';
 import type { NotificationRepositoryPort } from '../../repositories/ports/notification.port.js';
+import type { IdentityRepositoryPort } from '../../repositories/ports/identity.port.js';
+import type { OrganisationRepositoryPort } from '../../repositories/ports/organisation.port.js';
 import type { OrderRecord, OrderRepositoryPort } from '../../repositories/ports/order.port.js';
-import type { PatientRepositoryPort } from '../../repositories/ports/patient.port.js';
 import { uuidFromHex } from '../../domain/common/uuid.js';
 import { insertStaffTask } from '../../repositories/sql/staff-task.sql.js';
-import { sha256 } from '../../security/session-utils.js';
 
 export type OrderMaintenanceDeps = {
   orderRepo: OrderRepositoryPort;
-  patientRepo: PatientRepositoryPort;
+  identityRepo: IdentityRepositoryPort;
+  organisationRepo: OrganisationRepositoryPort;
   notificationRepo: NotificationRepositoryPort;
 };
 
@@ -29,19 +30,19 @@ async function queueDelayMessage(
   prescriptionId: string,
   episodeId: string,
 ) {
-  const patient = await deps.patientRepo.findPatientById(order.organisationId, order.patientId).catch(() => null);
-  if (!patient?.email) return;
-  await deps.notificationRepo.enqueue({
-    organisationId: order.organisationId,
-    patientId: order.patientId,
-    orderId: order.id,
-    channel: 'EMAIL',
-    templateCode: 'patient_fulfilment_delay',
-    recipientHash: sha256(patient.email.toLowerCase()),
-    encryptedRecipient: patient.email,
-    payload: { firstName: patient.firstName || 'Patient', message: 'Part of your order is delayed — no action needed.' },
-    idempotencyKey: patientMessageIdempotencyKey([order.id, prescriptionId, episodeId, 'delay']),
-  });
+  const recipients = await listPharmacyRecipients(order.organisationId, deps);
+  await queueEmailToRecipients(
+    deps.notificationRepo,
+    recipients,
+    'pharmacy_delivery_issue',
+    {
+      orderNumber: order.orderNumber,
+      summary: 'Part of the order is delayed and needs pharmacy awareness.',
+      prescriptionId,
+    },
+    ['pharmacy-delivery-issue', order.id, prescriptionId, episodeId],
+    { organisationId: order.organisationId, patientId: order.patientId, orderId: order.id },
+  );
 }
 
 export async function maintainPaidOrderFlow(deps: OrderMaintenanceDeps, now = new Date()) {
@@ -85,6 +86,19 @@ export async function maintainPaidOrderFlow(deps: OrderMaintenanceDeps, now = ne
             details: { orderId: order.id, prescriptionId },
             dueAt: new Date(`${String(prescription.expiryDate ?? '')}T23:59:59.999Z`).toISOString(),
           });
+          const recipients = await listPharmacyRecipients(order.organisationId, deps);
+          await queueEmailToRecipients(
+            deps.notificationRepo,
+            recipients,
+            'pharmacy_prescription_close_to_expiry',
+            {
+              orderNumber: order.orderNumber,
+              summary: `Prescription ${prescriptionId} is close to expiry.`,
+              prescriptionId,
+            },
+            ['pharmacy-prescription-close-to-expiry', order.id, prescriptionId, taskId],
+            { organisationId: order.organisationId, patientId: order.patientId, orderId: order.id },
+          );
         }
         if (action.type === 'renewal_expired') {
           summary.renewalEscalated += 1;

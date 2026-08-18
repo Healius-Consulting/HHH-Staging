@@ -7,10 +7,12 @@ import { asUuid, uuidKey } from '../../domain/common/uuid.js';
 import { normaliseUkPostcode } from '../../domain/geography/postcode.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
+import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlPostcodeSearchRepository } from '../../repositories/sql/postcode-search.sql.js';
 import { sha256 } from '../../security/session-utils.js';
 import type { CreateSubmissionInput } from '../../repositories/ports/intake.port.js';
+import { listPlatformAdminRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
 
 export const referralTokenSchema = z.string().min(12).max(160).regex(/^[A-Za-z0-9_-]+$/);
 const opaqueIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
@@ -139,6 +141,7 @@ export function createPublicIntakeV2Router(): Router {
   const organisationRepo = new SqlOrganisationRepository();
   const intakeRepo = new SqlIntakeRepository();
   const identityRepo = new SqlIdentityRepository();
+  const notificationRepo = new SqlNotificationRepository();
   const searchRepo = new SqlPostcodeSearchRepository();
 
   router.post('/public/referral-tokens/resolve', resolveLimiter, async (req: Request, res: Response, next: NextFunction) => {
@@ -225,6 +228,23 @@ export function createPublicIntakeV2Router(): Router {
           surface: 'public',
           details: { sourceType, conditionCount: input.conditions.length },
         });
+        const adminRecipients = await listPlatformAdminRecipients(identityRepo);
+        const submittedAt = submission.submittedAt || new Date().toISOString();
+        await queueEmailToRecipients(
+          notificationRepo,
+          adminRecipients,
+          'admin_new_enquiry_received',
+          {
+            caseReference: caseReference(submission.id, submittedAt),
+            firstName: input.firstName,
+            surname: input.surname,
+            submittedAt,
+            sourceType,
+            provisionalPharmacyName,
+          },
+          ['admin-enquiry', submission.id],
+          {},
+        );
       }
 
       const submittedAt = submission.submittedAt || new Date().toISOString();

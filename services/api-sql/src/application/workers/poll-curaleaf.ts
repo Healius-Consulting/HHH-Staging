@@ -10,14 +10,21 @@ import {
   shipmentBelongsToOrder,
   type CuraleafEventKind,
 } from '../integrations/curaleaf-events.js';
+import { listPharmacyRecipients, queueEmailToRecipients } from '../notifications/email-outbox.js';
 import { curaleafApiRequest } from '../integrations/curaleaf.service.js';
 import type { CuraleafPurchaseOrderLike, CuraleafShipmentLike } from '../orders/curaleaf-fulfilment.js';
+import type { IdentityRepositoryPort } from '../../repositories/ports/identity.port.js';
 import type { IntegrationConnectionRecord } from '../../repositories/ports/integration.port.js';
+import type { NotificationRepositoryPort } from '../../repositories/ports/notification.port.js';
+import type { OrganisationRepositoryPort } from '../../repositories/ports/organisation.port.js';
 import type { OrderRepositoryPort } from '../../repositories/ports/order.port.js';
 import { SqlWorkerEventRepository } from '../../repositories/sql/worker-event.sql.js';
 
 export type CuraleafPollDeps = {
   orderRepo: OrderRepositoryPort;
+  notificationRepo: NotificationRepositoryPort;
+  identityRepo: IdentityRepositoryPort;
+  organisationRepo: OrganisationRepositoryPort;
   events?: SqlWorkerEventRepository;
 };
 
@@ -78,6 +85,25 @@ async function pollKind(
             quoteSnapshot: next.snapshot,
             fulfilmentStatus: next.fulfilmentStatus,
           });
+          if (
+            next.fulfilmentStatus !== order.fulfilmentStatus &&
+            ['PARTIALLY_DISPATCHED_TO_PHARMACY', 'DISPATCHED_TO_PHARMACY'].includes(next.fulfilmentStatus)
+          ) {
+            const recipients = await listPharmacyRecipients(order.organisationId, deps);
+            await queueEmailToRecipients(
+              deps.notificationRepo,
+              recipients,
+              'pharmacy_order_dispatched',
+              {
+                orderNumber: order.orderNumber,
+                summary: next.fulfilmentStatus === 'PARTIALLY_DISPATCHED_TO_PHARMACY'
+                  ? 'A partial order has been dispatched.'
+                  : 'An order has been dispatched.',
+              },
+              ['pharmacy-order-dispatched', order.id, (record as CuraleafShipmentLike).id, next.fulfilmentStatus],
+              { organisationId: order.organisationId, patientId: order.patientId, orderId: order.id },
+            );
+          }
         }
       }
     }

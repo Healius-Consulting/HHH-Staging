@@ -6,6 +6,10 @@ import { persistCuraleafPrescriptionIdentity } from '../../application/prescript
 import { promotePatientAfterCuraleafPlacement } from '../../application/patient-finance/patient-finance.js';
 import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
+import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { listPharmacyRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
+import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
+import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
@@ -44,6 +48,9 @@ export function createPortalPaymentRouter(): Router {
   const paymentRepo = new SqlPaymentRepository();
   const orderRepo = new SqlOrderRepository();
   const integrationRepo = new SqlIntegrationRepository();
+  const identityRepo = new SqlIdentityRepository();
+  const notificationRepo = new SqlNotificationRepository();
+  const organisationRepo = new SqlOrganisationRepository();
   const patientRepo = new SqlPatientRepository();
   const patientFinanceRepo = new SqlPatientFinanceRepository();
   const patientFinanceDeps = { patientRepo, patientFinanceRepo };
@@ -124,6 +131,37 @@ export function createPortalPaymentRouter(): Router {
         externalReference: curaleafResult?.purchaseOrder?.id || input.reference,
         actorUid: scope.uid,
       });
+
+      const patient = await patientRepo.findPatientById(scope.organisationId, order.patientId).catch(() => null);
+      if (patient?.email) {
+        await queueEmailToRecipients(
+          notificationRepo,
+          [{ email: patient.email, displayName: patient.firstName || null }],
+          'patient_payment_confirmation',
+          {
+            firstName: patient.firstName || 'Patient',
+            amountPence: input.amountPence,
+            currency: 'GBP',
+            orderNumber: order.orderNumber,
+            receiptHash,
+          },
+          ['patient-payment-confirmation', paymentResult.id, receiptHash],
+          { organisationId: scope.organisationId, patientId: order.patientId, orderId },
+        );
+      }
+      const pharmacyRecipients = await listPharmacyRecipients(scope.organisationId, { identityRepo, organisationRepo });
+      await queueEmailToRecipients(
+        notificationRepo,
+        pharmacyRecipients,
+        'pharmacy_payment_received',
+        {
+          amountPence: input.amountPence,
+          currency: 'GBP',
+          orderNumber: order.orderNumber,
+        },
+        ['pharmacy-payment-received', paymentResult.id],
+        { organisationId: scope.organisationId, patientId: order.patientId, orderId },
+      );
 
       res.status(200).json({
         id: paymentResult.id,

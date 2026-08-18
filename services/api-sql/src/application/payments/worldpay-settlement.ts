@@ -3,8 +3,13 @@ import { persistCuraleafPrescriptionIdentity } from '../prescriptions/curaleaf-p
 import { promotePatientAfterCuraleafPlacement } from '../patient-finance/patient-finance.js';
 import type { PatientFinanceDeps } from '../patient-finance/patient-finance.js';
 import type { IntegrationRepositoryPort } from '../../repositories/ports/integration.port.js';
+import { listPharmacyRecipients, queueEmailToRecipients } from '../notifications/email-outbox.js';
 import type { OrderRepositoryPort } from '../../repositories/ports/order.port.js';
 import type { PaymentRecord, PaymentRepositoryPort } from '../../repositories/ports/payment.port.js';
+import type { NotificationRepositoryPort } from '../../repositories/ports/notification.port.js';
+import type { IdentityRepositoryPort } from '../../repositories/ports/identity.port.js';
+import type { OrganisationRepositoryPort } from '../../repositories/ports/organisation.port.js';
+import type { PatientRepositoryPort } from '../../repositories/ports/patient.port.js';
 import { sha256 } from '../../security/session-utils.js';
 
 export type WorldpaySettlementDeps = {
@@ -12,6 +17,10 @@ export type WorldpaySettlementDeps = {
   orderRepo: OrderRepositoryPort;
   integrationRepo: IntegrationRepositoryPort;
   patientFinanceDeps: PatientFinanceDeps;
+  patientRepo: PatientRepositoryPort;
+  notificationRepo: NotificationRepositoryPort;
+  identityRepo: IdentityRepositoryPort;
+  organisationRepo: OrganisationRepositoryPort;
 };
 
 export async function settlePaidWorldpayPayment(
@@ -28,6 +37,9 @@ export async function settlePaidWorldpayPayment(
   const receiptHash = payment.receiptHash ?? sha256(crypto.randomUUID());
   await deps.paymentRepo.updatePaymentStatus(payment.id, 'PAID', payment.orderId, receiptHash);
   const settled: PaymentRecord = { ...payment, status: 'PAID', receiptHash };
+  await queueSettlementEmails(settled, deps).catch(error => {
+    console.warn('[Worldpay] settlement notification note:', error);
+  });
 
   try {
     await placeOrderAfterWorldpaySettlement(settled, deps);
@@ -36,6 +48,44 @@ export async function settlePaidWorldpayPayment(
   }
 
   return { payment: settled, settled: true as const, reason: 'paid' as const };
+}
+
+async function queueSettlementEmails(payment: PaymentRecord, deps: WorldpaySettlementDeps) {
+  const order = await deps.orderRepo.findOrderById(payment.orderId, payment.organisationId);
+  if (!order) return;
+  const patient = await deps.patientRepo.findPatientById(payment.organisationId, order.patientId).catch(() => null);
+  if (patient?.email) {
+    await queueEmailToRecipients(
+      deps.notificationRepo,
+      [{ email: patient.email, displayName: patient.firstName || null }],
+      'patient_payment_confirmation',
+      {
+        firstName: patient.firstName || 'Patient',
+        amountPence: payment.amountPence,
+        currency: payment.currency,
+        orderNumber: order.orderNumber,
+        receiptHash: payment.receiptHash,
+      },
+      ['patient-payment-confirmation', payment.id, payment.receiptHash],
+      { organisationId: payment.organisationId, patientId: order.patientId, orderId: order.id },
+    );
+  }
+  const pharmacyRecipients = await listPharmacyRecipients(payment.organisationId, {
+    identityRepo: deps.identityRepo,
+    organisationRepo: deps.organisationRepo,
+  });
+  await queueEmailToRecipients(
+    deps.notificationRepo,
+    pharmacyRecipients,
+    'pharmacy_payment_received',
+    {
+      amountPence: payment.amountPence,
+      currency: payment.currency,
+      orderNumber: order.orderNumber,
+    },
+    ['pharmacy-payment-received', payment.id],
+    { organisationId: payment.organisationId, patientId: order.patientId, orderId: order.id },
+  );
 }
 
 export async function placeOrderAfterWorldpaySettlement(

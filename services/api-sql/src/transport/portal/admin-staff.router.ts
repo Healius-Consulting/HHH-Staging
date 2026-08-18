@@ -2,8 +2,10 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import { auth } from '../../bootstrap/firebase.js';
 import { portalAppOrigins } from '../../bootstrap/config.js';
+import { queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
 import { HttpError } from '../../domain/common/errors.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertPlatformScope } from '../../security/request-context.js';
@@ -66,6 +68,7 @@ function firebaseAuthErrorCode(error: unknown) {
 export function createAdminStaffRouter(): Router {
   const router = Router();
   const identityRepo = new SqlIdentityRepository();
+  const notificationRepo = new SqlNotificationRepository();
   const organisationRepo = new SqlOrganisationRepository();
 
   router.get('/portal/admin/staff', requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
@@ -153,6 +156,17 @@ export function createAdminStaffRouter(): Router {
         surface: scope.surface,
         details: { role: 'pharmacy_staff', contactRole, deliveryMode: 'firebase_client' },
       });
+      await queueEmailToRecipients(
+        notificationRepo,
+        [{ email: input.email, displayName: input.displayName }],
+        'pharmacy_staff_invite',
+        {
+          pharmacyName: organisation.tradingName || organisation.name,
+          actionLink,
+        },
+        ['pharmacy-staff-invite', user.uid, input.organisationId],
+        { organisationId: input.organisationId },
+      );
 
       res.status(201).json({
         uid: user.uid,
@@ -164,7 +178,7 @@ export function createAdminStaffRouter(): Router {
         contactRole,
         status: 'invited',
         createdAt,
-        invitationQueued: false,
+        invitationQueued: true,
         actionLink,
       });
     } catch (error) {
@@ -288,6 +302,17 @@ export function createAdminStaffRouter(): Router {
         surface: scope.surface,
         details: { role: 'hhh_admin', deliveryMode: 'firebase_client' },
       });
+      await queueEmailToRecipients(
+        notificationRepo,
+        [{ email: input.email, displayName: input.displayName }],
+        'pharmacy_staff_invite',
+        {
+          pharmacyName: 'HHH admin workspace',
+          actionLink,
+        },
+        ['platform-admin-invite', user.uid],
+        {},
+      );
 
       res.status(201).json({
         uid: user.uid,
@@ -296,7 +321,7 @@ export function createAdminStaffRouter(): Router {
         role: 'hhh_admin',
         status: 'invited',
         createdAt,
-        invitationQueued: false,
+        invitationQueued: true,
         actionLink,
       });
     } catch (error) {
@@ -340,6 +365,90 @@ export function createAdminStaffRouter(): Router {
       });
 
       res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/portal/admin/staff/:uid/password-reset-email', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const uid = staffUidSchema.parse(req.params.uid);
+      const profile = await identityRepo.findStaffUser(uid);
+      if (!profile || profile.role !== 'PHARMACY_STAFF' || !profile.organisationId) {
+        throw new HttpError(404, 'Staff account not found.', 'STAFF_NOT_FOUND');
+      }
+      const organisation = await organisationRepo.findOrganisationById(profile.organisationId);
+      if (!organisation) throw new HttpError(404, 'Pharmacy account not found.', 'NOT_FOUND');
+      const firebaseLink = await auth.generatePasswordResetLink(profile.email, {
+        url: new URL('/reset-password', portalAppOrigin()).toString(),
+        handleCodeInApp: true,
+      });
+      const actionLink = firstPartyPasswordResetLink(firebaseLink, portalAppOrigin());
+      await queueEmailToRecipients(
+        notificationRepo,
+        [{ email: profile.email, displayName: profile.displayName }],
+        'pharmacy_password_reset',
+        {
+          pharmacyName: organisation.tradingName || organisation.name,
+          actionLink,
+        },
+        ['pharmacy-password-reset', profile.uid, Date.now()],
+        { organisationId: profile.organisationId },
+      );
+      await identityRepo.appendAudit({
+        organisationId: profile.organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'staff.password_reset_queued',
+        recordType: 'StaffUser',
+        recordId: profile.uid,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+      });
+      res.status(200).json({ uid: profile.uid, email: profile.email, resetQueued: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/portal/admin/platform-admins/:uid/password-reset-email', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const uid = staffUidSchema.parse(req.params.uid);
+      const profile = await identityRepo.findStaffUser(uid);
+      if (!profile || profile.role !== 'HHH_ADMIN') {
+        throw new HttpError(404, 'Admin account not found.', 'ADMIN_NOT_FOUND');
+      }
+      const firebaseLink = await auth.generatePasswordResetLink(profile.email, {
+        url: new URL('/reset-password', portalAppOrigin()).toString(),
+        handleCodeInApp: true,
+      });
+      const actionLink = firstPartyPasswordResetLink(firebaseLink, portalAppOrigin());
+      await queueEmailToRecipients(
+        notificationRepo,
+        [{ email: profile.email, displayName: profile.displayName }],
+        'pharmacy_password_reset',
+        {
+          pharmacyName: 'HHH admin workspace',
+          actionLink,
+        },
+        ['platform-admin-password-reset', profile.uid, Date.now()],
+        {},
+      );
+      await identityRepo.appendAudit({
+        organisationId: null,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'staff.password_reset_queued',
+        recordType: 'StaffUser',
+        recordId: profile.uid,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+      });
+      res.status(200).json({ uid: profile.uid, email: profile.email, resetQueued: true });
     } catch (error) {
       next(error);
     }

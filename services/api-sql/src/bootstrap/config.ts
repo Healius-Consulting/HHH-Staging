@@ -7,6 +7,9 @@ const configSchema = z.object({
   DATA_CONNECT_SERVICE_ID: z.string().default('hhh-platform-service'),
   DATA_CONNECT_LOCATION: z.string().default('europe-west2'),
   CURALEAF_BASE_URL: z.url().default('https://api.curaleaflaboratories.dev'),
+  EMAIL_FROM_ADDRESS: z.string().email().optional(),
+  EMAIL_REPLY_TO_ADDRESS: z.string().email().optional(),
+  RESEND_API_KEY_SECRET_RESOURCE_NAME: z.string().optional(),
   IP_HASH_SECRET: z.string().optional(),
   SECURE_SESSION_COOKIES: z.string().default('true'),
   ALLOWED_ORIGINS: z.string().default(

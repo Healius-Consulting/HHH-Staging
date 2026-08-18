@@ -21,8 +21,12 @@ import {
   supplierFulfilmentStatus,
   syncSnapshotLineItemsFromPurchaseOrder,
 } from '../../application/orders/curaleaf-fulfilment.js';
+import { listPharmacyRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
 import { SqlFulfilmentRepository } from '../../repositories/sql/fulfilment.sql.js';
+import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
+import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
+import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
@@ -215,8 +219,11 @@ export function createPortalOrderRouter(): Router {
   const router = Router();
   const orderRepo = new SqlOrderRepository();
   const integrationRepo = new SqlIntegrationRepository();
+  const identityRepo = new SqlIdentityRepository();
   const paymentRepo = new SqlPaymentRepository();
   const fulfilmentRepo = new SqlFulfilmentRepository();
+  const notificationRepo = new SqlNotificationRepository();
+  const organisationRepo = new SqlOrganisationRepository();
   const patientRepo = new SqlPatientRepository();
   const patientFinanceRepo = new SqlPatientFinanceRepository();
   const patientFinanceDeps = { patientRepo, patientFinanceRepo };
@@ -363,6 +370,20 @@ export function createPortalOrderRouter(): Router {
       if (input.draftId) {
         await orderRepo.deleteDraft(input.draftId, scope.organisationId).catch(() => undefined);
       }
+
+      const pharmacyRecipients = await listPharmacyRecipients(scope.organisationId, { identityRepo, organisationRepo });
+      await queueEmailToRecipients(
+        notificationRepo,
+        pharmacyRecipients,
+        'pharmacy_order_accepted',
+        {
+          orderNumber,
+          amountPence: totalPence,
+          currency: input.currency,
+        },
+        ['pharmacy-order-accepted', result.id, orderNumber],
+        { organisationId: scope.organisationId, patientId: input.patientId, orderId: result.id },
+      );
 
       res.status(201).json({ id: result.id, orderNumber, status: 'order_submitted' });
     } catch (error) {
@@ -532,6 +553,19 @@ export function createPortalOrderRouter(): Router {
         reason: `Cancelled: ${input.reason}${input.note ? ` (${input.note})` : ''}`,
         actorUid: scope.uid,
       });
+
+      const pharmacyRecipients = await listPharmacyRecipients(scope.organisationId, { identityRepo, organisationRepo });
+      await queueEmailToRecipients(
+        notificationRepo,
+        pharmacyRecipients,
+        'pharmacy_order_cancelled',
+        {
+          orderNumber: order.orderNumber,
+          summary: `Reason: ${input.reason}${input.note ? ` (${input.note})` : ''}`,
+        },
+        ['pharmacy-order-cancelled', orderId, now],
+        { organisationId: scope.organisationId, patientId: order.patientId, orderId },
+      );
 
       res.status(200).json({ id: orderId, status: 'CANCELLED', cancelledAt: now });
     } catch (error) {
@@ -737,6 +771,19 @@ export function createPortalOrderRouter(): Router {
         });
       }
 
+      const pharmacyRecipients = await listPharmacyRecipients(scope.organisationId, { identityRepo, organisationRepo });
+      await queueEmailToRecipients(
+        notificationRepo,
+        pharmacyRecipients,
+        'pharmacy_collection_completed',
+        {
+          orderNumber: order.orderNumber,
+          summary: result.remainingOpen ? 'Partial collection completed.' : 'Collection completed.',
+        },
+        ['pharmacy-collection-completed', orderId, dispenseKey],
+        { organisationId: scope.organisationId, patientId: order.patientId, orderId },
+      );
+
       res.status(200).json({
         id: orderId,
         status: result.remainingOpen ? 'partially_collected' : 'collected',
@@ -765,6 +812,23 @@ export function createPortalOrderRouter(): Router {
         quoteSnapshot: snapshot,
         fulfilmentStatus: remainingOpen ? 'PARTIALLY_RECEIVED' : 'READY_FOR_COLLECTION',
       });
+
+      const patient = await patientRepo.findPatientById(scope.organisationId, order.patientId).catch(() => null);
+      if (patient?.email) {
+        const organisation = await organisationRepo.findOrganisationById(scope.organisationId).catch(() => null);
+        await queueEmailToRecipients(
+          notificationRepo,
+          [{ email: patient.email, displayName: patient.firstName || null }],
+          'patient_ready_for_collection',
+          {
+            firstName: patient.firstName || 'Patient',
+            orderNumber: order.orderNumber,
+            pharmacyName: organisation?.tradingName || organisation?.name || 'the pharmacy',
+          },
+          ['patient-ready-for-collection', orderId, remainingOpen ? 'partial' : 'full'],
+          { organisationId: scope.organisationId, patientId: order.patientId, orderId },
+        );
+      }
 
       res.status(200).json({ id: orderId, status: 'ready', readyAt: new Date().toISOString() });
     } catch (error) {
@@ -813,6 +877,19 @@ export function createPortalOrderRouter(): Router {
         reason: 'Order cancelled and archived for replacement',
         actorUid: scope.uid,
       });
+
+      const pharmacyRecipients = await listPharmacyRecipients(scope.organisationId, { identityRepo, organisationRepo });
+      await queueEmailToRecipients(
+        notificationRepo,
+        pharmacyRecipients,
+        'pharmacy_order_cancelled',
+        {
+          orderNumber: order.orderNumber,
+          summary: 'Order cancelled and archived for replacement.',
+        },
+        ['pharmacy-order-cancelled', orderId, 'archive'],
+        { organisationId: scope.organisationId, patientId: order.patientId, orderId },
+      );
 
       res.status(200).json({ success: true, cancelledOrderId: orderId });
     } catch (error) {

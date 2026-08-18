@@ -2,6 +2,9 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { HttpError } from '../../domain/common/errors.js';
 import { settlePaidWorldpayPayment } from '../../application/payments/worldpay-settlement.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
+import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
+import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
@@ -13,10 +16,13 @@ export function createPublicPaymentRouter(): Router {
   const paymentRepo = new SqlPaymentRepository();
   const orderRepo = new SqlOrderRepository();
   const integrationRepo = new SqlIntegrationRepository();
+  const identityRepo = new SqlIdentityRepository();
+  const notificationRepo = new SqlNotificationRepository();
+  const organisationRepo = new SqlOrganisationRepository();
   const patientRepo = new SqlPatientRepository();
   const patientFinanceRepo = new SqlPatientFinanceRepository();
   const patientFinanceDeps = { patientRepo, patientFinanceRepo };
-  const settlementDeps = { paymentRepo, orderRepo, integrationRepo, patientFinanceDeps };
+  const settlementDeps = { paymentRepo, orderRepo, integrationRepo, patientFinanceDeps, patientRepo, notificationRepo, identityRepo, organisationRepo };
 
   // GET /v1/public/payments/status - Check real-time payment clearance status
   router.get('/public/payments/status', async (req: Request, res: Response, next: NextFunction) => {
