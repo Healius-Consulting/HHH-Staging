@@ -248,11 +248,13 @@ export default function EligibilityApp() {
               <summary><span><strong>{selectedConditions.length ? `${selectedConditions.length} condition${selectedConditions.length === 1 ? '' : 's'} selected` : 'Choose conditions'}</strong><small>{selectedConditions.length ? selectedConditions.map(conditionLabel).join(', ') : 'Select up to three from the list'}</small></span><ChevronDown size={18} /></summary>
               <div className="eligibility-condition-options">
                 <div className="eligibility-condition-options__head"><strong>Choose up to three</strong><span>{selectedConditions.length}/3 selected</span></div>
-                {CONDITIONS.map(condition => {
-                  const checked = selectedConditions.includes(condition.id);
-                  const disabled = !checked && selectedConditions.length >= 3;
-                  return <label key={condition.id} className={disabled ? 'disabled' : ''}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleCondition(condition.id)} /><span>{condition.label}</span></label>;
-                })}
+                <div className="eligibility-condition-options__list" role="group" aria-label="Conditions">
+                  {CONDITIONS.map(condition => {
+                    const checked = selectedConditions.includes(condition.id);
+                    const disabled = !checked && selectedConditions.length >= 3;
+                    return <label key={condition.id} className={disabled ? 'disabled' : ''}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleCondition(condition.id)} /><span>{condition.label}</span></label>;
+                  })}
+                </div>
               </div>
             </details>
             {conditionError && <span className="eligibility-field-error" id="condition-error" role="alert">{conditionError}</span>}
