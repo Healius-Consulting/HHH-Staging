@@ -37,7 +37,7 @@ export default function FormularyPricing() {
           <span>
             <small>Curaleaf-managed catalogue</small>
             <strong>Recommended patient prices are supplied by Curaleaf and are read-only.</strong>
-            <em>Wholesale cost and stock availability are confirmed for the selected pack quantities when a quote is requested in the prescription workspace.</em>
+            <em>Wholesale cost and stock availability come from the Curaleaf quote bank when available, and are confirmed for exact pack quantities at checkout.</em>
           </span>
         </div>
         <dl className="pricing-position" aria-label="Curaleaf catalogue position">
@@ -118,8 +118,17 @@ export default function FormularyPricing() {
                 <span><strong>{product.retail > 0 ? money(product.retail) : 'Not supplied'}</strong><small>{product.retail > 0 ? 'Set by Curaleaf' : 'Awaiting Curaleaf price'}</small></span>
               </span>
               <span className="pricing-cost" role="cell">
-                <small>Order-specific</small>
-                <strong>Confirmed by quote</strong>
+                {product.cost && product.cost > 0 ? (
+                  <>
+                    <small>Quote bank</small>
+                    <strong>{money(product.cost)}</strong>
+                  </>
+                ) : (
+                  <>
+                    <small>Order-specific</small>
+                    <strong>Confirmed by quote</strong>
+                  </>
+                )}
               </span>
             </div>
           ))}

@@ -1016,3 +1016,43 @@ type MigrationOutbox @table {
   createdAt: Timestamp! @default(expr: "request.time")
 }
 
+enum CuraleafQuoteBankSource {
+  DAILY_REFRESH
+  LIVE_QUOTE
+}
+
+enum CuraleafStockStatus {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+}
+
+type CuraleafQuoteBankEntry @table(key: ["organisationId", "packId"]) {
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  connection: IntegrationConnection! @ref(fields: "connectionId")
+  connectionId: UUID! @index
+  packId: String!
+  formulaId: String
+  quotedQuantity: Int! @default(value: 1)
+  wholesalePackPricePence: Int64!
+  patientPackPricePence: Int64!
+  inStock: Boolean!
+  stockStatus: CuraleafStockStatus
+  source: CuraleafQuoteBankSource!
+  quotedAt: Timestamp!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type CuraleafQuoteBankSync @table(key: ["connectionId"]) {
+  organisation: Organisation! @ref(fields: "organisationId")
+  organisationId: UUID! @index
+  connection: IntegrationConnection! @ref(fields: "connectionId")
+  connectionId: UUID!
+  lastDailyRefreshAt: Timestamp
+  packCount: Int! @default(value: 0)
+  lastError: String
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+

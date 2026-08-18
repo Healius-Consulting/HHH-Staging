@@ -208,6 +208,10 @@ export interface CuraleafProduct {
   patientPackPrice: string;
   quantity: number;
   state: string;
+  wholesalePackPrice?: string;
+  quoteBankInStock?: boolean;
+  quoteBankStockStatus?: 'in_stock' | 'low_stock' | 'out_of_stock';
+  quoteBankQuotedAt?: string;
 }
 
 export interface CuraleafCatalogue {
@@ -217,6 +221,8 @@ export interface CuraleafCatalogue {
   products: CuraleafProduct[];
   formulaTotal: number;
   productTotal: number;
+  quoteBankUpdatedAt?: string | null;
+  quoteBankPackCount?: number;
 }
 
 export type CuraleafDevCatalogue = CuraleafCatalogue;

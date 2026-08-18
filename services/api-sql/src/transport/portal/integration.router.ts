@@ -2,7 +2,12 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { fetchCuraleafCatalogue, fetchCuraleafQuote, fetchCuraleafActivity, curaleafApiRequest } from '../../application/integrations/curaleaf.service.js';
+import {
+  mergeQuoteBankIntoCatalogue,
+  upsertCuraleafQuoteBankFromQuote,
+} from '../../application/integrations/curaleaf-quote-bank.service.js';
 import type { IntegrationName } from '../../repositories/ports/integration.port.js';
+import { SqlCuraleafQuoteBankRepository } from '../../repositories/sql/curaleaf-quote-bank.sql.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { requireStaff } from '../../security/require-staff.js';
@@ -36,6 +41,7 @@ export async function authorisedOrganisationId(
 export function createPortalIntegrationRouter(): Router {
   const router = Router();
   const integrationRepo = new SqlIntegrationRepository();
+  const quoteBankRepo = new SqlCuraleafQuoteBankRepository();
   const organisationRepo = new SqlOrganisationRepository();
 
   const status = (integration: IntegrationName) => async (req: Request, res: Response, next: NextFunction) => {
@@ -98,8 +104,12 @@ export function createPortalIntegrationRouter(): Router {
         throw new HttpError(503, 'Curaleaf is not connected for this pharmacy.', 'INTEGRATION_NOT_CONNECTED');
       }
       const catalogue = await fetchCuraleafCatalogue(connection);
+      const quoteBank = await quoteBankRepo.listEntries(organisationId);
       res.setHeader('Cache-Control', 'private, max-age=300');
-      res.status(200).json(catalogue);
+      res.status(200).json(mergeQuoteBankIntoCatalogue(
+        catalogue as { products: Array<Record<string, unknown>>; fetchedAt: string; [key: string]: unknown },
+        quoteBank,
+      ));
     } catch (error) { next(error); }
   };
 
@@ -124,6 +134,11 @@ export function createPortalIntegrationRouter(): Router {
       }
 
       const quote = await fetchCuraleafQuote(connection, input.items);
+      try {
+        await upsertCuraleafQuoteBankFromQuote(connection, quote, 'LIVE_QUOTE', quoteBankRepo);
+      } catch (error) {
+        console.warn('[Curaleaf] Quote bank upsert failed after live quote:', error);
+      }
       res.status(200).json(quote);
     } catch (error) { next(error); }
   };
