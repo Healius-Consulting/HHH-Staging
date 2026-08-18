@@ -38,3 +38,4 @@ dist-ssr
 .env*
 output/
 tmp/
+docs/platform-cost-brief.html
