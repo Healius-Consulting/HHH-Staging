@@ -1106,10 +1106,16 @@ function OrderListRow({ record, selected, now, onSelect }: { record: OrderRecord
   const cancellationResolution = orderCancellationResolution(record.order);
   const isCancellation = cancellationResolution !== 'none';
   return (
-    <button type="button" className={`order-crm-row${meta.tone === 'partial' ? ' order-crm-row--partial' : ''}${isCancellation ? ` order-crm-row--cancelled order-crm-row--${cancellationResolution}` : ''}${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={onSelect}>
+    <button
+      type="button"
+      className={`order-crm-row${meta.tone === 'partial' ? ' order-crm-row--partial' : ''}${isCancellation ? ` order-crm-row--cancelled order-crm-row--${cancellationResolution}` : ''}${selected ? ' selected' : ''}`}
+      aria-pressed={selected}
+      title={meta.description}
+      onClick={onSelect}
+    >
       <span className={`order-crm-row__stage order-tone--${meta.tone}`}><Icon size={15} /></span>
       <span className="order-crm-row__identity"><strong title={patientName}>{compactPatientName(patientName)}</strong><small>{record.order.redoContext ? 'Replacement' : 'Order'} {orderReference(record.order)} · {record.order.prescriptions.length} Rx</small></span>
-      <span className="order-crm-row__position"><strong>{money(record.order.payment.amount)}</strong><small>{shipmentListCopy(record, now) ?? formatDate(record.order.date)}</small></span>
+      <span className="order-crm-row__position"><strong>{money(record.order.payment.amount)}</strong><small>{formatDate(record.order.date)}</small></span>
       <span className={`order-stage-pill order-tone--${meta.tone}`}>{meta.label}</span>
     </button>
   );
@@ -1777,34 +1783,6 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
       </div>
     </div>
   );
-}
-
-function shipmentListCopy(record: OrderRecord, now: Date) {
-  const split = orderSplitPackSnapshot(record.order);
-  const isSplit = orderIsSplitFulfilment(record.order);
-  const guidance = deliveryGuidanceForOrder(record.order);
-
-  if (isSplit && orderHasInTransitPacks(record.order)) {
-    const eta = guidance ? formatDeliveryDate(guidance.windowEnd) : null;
-    const overdue = guidance ? londonDateKey(now) > guidance.windowEnd : false;
-    if (overdue && eta) return `${split.inTransit} of ${split.total} packs overdue · expected ${eta}`;
-    if (eta) return `${split.inTransit} of ${split.total} packs in transit · expected ${eta}`;
-    return `${split.inTransit} of ${split.total} packs in transit`;
-  }
-
-  if (isSplit && orderHasUncollectedReceivedPacks(record.order)) {
-    return `${split.atPharmacy} pack(s) ready for handout · ${split.withCuraleaf + split.inTransit} outstanding`;
-  }
-
-  if (isSplit && split.withCuraleaf > 0) {
-    return `${split.withCuraleaf} pack(s) with Curaleaf · first consignment complete`;
-  }
-
-  if (record.stage !== 'dispatched') return null;
-  if (!guidance) return null;
-  return londonDateKey(now) > guidance.windowEnd
-    ? `Expected by ${formatDeliveryDate(guidance.windowEnd)} — not received?`
-    : `Dispatched · expected by ${formatDeliveryDate(guidance.windowEnd)}`;
 }
 
 function collapsedActionCopy(stage: OrderStage) {

@@ -10755,11 +10755,12 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-crm-row{
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;
-  gap: 8px 9px;
+  grid-template-rows: auto auto;
+  gap: 6px 9px;
   width: 100%;
-  min-height: 94px;
-  align-items: center;
-  padding: 11px 12px;
+  min-height: 0;
+  align-items: start;
+  padding: 10px 12px 11px;
   border: 0;
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
@@ -10781,14 +10782,14 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .order-crm-row--cancelled{ min-height: 82px; }
 .order-crm-row--refunded.selected{ background: color-mix(in srgb, var(--info-500) 13%, var(--bg-surface)); box-shadow: inset 3px 0 0 var(--info-500); }
 .order-crm-row--resolved.selected{ background: color-mix(in srgb, var(--color-success) 10%, var(--bg-surface)); box-shadow: inset 3px 0 0 var(--color-success); }
-.order-crm-row__stage{ display: grid; width: 31px; height: 31px; place-items: center; border-radius: 7px; }
+.order-crm-row__stage{ display: grid; width: 31px; height: 31px; place-items: center; border-radius: 7px; margin-top: 1px; }
 .order-crm-row__identity, .order-crm-row__position{ min-width: 0; }
 .order-crm-row__identity strong, .order-crm-row__identity small, .order-crm-row__position strong, .order-crm-row__position small{ display: block; }
 .order-crm-row__identity strong{ overflow: hidden; color: var(--text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.order-crm-row__identity small, .order-crm-row__position small{ margin-top: 3px; color: var(--text-tertiary); font-size: 9px; }
-.order-crm-row__position{ text-align: right; }
+.order-crm-row__identity small, .order-crm-row__position small{ margin-top: 2px; color: var(--text-tertiary); font-size: 9px; line-height: 1.35; white-space: nowrap; }
+.order-crm-row__position{ text-align: right; padding-top: 1px; }
 .order-crm-row__position strong{ color: var(--text-primary); font-size: 12px; }
-.order-crm-row > .order-stage-pill{ grid-column: 2 / -1; justify-self: start; }
+.order-crm-row > .order-stage-pill{ grid-column: 2 / -1; justify-self: start; margin-top: 1px; }
 
 .order-stage-pill{
   display: inline-flex;
