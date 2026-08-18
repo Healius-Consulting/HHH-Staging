@@ -39,6 +39,20 @@ export function stampCuraleafPrescriptionOnSnapshot(
   const prescriptionId = input.prescriptionId || (typeof prior.prescriptionId === 'string' ? prior.prescriptionId : null);
   const prescriberId = input.prescriberId || (typeof prior.prescriberId === 'string' ? prior.prescriberId : null);
   const purchaseOrder = input.purchaseOrder && typeof input.purchaseOrder === 'object' ? input.purchaseOrder : null;
+  if (String(prior.purchaseOrderState || prior.state || '').toUpperCase() === 'CANCELLED') {
+    return {
+      ...root,
+      quoteReview: null,
+      curaleaf: {
+        ...prior,
+        status: 'prescription_closed',
+        purchaseOrderState: 'CANCELLED',
+        state: 'CANCELLED',
+        prescriptionId,
+        prescriberId,
+      },
+    };
+  }
   const hasPurchaseOrder = Boolean(purchaseOrder?.id || purchaseOrder?.purchaseOrderId);
   const prescriptionState = asCuraleafPrescriptionState(input.prescriptionState)
     ?? asCuraleafPrescriptionState(prior.prescriptionState)

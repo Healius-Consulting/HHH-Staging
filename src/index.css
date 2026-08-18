@@ -11041,7 +11041,74 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   border-left: 3px solid currentColor;
 }
 .order-crm-alert--danger{ color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 7%, var(--bg-surface)); }
+.order-crm-alert--warning{ color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 8%, var(--bg-surface)); }
 .order-crm-alert--neutral{ color: var(--text-secondary); background: var(--bg-elevated); }
+
+.quote-review-panel{
+  margin: 14px 16px 0;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 28%, var(--border));
+  border-radius: 9px;
+  background: var(--bg-surface);
+}
+.quote-review-panel__header{
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 13px;
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 7%, var(--bg-surface));
+  border-bottom: 1px solid var(--border);
+}
+.quote-review-panel__header small,
+.quote-review-panel__header strong,
+.quote-review-panel__header em{ display: block; }
+.quote-review-panel__header small{
+  color: var(--text-tertiary);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.quote-review-panel__header strong{ margin-top: 2px; color: var(--text-primary); font-size: 12px; }
+.quote-review-panel__header em{ margin-top: 4px; color: var(--text-secondary); font-size: 10px; font-style: normal; line-height: 1.45; }
+.quote-review-panel__diffs{
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.quote-review-panel__diffs li{
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+}
+.quote-review-panel__diffs strong{ color: var(--text-primary); font-size: 11px; }
+.quote-review-panel__diffs small{ color: var(--text-secondary); font-size: 10px; }
+.quote-review-panel__actions,
+.quote-review-panel__waiting{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 13px;
+}
+.quote-review-panel__waiting{ align-items: flex-start; }
+.quote-review-panel__waiting > span{ flex: 1; min-width: 180px; }
+.quote-review-panel__waiting strong,
+.quote-review-panel__waiting small{ display: block; }
+.quote-review-panel__waiting strong{ font-size: 11px; color: var(--text-primary); }
+.quote-review-panel__waiting small{ margin-top: 3px; font-size: 10px; color: var(--text-secondary); line-height: 1.45; }
+.quote-review-panel__waiting label{ display: grid; gap: 5px; flex: 1 1 220px; color: var(--text-secondary); font-size: 10px; font-weight: 650; }
+.quote-review-panel__actions .btn,
+.quote-review-panel__waiting .btn,
+.curaleaf-call-modal__footer .btn{ min-height: 44px; }
+@media (max-width: 720px){
+  .quote-review-panel__actions .btn,
+  .quote-review-panel__waiting .btn{ width: 100%; }
+}
 .order-crm-alert strong, .order-crm-alert small, .order-crm-next-action strong, .order-crm-next-action small{ display: block; }
 .order-crm-alert strong, .order-crm-next-action strong{ font-size: 11px; }
 .order-crm-alert small, .order-crm-next-action small{ margin-top: 3px; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }

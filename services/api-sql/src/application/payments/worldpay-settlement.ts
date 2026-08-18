@@ -1,4 +1,5 @@
 import { executeCuraleafOrderPlacement } from '../integrations/curaleaf.service.js';
+import { curaleafCancellationBlocksPlacement } from '../orders/quote-review.js';
 import { persistCuraleafPrescriptionIdentity } from '../prescriptions/curaleaf-prescription-record.js';
 import { promotePatientAfterCuraleafPlacement } from '../patient-finance/patient-finance.js';
 import type { PatientFinanceDeps } from '../patient-finance/patient-finance.js';
@@ -94,6 +95,30 @@ export async function placeOrderAfterWorldpaySettlement(
 ) {
   const order = await deps.orderRepo.findOrderById(payment.orderId, payment.organisationId);
   if (!order) return null;
+
+  const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
+  if (curaleafCancellationBlocksPlacement(order.quoteSnapshot) || order.status === 'CANCELLED') {
+    return null;
+  }
+  const review = snapshot.quoteReview && typeof snapshot.quoteReview === 'object' ? snapshot.quoteReview as Record<string, any> : null;
+  if (review?.status === 'awaiting_top_up' && (review.topUpPaymentId === payment.id || payment.amountPence === review.patientDeltaPence)) {
+    const approved = {
+      ...snapshot,
+      quoteReview: {
+        ...review,
+        status: 'approved',
+        approvedAt: new Date().toISOString(),
+        approvedFingerprint: review.fingerprint,
+      },
+    };
+    await deps.orderRepo.updateQuoteSnapshot({
+      id: order.id,
+      organisationId: order.organisationId,
+      quoteSnapshot: approved,
+      fulfilmentStatus: 'SUPPLIER_PENDING',
+    });
+    order.quoteSnapshot = approved;
+  }
 
   const connection = await deps.integrationRepo.findConnection(payment.organisationId, 'CURALEAF').catch(() => null);
   let curaleafResult: Awaited<ReturnType<typeof executeCuraleafOrderPlacement>> | null = null;

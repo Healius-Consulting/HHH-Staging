@@ -244,7 +244,7 @@ function unresolvedOrderReason(order: PatientOrder, now: Date): UnresolvedOrderR
   if (order.unresolvedReason === 'expired' || order.unresolvedReason === 'rejected' || order.unresolvedReason === 'cancelled') return order.unresolvedReason;
   if (order.redoEligible === false) return null;
   if (order.cancellation?.status === 'refund_required' || order.cancellation?.status === 'confirmed' || order.prescriptions.some(rx => rx.status === 'cancelled' || rx.purchaseOrderState === 'CANCELLED')) return 'cancelled';
-  if (order.quoteReview?.status === 'recreate_required' || order.quoteReview) return 'rejected';
+  if (order.quoteReview?.status === 'recreate_required') return 'rejected';
   if (order.lifecycleStatus === 'archived' || order.isExpired) return 'expired';
   const entryDate = new Date(order.date);
   const expiryDate = order.cycleExpiresAt ? new Date(order.cycleExpiresAt) : (() => {
@@ -259,7 +259,8 @@ export function orderStage(order: PatientOrder, now = new Date()): { stage: Orde
   const unresolvedReason = unresolvedOrderReason(order, now);
   if (order.lifecycleStatus === 'cancelled') return { stage: 'cancelled', unresolvedReason };
   if (unresolvedReason === 'expired' || order.unresolvedReason === 'expired' || order.lifecycleStatus === 'archived' || order.isExpired) return { stage: 'archived', unresolvedReason };
-  if (unresolvedReason === 'rejected' || order.unresolvedReason === 'rejected' || order.quoteReview) return { stage: 'rejected', unresolvedReason };
+  if (unresolvedReason === 'rejected' || order.unresolvedReason === 'rejected') return { stage: 'rejected', unresolvedReason };
+  if (unresolvedReason === 'cancelled') return { stage: 'cancelled', unresolvedReason };
   if (order.payment.status === 'sent') return { stage: 'awaiting-payment', unresolvedReason };
 
   const statuses = order.prescriptions.map(prescription => prescription.status);

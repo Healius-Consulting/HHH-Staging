@@ -1,7 +1,16 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
-import { curaleafApiRequest, executeCuraleafOrderPlacement, fetchCuraleafPurchaseOrders, fetchCuraleafShipments } from '../../application/integrations/curaleaf.service.js';
+import { curaleafApiRequest, executeCuraleafOrderPlacement, fetchCuraleafPurchaseOrders, fetchCuraleafShipments, fetchCuraleafQuote } from '../../application/integrations/curaleaf.service.js';
+import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
+import { stampCuraleafCancellationOnSnapshot } from '../../application/integrations/curaleaf-events.js';
+import {
+  curaleafCancellationBlocksPlacement,
+  evaluateQuoteReview,
+  readQuoteReview,
+  stampQuoteReviewOnSnapshot,
+  supplierOrderCancelled,
+} from '../../application/orders/quote-review.js';
 import {
   assertPatientEligibleForOrder,
   promotePatientAfterCuraleafPlacement,
@@ -129,6 +138,39 @@ async function attachCuraleafToOrder(
       Object.values(snapshot.prescriptionFlow || {}).flatMap((flow: any) => Array.isArray(flow?.lines) ? flow.lines : []),
     ),
   });
+  const liveCancelled = String(matchedPO?.state || matchedPO?.purchaseOrderState || '').toUpperCase() === 'CANCELLED';
+  const snapshotCancelled = supplierOrderCancelled(snapshot);
+  if (snapshotCancelled && !liveCancelled) {
+    return toPortalOrder(order as any);
+  }
+  if (liveCancelled || snapshotCancelled) {
+    const nextSnapshot = stampCuraleafCancellationOnSnapshot(alignedSnapshot, {
+      action: 'confirmed',
+      purchaseOrderId: String(matchedPO?.id || prior.purchaseOrderId || prior.id || ''),
+      prescriptionId: typeof prior.prescriptionId === 'string' ? prior.prescriptionId : typeof matchedPO?.prescriptionId === 'string' ? matchedPO.prescriptionId : null,
+      prescriptionState: String(prior.prescriptionState || matchedPO?.prescriptionState || '') === 'CANCELLED' ? 'CANCELLED' : undefined,
+      reference: 'curaleaf_po_cancelled',
+      note: 'Curaleaf cancelled the purchase order after pharmacy contact.',
+    });
+    const nextCuraleaf = {
+      ...((nextSnapshot as { curaleaf?: Record<string, unknown> }).curaleaf || {}),
+      prescriptionId: prior.prescriptionId || matchedPO?.prescriptionId || null,
+      prescriberId: prior.prescriberId || matchedPO?.prescriberId || null,
+    };
+    const persisted = { ...(nextSnapshot as Record<string, unknown>), curaleaf: nextCuraleaf };
+    if (repos) {
+      await repos.orderRepo.updateQuoteSnapshot({
+        id: order.id,
+        organisationId: order.organisationId,
+        quoteSnapshot: persisted,
+        fulfilmentStatus: 'EXCEPTION',
+      }).catch(err => console.warn('Curaleaf cancelled snapshot persist warning:', err));
+      order.fulfilmentStatus = 'EXCEPTION';
+      order.quoteSnapshot = persisted;
+    }
+    return toPortalOrder(order as any);
+  }
+
   const curaleaf = matchedPO || (priorValid && liveShipments.length)
     ? {
       ...(livePo || {}),
@@ -464,6 +506,9 @@ export function createPortalOrderRouter(): Router {
       if (order.paymentStatus !== 'PAID' && !order.paidAt) {
         throw new HttpError(409, 'Order must be paid before placing with Curaleaf.', 'ORDER_NOT_PAID');
       }
+      if (curaleafCancellationBlocksPlacement(order.quoteSnapshot)) {
+        throw new HttpError(409, 'This Curaleaf order was cancelled.', 'CURALEAF_ORDER_CANCELLED');
+      }
 
       await orderRepo.updateOrderStatus({
         id: orderId,
@@ -521,6 +566,220 @@ export function createPortalOrderRouter(): Router {
     }
   });
 
+  router.post('/portal/orders/:id/cancellations', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const input = z.object({
+        organisationId: z.string().optional(),
+        reason: z.enum(['added_in_error', 'patient_request', 'other']),
+        note: z.string().max(1000).optional(),
+      }).parse(req.body);
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      const snapshotRoot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
+      const curaleaf = snapshotRoot.curaleaf && typeof snapshotRoot.curaleaf === 'object' ? snapshotRoot.curaleaf : {};
+      const hasRockyOrder = Boolean(curaleaf.purchaseOrderId || curaleaf.id || curaleaf.prescriptionId || supplierOrderCancelled(order.quoteSnapshot));
+      const snapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+        action: supplierOrderCancelled(order.quoteSnapshot) || !hasRockyOrder ? 'confirmed' : 'requested',
+        reason: input.reason,
+        note: input.note,
+        actorUid: scope.uid,
+      });
+      const exception = hasRockyOrder || order.paymentStatus === 'PAID' || supplierOrderCancelled(snapshot);
+      await orderRepo.updateQuoteSnapshot({
+        id: orderId,
+        organisationId: scope.organisationId,
+        quoteSnapshot: snapshot,
+        fulfilmentStatus: exception ? 'EXCEPTION' : undefined,
+      });
+      if (!hasRockyOrder && order.paymentStatus !== 'PAID') {
+        await orderRepo.updateOrderStatus({
+          id: orderId,
+          organisationId: scope.organisationId,
+          status: 'CANCELLED',
+          cancelledAt: new Date().toISOString(),
+        });
+      }
+      const mapped = toPortalOrder({ ...order, quoteSnapshot: snapshot, fulfilmentStatus: exception ? 'EXCEPTION' : order.fulfilmentStatus } as any);
+      res.status(201).json(mapped);
+    } catch (error) { next(error); }
+  });
+
+  router.post('/portal/orders/:id/quote-review/resolve', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const orderId = String(req.params.id || '');
+      const input = z.object({
+        organisationId: z.string().optional(),
+        action: z.enum(['absorb', 'continue_as_fee', 'request_top_up', 'request_refund', 'refresh']),
+      }).parse(req.body);
+      const order = await orderRepo.findOrderById(orderId, scope.organisationId);
+      if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      if (curaleafCancellationBlocksPlacement(order.quoteSnapshot)) {
+        throw new HttpError(409, 'This Curaleaf purchase order was cancelled.', 'CURALEAF_ORDER_CANCELLED');
+      }
+      const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
+      const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
+      const review = readQuoteReview(snapshot);
+      const now = new Date().toISOString();
+      const lineItems = Array.isArray(snapshot.lineItems) ? snapshot.lineItems as Array<Record<string, unknown>> : [];
+      const quoteItems = lineItems.map(item => ({
+        packId: String(item.packId || item.productId || ''),
+        quantity: Number(item.quantity || item.count || 1),
+      })).filter(item => item.packId && item.quantity > 0);
+
+      const persistAndMaybePlace = async (nextSnapshot: unknown, extra?: { dispensingFeePence?: number; place?: boolean }) => {
+        await orderRepo.updateQuoteSnapshot({
+          id: orderId,
+          organisationId: scope.organisationId,
+          quoteSnapshot: nextSnapshot,
+          fulfilmentStatus: 'SUPPLIER_PENDING',
+          dispensingFeePence: extra?.dispensingFeePence,
+        });
+        let placement = null;
+        if (extra?.place && connection?.secretResourceName) {
+          placement = await executeCuraleafOrderPlacement(connection, {
+            ...order,
+            quoteSnapshot: nextSnapshot,
+            paymentStatus: 'PAID',
+            paidAt: order.paidAt,
+            status: 'PROCESSING',
+          });
+        }
+        const latest = await orderRepo.findOrderById(orderId, scope.organisationId);
+        return { order: latest, placement };
+      };
+
+      if (input.action === 'refresh') {
+        if (!connection?.secretResourceName || !quoteItems.length) throw new HttpError(409, 'A live Curaleaf quote is required.', 'QUOTE_UNAVAILABLE');
+        const latestQuote = await fetchCuraleafQuote(connection, quoteItems);
+        const decision = evaluateQuoteReview({ snapshot, latestRaw: latestQuote, now });
+        if (!decision.hold) {
+          const approved = stampQuoteReviewOnSnapshot(snapshot, {
+            status: 'approved',
+            type: review?.type || 'supplier_cost_changed',
+            fingerprint: decision.fingerprint,
+            latestQuote,
+            differences: [],
+            patientDeltaPence: 0,
+            checkedAt: now,
+            approvedAt: now,
+            approvedFingerprint: decision.fingerprint,
+          });
+          const result = await persistAndMaybePlace(approved, { place: true });
+          res.status(200).json({ action: 'refresh', placed: Boolean(result.placement && 'purchaseOrder' in result.placement && result.placement.purchaseOrder), order: toPortalOrder(result.order as any) });
+          return;
+        }
+        const held = stampQuoteReviewOnSnapshot(snapshot, decision.review);
+        const result = await persistAndMaybePlace(held);
+        res.status(200).json({ action: 'refresh', placed: false, order: toPortalOrder(result.order as any) });
+        return;
+      }
+
+      if (!review || (review.status !== 'required' && review.status !== 'awaiting_top_up' && review.status !== 'awaiting_refund')) {
+        throw new HttpError(409, 'This order is not waiting on quote review.', 'QUOTE_REVIEW_NOT_REQUIRED');
+      }
+
+      if (input.action === 'absorb') {
+        if (review.type === 'out_of_stock') throw new HttpError(409, 'Out-of-stock lines cannot be absorbed.', 'STOCK_HOLD');
+        const approved = stampQuoteReviewOnSnapshot({
+          ...snapshot,
+          pharmacyContributionPence: Math.max(0, review.patientDeltaPence),
+        }, {
+          ...review,
+          status: 'approved',
+          approvedAt: now,
+          approvedFingerprint: review.fingerprint,
+          pharmacyContributionPence: Math.max(0, review.patientDeltaPence),
+        });
+        const result = await persistAndMaybePlace(approved, { place: true });
+        res.status(200).json({ action: 'absorb', order: toPortalOrder(result.order as any) });
+        return;
+      }
+
+      if (input.action === 'continue_as_fee') {
+        if (review.type !== 'patient_price_changed' || review.patientDeltaPence >= 0) {
+          throw new HttpError(409, 'Continue as fee is only for a patient-price drop.', 'QUOTE_REVIEW_ACTION');
+        }
+        const extraFee = Math.abs(review.patientDeltaPence);
+        const approved = stampQuoteReviewOnSnapshot(snapshot, {
+          ...review,
+          status: 'approved',
+          approvedAt: now,
+          approvedFingerprint: review.fingerprint,
+        });
+        const result = await persistAndMaybePlace(approved, {
+          dispensingFeePence: Number(order.dispensingFeePence || 0) + extraFee,
+          place: true,
+        });
+        res.status(200).json({ action: 'continue_as_fee', order: toPortalOrder(result.order as any) });
+        return;
+      }
+
+      if (input.action === 'request_top_up') {
+        if (review.patientDeltaPence <= 0) throw new HttpError(409, 'A top-up is only for a patient-price increase.', 'QUOTE_REVIEW_ACTION');
+        const worldpay = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY').catch(() => null);
+        const transactionReference = `WP-TOPUP-${Date.now().toString(36).toUpperCase()}`;
+        const session = await createWorldpayHostedSession(worldpay, scope.organisationId, {
+          orderNumber: order.orderNumber || orderId,
+          transactionReference,
+          amountPence: review.patientDeltaPence,
+          currency: order.currency || 'GBP',
+          statementNarrative: (order.orderNumber || 'HHH').slice(0, 24),
+          successUrl: `https://holistichealthhub.cc/payment/success?ref=${encodeURIComponent(transactionReference)}`,
+          cancelUrl: `https://holistichealthhub.cc/payment/cancelled?ref=${encodeURIComponent(transactionReference)}`,
+        });
+        const payment = await paymentRepo.createPayment({
+          organisationId: scope.organisationId,
+          orderId,
+          patientId: order.patientId,
+          status: 'PENDING',
+          amountPence: review.patientDeltaPence,
+          currency: order.currency || 'GBP',
+          route: 'WORLDPAY',
+          transactionReference: session.transactionReference,
+          hostedPaymentUrl: session.url,
+        });
+        const waiting = stampQuoteReviewOnSnapshot(snapshot, {
+          ...review,
+          status: 'awaiting_top_up',
+          topUpPaymentId: payment.id,
+          hostedPaymentUrl: session.url,
+        });
+        await persistAndMaybePlace(waiting);
+        res.status(200).json({
+          action: 'request_top_up',
+          paymentUrl: session.url,
+          amountPence: review.patientDeltaPence,
+          order: toPortalOrder({ ...order, quoteSnapshot: waiting } as any),
+        });
+        return;
+      }
+
+      if (input.action === 'request_refund') {
+        if (review.patientDeltaPence >= 0) throw new HttpError(409, 'A difference refund is only for a patient-price drop.', 'QUOTE_REVIEW_ACTION');
+        const refundId = `qref-${Date.now().toString(36)}`;
+        const waiting = stampQuoteReviewOnSnapshot({
+          ...snapshot,
+          refund: {
+            id: refundId,
+            status: 'pending_confirmation',
+            amountPence: Math.abs(review.patientDeltaPence),
+            kind: 'quote_difference',
+            requestedAt: now,
+            requestedBy: scope.uid,
+          },
+        }, { ...review, status: 'awaiting_refund', refundId, refundAmountPence: Math.abs(review.patientDeltaPence) });
+        const result = await persistAndMaybePlace(waiting);
+        res.status(200).json({ action: 'request_refund', refundId, order: toPortalOrder(result.order as any) });
+        return;
+      }
+
+      throw new HttpError(400, 'Unsupported quote review action.', 'QUOTE_REVIEW_ACTION');
+    } catch (error) { next(error); }
+  });
+
   // POST /v1/portal/orders/:id/curaleaf-cancellation - Record Curaleaf order cancellation
   router.post('/portal/orders/:id/curaleaf-cancellation', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -528,8 +787,10 @@ export function createPortalOrderRouter(): Router {
       const orderId = String(req.params.id || '');
       const input = z.object({
         organisationId: z.string().optional(),
-        reason: z.string().min(1).max(255),
+        action: z.enum(['contacted', 'confirmed']).default('contacted'),
+        reference: z.string().trim().min(3).max(160).optional(),
         note: z.string().max(1000).optional(),
+        reason: z.string().min(1).max(255).optional(),
       }).parse(req.body);
 
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
@@ -537,41 +798,22 @@ export function createPortalOrderRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const now = new Date().toISOString();
-      await orderRepo.updateOrderStatus({
-        id: orderId,
-        organisationId: scope.organisationId,
-        status: 'CANCELLED',
-        cancelledAt: now,
-      });
-
-      await purgeOrderPrescriptionFiles(scope.organisationId, order.quoteSnapshot).catch(error =>
-        console.warn('[Prescription file] Purge after cancellation note:', error),
-      );
-
-      await orderRepo.appendPlacementEvent({
-        organisationId: scope.organisationId,
-        orderId,
-        fromState: 'PENDING_PLACEMENT',
-        toState: 'CANCELLED_REFUNDED',
-        reason: `Cancelled: ${input.reason}${input.note ? ` (${input.note})` : ''}`,
+      const snapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+        action: input.action,
+        reference: input.reference || input.reason || 'curaleaf_contact',
+        note: input.note,
         actorUid: scope.uid,
       });
-
-      const pharmacyRecipients = await listPharmacyRecipients(scope.organisationId, { identityRepo, organisationRepo });
-      await queueEmailToRecipients(
-        notificationRepo,
-        pharmacyRecipients,
-        'pharmacy_order_cancelled',
-        {
-          orderNumber: order.orderNumber,
-          summary: `Reason: ${input.reason}${input.note ? ` (${input.note})` : ''}`,
-        },
-        ['pharmacy-order-cancelled', orderId, now],
-        { organisationId: scope.organisationId, patientId: order.patientId, orderId },
-      );
-
-      res.status(200).json({ id: orderId, status: 'CANCELLED', cancelledAt: now });
+      await orderRepo.updateQuoteSnapshot({
+        id: orderId,
+        organisationId: scope.organisationId,
+        quoteSnapshot: snapshot,
+        fulfilmentStatus: input.action === 'confirmed' || supplierOrderCancelled(snapshot)
+          ? 'EXCEPTION'
+          : undefined,
+      });
+      const latest = await orderRepo.findOrderById(orderId, scope.organisationId);
+      res.status(200).json(toPortalOrder(latest as any));
     } catch (error) {
       next(error);
     }
@@ -675,7 +917,58 @@ export function createPortalOrderRouter(): Router {
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
 
+      const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
+      const review = readQuoteReview(snapshot);
+      const quoteDifference = snapshot.refund?.kind === 'quote_difference' || review?.status === 'awaiting_refund';
       const now = new Date().toISOString();
+
+      if (quoteDifference) {
+        if (curaleafCancellationBlocksPlacement(order.quoteSnapshot)) {
+          throw new HttpError(409, 'This Curaleaf order was cancelled. Record the paid-order refund instead of a quote-difference refund.', 'CURALEAF_ORDER_CANCELLED');
+        }
+        const approved = stampQuoteReviewOnSnapshot({
+          ...snapshot,
+          refund: {
+            ...(snapshot.refund || {}),
+            id: refundId,
+            status: 'completed',
+            externalReference: input.externalReference,
+            confirmedAt: now,
+            confirmedBy: scope.uid,
+          },
+        }, review ? {
+          ...review,
+          status: 'approved',
+          approvedAt: now,
+          approvedFingerprint: review.fingerprint,
+        } : null);
+        await orderRepo.updateQuoteSnapshot({
+          id: orderId,
+          organisationId: scope.organisationId,
+          quoteSnapshot: approved,
+          fulfilmentStatus: 'SUPPLIER_PENDING',
+        });
+        const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
+        if (connection?.secretResourceName) {
+          await executeCuraleafOrderPlacement(connection, {
+            ...order,
+            quoteSnapshot: approved,
+            paymentStatus: 'PAID',
+            paidAt: order.paidAt,
+            status: 'PROCESSING',
+          });
+        }
+        res.status(200).json({
+          id: refundId,
+          status: 'completed',
+          amountPence: Number(snapshot.refund?.amountPence || review?.refundAmountPence || 0),
+          externalReference: input.externalReference,
+          confirmedAt: now,
+          kind: 'quote_difference',
+        });
+        return;
+      }
+
       await paymentRepo.updatePaymentStatus(orderId, 'CANCELLED', orderId);
       await orderRepo.updateOrderStatus({
         id: orderId,

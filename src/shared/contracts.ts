@@ -572,7 +572,7 @@ export interface PortalOrderRecord {
   archivedReason?: string;
   cycleStartedAt?: string;
   cycleExpiresAt?: string;
-  unresolvedReason?: 'expired' | 'rejected' | null;
+  unresolvedReason?: 'expired' | 'rejected' | 'cancelled' | null;
   redoEligible?: boolean;
   redoneByOrderId?: string | null;
   redoOfOrderId?: string | null;
@@ -591,14 +591,18 @@ export interface PortalOrderRecord {
   expiryCheck?: ExpiryCheckState;
   pricingQuote?: CuraleafPricingSnapshot;
   quoteReview?: {
-    status: 'required' | 'approved' | 'recreate_required';
+    status: 'required' | 'approved' | 'recreate_required' | 'awaiting_top_up' | 'awaiting_refund';
     type: 'out_of_stock' | 'patient_price_changed' | 'supplier_cost_changed';
     fingerprint: string;
     latestQuote: CuraleafQuote;
     differences: Array<{ category: 'stock' | 'patient_price' | 'supplier_cost'; field: string; packId?: string; previous: string | boolean; latest: string | boolean }>;
     checkedAt: string;
+    patientDeltaPence?: number;
     approvedAt?: string;
     approvalNote?: string;
+    pharmacyContributionPence?: number;
+    hostedPaymentUrl?: string;
+    refundAmountPence?: number;
   };
   curaleaf?: PortalCuraleafOrderState;
   curaleafSubOrders?: Record<string, PortalCuraleafOrderState>;

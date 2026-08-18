@@ -10,8 +10,18 @@ import {
   purgeOrderPrescriptionFiles,
 } from '../prescriptions/prescription-file-purge.js';
 import { persistCuraleafPrescriptionIdentity } from '../prescriptions/curaleaf-prescription-record.js';
+import { stampCuraleafCancellationOnSnapshot } from './curaleaf-events.js';
+import {
+  curaleafCancellationBlocksPlacement,
+  evaluateQuoteReview,
+  isQuoteReviewBlocking,
+  readQuoteReview,
+  stampQuoteReviewOnSnapshot,
+  supplierPurchaseOrderCancelled,
+} from '../orders/quote-review.js';
 import { StorageProvider } from '../../providers/storage/storage.provider.js';
 import type { IntegrationConnectionRecord } from '../../repositories/ports/integration.port.js';
+import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPrescriptionRepository } from '../../repositories/sql/prescription.sql.js';
 
 const secretClient = new SecretManagerServiceClient();
@@ -283,6 +293,10 @@ export async function executeCuraleafOrderPlacement(
     return { skipped: true, reason: 'Order is cancelled' };
   }
 
+  if (curaleafCancellationBlocksPlacement(order.quoteSnapshot) || supplierPurchaseOrderCancelled(order.quoteSnapshot)) {
+    return { skipped: true, reason: 'Curaleaf purchase order was cancelled' };
+  }
+
   if (order.paymentStatus !== 'PAID' && !order.paidAt) {
     return { skipped: true, reason: 'Order is not paid yet' };
   }
@@ -315,6 +329,22 @@ export async function executeCuraleafOrderPlacement(
       null,
     );
     if (matchedPurchaseOrder?.id) {
+      if (String(matchedPurchaseOrder.state || matchedPurchaseOrder.purchaseOrderState || '').toUpperCase() === 'CANCELLED') {
+        const cancelledSnapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+          action: 'confirmed',
+          purchaseOrderId: String(matchedPurchaseOrder.id),
+          prescriptionId: priorCuraleaf?.prescriptionId ?? null,
+          reference: 'curaleaf_po_cancelled',
+          note: 'Curaleaf cancelled the purchase order after pharmacy contact.',
+        });
+        await new SqlOrderRepository().updateQuoteSnapshot({
+          id: order.id,
+          organisationId: connection.organisationId,
+          quoteSnapshot: cancelledSnapshot,
+          fulfilmentStatus: 'EXCEPTION',
+        });
+        return { skipped: true, reason: 'Curaleaf purchase order was cancelled' };
+      }
       await purgeOrderPrescriptionFiles(connection.organisationId, snapshot).catch(error =>
         console.warn('[Prescription file] Purge after existing PO note:', error),
       );
@@ -432,10 +462,18 @@ export async function executeCuraleafOrderPlacement(
     };
   }
 
-  // Step 3: Stock and price re-check quote gate.
+  // Step 3: Stock and price re-check. Hold before creating a Rocky prescription.
+  const blockingReview = readQuoteReview(snapshot);
+  if (blockingReview?.status === 'awaiting_top_up') {
+    return { skipped: true, reason: 'Quote review awaiting patient top-up', quoteReview: blockingReview };
+  }
+  if (blockingReview?.status === 'awaiting_refund') {
+    return { skipped: true, reason: 'Quote review awaiting difference refund', quoteReview: blockingReview };
+  }
   if (lineItems.length > 0) {
+    let latestQuote: unknown;
     try {
-      await curaleafApiRequest(connection, '/v1/quotes/', {
+      latestQuote = await curaleafApiRequest(connection, '/v1/quotes/', {
         method: 'POST',
         body: JSON.stringify({
           items: lineItems.map(item => ({ packId: item.productId, quantity: item.count })),
@@ -443,7 +481,30 @@ export async function executeCuraleafOrderPlacement(
       });
     } catch (quoteErr) {
       console.warn('[Curaleaf] Placement quote recheck note:', quoteErr);
+      return { skipped: true, reason: 'Curaleaf quote could not be retrieved' };
     }
+    try {
+      const decision = evaluateQuoteReview({ snapshot, latestRaw: latestQuote });
+      if (decision.hold) {
+        const heldSnapshot = stampQuoteReviewOnSnapshot(snapshot, decision.review);
+        await new SqlOrderRepository().updateQuoteSnapshot({
+          id: order.id,
+          organisationId: connection.organisationId,
+          quoteSnapshot: heldSnapshot,
+          fulfilmentStatus: 'SUPPLIER_PENDING',
+        });
+        return {
+          skipped: true,
+          reason: 'Quote review required',
+          quoteReview: decision.review,
+        };
+      }
+    } catch (quoteErr) {
+      console.warn('[Curaleaf] Placement quote compare note:', quoteErr);
+      return { skipped: true, reason: 'Curaleaf quote could not be retrieved' };
+    }
+  } else if (isQuoteReviewBlocking(snapshot)) {
+    return { skipped: true, reason: 'Quote review required', quoteReview: blockingReview };
   }
 
   // Step 4: Submit prescription and capture the Curaleaf prescription ID.

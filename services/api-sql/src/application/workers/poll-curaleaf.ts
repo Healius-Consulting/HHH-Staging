@@ -1,13 +1,15 @@
 import {
-  applyCancelledPurchaseOrderSnapshot,
   applyShipmentSnapshot,
   curaleafEntityRecord,
   curaleafEventKey,
   curaleafEventKinds,
   cursorAfterIso,
   eventPollBackoffSeconds,
+  orderMatchesCancelledPrescription,
   orderMatchesCancelledPurchaseOrder,
   shipmentBelongsToOrder,
+  stampCuraleafCancellationOnSnapshot,
+  supplierCancellationAlreadyConfirmed,
   type CuraleafEventKind,
 } from '../integrations/curaleaf-events.js';
 import { listPharmacyRecipients, queueEmailToRecipients } from '../notifications/email-outbox.js';
@@ -27,6 +29,46 @@ export type CuraleafPollDeps = {
   organisationRepo: OrganisationRepositoryPort;
   events?: SqlWorkerEventRepository;
 };
+
+async function persistSupplierCancellation(
+  order: { id: string; organisationId: string; patientId?: string | null; orderNumber?: string | null; quoteSnapshot?: unknown },
+  deps: CuraleafPollDeps,
+  input: {
+    purchaseOrderId?: string | null;
+    prescriptionId?: string | null;
+    prescriptionState?: string | null;
+    entityId: string;
+    summary: string;
+  },
+) {
+  if (supplierCancellationAlreadyConfirmed(order.quoteSnapshot)) return;
+  const nextSnapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+    action: 'confirmed',
+    purchaseOrderId: input.purchaseOrderId,
+    prescriptionId: input.prescriptionId,
+    prescriptionState: input.prescriptionState,
+    reference: 'curaleaf_po_cancelled',
+    note: 'Curaleaf cancelled the order after pharmacy contact.',
+  });
+  await deps.orderRepo.updateQuoteSnapshot({
+    id: order.id,
+    organisationId: order.organisationId,
+    quoteSnapshot: nextSnapshot,
+    fulfilmentStatus: 'EXCEPTION',
+  });
+  const recipients = await listPharmacyRecipients(order.organisationId, deps);
+  await queueEmailToRecipients(
+    deps.notificationRepo,
+    recipients,
+    'pharmacy_order_cancelled',
+    {
+      orderNumber: order.orderNumber,
+      summary: input.summary,
+    },
+    ['pharmacy-order-cancelled', order.id, input.entityId, 'CANCELLED'],
+    { organisationId: order.organisationId, patientId: order.patientId, orderId: order.id },
+  );
+}
 
 async function pollKind(
   connection: IntegrationConnectionRecord,
@@ -66,11 +108,22 @@ async function pollKind(
         const orders = await deps.orderRepo.listTenantOrders(connection.organisationId, 500);
         for (const order of orders) {
           if (!orderMatchesCancelledPurchaseOrder(order, record as CuraleafPurchaseOrderLike)) continue;
-          await deps.orderRepo.updateQuoteSnapshot({
-            id: order.id,
-            organisationId: order.organisationId,
-            quoteSnapshot: applyCancelledPurchaseOrderSnapshot(order.quoteSnapshot, record as CuraleafPurchaseOrderLike),
-            fulfilmentStatus: 'EXCEPTION',
+          await persistSupplierCancellation(order, deps, {
+            purchaseOrderId: String(record.id || ''),
+            entityId: String(record.id || ''),
+            summary: 'Curaleaf cancelled the purchase order. Refund or replace the paid order.',
+          });
+        }
+      }
+      if (kind === 'prescription' && record.state === 'CANCELLED') {
+        const orders = await deps.orderRepo.listTenantOrders(connection.organisationId, 500);
+        for (const order of orders) {
+          if (!orderMatchesCancelledPrescription(order, record)) continue;
+          await persistSupplierCancellation(order, deps, {
+            prescriptionId: String(record.id || ''),
+            prescriptionState: 'CANCELLED',
+            entityId: String(record.id || ''),
+            summary: 'Curaleaf cancelled the prescription after pharmacy contact. Refund or replace the paid order.',
           });
         }
       }

@@ -238,3 +238,30 @@ test('partial collection with supplier remainder does not keep an in-transit del
   assert.equal(orderAwaitingSupplierShipmentProductNames(order).length, 1);
   assert.equal(prescriptionStatusLabel(order.prescriptions[0]!), 'Part collected');
 });
+
+test('quote review required stays paid and is not treated as a Curaleaf rejection', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{ status: 'draft', placed: false }],
+    quoteReview: { status: 'required', type: 'patient_price_changed' },
+  } as PatientOrder;
+  assert.equal(orderStage(order).stage, 'paid');
+  assert.equal(orderStage(order).unresolvedReason, null);
+});
+
+test('Curaleaf-cancelled paid orders stay in cancelled unresolved, not as unpaid cancels', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    unresolvedReason: 'cancelled',
+    cancellation: { status: 'refund_required' },
+    curaleafCancellation: { status: 'confirmed' },
+    prescriptions: [{ status: 'cancelled', purchaseOrderState: 'CANCELLED', placed: true }],
+  } as PatientOrder;
+  const staged = orderStage(order);
+  assert.equal(staged.stage, 'cancelled');
+  assert.equal(staged.unresolvedReason, 'cancelled');
+  assert.equal(orderCancellationResolution(order), 'needs-action');
+});
+

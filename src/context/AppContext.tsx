@@ -226,7 +226,7 @@ export function getUnresolvedReason(order: PatientOrder, now = new Date()): Unre
   if (order.unresolvedReason === 'expired' || order.unresolvedReason === 'rejected' || order.unresolvedReason === 'cancelled') return order.unresolvedReason;
   if (order.redoEligible === false) return null;
   if (order.cancellation?.status === 'refund_required' || order.cancellation?.status === 'confirmed' || order.prescriptions.some(rx => rx.status === 'cancelled' || rx.purchaseOrderState === 'CANCELLED')) return 'cancelled';
-  if (order.quoteReview?.status === 'recreate_required' || order.quoteReview) return 'rejected';
+  if (order.quoteReview?.status === 'recreate_required') return 'rejected';
   if (order.lifecycleStatus === 'archived' || order.isExpired) return 'expired';
   const entryDate = new Date(order.date);
   const expiryDate = order.cycleExpiresAt ? new Date(order.cycleExpiresAt) : (() => {
@@ -468,7 +468,8 @@ export const ORGANISATIONS: PharmacyTenant[] = [
     gphcNumber: 'TRAINING-PHARM2', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'shaylenpatel.locum@hotmail.com', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
     address: 'Alternate Training Branch, United Kingdom', websiteDomains: ['training-pharm2.cc'],
     status: 'live', staffCount: 2,
-    testAccount: true, gdprExempt: true,
+    testAccount: false, gdprExempt: true,
+    workspaceClassification: 'standard',
     defaultPaymentRoute: 'manual',
     brand: { primary: '#1e40af', portalName: 'Alternate Branch' },
     worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
@@ -722,6 +723,7 @@ export type Action =
   | { type: 'RECORD_CURALEAF_CANCELLATION_CONTACT'; orderId: number; reference: string; note?: string }
   | { type: 'CONFIRM_CURALEAF_CANCELLATION'; orderId: number; reference: string }
   | { type: 'SET_ORDER_CANCELLATION'; orderId: number; cancellation: OrderCancellationState; curaleafCancellation?: CuraleafCancellationState; lifecycleStatus?: string; paymentStatus?: PaymentStatus }
+  | { type: 'SET_QUOTE_REVIEW'; orderId: number; quoteReview?: PatientOrder['quoteReview']; refund?: OrderRefundState; dispensingFee?: number }
   | { type: 'CONFIRM_PAYMENT'; orderId: number }
   | { type: 'RECORD_MANUAL_PAYMENT'; orderId: number; tender: ManualTender; reference?: string; notes?: string }
   // Submission to Curaleaf.
@@ -1831,6 +1833,13 @@ function reducer(state: AppState, action: Action): AppState {
         curaleafCancellation: action.curaleafCancellation ?? order.curaleafCancellation,
         lifecycleStatus: action.lifecycleStatus ?? order.lifecycleStatus,
         payment: action.paymentStatus ? { ...order.payment, status: action.paymentStatus } : order.payment,
+      }));
+    case 'SET_QUOTE_REVIEW':
+      return mapOrder(state, action.orderId, order => ({
+        ...order,
+        quoteReview: action.quoteReview,
+        refund: action.refund ?? order.refund,
+        dispensingFee: action.dispensingFee ?? order.dispensingFee,
       }));
     case 'CONFIRM_PAYMENT':
       return mapOrder(state, action.orderId, o => ({

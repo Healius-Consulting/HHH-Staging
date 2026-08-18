@@ -31,11 +31,13 @@ interface UnifiedPatient {
   orders: PatientOrder[];
 }
 
-function orderExceptionReason(order: PatientOrder): 'rejected' | 'expired' | null {
+function orderExceptionReason(order: PatientOrder): 'rejected' | 'expired' | 'cancelled' | null {
   if (order.prescriptions.length > 0 && order.prescriptions.every(prescription => prescription.status === 'collected')) return null;
-  if (order.unresolvedReason === 'rejected' || order.quoteReview) return 'rejected';
+  if (order.unresolvedReason === 'rejected' || order.quoteReview?.status === 'recreate_required') return 'rejected';
   if (order.unresolvedReason === 'expired' || order.lifecycleStatus === 'archived' || order.isExpired) return 'expired';
-  return getUnresolvedReason(order);
+  const unresolved = getUnresolvedReason(order);
+  if (unresolved === 'cancelled' || unresolved === 'rejected' || unresolved === 'expired') return unresolved;
+  return null;
 }
 
 function operationalOrder(order: PatientOrder) {

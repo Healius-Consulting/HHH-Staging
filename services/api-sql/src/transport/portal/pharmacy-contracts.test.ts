@@ -212,6 +212,101 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.prescriptionFlow['rx-pending']?.state, 'PENDING_PLACEMENT');
   });
 
+  it('maps a paid quote-review hold without inventing a purchase order', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-18T18:25:53.380340Z',
+      fulfilmentStatus: 'SUPPLIER_PENDING',
+      quoteSnapshot: {
+        lineItems: [{
+          packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          formulaId: 'f74f63de-dc89-4074-9d8c-be35f5398963',
+          name: '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD',
+          quantity: 1,
+          unitPricePence: 8500,
+        }],
+        prescriptions: [{
+          id: 'rx-review',
+          fileId: 'rx-review',
+          serialNumber: '34CD78GH',
+          issueDate: '2026-08-18',
+          prescriber: { name: 'Dr Prescriber', pin: '123', gmcNumber: null, gphcNumber: '000123', initials: 'DP' },
+          items: [],
+        }],
+        quoteReview: {
+          status: 'required',
+          type: 'patient_price_changed',
+          fingerprint: 'abc',
+          latestQuote: {},
+          differences: [],
+          patientDeltaPence: 500,
+          checkedAt: '2026-08-18T20:00:00.000Z',
+        },
+      },
+    });
+    assert.equal(mapped.paymentStatus, 'paid');
+    assert.equal(mapped.quoteReview?.status, 'required');
+    assert.equal(mapped.curaleaf?.status, 'quote_review_required');
+    assert.equal(mapped.curaleaf?.purchaseOrderId, null);
+    assert.equal(mapped.prescriptionFlow['rx-review']?.state, 'HELD_PRICE');
+    assert.equal(mapped.unresolvedReason, undefined);
+  });
+
+  it('keeps a paid Curaleaf-cancelled purchase order paid and unresolved, not as an unpaid cancel', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      status: 'PROCESSING',
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-18T18:25:53.380340Z',
+      fulfilmentStatus: 'EXCEPTION',
+      quoteSnapshot: {
+        quoteReview: {
+          status: 'required',
+          type: 'out_of_stock',
+          fingerprint: 'abc',
+          latestQuote: {},
+          differences: [],
+          patientDeltaPence: 0,
+          checkedAt: '2026-08-18T20:00:00.000Z',
+        },
+        cancellation: { status: 'refund_required', reason: 'other' },
+        curaleafCancellation: { status: 'confirmed', confirmationReference: 'phone_cs_confirmed' },
+        lineItems: [{
+          packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          formulaId: 'f74f63de-dc89-4074-9d8c-be35f5398963',
+          name: '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD',
+          quantity: 1,
+          unitPricePence: 8500,
+        }],
+        prescriptions: [{
+          id: 'rx-cancelled',
+          fileId: 'rx-cancelled',
+          serialNumber: '34CD78GH',
+          issueDate: '2026-08-18',
+          prescriber: { name: 'Dr Prescriber', pin: '123', gmcNumber: null, gphcNumber: '000123', initials: 'DP' },
+          items: [],
+        }],
+        curaleaf: {
+          status: 'prescription_closed',
+          prescriptionId: '2bd0fa9f-50ee-4344-a5fa-d0da95ac83aa',
+          purchaseOrderId: 'f287b3b8-d83f-478d-a7e6-34f4cc527f86',
+          purchaseOrderState: 'CANCELLED',
+          state: 'CANCELLED',
+        },
+      },
+    });
+    assert.equal(mapped.paymentStatus, 'paid');
+    assert.equal(mapped.status, 'cancelled');
+    assert.equal(mapped.unresolvedReason, 'cancelled');
+    assert.equal(mapped.quoteReview, undefined);
+    assert.equal(mapped.curaleaf?.purchaseOrderState, 'CANCELLED');
+    assert.equal(mapped.curaleaf?.status, 'prescription_closed');
+    assert.equal(mapped.prescriptionFlow['rx-cancelled']?.state, 'CANCELLED_PURCHASE_ORDER');
+  });
+
   it('maps a split Curaleaf shipment onto the portal contract without inventing a full dispatch', () => {
     const mapped = toPortalOrder({
       ...order,

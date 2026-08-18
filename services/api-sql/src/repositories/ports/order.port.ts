@@ -79,6 +79,7 @@ export interface OrderRepositoryPort {
     organisationId: string;
     quoteSnapshot: unknown;
     fulfilmentStatus?: CreateOrderInput['fulfilmentStatus'];
+    dispensingFeePence?: number;
   }): Promise<boolean>;
   appendPlacementEvent(data: {
     organisationId: string;

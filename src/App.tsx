@@ -206,7 +206,7 @@ function StaffWorkspace() {
     ? 'live'
     : organisation?.testAccount
       ? 'training'
-    : organisation?.status === 'live' && setup.status?.completed
+    : organisation?.status === 'live'
       ? 'live'
       : organisation?.status === 'intake_live'
         ? 'intake'

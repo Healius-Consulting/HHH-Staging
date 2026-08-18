@@ -187,14 +187,20 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
   const snapshot = (order.quoteSnapshot ?? {}) as any;
   const persistedCuraleaf = snapshot?.curaleaf && typeof snapshot.curaleaf === 'object' ? snapshot.curaleaf : null;
   const po = order.curaleaf || persistedCuraleaf;
-  const isCancelledOrder = order.status === 'CANCELLED' || po?.state === 'CANCELLED' || po?.purchaseOrderState === 'CANCELLED';
-  const isPaid = !isCancelledOrder && (order.paymentStatus === 'PAID' || Boolean(order.paidAt));
+  const isHhhCancelled = order.status === 'CANCELLED';
+  const isSupplierCancelled = po?.state === 'CANCELLED' || po?.purchaseOrderState === 'CANCELLED' || po?.prescriptionState === 'CANCELLED';
+  const isCancelledOrder = isHhhCancelled || isSupplierCancelled;
+  const isPaid = (order.paymentStatus === 'PAID' || Boolean(order.paidAt)) && order.paymentStatus !== 'CANCELLED';
+  const quoteReview = snapshot?.quoteReview && typeof snapshot.quoteReview === 'object' && !isSupplierCancelled
+    ? snapshot.quoteReview
+    : undefined;
+  const reviewBlocking = Boolean(quoteReview && ['required', 'awaiting_top_up', 'awaiting_refund'].includes(String(quoteReview.status)));
   const purchaseOrderId = realPurchaseOrderId(po, order);
-  const hasPurchaseOrderRecord = Boolean(purchaseOrderId || po?.shipments?.length);
+  const hasPurchaseOrderRecord = Boolean((purchaseOrderId || po?.shipments?.length) && !reviewBlocking);
   const prescriptionId = typeof po?.prescriptionId === 'string' && po.prescriptionId.trim() ? po.prescriptionId.trim() : null;
   const prescriberId = typeof po?.prescriberId === 'string' && po.prescriberId.trim() ? po.prescriberId.trim() : null;
   const hasClinicPlacement = Boolean(prescriptionId || prescriberId);
-  const isSupplierFlowActive = isPaid && (hasPurchaseOrderRecord || POST_PURCHASE_ORDER_FULFILMENT.has(order.fulfilmentStatus));
+  const isSupplierFlowActive = isPaid && !reviewBlocking && (hasPurchaseOrderRecord || POST_PURCHASE_ORDER_FULFILMENT.has(order.fulfilmentStatus));
   const prescriptionState = asPrescriptionState(po?.prescriptionState)
     ?? (hasPurchaseOrderRecord ? 'ACTIVE' : prescriptionId ? 'PENDING' : undefined);
 
@@ -295,7 +301,9 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     prescriptionFlow[rxKey] = {
       id: rxKey,
       orderId: rxKey,
-      state: isCancelledOrder ? 'CANCELLED_PURCHASE_ORDER'
+      state: isSupplierCancelled ? 'CANCELLED_PURCHASE_ORDER'
+        : reviewBlocking && quoteReview?.type === 'out_of_stock' ? 'HELD_STOCK'
+        : reviewBlocking ? 'HELD_PRICE'
         : remainingOpenAfterGoodsIn ? 'PARTIALLY_RECEIVED'
         : hasCheckedInPacks && order.fulfilmentStatus === 'COLLECTED' ? 'COLLECTED'
         : hasCheckedInPacks && order.fulfilmentStatus === 'READY_FOR_COLLECTION' ? 'READY_FOR_COLLECTION'
@@ -335,7 +343,23 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
   const clinicPlacementStatus = prescriptionState === 'EXPIRED' || prescriptionState === 'CANCELLED'
     ? 'prescription_closed' as const
     : 'prescription_pending' as const;
-  const curaleaf = isPaid && hasPurchaseOrderRecord ? {
+  const curaleaf = isSupplierCancelled && hasPurchaseOrderRecord ? {
+    status: 'prescription_closed' as const,
+    prescriptionState,
+    prescriptionId: prescriptionId ?? undefined,
+    prescriberId: prescriberId ?? undefined,
+    customerReference: po?.customerReference || order.orderNumber || order.id,
+    purchaseOrderId,
+    purchaseOrderState: 'CANCELLED' as const,
+  } : isPaid && reviewBlocking ? {
+    status: 'quote_review_required' as const,
+    prescriptionState,
+    prescriptionId: prescriptionId ?? undefined,
+    prescriberId: prescriberId ?? undefined,
+    customerReference: order.orderNumber || order.id,
+    purchaseOrderId: null,
+    purchaseOrderState: null,
+  } : isPaid && hasPurchaseOrderRecord ? {
     status: 'purchase_order_submitted' as const,
     prescriptionState,
     prescriptionId: prescriptionId ?? undefined,
@@ -383,7 +407,7 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     totalPence: Number(order.totalPence),
     currency: order.currency === 'GBP' ? 'GBP' as const : 'GBP' as const,
     paymentRoute: lower(order.paymentRoute) === 'worldpay' ? 'worldpay' as const : 'manual' as const,
-    paymentStatus: isCancelledOrder ? 'cancelled' : isPaid ? 'paid' : lower(order.paymentStatus),
+    paymentStatus: isPaid ? 'paid' : isHhhCancelled || order.paymentStatus === 'CANCELLED' ? 'cancelled' : lower(order.paymentStatus),
     fulfilmentStatus: portalFulfilment,
     status: isCancelledOrder ? 'cancelled' : isPaid && order.status === 'SUBMITTED' ? 'processing' : lower(order.status),
     paymentTransactionReference: order.orderNumber,
@@ -391,6 +415,12 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     curaleafApprovedAt: po?.createdAt || po?.issuedDate || undefined,
     autoPlacementEnabled: true,
     curaleaf,
+    quoteReview,
+    pharmacyContributionPence: Number(snapshot?.pharmacyContributionPence || quoteReview?.pharmacyContributionPence || 0) || undefined,
+    cancellation: snapshot?.cancellation ?? undefined,
+    curaleafCancellation: snapshot?.curaleafCancellation ?? undefined,
+    refund: snapshot?.refund ?? undefined,
+    unresolvedReason: isSupplierCancelled ? 'cancelled' : undefined,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
   };

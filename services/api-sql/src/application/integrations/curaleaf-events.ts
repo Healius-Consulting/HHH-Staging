@@ -65,6 +65,24 @@ export function orderMatchesCancelledPurchaseOrder(
   return customerReferenceMatchesOrder(purchaseOrder.customerReference, order);
 }
 
+export function orderMatchesCancelledPrescription(
+  order: { quoteSnapshot?: unknown },
+  prescription: { id?: unknown; prescriptionId?: unknown },
+) {
+  const snapshot = asRecord(order.quoteSnapshot);
+  const curaleaf = asRecord(snapshot.curaleaf);
+  const recordedId = String(curaleaf.prescriptionId || '');
+  const incomingId = String(prescription.id || prescription.prescriptionId || '');
+  return Boolean(recordedId && incomingId && recordedId === incomingId);
+}
+
+export function supplierCancellationAlreadyConfirmed(snapshot: unknown) {
+  const cancellation = asRecord(asRecord(snapshot).curaleafCancellation);
+  const curaleaf = asRecord(asRecord(snapshot).curaleaf);
+  const cancelled = String(curaleaf.purchaseOrderState || curaleaf.state || curaleaf.prescriptionState || '').toUpperCase() === 'CANCELLED';
+  return cancelled && cancellation.status === 'confirmed';
+}
+
 export function applyCancelledPurchaseOrderSnapshot(
   snapshot: unknown,
   purchaseOrder: CuraleafPurchaseOrderLike,
@@ -80,13 +98,109 @@ export function applyCancelledPurchaseOrderSnapshot(
   return {
     ...root,
     prescriptionFlow: Object.keys(nextFlow).length ? nextFlow : root.prescriptionFlow,
+    quoteReview: null,
+    refund: asRecord(root.refund).kind === 'quote_difference' ? null : root.refund,
     curaleaf: {
       ...curaleaf,
       ...purchaseOrder,
+      status: 'prescription_closed',
       purchaseOrderId: purchaseOrder.id ?? curaleaf.purchaseOrderId,
       purchaseOrderState: 'CANCELLED',
       state: 'CANCELLED',
     },
+  };
+}
+
+export function stampCuraleafCancellationOnSnapshot(
+  snapshot: unknown,
+  input: {
+    action: 'requested' | 'contacted' | 'confirmed';
+    purchaseOrderId?: string | null;
+    prescriptionId?: string | null;
+    prescriptionState?: string | null;
+    reference?: string | null;
+    note?: string | null;
+    actorUid?: string | null;
+    reason?: 'added_in_error' | 'patient_request' | 'other';
+    now?: string;
+  },
+) {
+  const root = asRecord(snapshot);
+  const prior = asRecord(root.curaleafCancellation);
+  const cancellation = asRecord(root.cancellation);
+  const now = input.now ?? new Date().toISOString();
+  const curaleaf = asRecord(root.curaleaf);
+  const purchaseOrderId = input.purchaseOrderId || (typeof curaleaf.purchaseOrderId === 'string' ? curaleaf.purchaseOrderId : typeof curaleaf.id === 'string' ? curaleaf.id : null);
+  const prescriptionId = input.prescriptionId || (typeof curaleaf.prescriptionId === 'string' ? curaleaf.prescriptionId : null);
+  const nextCancellation = input.action === 'confirmed'
+    ? {
+      status: 'confirmed' as const,
+      purchaseOrderId,
+      prescriptionId,
+      requestedAt: prior.requestedAt || now,
+      requestedBy: prior.requestedBy || input.actorUid || null,
+      contactReference: prior.contactReference || input.reference || null,
+      contactNote: prior.contactNote || input.note || null,
+      contactedAt: prior.contactedAt || now,
+      contactedBy: prior.contactedBy || input.actorUid || null,
+      confirmedAt: now,
+      confirmedBy: input.actorUid || null,
+      confirmationReference: input.reference || 'curaleaf_po_cancelled',
+    }
+    : input.action === 'contacted'
+      ? {
+        status: 'awaiting_confirmation' as const,
+        purchaseOrderId,
+        prescriptionId,
+        requestedAt: prior.requestedAt || now,
+        requestedBy: prior.requestedBy || input.actorUid || null,
+        contactReference: input.reference || null,
+        contactNote: input.note || null,
+        contactedAt: now,
+        contactedBy: input.actorUid || null,
+      }
+      : {
+        status: 'contact_required' as const,
+        purchaseOrderId,
+        prescriptionId,
+        requestedAt: now,
+        requestedBy: input.actorUid || null,
+      };
+  const nextOrderCancellation = {
+    status: input.action === 'confirmed' ? 'refund_required' as const
+      : input.action === 'contacted' ? 'awaiting_curaleaf_confirmation' as const
+        : 'curaleaf_contact_required' as const,
+    reason: input.reason || (typeof cancellation.reason === 'string' ? cancellation.reason : 'other'),
+    note: input.note ?? cancellation.note ?? null,
+    requestedAt: cancellation.requestedAt || now,
+    requestedBy: cancellation.requestedBy || input.actorUid || null,
+  };
+  const cancelled = input.action === 'confirmed' && purchaseOrderId
+    ? applyCancelledPurchaseOrderSnapshot(root, {
+      id: purchaseOrderId,
+      purchaseOrderId,
+      state: 'CANCELLED',
+      purchaseOrderState: 'CANCELLED',
+    })
+    : input.action === 'confirmed' && (prescriptionId || input.prescriptionState === 'CANCELLED')
+      ? {
+        ...root,
+        quoteReview: null,
+        curaleaf: {
+          ...curaleaf,
+          status: 'prescription_closed',
+          prescriptionId,
+          prescriptionState: 'CANCELLED',
+        },
+      }
+      : { ...root, quoteReview: null };
+  const cancelledRecord = asRecord(cancelled);
+  return {
+    ...cancelled,
+    quoteReview: null,
+    refund: asRecord(cancelledRecord.refund).kind === 'quote_difference' ? null : cancelledRecord.refund,
+    curaleafCancellation: nextCancellation,
+    cancellation: nextOrderCancellation,
   };
 }
 

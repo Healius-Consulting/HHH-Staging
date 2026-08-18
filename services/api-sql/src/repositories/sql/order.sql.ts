@@ -293,12 +293,13 @@ const LIST_PAID_OPEN_ORDERS_GQL = `
 `;
 
 const UPDATE_ORDER_SNAPSHOT_GQL = `
-  mutation UpdateOrderSnapshot($id: UUID!, $quoteSnapshot: Any, $fulfilmentStatus: FulfilmentStatus) {
+  mutation UpdateOrderSnapshot($id: UUID!, $quoteSnapshot: Any, $fulfilmentStatus: FulfilmentStatus, $dispensingFeePence: Int64) {
     order_update(
       key: { id: $id }
       data: {
         quoteSnapshot: $quoteSnapshot
         fulfilmentStatus: $fulfilmentStatus
+        dispensingFeePence: $dispensingFeePence
         updatedAt_expr: "request.time"
       }
     )
@@ -453,6 +454,7 @@ export class SqlOrderRepository implements OrderRepositoryPort {
     organisationId: string;
     quoteSnapshot: unknown;
     fulfilmentStatus?: CreateOrderInput['fulfilmentStatus'];
+    dispensingFeePence?: number;
   }): Promise<boolean> {
     const existing = await this.findOrderById(data.id, data.organisationId);
     if (!existing) return false;
@@ -461,6 +463,7 @@ export class SqlOrderRepository implements OrderRepositoryPort {
         id: data.id,
         quoteSnapshot: data.quoteSnapshot ?? existing.quoteSnapshot ?? null,
         fulfilmentStatus: data.fulfilmentStatus ?? existing.fulfilmentStatus,
+        dispensingFeePence: data.dispensingFeePence ?? existing.dispensingFeePence,
       },
     });
     return true;

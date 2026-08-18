@@ -119,6 +119,7 @@ export interface OrganisationRepositoryPort {
   findOrganisationById(id: string): Promise<OrganisationRecord | null>;
   listOrganisations(): Promise<OrganisationRecord[]>;
   updateOrganisationProfile(id: string, input: UpdateOrganisationProfileInput): Promise<void>;
+  updateOrganisationClassification(id: string, classification: OrganisationRecord['classification']): Promise<void>;
   findDirectoryByTokenHash(tokenHash: string): Promise<PublicPharmacyResolution | null>;
   findReferralTokenByHash(tokenHash: string): Promise<ReferralTokenRecord | null>;
   createReferralToken(params: {

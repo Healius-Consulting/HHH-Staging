@@ -290,6 +290,20 @@ const UPDATE_ORGANISATION_PROFILE_GQL = `
   }
 `;
 
+const UPDATE_ORGANISATION_CLASSIFICATION_GQL = `
+  mutation UpdateOrganisationClassification(
+    $id: UUID!
+    $classification: WorkspaceClassification!
+  ) {
+    organisation_update(
+      key: { id: $id }
+      data: {
+        classification: $classification
+      }
+    )
+  }
+`;
+
 const UPDATE_STAFF_PREFERENCES_GQL = `
   mutation UpdateStaffPreferences(
     $uid: String!
@@ -340,6 +354,12 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
         mainContactPhone: input.mainContactPhone,
         mainContactEmail: input.mainContactEmail,
       },
+    });
+  }
+
+  async updateOrganisationClassification(id: string, classification: OrganisationRecord['classification']): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(UPDATE_ORGANISATION_CLASSIFICATION_GQL, {
+      variables: { id: asUuid(id), classification },
     });
   }
 

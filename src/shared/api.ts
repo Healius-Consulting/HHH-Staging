@@ -672,6 +672,16 @@ export function approveCuraleafQuoteReview(orderId: string, input: { organisatio
   return apiRequest(`/v1/portal/orders/${encodeURIComponent(orderId)}/curaleaf-quote-review/approve`, { method: 'POST', body: JSON.stringify(input) });
 }
 
+export function resolvePortalQuoteReview(orderId: string, input: {
+  organisationId: string;
+  action: 'absorb' | 'continue_as_fee' | 'request_top_up' | 'request_refund' | 'refresh';
+}) {
+  return apiRequest<{ action: string; paymentUrl?: string; amountPence?: number; refundId?: string; order: import('./contracts').PortalOrderRecord }>(
+    `/v1/portal/orders/${encodeURIComponent(orderId)}/quote-review/resolve`,
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+}
+
 export function connectWorldpayPharmacy(input: WorldpayConnectionInput) {
   return apiRequest<WorldpayConnectionStatus>('/v1/portal/integrations/worldpay/credentials', {
     method: 'PUT',

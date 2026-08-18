@@ -1,0 +1,292 @@
+import { createHash } from 'node:crypto';
+import { curaleafMoneyPence } from '../../domain/integrations/curaleaf-money.js';
+
+export type QuoteDifferenceCategory = 'stock' | 'patient_price' | 'supplier_cost';
+
+export type QuoteDifference = {
+  category: QuoteDifferenceCategory;
+  field: string;
+  packId?: string;
+  previous: string | boolean;
+  latest: string | boolean;
+};
+
+export type QuoteReviewType = 'out_of_stock' | 'patient_price_changed' | 'supplier_cost_changed';
+
+export type QuoteReviewStatus =
+  | 'required'
+  | 'approved'
+  | 'awaiting_top_up'
+  | 'awaiting_refund'
+  | 'recreate_required';
+
+export type ParsedQuoteItem = {
+  packId: string;
+  quantity: number;
+  inStock: boolean;
+  stockStatus: 'in_stock' | 'low_stock' | 'out_of_stock';
+  wholesalePence: number;
+  patientPence: number;
+};
+
+export type ParsedQuote = {
+  shippingPence: number;
+  taxRate: string;
+  items: ParsedQuoteItem[];
+};
+
+export type QuoteReviewRecord = {
+  status: QuoteReviewStatus;
+  type: QuoteReviewType;
+  fingerprint: string;
+  latestQuote: unknown;
+  differences: QuoteDifference[];
+  patientDeltaPence: number;
+  checkedAt: string;
+  approvedAt?: string;
+  approvedFingerprint?: string;
+  pharmacyContributionPence?: number;
+  topUpPaymentId?: string;
+  refundId?: string;
+  refundAmountPence?: number;
+  hostedPaymentUrl?: string;
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function moneyPence(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value * 100);
+  return curaleafMoneyPence(value, 'pack price');
+}
+
+function penceFrom(pence: unknown, money: unknown, alt?: unknown) {
+  if (typeof pence === 'number' && Number.isFinite(pence)) return Math.round(pence);
+  if (money != null && money !== '') return moneyPence(money);
+  if (alt != null && alt !== '') return moneyPence(alt);
+  return 0;
+}
+
+function stockStatus(inStock: boolean, status?: unknown): ParsedQuoteItem['stockStatus'] {
+  const normalised = String(status || '').toLowerCase();
+  if (!inStock || normalised === 'out_of_stock') return 'out_of_stock';
+  if (normalised === 'low_stock') return 'low_stock';
+  return 'in_stock';
+}
+
+export function snapshotQuote(snapshot: unknown): unknown {
+  const root = asRecord(snapshot);
+  return root.pricingQuote ?? root.quote ?? null;
+}
+
+export function parseQuote(raw: unknown): ParsedQuote | null {
+  const record = asRecord(raw);
+  const items = Array.isArray(record.items) ? record.items : [];
+  const parsedItems: ParsedQuoteItem[] = [];
+  for (const entry of items) {
+    const item = asRecord(entry);
+    const packId = String(item.packId || item.productId || '').trim();
+    const quantity = Number(item.quantity || item.qty || item.count || 0);
+    if (!packId || quantity <= 0) continue;
+    const inStock = item.inStock !== false && stockStatus(true, item.stockStatus) !== 'out_of_stock';
+    parsedItems.push({
+      packId,
+      quantity,
+      inStock,
+      stockStatus: stockStatus(item.inStock !== false, item.stockStatus),
+      wholesalePence: penceFrom(item.wholesalePackPricePence, item.wholesalePackPrice, item.wholesalePrice),
+      patientPence: penceFrom(item.patientPackPricePence, item.patientPackPrice, item.patientPrice),
+    });
+  }
+  if (!parsedItems.length) return null;
+  return {
+    shippingPence: penceFrom(record.shippingPence, record.shippingPrice),
+    taxRate: String(record.taxRate ?? '0'),
+    items: parsedItems,
+  };
+}
+
+export function quoteFingerprint(quote: ParsedQuote) {
+  const normalised = {
+    shippingPence: quote.shippingPence,
+    taxRate: quote.taxRate,
+    items: [...quote.items]
+      .sort((left, right) => left.packId.localeCompare(right.packId))
+      .map(item => ({
+        packId: item.packId,
+        quantity: item.quantity,
+        inStock: item.inStock,
+        stockStatus: item.stockStatus,
+        wholesalePence: item.wholesalePence,
+        patientPence: item.patientPence,
+      })),
+  };
+  return createHash('sha256').update(JSON.stringify(normalised)).digest('hex');
+}
+
+export function compareQuotes(baseline: ParsedQuote, latest: ParsedQuote): QuoteDifference[] {
+  const differences: QuoteDifference[] = [];
+  const priorItems = new Map(baseline.items.map(item => [item.packId, item]));
+  for (const item of latest.items) {
+    const earlier = priorItems.get(item.packId);
+    if (!earlier) continue;
+    if (item.inStock !== earlier.inStock || item.stockStatus !== earlier.stockStatus) {
+      differences.push({
+        category: 'stock',
+        field: 'inStock',
+        packId: item.packId,
+        previous: earlier.inStock,
+        latest: item.inStock,
+      });
+    }
+    if (item.patientPence !== earlier.patientPence) {
+      differences.push({
+        category: 'patient_price',
+        field: 'patientPackPrice',
+        packId: item.packId,
+        previous: String(earlier.patientPence),
+        latest: String(item.patientPence),
+      });
+    }
+    if (item.wholesalePence !== earlier.wholesalePence) {
+      differences.push({
+        category: 'supplier_cost',
+        field: 'wholesalePackPrice',
+        packId: item.packId,
+        previous: String(earlier.wholesalePence),
+        latest: String(item.wholesalePence),
+      });
+    }
+  }
+  if (baseline.shippingPence !== latest.shippingPence) {
+    differences.push({
+      category: 'supplier_cost',
+      field: 'shippingPrice',
+      previous: String(baseline.shippingPence),
+      latest: String(latest.shippingPence),
+    });
+  }
+  return differences;
+}
+
+export function patientQuoteTotalPence(quote: ParsedQuote) {
+  return quote.items.reduce((total, item) => total + item.patientPence * item.quantity, 0);
+}
+
+export function quoteReviewType(latest: ParsedQuote, differences: QuoteDifference[]): QuoteReviewType | null {
+  if (latest.items.some(item => !item.inStock || item.stockStatus === 'out_of_stock')) return 'out_of_stock';
+  if (differences.some(item => item.category === 'patient_price')) return 'patient_price_changed';
+  if (differences.some(item => item.category === 'supplier_cost' || item.category === 'stock')) return 'supplier_cost_changed';
+  return null;
+}
+
+export function readQuoteReview(snapshot: unknown): QuoteReviewRecord | null {
+  const review = asRecord(asRecord(snapshot).quoteReview);
+  if (!review.status || !review.type || !review.fingerprint) return null;
+  return review as QuoteReviewRecord;
+}
+
+export function isQuoteReviewBlocking(snapshot: unknown) {
+  const review = readQuoteReview(snapshot);
+  return review?.status === 'required'
+    || review?.status === 'awaiting_top_up'
+    || review?.status === 'awaiting_refund';
+}
+
+export function quoteReviewAllowsPlacement(snapshot: unknown, latestFingerprint: string) {
+  const review = readQuoteReview(snapshot);
+  if (!review) return true;
+  if (review.status === 'awaiting_top_up' || review.status === 'awaiting_refund' || review.status === 'required') {
+    return false;
+  }
+  return review.status === 'approved' && review.approvedFingerprint === latestFingerprint;
+}
+
+export function evaluateQuoteReview(input: {
+  snapshot: unknown;
+  latestRaw: unknown;
+  now?: string;
+}): { hold: false; fingerprint: string; latest: ParsedQuote } | {
+  hold: true;
+  fingerprint: string;
+  latest: ParsedQuote;
+  review: QuoteReviewRecord;
+} {
+  const latest = parseQuote(input.latestRaw);
+  if (!latest) {
+    throw new Error('Curaleaf returned an invalid quote.');
+  }
+  const fingerprint = quoteFingerprint(latest);
+  const existing = readQuoteReview(input.snapshot);
+  if (existing?.status === 'approved' && existing.approvedFingerprint === fingerprint) {
+    return { hold: false, fingerprint, latest };
+  }
+  const baseline = parseQuote(snapshotQuote(input.snapshot));
+  const differences = baseline
+    ? compareQuotes(baseline, latest)
+    : [{ category: 'patient_price' as const, field: 'missingOriginalQuote', previous: 'missing', latest: 'present' }];
+  const type = quoteReviewType(latest, differences);
+  if (!type) return { hold: false, fingerprint, latest };
+  const patientDeltaPence = baseline ? patientQuoteTotalPence(latest) - patientQuoteTotalPence(baseline) : 0;
+  return {
+    hold: true,
+    fingerprint,
+    latest,
+    review: {
+      status: 'required',
+      type,
+      fingerprint,
+      latestQuote: input.latestRaw,
+      differences,
+      patientDeltaPence,
+      checkedAt: input.now ?? new Date().toISOString(),
+    },
+  };
+}
+
+export function stampQuoteReviewOnSnapshot(snapshot: unknown, review: QuoteReviewRecord | null) {
+  const root = asRecord(snapshot);
+  const flow = asRecord(root.prescriptionFlow);
+  const heldState = review?.type === 'out_of_stock' ? 'HELD_STOCK' : 'HELD_PRICE';
+  const nextFlow: Record<string, unknown> = {};
+  const blocking = review && (review.status === 'required' || review.status === 'awaiting_top_up' || review.status === 'awaiting_refund');
+  for (const [key, value] of Object.entries(flow)) {
+    const prescription = asRecord(value);
+    nextFlow[key] = blocking ? { ...prescription, state: heldState } : prescription;
+  }
+  const curaleaf = asRecord(root.curaleaf);
+  return {
+    ...root,
+    quote: root.quote ?? root.pricingQuote ?? review?.latestQuote ?? null,
+    pricingQuote: root.pricingQuote ?? root.quote ?? review?.latestQuote ?? null,
+    quoteReview: review,
+    prescriptionFlow: Object.keys(nextFlow).length ? nextFlow : root.prescriptionFlow,
+    curaleaf: {
+      ...curaleaf,
+      status: blocking ? 'quote_review_required' : curaleaf.status,
+    },
+  };
+}
+
+export function supplierPurchaseOrderCancelled(snapshot: unknown) {
+  const curaleaf = asRecord(asRecord(snapshot).curaleaf);
+  return String(curaleaf.purchaseOrderState || curaleaf.state || '').toUpperCase() === 'CANCELLED';
+}
+
+export function supplierPrescriptionCancelled(snapshot: unknown) {
+  const curaleaf = asRecord(asRecord(snapshot).curaleaf);
+  return String(curaleaf.prescriptionState || '').toUpperCase() === 'CANCELLED';
+}
+
+export function supplierOrderCancelled(snapshot: unknown) {
+  return supplierPurchaseOrderCancelled(snapshot) || supplierPrescriptionCancelled(snapshot);
+}
+
+export function curaleafCancellationBlocksPlacement(snapshot: unknown) {
+  if (supplierOrderCancelled(snapshot)) return true;
+  const cancellation = asRecord(asRecord(snapshot).curaleafCancellation);
+  const orderCancellation = asRecord(asRecord(snapshot).cancellation);
+  return ['contact_required', 'awaiting_confirmation', 'confirmed'].includes(String(cancellation.status || ''))
+    || ['curaleaf_contact_required', 'awaiting_curaleaf_confirmation', 'refund_required', 'cancelled'].includes(String(orderCancellation.status || ''));
+}
