@@ -29,7 +29,7 @@ import {
   supplierFulfilmentStatus,
   syncSnapshotLineItemsFromPurchaseOrder,
 } from '../../application/orders/curaleaf-fulfilment.js';
-import { listPharmacyRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
+import { listPharmacyRecipients, pharmacyEmailContext, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
 import { SqlFulfilmentRepository } from '../../repositories/sql/fulfilment.sql.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
@@ -909,6 +909,27 @@ export function createPortalOrderRouter(): Router {
         confirmedBy: scope.uid,
       };
 
+      const [patient, organisation] = await Promise.all([
+        patientRepo.findPatientById(scope.organisationId, order.patientId).catch(() => null),
+        organisationRepo.findOrganisationById(scope.organisationId).catch(() => null),
+      ]);
+      if (patient?.email) {
+        await queueEmailToRecipients(
+          notificationRepo,
+          [{ email: patient.email, displayName: patient.firstName || null }],
+          'patient_refunded',
+          {
+            firstName: patient.firstName || 'Patient',
+            amountPence: nextRefund.amountPence,
+            currency: order.currency || 'GBP',
+            orderNumber: order.orderNumber,
+            ...pharmacyEmailContext(organisation),
+          },
+          ['patient-refunded', orderId, refundId],
+          { organisationId: scope.organisationId, patientId: order.patientId, orderId },
+        );
+      }
+
       res.status(200).json(nextRefund);
     } catch (error) {
       next(error);
@@ -1039,7 +1060,7 @@ export function createPortalOrderRouter(): Router {
           {
             firstName: patient.firstName || 'Patient',
             orderNumber: order.orderNumber,
-            pharmacyName: organisation?.tradingName || organisation?.name || 'the pharmacy',
+            ...pharmacyEmailContext(organisation),
           },
           ['patient-ready-for-collection', orderId, remainingOpen ? 'partial' : 'full'],
           { organisationId: scope.organisationId, patientId: order.patientId, orderId },

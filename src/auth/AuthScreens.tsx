@@ -69,7 +69,7 @@ export function StaffLogin() {
     if (resetMode) {
       try {
         await sendPasswordReset(email);
-        setMessage('If an invited staff account exists for that address, Firebase will send reset instructions.');
+        setMessage('If an invited staff account exists for that address, reset instructions will be sent.');
       } catch {
         setMessage('Password reset is temporarily unavailable. Contact an HHH administrator.');
       }

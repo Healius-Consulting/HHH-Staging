@@ -1,16 +1,17 @@
 import { evaluatePendingPaymentLifecycle } from '../payments/payment-lifecycle.js';
-import { patientMessageIdempotencyKey } from '../notifications/patient-messages.js';
+import { pharmacyEmailContext, queueEmailToRecipients } from '../notifications/email-outbox.js';
 import type { NotificationRepositoryPort } from '../../repositories/ports/notification.port.js';
 import type { OrderRepositoryPort } from '../../repositories/ports/order.port.js';
+import type { OrganisationRepositoryPort } from '../../repositories/ports/organisation.port.js';
 import type { PatientRepositoryPort } from '../../repositories/ports/patient.port.js';
 import type { PaymentRepositoryPort } from '../../repositories/ports/payment.port.js';
-import { sha256 } from '../../security/session-utils.js';
 
 export type PaymentLifecycleDeps = {
   paymentRepo: PaymentRepositoryPort;
   orderRepo: OrderRepositoryPort;
   patientRepo: PatientRepositoryPort;
   notificationRepo: NotificationRepositoryPort;
+  organisationRepo: OrganisationRepositoryPort;
 };
 
 function payloadObject(value: unknown): Record<string, unknown> {
@@ -58,24 +59,27 @@ export async function processPendingPaymentLifecycle(deps: PaymentLifecycleDeps,
         summary.reduced += 1;
         continue;
       }
-      const patient = await deps.patientRepo.findPatientById(payment.organisationId, order.patientId).catch(() => null);
+      const [patient, organisation] = await Promise.all([
+        deps.patientRepo.findPatientById(payment.organisationId, order.patientId).catch(() => null),
+        deps.organisationRepo.findOrganisationById(payment.organisationId).catch(() => null),
+      ]);
       if (patient?.email) {
-        await deps.notificationRepo.enqueue({
-          organisationId: payment.organisationId,
-          patientId: order.patientId,
-          orderId: order.id,
-          channel: 'EMAIL',
-          templateCode: 'patient_payment_request',
-          recipientHash: sha256(patient.email.toLowerCase()),
-          encryptedRecipient: patient.email,
-          payload: {
+        await queueEmailToRecipients(
+          deps.notificationRepo,
+          [{ email: patient.email, displayName: patient.firstName || null }],
+          'patient_payment_request',
+          {
             firstName: patient.firstName || 'Patient',
             amountPence: payment.amountPence,
+            currency: payment.currency,
+            orderNumber: order.orderNumber,
             paymentUrl: payment.hostedPaymentUrl,
             reminderHour: decision.hour,
+            ...pharmacyEmailContext(organisation),
           },
-          idempotencyKey: patientMessageIdempotencyKey([payment.id, `reminder${decision.hour}`]),
-        });
+          [payment.id, `reminder${decision.hour}`],
+          { organisationId: payment.organisationId, patientId: order.patientId, orderId: order.id },
+        );
       }
       await deps.paymentRepo.updatePaymentOutcome({
         id: payment.id,

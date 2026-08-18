@@ -3,7 +3,7 @@ import type { EmailTemplateCode } from './message-kinds.js';
 import { messageIdempotencyKey } from './message-kinds.js';
 import type { NotificationRepositoryPort } from '../../repositories/ports/notification.port.js';
 import type { IdentityRepositoryPort, StaffUserRecord } from '../../repositories/ports/identity.port.js';
-import type { OrganisationRepositoryPort } from '../../repositories/ports/organisation.port.js';
+import type { OrganisationRecord, OrganisationRepositoryPort } from '../../repositories/ports/organisation.port.js';
 
 type Recipient = {
   email: string;
@@ -24,6 +24,15 @@ function dedupeRecipients(items: Recipient[]) {
     result.push({ email, displayName: item.displayName ?? null });
   }
   return result;
+}
+
+export function pharmacyEmailContext(organisation: OrganisationRecord | null | undefined) {
+  return {
+    pharmacyName: organisation?.tradingName || organisation?.name || 'the pharmacy',
+    pharmacyPhone: organisation?.mainContactPhone || '',
+    pharmacyEmail: organisation?.mainContactEmail || '',
+    pharmacyAddress: organisation?.address || '',
+  };
 }
 
 export async function queueEmailToRecipients(

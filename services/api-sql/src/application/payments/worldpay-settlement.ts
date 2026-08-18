@@ -4,7 +4,7 @@ import { persistCuraleafPrescriptionIdentity } from '../prescriptions/curaleaf-p
 import { promotePatientAfterCuraleafPlacement } from '../patient-finance/patient-finance.js';
 import type { PatientFinanceDeps } from '../patient-finance/patient-finance.js';
 import type { IntegrationRepositoryPort } from '../../repositories/ports/integration.port.js';
-import { listPharmacyRecipients, queueEmailToRecipients } from '../notifications/email-outbox.js';
+import { listPharmacyRecipients, pharmacyEmailContext, queueEmailToRecipients } from '../notifications/email-outbox.js';
 import type { OrderRepositoryPort } from '../../repositories/ports/order.port.js';
 import type { PaymentRecord, PaymentRepositoryPort } from '../../repositories/ports/payment.port.js';
 import type { NotificationRepositoryPort } from '../../repositories/ports/notification.port.js';
@@ -54,7 +54,10 @@ export async function settlePaidWorldpayPayment(
 async function queueSettlementEmails(payment: PaymentRecord, deps: WorldpaySettlementDeps) {
   const order = await deps.orderRepo.findOrderById(payment.orderId, payment.organisationId);
   if (!order) return;
-  const patient = await deps.patientRepo.findPatientById(payment.organisationId, order.patientId).catch(() => null);
+  const [patient, organisation] = await Promise.all([
+    deps.patientRepo.findPatientById(payment.organisationId, order.patientId).catch(() => null),
+    deps.organisationRepo.findOrganisationById(payment.organisationId).catch(() => null),
+  ]);
   if (patient?.email) {
     await queueEmailToRecipients(
       deps.notificationRepo,
@@ -66,6 +69,7 @@ async function queueSettlementEmails(payment: PaymentRecord, deps: WorldpaySettl
         currency: payment.currency,
         orderNumber: order.orderNumber,
         receiptHash: payment.receiptHash,
+        ...pharmacyEmailContext(organisation),
       },
       ['patient-payment-confirmation', payment.id, payment.receiptHash],
       { organisationId: payment.organisationId, patientId: order.patientId, orderId: order.id },

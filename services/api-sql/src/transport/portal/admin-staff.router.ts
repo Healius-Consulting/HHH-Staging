@@ -1,8 +1,8 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { auth } from '../../bootstrap/firebase.js';
-import { portalAppOrigins } from '../../bootstrap/config.js';
 import { queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
+import { firstPartyPasswordResetLink, portalAppOrigin } from '../../application/identity/password-reset-link.js';
 import { HttpError } from '../../domain/common/errors.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
@@ -37,23 +37,6 @@ const invitePlatformAdminSchema = z.object({
   email: z.email().transform(value => value.toLowerCase()),
   displayName: z.string().trim().min(1).max(200),
 }).strict();
-
-function portalAppOrigin() {
-  for (const origin of portalAppOrigins) {
-    if (origin.includes('portal.')) return origin;
-  }
-  return 'https://portal.holistichealthhub.cc';
-}
-
-function firstPartyPasswordResetLink(firebaseLink: string, appOrigin: string) {
-  const source = new URL(firebaseLink);
-  const destination = new URL('/reset-password', appOrigin);
-  for (const key of ['oobCode', 'apiKey', 'lang']) {
-    const value = source.searchParams.get(key);
-    if (value) destination.searchParams.set(key, value);
-  }
-  return destination.toString();
-}
 
 function firebaseAuthErrorCode(error: unknown) {
   if (!error || typeof error !== 'object') return null;
@@ -154,7 +137,7 @@ export function createAdminStaffRouter(): Router {
         requestId: scope.requestId,
         sessionHashPrefix: scope.sessionHash.slice(0, 12),
         surface: scope.surface,
-        details: { role: 'pharmacy_staff', contactRole, deliveryMode: 'firebase_client' },
+        details: { role: 'pharmacy_staff', contactRole, deliveryMode: 'outbox' },
       });
       await queueEmailToRecipients(
         notificationRepo,
@@ -300,7 +283,7 @@ export function createAdminStaffRouter(): Router {
         requestId: scope.requestId,
         sessionHashPrefix: scope.sessionHash.slice(0, 12),
         surface: scope.surface,
-        details: { role: 'hhh_admin', deliveryMode: 'firebase_client' },
+        details: { role: 'hhh_admin', deliveryMode: 'outbox' },
       });
       await queueEmailToRecipients(
         notificationRepo,
@@ -449,6 +432,45 @@ export function createAdminStaffRouter(): Router {
         surface: scope.surface,
       });
       res.status(200).json({ uid: profile.uid, email: profile.email, resetQueued: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/portal/admin/staff/:uid/mfa-reset', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const uid = staffUidSchema.parse(req.params.uid);
+      z.object({
+        verifiedIdentity: z.literal(true),
+        reason: z.string().trim().min(20).max(500),
+      }).parse(req.body);
+      const profile = await identityRepo.findStaffUser(uid);
+      if (!profile || profile.disabled || profile.status === 'REMOVED') {
+        throw new HttpError(404, 'Staff account not found.', 'STAFF_NOT_FOUND');
+      }
+      await auth.updateUser(uid, { multiFactor: { enrolledFactors: [] } });
+      await auth.revokeRefreshTokens(uid);
+      await queueEmailToRecipients(
+        notificationRepo,
+        [{ email: profile.email, displayName: profile.displayName }],
+        'pharmacy_2fa_disabled',
+        { pharmacyName: profile.role === 'HHH_ADMIN' ? 'HHH admin workspace' : 'the pharmacy' },
+        ['pharmacy-2fa-disabled', profile.uid, Date.now()],
+        { organisationId: profile.organisationId },
+      );
+      await identityRepo.appendAudit({
+        organisationId: profile.organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'staff.mfa_reset',
+        recordType: 'StaffUser',
+        recordId: profile.uid,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+      });
+      res.status(200).json({ uid: profile.uid, resetQueued: true });
     } catch (error) {
       next(error);
     }

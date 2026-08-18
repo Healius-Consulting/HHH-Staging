@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { sendPasswordResetEmail } from 'firebase/auth';
 import {
   AlertCircle,
   Building2,
@@ -23,6 +22,7 @@ import {
   Search,
   Settings2,
   ShieldCheck,
+  ShieldOff,
   TrendingUp,
   Trash2,
   UserPlus,
@@ -39,9 +39,7 @@ import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources'
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { useAuth } from '../auth/useAuth';
-import { requireFirebaseAuth } from '../auth/firebase';
-import { passwordResetActionSettings } from '../auth/passwordReset';
-import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacyStaff, getPlatformAdmins, getReferralLink, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacyStaff, getPlatformAdmins, getReferralLink, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, resetPharmacyStaffMfa, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
 import type { AdminReferralFinanceReport, CuraleafConnectionStatus, PatientRegisterExportResult, PatientRegisterExportRow, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, PlatformAdminAccount, PlatformAdminInvitation, UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
@@ -63,6 +61,8 @@ import AdminIntakeV2 from '../components/AdminIntakeV2';
 
 type PlatformTab = 'setup' | 'curaleaf' | 'access' | 'directory';
 type PharmacyDetailTab = 'access' | 'config' | 'patients';
+
+const MFA_RESET_REASON = 'Administrator reset authenticator after confirming the staff member identity.';
 
 function adminViewFromPath(): AdminView {
   const relativePath = surfaceRelativePath(window.location.pathname, appPathPrefix);
@@ -406,6 +406,7 @@ function PlatformAdminManager() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [deletingUid, setDeletingUid] = useState<string | null>(null);
+  const [resettingUid, setResettingUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -449,12 +450,16 @@ function PlatformAdminManager() {
           dispatch({ type: 'ADD_TOAST', message: 'Local preview account created. No email was sent.', toastType: 'success' });
           return;
         }
-        await sendPasswordResetEmail(requireFirebaseAuth(), created.email, passwordResetActionSettings());
-        setEmailDelivery('sent');
-        dispatch({ type: 'ADD_TOAST', message: `${created.displayName} was added and Firebase sent their setup email.`, toastType: 'success' });
+        if (created.invitationQueued) {
+          setEmailDelivery('sent');
+          dispatch({ type: 'ADD_TOAST', message: 'Setup email queued.', toastType: 'success' });
+        } else {
+          setEmailDelivery('failed');
+          dispatch({ type: 'ADD_TOAST', message: 'Account created. Copy the setup link instead.', toastType: 'warning' });
+        }
       } catch {
         setEmailDelivery('failed');
-        dispatch({ type: 'ADD_TOAST', message: 'Account created, but Firebase could not send the email. Copy the setup link instead.', toastType: 'warning' });
+        dispatch({ type: 'ADD_TOAST', message: 'Account created. Copy the setup link instead.', toastType: 'warning' });
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The admin account could not be created.');
@@ -484,6 +489,22 @@ function PlatformAdminManager() {
     }
   };
 
+  const resetMfa = async (account: PlatformAdminAccount) => {
+    if (account.status === 'disabled' || !window.confirm(`Remove ${account.displayName}'s authenticator app? They will set it up again the next time they sign in.`)) return;
+    setResettingUid(account.uid);
+    setError(null);
+    try {
+      if (!isLocalPortalPreview) {
+        await resetPharmacyStaffMfa(account.uid, { verifiedIdentity: true, reason: MFA_RESET_REASON });
+      }
+      dispatch({ type: 'ADD_TOAST', message: 'Authenticator removed. They will set it up again at next sign-in.', toastType: 'success' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The authenticator could not be removed.');
+    } finally {
+      setResettingUid(null);
+    }
+  };
+
   return (
     <section className="card admin-staff-card">
       <div className="admin-directory-head"><div><p className="section-label">Platform access</p><h2>HHH administrators</h2><p>Invite colleagues who need full admin portal access. Admin accounts are separate from pharmacy staff and are not tied to a pharmacy organisation.</p></div><span className="pill pill-info"><ShieldCheck size={13} /> {admins.length} admin{admins.length === 1 ? '' : 's'}</span></div>
@@ -493,7 +514,7 @@ function PlatformAdminManager() {
         <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Invite admin'}</button>
       </form>
       {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
-      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>Admin account created · {emailDelivery === 'sent' ? 'Email sent' : emailDelivery === 'failed' ? 'Email not sent' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? `Firebase sent a password setup email to ${invitation.email}.` : `Send this one-time Firebase setup link to ${invitation.email}.`} They will choose a password and verify their email before entering the admin portal.</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
+      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>Admin account created · {emailDelivery === 'sent' ? 'Setup email queued' : emailDelivery === 'failed' ? 'Email not queued' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? 'A password setup email has been queued. They will choose a password and set up two-factor authentication before entering the admin portal.' : 'Copy this one-time setup link and send it securely. They will choose a password and set up two-factor authentication before entering the admin portal.'}</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
       <div className="admin-staff-list">
         {loading && <div className="empty-state">Loading admin accounts…</div>}
         {!loading && admins.length === 0 && <div className="empty-state">No HHH admin accounts yet. Invite the first administrator above.</div>}
@@ -506,7 +527,10 @@ function PlatformAdminManager() {
               <div><strong>{account.displayName}{isSelf ? ' (you)' : ''}</strong><span>{account.email}</span></div>
               <span className="pill pill-info">Admin</span>
               <span className={`pill ${account.status === 'active' ? 'pill-green' : account.status === 'disabled' ? 'pill-red' : 'pill-amber'}`}>{account.status}</span>
-              <button className="icon-btn" type="button" disabled={isSelf || isLastAdmin || deletingUid === account.uid} title={isSelf ? 'You cannot remove your own access' : isLastAdmin ? 'At least one admin must remain' : 'Remove admin access'} aria-label={isSelf ? `${account.displayName} is your account` : `Remove ${account.displayName}`} onClick={() => void removeAdmin(account)}><UserX size={16} /></button>
+              <div className="admin-staff-row-actions">
+                <button className="icon-btn" type="button" disabled={account.status === 'disabled' || resettingUid === account.uid} title="Remove authenticator app" aria-label={`Remove authenticator for ${account.displayName}`} onClick={() => void resetMfa(account)}><ShieldOff size={16} /></button>
+                <button className="icon-btn" type="button" disabled={isSelf || isLastAdmin || deletingUid === account.uid} title={isSelf ? 'You cannot remove your own access' : isLastAdmin ? 'At least one admin must remain' : 'Remove admin access'} aria-label={isSelf ? `${account.displayName} is your account` : `Remove ${account.displayName}`} onClick={() => void removeAdmin(account)}><UserX size={16} /></button>
+              </div>
             </div>
           );
         })}
@@ -525,6 +549,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [deletingUid, setDeletingUid] = useState<string | null>(null);
+  const [resettingUid, setResettingUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -577,12 +602,16 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
           dispatch({ type: 'ADD_TOAST', message: 'Local preview account created. No email was sent.', toastType: 'success' });
           return;
         }
-        await sendPasswordResetEmail(requireFirebaseAuth(), created.email, passwordResetActionSettings());
-        setEmailDelivery('sent');
-        dispatch({ type: 'ADD_TOAST', message: `${created.displayName} was added and Firebase sent their setup email.`, toastType: 'success' });
+        if (created.invitationQueued) {
+          setEmailDelivery('sent');
+          dispatch({ type: 'ADD_TOAST', message: 'Setup email queued.', toastType: 'success' });
+        } else {
+          setEmailDelivery('failed');
+          dispatch({ type: 'ADD_TOAST', message: 'Account created. Copy the setup link instead.', toastType: 'warning' });
+        }
       } catch {
         setEmailDelivery('failed');
-        dispatch({ type: 'ADD_TOAST', message: 'Account created, but Firebase could not send the email. Copy the setup link instead.', toastType: 'warning' });
+        dispatch({ type: 'ADD_TOAST', message: 'Account created. Copy the setup link instead.', toastType: 'warning' });
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The staff account could not be created.');
@@ -614,6 +643,22 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     }
   };
 
+  const resetMfa = async (account: PharmacyStaffAccount) => {
+    if (account.status === 'disabled' || !window.confirm(`Remove ${account.displayName}'s authenticator app? They will set it up again the next time they sign in.`)) return;
+    setResettingUid(account.uid);
+    setError(null);
+    try {
+      if (!isLocalPortalPreview) {
+        await resetPharmacyStaffMfa(account.uid, { verifiedIdentity: true, reason: MFA_RESET_REASON });
+      }
+      dispatch({ type: 'ADD_TOAST', message: 'Authenticator removed. They will set it up again at next sign-in.', toastType: 'success' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The authenticator could not be removed.');
+    } finally {
+      setResettingUid(null);
+    }
+  };
+
   return (
     <section className="card admin-staff-card">
       <div className="admin-directory-head"><div><p className="section-label">Account access</p><h2>Pharmacy staff</h2><p>Create staff access for this pharmacy. The first account is tagged Owner only to identify the main contact; it receives no additional permissions.</p></div><span className="pill pill-info"><Users size={13} /> {staff.length} account{staff.length === 1 ? '' : 's'}</span></div>
@@ -623,11 +668,11 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
         <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Add staff account'}</button>
       </form>
       {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
-      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>{invitation.contactRole === 'owner' ? 'Owner account created' : 'Staff account created'} · {emailDelivery === 'sent' ? 'Email sent' : emailDelivery === 'failed' ? 'Email not sent' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? `Firebase sent a password setup email to ${invitation.email}.` : `Send this one-time Firebase setup link to ${invitation.email}.`} They will choose a password and verify their email before entering the pharmacy workspace.</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
+      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>{invitation.contactRole === 'owner' ? 'Owner account created' : 'Staff account created'} · {emailDelivery === 'sent' ? 'Setup email queued' : emailDelivery === 'failed' ? 'Email not queued' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? 'A password setup email has been queued. They will choose a password and set up two-factor authentication before entering the pharmacy workspace.' : 'Copy this one-time setup link and send it securely. They will choose a password and set up two-factor authentication before entering the pharmacy workspace.'}</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
       <div className="admin-staff-list">
         {loading && <div className="empty-state">Loading staff accounts…</div>}
         {!loading && staff.length === 0 && <div className="empty-state">No pharmacy staff accounts yet. The first person added will be tagged Owner.</div>}
-        {staff.map(account => <div className="admin-staff-row" key={account.uid}><div className="staff-avatar">{account.displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()}</div><div><strong>{account.displayName}</strong><span>{account.email}</span></div><span className={`pill ${account.contactRole === 'owner' ? 'pill-info' : 'pill-neutral'}`}>{account.contactRole === 'owner' ? 'Owner' : 'Staff'}</span><span className={`pill ${account.status === 'active' ? 'pill-green' : account.status === 'disabled' ? 'pill-red' : 'pill-amber'}`}>{account.status}</span><button className="icon-btn" type="button" disabled={account.contactRole === 'owner' || deletingUid === account.uid} title={account.contactRole === 'owner' ? 'Owner account is protected' : 'Remove staff access'} aria-label={account.contactRole === 'owner' ? `${account.displayName} is the protected owner account` : `Remove ${account.displayName}`} onClick={() => void removeStaff(account)}><UserX size={16} /></button></div>)}
+        {staff.map(account => <div className="admin-staff-row" key={account.uid}><div className="staff-avatar">{account.displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()}</div><div><strong>{account.displayName}</strong><span>{account.email}</span></div><span className={`pill ${account.contactRole === 'owner' ? 'pill-info' : 'pill-neutral'}`}>{account.contactRole === 'owner' ? 'Owner' : 'Staff'}</span><span className={`pill ${account.status === 'active' ? 'pill-green' : account.status === 'disabled' ? 'pill-red' : 'pill-amber'}`}>{account.status}</span><div className="admin-staff-row-actions"><button className="icon-btn" type="button" disabled={account.status === 'disabled' || resettingUid === account.uid} title="Remove authenticator app" aria-label={`Remove authenticator for ${account.displayName}`} onClick={() => void resetMfa(account)}><ShieldOff size={16} /></button><button className="icon-btn" type="button" disabled={account.contactRole === 'owner' || deletingUid === account.uid} title={account.contactRole === 'owner' ? 'Owner account is protected' : 'Remove staff access'} aria-label={account.contactRole === 'owner' ? `${account.displayName} is the protected owner account` : `Remove ${account.displayName}`} onClick={() => void removeStaff(account)}><UserX size={16} /></button></div></div>)}
       </div>
     </section>
   );

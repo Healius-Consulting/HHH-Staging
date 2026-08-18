@@ -7,7 +7,7 @@ import { promotePatientAfterCuraleafPlacement } from '../../application/patient-
 import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
-import { listPharmacyRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
+import { listPharmacyRecipients, pharmacyEmailContext, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
@@ -36,6 +36,38 @@ const createPaymentSchema = z.object({
   currency: z.string().default('GBP'),
   route: z.enum(['MANUAL', 'WORLDPAY']).default('MANUAL'),
 });
+
+async function queuePatientPaymentRequestEmail(input: {
+  organisationId: string;
+  orderId: string;
+  order: { patientId: string; orderNumber: string | null; totalPence: number; currency: string | null };
+  paymentId: string;
+  paymentUrl: string | undefined;
+  notificationRepo: SqlNotificationRepository;
+  organisationRepo: SqlOrganisationRepository;
+  patientRepo: SqlPatientRepository;
+}) {
+  const [patient, organisation] = await Promise.all([
+    input.patientRepo.findPatientById(input.organisationId, input.order.patientId).catch(() => null),
+    input.organisationRepo.findOrganisationById(input.organisationId).catch(() => null),
+  ]);
+  if (!patient?.email || !input.paymentUrl || !input.paymentId) return;
+  await queueEmailToRecipients(
+    input.notificationRepo,
+    [{ email: patient.email, displayName: patient.firstName || null }],
+    'patient_payment_request',
+    {
+      firstName: patient.firstName || 'Patient',
+      amountPence: input.order.totalPence,
+      currency: input.order.currency || 'GBP',
+      orderNumber: input.order.orderNumber,
+      paymentUrl: input.paymentUrl,
+      ...pharmacyEmailContext(organisation),
+    },
+    ['patient-payment-request', input.paymentId],
+    { organisationId: input.organisationId, patientId: input.order.patientId, orderId: input.orderId },
+  );
+}
 
 const refundSchema = z.object({
   amountPence: z.number().int().positive(),
@@ -137,7 +169,10 @@ export function createPortalPaymentRouter(): Router {
         actorUid: scope.uid,
       });
 
-      const patient = await patientRepo.findPatientById(scope.organisationId, order.patientId).catch(() => null);
+      const [patient, organisation] = await Promise.all([
+        patientRepo.findPatientById(scope.organisationId, order.patientId).catch(() => null),
+        organisationRepo.findOrganisationById(scope.organisationId).catch(() => null),
+      ]);
       if (patient?.email) {
         await queueEmailToRecipients(
           notificationRepo,
@@ -149,6 +184,7 @@ export function createPortalPaymentRouter(): Router {
             currency: 'GBP',
             orderNumber: order.orderNumber,
             receiptHash,
+            ...pharmacyEmailContext(organisation),
           },
           ['patient-payment-confirmation', paymentResult.id, receiptHash],
           { organisationId: scope.organisationId, patientId: order.patientId, orderId },
@@ -222,8 +258,19 @@ export function createPortalPaymentRouter(): Router {
         hostedPaymentUrl: session.url,
       });
 
+      await queuePatientPaymentRequestEmail({
+        organisationId: scope.organisationId,
+        orderId,
+        order,
+        paymentId: paymentResult.id || '',
+        paymentUrl: session.url,
+        notificationRepo,
+        organisationRepo,
+        patientRepo,
+      });
+
       res.status(200).json({
-        paymentId: paymentResult.id,
+        paymentId: paymentResult.id || '',
         transactionReference: session.transactionReference,
         provider: {
           url: session.url,
@@ -289,8 +336,19 @@ export function createPortalPaymentRouter(): Router {
         actorUid: scope.uid,
       });
 
+      await queuePatientPaymentRequestEmail({
+        organisationId: scope.organisationId,
+        orderId,
+        order,
+        paymentId: paymentResult.id || '',
+        paymentUrl: session.url,
+        notificationRepo,
+        organisationRepo,
+        patientRepo,
+      });
+
       res.status(200).json({
-        paymentId: paymentResult.id,
+        paymentId: paymentResult.id || '',
         transactionReference: session.transactionReference,
         provider: {
           url: session.url,

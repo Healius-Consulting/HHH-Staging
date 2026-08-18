@@ -26,16 +26,17 @@ import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
-  const tenantPatients = state.crm.filter(patient => patient.organisationId === state.currentOrganisationId && canCreateOrderForPatient(patient));
+  const organisationPatients = state.crm.filter(candidate => candidate.organisationId === state.currentOrganisationId);
+  const orderablePatients = organisationPatients.filter(canCreateOrderForPatient);
   const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0];
-  const canUseWorldpay = organisation.worldpay.enabled && organisation.worldpay.status === 'connected';
+  const canUseWorldpay = Boolean(organisation?.worldpay.enabled && organisation?.worldpay.status === 'connected');
   const draftOrders = state.orders.filter(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none');
   const activeOrder = state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === state.activeOrderId && order.payment.status === 'none');
   const selectedPaymentRoute = activeOrder?.paymentRoute ?? (canUseWorldpay ? 'worldpay' : 'manual');
   const redoSourceOrder = activeOrder?.redoContext
     ? state.orders.find(order => order.organisationId === state.currentOrganisationId && order.id === activeOrder.redoContext!.originalOrderId)
     : null;
-  const patient = activeOrder?.patientId ? tenantPatients.find(candidate => candidate.id === activeOrder.patientId) ?? null : null;
+  const patient = activeOrder?.patientId ? organisationPatients.find(candidate => candidate.id === activeOrder.patientId) ?? null : null;
   const [selectedRxId, setSelectedRxId] = useState<number | null>(null);
   const [changingPatient, setChangingPatient] = useState(false);
   const [patientQuery, setPatientQuery] = useState('');
@@ -134,13 +135,12 @@ export default function CreateOrder() {
     setQuoteBusy(false);
     setEditingClinicFormularyRxId(null);
     setSelectedUnresolvedOrderId(activeOrder?.redoContext?.originalOrderId ?? null);
-    setRedoRefundReference('');
   }, [activeOrder?.id, activeOrder?.redoContext?.originalOrderId]);
 
   const matchingPatients = useMemo(() => {
     const query = patientQuery.trim().toLowerCase();
-    return tenantPatients.filter(candidate => !query || [candidate.name, candidate.email, candidate.mobile, candidate.dob ?? '', formatPatientDob(candidate.dob)].some(value => value.toLowerCase().includes(query))).slice(0, 7);
-  }, [patientQuery, tenantPatients]);
+    return orderablePatients.filter(candidate => !query || [candidate.name, candidate.email, candidate.mobile, candidate.dob ?? '', formatPatientDob(candidate.dob)].some(value => value.toLowerCase().includes(query))).slice(0, 7);
+  }, [orderablePatients, patientQuery]);
 
   const unresolvedOrdersForPatient = useMemo(() => {
     if (!patient) return [] as Array<{ order: PatientOrder; reason: UnresolvedOrderReason; itemCount: number }>;
@@ -242,7 +242,7 @@ export default function CreateOrder() {
   ] : [];
   const activeOrderRef = activeOrder ? orderReference(activeOrder) : '';
   const confirmingDraft = confirmingDraftDeleteId === null ? null : draftOrders.find(order => order.id === confirmingDraftDeleteId) ?? null;
-  const confirmingDraftPatient = confirmingDraft?.patientId ? tenantPatients.find(candidate => candidate.id === confirmingDraft.patientId) : null;
+  const confirmingDraftPatient = confirmingDraft?.patientId ? organisationPatients.find(candidate => candidate.id === confirmingDraft.patientId) : null;
   const confirmingDraftLabel = confirmingDraftPatient?.name ?? (confirmingDraft ? `Unlinked draft #${confirmingDraft.id}` : 'this draft');
 
   const initials = (name: string) => name.split(' ').map(word => word[0]).join('').toUpperCase().slice(0, 2);
@@ -645,11 +645,11 @@ export default function CreateOrder() {
       setPatientSearchOpen(false);
       return;
     }
-    const linkedPatient = tenantPatients.find(candidate => candidate.id === patientId);
+    const linkedPatient = orderablePatients.find(candidate => candidate.id === patientId);
     if (!linkedPatient) return;
     const replacingPatient = Boolean(activeOrder.patientId);
     dispatch({ type: 'SET_ORDER_PATIENT', orderId: activeOrder.id, patientId });
-    dispatch({ type: 'ADD_TOAST', message: replacingPatient ? `Draft reassigned to ${linkedPatient.name}.` : `Linked patient “${linkedPatient.name}”.`, toastType: 'success' });
+    dispatch({ type: 'ADD_TOAST', message: replacingPatient ? 'Draft reassigned to the selected patient.' : 'Patient linked to this draft.', toastType: 'success' });
     setChangingPatient(false);
     setPatientQuery('');
     setPatientSearchOpen(false);
@@ -664,8 +664,8 @@ export default function CreateOrder() {
     dispatch({
       type: 'ADD_TOAST',
       message: source.order.payment.status === 'paid'
-        ? `Order #${sourceOrderId} loaded into this draft (${source.itemCount} item${source.itemCount === 1 ? '' : 's'}). Payment can be carried over after you attach and authenticate the new prescription PDF.`
-        : `Order #${sourceOrderId} loaded into this draft (${source.itemCount} item${source.itemCount === 1 ? '' : 's'}). Attach and authenticate the new prescription PDF before checkout.`,
+        ? `Replacement draft loaded (${source.itemCount} item${source.itemCount === 1 ? '' : 's'}). Payment can be carried over after the new prescription is authenticated.`
+        : `Replacement draft loaded (${source.itemCount} item${source.itemCount === 1 ? '' : 's'}). Authenticate the new prescription before checkout.`,
       toastType: 'info',
     });
   };
@@ -804,7 +804,7 @@ export default function CreateOrder() {
         </div>
         <div className="rx-draft-tabs" role="tablist" aria-label="Open prescription drafts">
           {draftOrders.map(order => {
-            const draftPatient = order.patientId ? tenantPatients.find(candidate => candidate.id === order.patientId) : null;
+            const draftPatient = order.patientId ? organisationPatients.find(candidate => candidate.id === order.patientId) : null;
             const active = order.id === state.activeOrderId;
             return (
               <div className={`rx-draft-tab-wrap${active ? ' active' : ''}`} key={order.id}>
@@ -883,6 +883,10 @@ export default function CreateOrder() {
             </ol>
           </section>
 
+          {patient && !canCreateOrderForPatient(patient) ? (
+            <ProviderStatusNotice title="This patient cannot start an order" detail="The linked patient is no longer approved or referred. Change the patient, or wait until their record is eligible again." />
+          ) : null}
+
           {patient && activeOrder.redoContext ? (
             <section className="rx-replacement-context card" aria-label={`Replacement order ${activeOrderRef}`}>
               <span className="rx-replacement-context__mark">{activeOrderRef.replace(/^#\d+/, '')}</span>
@@ -901,7 +905,7 @@ export default function CreateOrder() {
               <span className="rx-replacement-context__next"><ShieldCheck size={15} /><span><strong>New prescription required</strong><small>Authenticate the replacement below.</small></span></span>
             </section>
           ) : patient && unresolvedOrdersForPatient.length > 0 ? (
-            <details key={`${activeOrder.id}-${activeOrder.redoContext?.originalOrderId ?? 'none'}`} className="rx-unresolved-panel rx-unresolved-drawer card" aria-label="Unresolved archived and rejected orders" open={Boolean(activeOrder.redoContext)}>
+            <details className="rx-unresolved-panel rx-unresolved-drawer card" aria-label="Unresolved archived and rejected orders">
               <summary className="rx-unresolved-panel__header">
                 <span>
                   <p className="section-label">Unresolved for this patient</p>
@@ -965,7 +969,7 @@ export default function CreateOrder() {
             </details>
           ) : null}
 
-          <button type="button" className="rx-mobile-review-bar" onClick={() => document.getElementById('rx-order-review')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+          <button type="button" className="rx-mobile-review-bar" onClick={() => document.getElementById('rx-order-review')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })}>
             <span><small>Patient total</small><strong>{money(orderRevenue(activeOrder))}</strong></span>
             <span>Review order <ArrowRight size={15} /></span>
           </button>

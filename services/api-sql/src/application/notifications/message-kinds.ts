@@ -1,10 +1,13 @@
 export const EMAIL_TEMPLATE_CODES = [
   'patient_payment_request',
   'patient_payment_confirmation',
+  'patient_refunded',
   'patient_ready_for_collection',
   'admin_new_enquiry_received',
   'pharmacy_staff_invite',
   'pharmacy_password_reset',
+  'pharmacy_2fa_enabled',
+  'pharmacy_2fa_disabled',
   'pharmacy_new_patient_referred',
   'pharmacy_payment_received',
   'pharmacy_order_accepted',
@@ -20,6 +23,7 @@ export type EmailTemplateCode = (typeof EMAIL_TEMPLATE_CODES)[number];
 export const PATIENT_MESSAGE_KINDS = [
   'patient_payment_request',
   'patient_payment_confirmation',
+  'patient_refunded',
   'patient_ready_for_collection',
 ] as const;
 

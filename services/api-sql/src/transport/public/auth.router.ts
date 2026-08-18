@@ -1,12 +1,16 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { SessionService } from '../../application/identity/session.service.js';
+import { firstPartyPasswordResetLink, portalAppOrigin } from '../../application/identity/password-reset-link.js';
+import { queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
+import { auth } from '../../bootstrap/firebase.js';
 import { HttpError } from '../../domain/common/errors.js';
 import { cookieOptions, csrfCookieName, issueCsrf, requireCsrf } from '../../security/csrf.js';
 import type { ProtectedSurface } from '../../security/request-context.js';
 import { requireStaff, sessionCookieName } from '../../security/require-staff.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { toPortalOrganisation } from '../portal/pharmacy-contracts.js';
 
@@ -14,11 +18,22 @@ const sessionInputSchema = z.object({
   idToken: z.string().min(100).max(20_000),
 });
 
+const passwordResetSchema = z.object({
+  email: z.email().transform(value => value.toLowerCase()),
+}).strict();
+
+function bearerToken(request: Request) {
+  const header = request.get('authorization') || '';
+  if (!header.toLowerCase().startsWith('bearer ')) return '';
+  return header.slice(7).trim();
+}
+
 export function createAuthRouter(): Router {
   const router = Router();
   const sessionService = new SessionService();
   const identityRepo = new SqlIdentityRepository();
   const organisationRepo = new SqlOrganisationRepository();
+  const notificationRepo = new SqlNotificationRepository();
 
   // GET /v1/auth/csrf - Issue or refresh CSRF token
   router.get('/auth/csrf', (req: Request, res: Response) => {
@@ -134,6 +149,96 @@ export function createAuthRouter(): Router {
       const payload = await sessionService.getSessionPayload(req.context);
       const csrfToken = issueCsrf(req, res);
       res.status(200).json({ ...payload, csrfToken });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/auth/password-reset', requireCsrf, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email } = passwordResetSchema.parse(req.body);
+      try {
+        const user = await auth.getUserByEmail(email);
+        const profile = await identityRepo.findStaffUser(user.uid);
+        if (profile && !profile.disabled && profile.status !== 'REMOVED') {
+          const firebaseLink = await auth.generatePasswordResetLink(profile.email, {
+            url: new URL('/reset-password', portalAppOrigin()).toString(),
+            handleCodeInApp: true,
+          });
+          const actionLink = firstPartyPasswordResetLink(firebaseLink, portalAppOrigin());
+          const organisation = profile.organisationId
+            ? await organisationRepo.findOrganisationById(profile.organisationId)
+            : null;
+          await queueEmailToRecipients(
+            notificationRepo,
+            [{ email: profile.email, displayName: profile.displayName }],
+            'pharmacy_password_reset',
+            {
+              pharmacyName: organisation?.tradingName || organisation?.name || 'HHH admin workspace',
+              actionLink,
+            },
+            ['staff-password-reset', profile.uid, Date.now()],
+            { organisationId: profile.organisationId },
+          );
+          await identityRepo.appendAudit({
+            organisationId: profile.organisationId,
+            actorUid: profile.uid,
+            actorRole: profile.role,
+            event: 'staff.password_reset_queued',
+            recordType: 'StaffUser',
+            recordId: profile.uid,
+            requestId: req.requestId ?? null,
+            surface: profile.role === 'HHH_ADMIN' ? 'admin' : 'pharmacy',
+          });
+        }
+      } catch {
+        // Always acknowledge so the login form cannot be used to probe staff accounts.
+      }
+      res.status(200).json({ accepted: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(200).json({ accepted: true });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.post('/auth/mfa-enrolled', requireCsrf, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const idToken = bearerToken(req);
+      if (!idToken) {
+        throw new HttpError(401, 'A valid staff session is required.', 'UNAUTHENTICATED');
+      }
+      let uid = '';
+      try {
+        uid = (await auth.verifyIdToken(idToken, true)).uid;
+      } catch {
+        throw new HttpError(401, 'A valid staff session is required.', 'UNAUTHENTICATED');
+      }
+      const profile = await identityRepo.findStaffUser(uid);
+      if (!profile || profile.disabled || profile.status === 'REMOVED') {
+        throw new HttpError(401, 'A valid staff session is required.', 'UNAUTHENTICATED');
+      }
+      await queueEmailToRecipients(
+        notificationRepo,
+        [{ email: profile.email, displayName: profile.displayName }],
+        'pharmacy_2fa_enabled',
+        { pharmacyName: profile.role === 'HHH_ADMIN' ? 'HHH admin workspace' : 'the pharmacy' },
+        ['pharmacy-2fa-enabled', profile.uid, Date.now()],
+        { organisationId: profile.organisationId },
+      );
+      await identityRepo.appendAudit({
+        organisationId: profile.organisationId,
+        actorUid: profile.uid,
+        actorRole: profile.role,
+        event: 'staff.mfa_enrolled',
+        recordType: 'StaffUser',
+        recordId: profile.uid,
+        requestId: req.requestId ?? null,
+        surface: profile.role === 'HHH_ADMIN' ? 'admin' : 'pharmacy',
+      });
+      res.status(200).json({ queued: true });
     } catch (error) {
       next(error);
     }

@@ -815,6 +815,30 @@ export function removePlatformAdmin(uid: string) {
   return apiRequest<void>(`/v1/portal/admin/platform-admins/${encodeURIComponent(uid)}`, { method: 'DELETE' });
 }
 
+export function resetPharmacyStaffMfa(uid: string, input: { verifiedIdentity: true; reason: string }) {
+  return apiRequest<{ uid: string; resetQueued: boolean }>(`/v1/portal/admin/staff/${encodeURIComponent(uid)}/mfa-reset`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function requestStaffPasswordReset(email: string) {
+  if (!csrfToken) await getAuthCsrf();
+  return performApiRequest<{ accepted: true }>('/v1/auth/password-reset', {
+    method: 'POST',
+    body: JSON.stringify({ email: email.trim().toLowerCase() }),
+  });
+}
+
+export async function notifyStaffMfaEnrolled(idToken: string) {
+  if (!csrfToken) await getAuthCsrf();
+  return performApiRequest<{ queued: true }>('/v1/auth/mfa-enrolled', {
+    method: 'POST',
+    body: JSON.stringify({}),
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+}
+
 export function getPharmacySetupStatus(organisationId: string) {
   return apiRequest<PharmacySetupStatus>(`/v1/portal/setup?organisationId=${encodeURIComponent(organisationId)}`);
 }

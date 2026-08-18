@@ -6,7 +6,6 @@ import {
   onIdTokenChanged,
   reload,
   sendEmailVerification,
-  sendPasswordResetEmail,
   setPersistence,
   signInWithEmailAndPassword,
   signOut,
@@ -24,6 +23,8 @@ import {
   deleteAuthenticatedSession,
   getAuthenticatedSession,
   getStaffAccessibilityPreferences,
+  notifyStaffMfaEnrolled,
+  requestStaffPasswordReset,
   setApiCsrfToken,
   setApiSecurityTokenProvider,
   updateStaffAccessibilityPreferences,
@@ -34,7 +35,6 @@ import { firebaseConfiguration, mfaRequired, readAppCheckToken, requireFirebaseA
 import { AuthContext, type AuthContextValue } from './AuthContext';
 import type { AuthState, AuthenticatedStaff, StaffRole } from './types';
 import { isLocalPortalPreview, localPreviewStaff } from '../dev/localPortalPreview';
-import { passwordResetActionSettings } from './passwordReset';
 import { appPathPrefix, isCurrentSurfacePath, surfacePath } from './surface-path';
 
 const IDLE_LIMIT_MS = 15 * 60 * 1000;
@@ -382,6 +382,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const assertion = TotpMultiFactorGenerator.assertionForEnrollment(totpSecret.current, code.trim());
     await multiFactor(user).enroll(assertion, 'HHH staff authenticator');
     totpSecret.current = null;
+    try {
+      const idToken = await user.getIdToken(true);
+      await notifyStaffMfaEnrolled(idToken);
+    } catch {
+      /* Enrolment succeeded even if the confirmation email could not be queued. */
+    }
     await signOut(requireFirebaseAuth());
     setState({ phase: 'anonymous', staff: null, error: null, notice: 'Authenticator enrolled. Sign in again with your password and six-digit code.' });
   }, []);
@@ -401,7 +407,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [finishFirebaseSignIn]);
 
   const sendPasswordReset = useCallback(async (email: string) => {
-    await sendPasswordResetEmail(requireFirebaseAuth(), email.trim(), passwordResetActionSettings());
+    if (isLocalPortalPreview) return;
+    await requestStaffPasswordReset(email);
   }, []);
 
   const value = useMemo<AuthContextValue>(() => ({
