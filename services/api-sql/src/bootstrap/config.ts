@@ -12,11 +12,15 @@ const configSchema = z.object({
   ALLOWED_ORIGINS: z.string().default(
     'https://holistichealthhub.cc,https://holistichealthhub.live,' +
     'https://portal.holistichealthhub.cc,https://portal.holistichealthhub.live,' +
+    'https://hhh.thinktimeless.co.uk,https://www.hhh.thinktimeless.co.uk,' +
+    'https://portal.hhh.thinktimeless.co.uk,https://staging.thinktimeless.co.uk,' +
     'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174'
   ),
   ALLOWED_HOSTS: z.string().default(
     'holistichealthhub.cc,holistichealthhub.live,' +
     'portal.holistichealthhub.cc,portal.holistichealthhub.live,' +
+    'hhh.thinktimeless.co.uk,www.hhh.thinktimeless.co.uk,portal.hhh.thinktimeless.co.uk,' +
+    'staging.thinktimeless.co.uk,' +
     'localhost,127.0.0.1'
   ),
   // Domain backends are SQL Connect only. Firestore is not a valid runtime.

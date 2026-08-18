@@ -31,13 +31,18 @@ function ageDays(at: number, now: number) {
   return Math.max(0, Math.floor((now - at) / DAY_MS));
 }
 
-function maskPatientLabel(patient: PatientRecord | undefined) {
-  if (!patient) return 'Patient record';
-  return [patient.firstName, patient.surname]
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(part => `${part[0]!.toUpperCase()}${'•'.repeat(Math.min(5, Math.max(2, part.length - 1)))}`)
-    .join(' ');
+function overviewPatientLabel(patient: PatientRecord | undefined) {
+  const surname = patient?.surname?.trim();
+  const firstInitial = patient?.firstName?.trim()?.[0]?.toUpperCase();
+  if (!surname && !firstInitial) return 'Patient record';
+  if (!firstInitial) return surname!;
+  return surname ? `${surname}, ${firstInitial}` : firstInitial;
+}
+
+function overviewOrderReference(order: { id: string; orderNumber?: string | null; paymentTransactionReference?: string | null }) {
+  const number = order.orderNumber?.trim() || order.paymentTransactionReference?.trim();
+  if (number) return `#${number}`;
+  return `#${order.id.replaceAll('-', '').slice(0, 8).toUpperCase()}`;
 }
 
 export function toPortalOrganisation(organisation: OrganisationRecord) {
@@ -366,8 +371,10 @@ export function buildSqlPharmacyOverview(params: {
     kind: 'payment' | 'collection';
     ageDays: number;
     maskedPatientLabel: string;
+    orderReference: string;
     recordTarget: { kind: 'order'; id: string };
     summary: string;
+    actionLabel: string;
   }> = [];
 
   for (const order of awaitingPayment) {
@@ -377,9 +384,11 @@ export function buildSqlPharmacyOverview(params: {
       id: `payment-${order.id}`,
       kind: 'payment',
       ageDays: age,
-      maskedPatientLabel: maskPatientLabel(patientById.get(order.patientId)),
+      maskedPatientLabel: overviewPatientLabel(patientById.get(order.patientId)),
+      orderReference: overviewOrderReference(order),
       recordTarget: { kind: 'order', id: order.id },
-      summary: `Payment has been outstanding for ${age} day${age === 1 ? '' : 's'}.`,
+      summary: `Payment outstanding for ${age} day${age === 1 ? '' : 's'}.`,
+      actionLabel: 'Open order',
     });
   }
 
@@ -390,9 +399,11 @@ export function buildSqlPharmacyOverview(params: {
       id: `collection-${order.id}`,
       kind: 'collection',
       ageDays: age,
-      maskedPatientLabel: maskPatientLabel(patientById.get(order.patientId)),
+      maskedPatientLabel: overviewPatientLabel(patientById.get(order.patientId)),
+      orderReference: overviewOrderReference(order),
       recordTarget: { kind: 'order', id: order.id },
-      summary: `Collection follow-up is overdue by ${age} day${age === 1 ? '' : 's'}.`,
+      summary: `Ready to collect for ${age} day${age === 1 ? '' : 's'}.`,
+      actionLabel: 'Open order',
     });
   }
 
@@ -422,17 +433,7 @@ export function buildSqlPharmacyOverview(params: {
       urgentTotal: priorityItems.length,
     },
     priorityItems,
-    recentSessions: activeOrders
-      .slice()
-      .sort((left, right) => timestamp(right.updatedAt, right.createdAt) - timestamp(left.updatedAt, left.createdAt))
-      .slice(0, 5)
-      .map(order => ({
-        orderId: order.id,
-        maskedPatientLabel: maskPatientLabel(patientById.get(order.patientId)),
-        occurredAt: order.updatedAt || order.createdAt,
-        prescriptionCount: 0,
-        status: order.status,
-      })),
+    recentSessions: [],
     handover: {
       activePatients,
       activePaymentLinks: awaitingPayment.length,

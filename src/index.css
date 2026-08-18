@@ -260,6 +260,11 @@
 .overview-view-switcher button:focus-visible { outline: 3px solid var(--focus-ring, #146c43); outline-offset: 2px; }
 
 .overview-panel { display: grid; gap: 1rem; }
+.secure-overview__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.overview-handover-toggle[aria-pressed='true'] { box-shadow: inset 0 0 0 1px rgb(20 38 27 / 8%); }
+.overview-today .summary-tiles { margin: 0; }
+.overview-priority-meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0.25rem 0 0; color: var(--text-muted, #526157); font-size: 0.8125rem; }
+.overview-priority-meta span:first-child { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
 .overview-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.75rem; }
 .overview-summary-tile { display: grid; gap: 0.25rem; min-height: 7.25rem; padding: 1rem; border: 1px solid var(--border-subtle, #d9e0da); border-radius: 0.75rem; background: var(--surface-elevated, #fff); }
 .overview-summary-tile > span { color: var(--text-muted, #526157); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }

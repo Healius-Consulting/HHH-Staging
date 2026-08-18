@@ -20,6 +20,34 @@ const surface: Surface = resolveSurface();
 const apiOrigin = (process.env.HHH_FIREBASE_API_ORIGIN ?? 'https://europe-west2-hhh26-4ebd2.cloudfunctions.net/apiLondon').replace(/\/$/, '');
 
 const portalSurface = surface === 'portal';
+const CANONICAL_PUBLIC_ORIGIN = 'https://holistichealthhub.cc';
+// Pharmacy QR host. Cloudflare owns the live 301. These Vercel host redirects are only a backstop if hhh is re-attached to a public project. Do not add staging.thinktimeless.co.uk.
+const THINKTIMELESS_PUBLIC_HOSTS = ['hhh.thinktimeless.co.uk', 'www.hhh.thinktimeless.co.uk'] as const;
+
+const thinktimelessPublicRedirects = THINKTIMELESS_PUBLIC_HOSTS.flatMap(host => [
+  {
+    source: '/',
+    has: [
+      { type: 'host' as const, value: host },
+      { type: 'query' as const, key: 'token' },
+    ],
+    destination: `${CANONICAL_PUBLIC_ORIGIN}/eligibility`,
+    permanent: true,
+  },
+  {
+    source: '/eligibility',
+    has: [{ type: 'host' as const, value: host }],
+    destination: `${CANONICAL_PUBLIC_ORIGIN}/eligibility`,
+    permanent: true,
+  },
+  {
+    source: '/(.*)',
+    has: [{ type: 'host' as const, value: host }],
+    destination: `${CANONICAL_PUBLIC_ORIGIN}/$1`,
+    permanent: true,
+  },
+]);
+
 const securityHeaders = [
   { key: 'Content-Security-Policy', value: CONTENT_SECURITY_POLICY },
   { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
@@ -53,6 +81,7 @@ export const config = {
     { source: '/pharmacy/home', destination: '/pharmacy', permanent: true },
     { source: '/admin/overview', destination: '/admin', permanent: true },
   ] : [
+    ...thinktimelessPublicRedirects,
     { source: '/general-5', destination: '/faq', permanent: true },
     { source: '/general-5-1', destination: '/privacy', permanent: true },
   ],

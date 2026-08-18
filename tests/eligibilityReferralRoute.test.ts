@@ -14,6 +14,13 @@ test('a valid single token selects the pharmacy-specific form', () => {
   });
 });
 
+test('printed stone URLs with mode=eligibility?token= still select the pharmacy form', () => {
+  assert.deepEqual(parseEligibilityReferralRoute('?mode=eligibility?token=kchem-7x4p9k'), {
+    kind: 'token',
+    token: 'kchem-7x4p9k',
+  });
+});
+
 test('present but empty, malformed, or ambiguous token parameters fail closed', () => {
   for (const search of ['?token=', '?token=%20', '?token=short', '?token=valid-token-value.', '?token=one-valid-token&token=another-valid-token']) {
     assert.deepEqual(parseEligibilityReferralRoute(search), { kind: 'invalid-token' });

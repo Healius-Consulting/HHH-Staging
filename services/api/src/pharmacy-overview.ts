@@ -17,10 +17,24 @@ function timestamp(record: RecordData, ...fields: string[]) {
 }
 function ageDays(at: number, now: number) { return Math.max(0, Math.floor((now - at) / DAY_MS)); }
 
-export function maskPatientLabel(name: unknown) {
-  const parts = text(name).trim().split(/\s+/).filter(Boolean);
+export function overviewPatientLabelFromName(name: unknown) {
+  const parts = typeof name === 'string' ? name.trim().split(/\s+/).filter(Boolean) : [];
   if (!parts.length) return 'Patient record';
-  return parts.slice(0, 2).map(part => `${part[0]!.toUpperCase()}${'•'.repeat(Math.min(5, Math.max(2, part.length - 1)))}`).join(' ');
+  if (parts.length === 1) return parts[0]!;
+  const firstName = parts[0]!;
+  const surname = parts[parts.length - 1]!;
+  return `${surname}, ${firstName[0]!.toUpperCase()}`;
+}
+
+/** @deprecated Use overviewPatientLabelFromName — kept for legacy Firestore overview tests. */
+export function maskPatientLabel(name: unknown) {
+  return overviewPatientLabelFromName(name);
+}
+
+function overviewOrderReferenceFromId(orderId: string, orderNumber?: unknown) {
+  const number = typeof orderNumber === 'string' ? orderNumber.trim() : '';
+  if (number) return `#${number}`;
+  return `#${orderId.replaceAll('-', '').slice(0, 8).toUpperCase()}`;
 }
 
 function patientName(record: RecordData) {
@@ -119,9 +133,11 @@ export function composePharmacyOverview(input: {
     const patient = patientById.get(text(order.patientId));
     priorityItems.push({
       id: `payment-${text(order.id)}`, kind: 'payment', ageDays: days,
-      maskedPatientLabel: maskPatientLabel(patientName(patient ?? {})),
+      maskedPatientLabel: overviewPatientLabelFromName(patientName(patient ?? {})),
+      orderReference: overviewOrderReferenceFromId(text(order.id), order.orderNumber),
       recordTarget: { kind: 'order', id: text(order.id) },
-      summary: `Payment has been outstanding for ${days} day${days === 1 ? '' : 's'}.`,
+      summary: `Payment outstanding for ${days} day${days === 1 ? '' : 's'}.`,
+      actionLabel: 'Open order',
     });
   }
   for (const order of collectionOrders) {
@@ -132,32 +148,27 @@ export function composePharmacyOverview(input: {
     const patient = patientById.get(text(order.patientId));
     priorityItems.push({
       id: `collection-${text(order.id)}`, kind: 'collection', ageDays: days,
-      maskedPatientLabel: maskPatientLabel(patientName(patient ?? {})),
+      maskedPatientLabel: overviewPatientLabelFromName(patientName(patient ?? {})),
+      orderReference: overviewOrderReferenceFromId(text(order.id), order.orderNumber),
       recordTarget: { kind: 'order', id: text(order.id) },
-      summary: `Collection follow-up is overdue by ${days} day${days === 1 ? '' : 's'}.`,
+      summary: `Ready to collect for ${days} day${days === 1 ? '' : 's'}.`,
+      actionLabel: 'Open order',
     });
   }
   for (const order of orders.filter(cancellationRequiresAction)) {
     const patient = patientById.get(text(order.patientId));
     priorityItems.push({
       id: `cancellation-${text(order.id)}`, kind: 'cancellation', ageDays: ageDays(timestamp(order, 'updatedAt', 'createdAt'), now),
-      maskedPatientLabel: maskPatientLabel(patientName(patient ?? {})),
+      maskedPatientLabel: overviewPatientLabelFromName(patientName(patient ?? {})),
+      orderReference: overviewOrderReferenceFromId(text(order.id), order.orderNumber),
       recordTarget: { kind: 'order', id: text(order.id) },
       summary: 'Cancellation or refund resolution requires attention.',
+      actionLabel: 'Open order',
     });
   }
   priorityItems.sort((left, right) => Number(right.ageDays) - Number(left.ageDays));
 
-  const recentSessions = [...activeOrders]
-    .sort((left, right) => timestamp(right, 'updatedAt', 'date', 'createdAt') - timestamp(left, 'updatedAt', 'date', 'createdAt'))
-    .slice(0, 5)
-    .map(order => ({
-      orderId: text(order.id),
-      maskedPatientLabel: maskPatientLabel(patientName(patientById.get(text(order.patientId)) ?? {})),
-      occurredAt: new Date(timestamp(order, 'updatedAt', 'date', 'createdAt')).toISOString(),
-      prescriptionCount: orderPrescriptions(order).length,
-      status: text(order.lifecycleStatus) || text(orderPayment(order).status) || text(order.status) || 'draft',
-    }));
+  const recentSessions: never[] = [];
 
   const integrations = ['curaleaf', 'worldpay'].map(integration => {
     const document = input.integrations.find(item => item.data.integration === integration || item.id.endsWith(`--${integration}`));

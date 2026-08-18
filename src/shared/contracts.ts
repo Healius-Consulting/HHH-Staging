@@ -960,7 +960,7 @@ export interface StaffAccessibilityPreferences {
   reduceMotion: boolean;
   enhancedFocus: boolean;
   underlineLinks: boolean;
-  overviewView?: 'operations' | 'pipeline' | 'handover';
+  overviewView?: 'today' | 'handover' | 'operations' | 'pipeline';
 }
 
 export interface AuthenticatedSession {
@@ -1001,8 +1001,10 @@ export interface PharmacyOverview {
     kind: 'payment' | 'supplier' | 'collection' | 'repeat' | 'cancellation';
     ageDays: number;
     maskedPatientLabel: string;
+    orderReference: string;
     recordTarget: { kind: 'patient' | 'order'; id: string };
     summary: string;
+    actionLabel: string;
   }>;
   recentSessions: Array<{
     orderId: string;

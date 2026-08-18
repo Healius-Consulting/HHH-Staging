@@ -54,8 +54,33 @@ test('all protected production tokens retain every supported URL shape', () => {
   for (const token of ['kchem-7x4p9k', 'eastwood-3m8q2v']) assert.equal(resolvePublicView('/eligibility', `?token=${token}`), 'eligibility');
 });
 
+test('printed thinktimeless stone URLs with a second ? still open eligibility', () => {
+  const stone = '?mode=eligibility?token=eastwood-3m8q2v';
+  assert.equal(resolvePublicView('/', stone), 'eligibility');
+  assert.equal(
+    canonicalEligibilityRedirect('hhh.thinktimeless.co.uk', '/', stone),
+    'https://holistichealthhub.cc/eligibility?token=eastwood-3m8q2v',
+  );
+});
+
+test('the exact printed Eastwood and K-Chem URLs redirect onto holistichealthhub.cc', () => {
+  const links = [
+    'bbd8fc4749934797a49398c0b95e68cf873d4868c33c42a2949d6f65359d44c5',
+    '0a93ebde7ab143cfafd7c2a34329b3587148fb1ff9fb4e6fbf02f517fac05d30',
+  ];
+  for (const token of links) {
+    const search = `?mode=eligibility&token=${token}`;
+    assert.equal(resolvePublicView('/', search), 'eligibility');
+    assert.equal(
+      canonicalEligibilityRedirect('hhh.thinktimeless.co.uk', '/', search),
+      `https://holistichealthhub.cc/eligibility?token=${token}`,
+    );
+  }
+});
+
 test('the canonical and unrelated public hosts never redirect themselves', () => {
   assert.equal(canonicalEligibilityRedirect('holistichealthhub.cc', '/eligibility', '?token=value'), null);
+  assert.equal(canonicalEligibilityRedirect('www.holistichealthhub.cc', '/', '?mode=eligibility?token=eastwood-3m8q2v'), null);
   assert.equal(canonicalEligibilityRedirect('holistichealthhub.live', '/about', '?token=value'), null);
   assert.equal(canonicalEligibilityRedirect('holistichealthhub.live', '/eligibility', ''), null);
 });

@@ -19,8 +19,8 @@ Read this register before changing any pharmacy-facing screen. “Fixed” items
 | Workspace header | Pharmacy staff; exact tenant | Tenant-confidential; `/v1/portal/overview` | Fixed content, flexible hierarchy | Refresh performs read | Loading, stale, training, paused; wraps without horizontal scroll |
 | View selector | Pharmacy staff | Staff preference; `/v1/portal/preferences` | Flexible control, fixed availability | Preference write | Tab semantics, keyboard reachability, 44px mobile target |
 | Daily Operations summary | Pharmacy staff | Aggregated operational; Overview endpoint | Flexible card order | Cards may navigate only | Loading, zero, partial failure; 5→3→1 grid |
-| Priority queue | Pharmacy staff | Masked case references; Overview endpoint | Fixed masking, flexible density | Open authorised record; mutations prohibited here | Empty, aged, stale, permission denied; buttons remain labelled |
-| Recent sessions | Pharmacy staff | Masked case references; Overview endpoint | Fixed masking | Open full record only after fresh read | Empty/stale; no name, email, phone, or prescription details |
+| Priority queue | Pharmacy staff | Surname and initial plus order reference; Overview endpoint | Fixed masking, flexible density | Open authorised record; mutations prohibited here | Empty, aged, stale, permission denied; buttons remain labelled |
+| Recent sessions | Pharmacy staff | Deprecated on Overview; open full record from Orders or Patients | — | — | Not shown |
 | Workflow Pipeline | Pharmacy staff | Aggregate counts/ageing; Overview endpoint | Flexible pipeline/list composition | Navigation only | No contact data; textual bottleneck status; 4→2→1 stages |
 | Secure Handover | Pharmacy staff and shared stand-up display | Zero-PII aggregates; Overview endpoint | Fixed privacy boundary, flexible composition | Refresh/view preference only | No patient labels or identifiers; readable at 200% zoom |
 | Integration health | Pharmacy staff | Operational metadata; Overview endpoint | Fixed state vocabulary | No repair mutation | Connected, degraded, unavailable, not configured; text plus colour |

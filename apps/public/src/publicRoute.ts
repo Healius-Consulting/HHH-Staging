@@ -1,12 +1,20 @@
+import { normaliseEligibilitySearch } from '../../eligibility/src/referralRoute.ts';
+
 export type PublicView = 'site' | 'eligibility' | 'payment-complete' | 'payment-cancelled';
 
 export const CANONICAL_ELIGIBILITY_ORIGIN = 'https://holistichealthhub.cc';
 export const LEGACY_PUBLIC_HOST = 'holistichealthhub.live';
+/** Printed pharmacy QR host. Live traffic is a Cloudflare 301 onto `.cc`; keep this so a missed DNS change still canonicalises. Never include staging.thinktimeless.co.uk. */
+const LEGACY_ELIGIBILITY_HOSTS = new Set([
+  LEGACY_PUBLIC_HOST,
+  'hhh.thinktimeless.co.uk',
+  'www.hhh.thinktimeless.co.uk',
+]);
 const ALLOWED_ATTRIBUTION_PARAMETERS = new Set(['source', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']);
 
 export function resolvePublicView(pathname: string, search: string): PublicView {
   const path = pathname.replace(/\/+$/, '') || '/';
-  const query = new URLSearchParams(search);
+  const query = new URLSearchParams(normaliseEligibilitySearch(search));
 
   // Pharmacy QR packs issued before the standalone eligibility path used the
   // public root with ?mode=eligibility. Keep that URL working indefinitely so
@@ -33,9 +41,10 @@ export function resolvePublicView(pathname: string, search: string): PublicView 
 }
 
 export function canonicalEligibilityRedirect(hostname: string, pathname: string, search: string) {
-  if (hostname.toLowerCase() !== LEGACY_PUBLIC_HOST) return null;
+  const host = hostname.toLowerCase();
+  if (!LEGACY_ELIGIBILITY_HOSTS.has(host)) return null;
   if (resolvePublicView(pathname, search) !== 'eligibility') return null;
-  const query = new URLSearchParams(search);
+  const query = new URLSearchParams(normaliseEligibilitySearch(search));
   if (!query.get('token')) return null;
   for (const key of [...query.keys()]) {
     if (key !== 'token' && !ALLOWED_ATTRIBUTION_PARAMETERS.has(key)) query.delete(key);

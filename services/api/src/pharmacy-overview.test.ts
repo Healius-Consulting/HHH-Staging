@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cancellationRequiresAction, composePharmacyOverview, maskPatientLabel } from './pharmacy-overview.js';
+import { cancellationRequiresAction, composePharmacyOverview, overviewPatientLabelFromName } from './pharmacy-overview.js';
 
-test('overview patient labels disclose only initials and bounded masks', () => {
-  assert.equal(maskPatientLabel('Rebecca Allen'), 'R••••• A••••');
-  assert.equal(maskPatientLabel('A'), 'A••');
-  assert.equal(maskPatientLabel(''), 'Patient record');
-  assert.equal(maskPatientLabel('Long Given Middle Family'), 'L••• G••••');
+test('overview patient labels use surname and initial without full given names', () => {
+  assert.equal(overviewPatientLabelFromName('Rebecca Allen'), 'Allen, R');
+  assert.equal(overviewPatientLabelFromName('A'), 'A');
+  assert.equal(overviewPatientLabelFromName(''), 'Patient record');
+  assert.equal(overviewPatientLabelFromName('Long Given Middle Family'), 'Family, L');
 });
 
 test('overview aggregates fixed tenant fixtures without exposing contact data', () => {

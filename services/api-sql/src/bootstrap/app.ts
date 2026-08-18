@@ -32,7 +32,10 @@ export function isOriginPermitted(origin: string | undefined): boolean {
     if (host === 'localhost' || host === '127.0.0.1') return true;
     if (
       host === 'holistichealthhub.cc' || host.endsWith('.holistichealthhub.cc') ||
-      host === 'holistichealthhub.live' || host.endsWith('.holistichealthhub.live')
+      host === 'holistichealthhub.live' || host.endsWith('.holistichealthhub.live') ||
+      host === 'hhh.thinktimeless.co.uk' || host === 'www.hhh.thinktimeless.co.uk' ||
+      host === 'portal.hhh.thinktimeless.co.uk' ||
+      host === 'staging.thinktimeless.co.uk'
     ) return true;
   } catch {
     return false;
