@@ -363,19 +363,32 @@ export default function CreateOrder() {
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live') {
         if (!quoteAvailable) throw new Error('A complete in-stock Curaleaf quote is required before creating the live order.');
-        const lineItems = activeOrder.prescriptions.flatMap(rx => rx.items.map(item => ({
-          productId: item.productId,
-          packId: item.productId,
-          formulaId: item.formulaId,
-          name: item.name,
-          quantity: item.qty,
-          unitPricePence: Math.round((item.retail || 0) * 100),
-        })));
+        const pricingQuote = activeOrder.pricingQuote ?? activeOrder.curaleaf?.quote;
+        const quoteItems = Array.isArray(pricingQuote?.items) ? pricingQuote.items : [];
+        const lineItems = activeOrder.prescriptions.flatMap(rx => rx.items.map(item => {
+          const quoted = quoteItems.find(entry => entry.packId === item.productId);
+          const wholesalePackPricePence = quoted ? Math.round(Number(quoted.wholesalePackPrice) * 100) : undefined;
+          return {
+            productId: item.productId,
+            packId: item.productId,
+            formulaId: item.formulaId,
+            name: item.name,
+            quantity: item.qty,
+            unitPricePence: Math.round((item.retail || 0) * 100),
+            wholesalePackPrice: quoted?.wholesalePackPrice,
+            wholesalePackPricePence,
+          };
+        }));
         const orderRevPence = Math.round(orderRevenue(activeOrder) * 100);
         const dispensingFeePence = Math.round((activeOrder.dispensingFee || 0) * 100);
         const medicineTotalPence = Math.max(0, orderRevPence - dispensingFeePence);
         const totalPence = orderRevPence > 0 ? orderRevPence : Math.round(activeOrder.payment.amount * 100);
-        const pricingQuote = activeOrder.pricingQuote ?? activeOrder.curaleaf?.quote;
+        const shippingPence = pricingQuote
+          ? (typeof pricingQuote.shippingPence === 'number'
+            ? pricingQuote.shippingPence
+            : Math.round(Number(pricingQuote.shippingPrice || 0) * 100))
+          : undefined;
+        const wholesaleProductPence = lineItems.reduce((sum, item) => sum + (item.wholesalePackPricePence || 0) * item.quantity, 0);
 
         const persisted = activeOrder.backendId ? { id: activeOrder.backendId } : await createPortalOrder({
           organisationId: state.currentOrganisationId,
@@ -386,7 +399,14 @@ export default function CreateOrder() {
           dispensingFeePence,
           totalPence,
           pricingQuote,
-          quoteSnapshot: pricingQuote ? { quote: pricingQuote, pricingQuote, lineItems, totalPence } : undefined,
+          quoteSnapshot: pricingQuote ? {
+            quote: pricingQuote,
+            pricingQuote,
+            lineItems,
+            totalPence,
+            shippingPence,
+            wholesaleProductPence,
+          } : undefined,
           lineItems,
           prescriptions: activeOrder.prescriptions.map(rx => ({
             fileId: rx.fileId!,

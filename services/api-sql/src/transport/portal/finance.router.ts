@@ -4,6 +4,7 @@ import { dataConnect } from '../../bootstrap/firebase.js';
 import { HttpError } from '../../domain/common/errors.js';
 import { assertPlatformScope, assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
+import { quotedCostFromSnapshot } from '../../application/orders/finance-costing.js';
 import { pharmacyFinanceRecognition } from './finance-recognition.js';
 
 const organisationIdSchema = z.string().regex(/^(?:[a-f\d]{32}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i);
@@ -138,9 +139,11 @@ export function createPortalFinanceRouter(): Router {
       const datedRows = rawOrders.map(order => {
         const flags = pharmacyFinanceRecognition(order);
         const snapshot = (order.quoteSnapshot ?? {}) as any;
+        const quoted = quotedCostFromSnapshot(snapshot);
         const rawLines = snapshot?.lineItems || snapshot?.items || snapshot?.prescriptions?.flatMap((rx: any) => rx.items) || [];
         const lines = Array.isArray(rawLines) ? rawLines.map((item: any) => {
           const qty = Number(item.quantity || item.qty || 1);
+          const packId = String(item.productId || item.packId || item.id || '');
           const unitPrice = Number(
             item.unitPricePence ||
             item.retailPence ||
@@ -148,32 +151,25 @@ export function createPortalFinanceRouter(): Router {
             (item.patientPackPrice ? Math.round(Number(item.patientPackPrice) * 100) : 0) ||
             (order.totalPence && qty > 0 ? Math.round((Number(order.totalPence) - Number(order.dispensingFeePence || 0)) / qty) : 0)
           );
-          const wholesaleUnit = Number(
-            item.wholesalePackPricePence ||
-            (item.wholesalePackPrice ? Math.round(Number(item.wholesalePackPrice) * 100) : 0) ||
-            (snapshot?.wholesaleProductPence && qty > 0 ? Math.round(Number(snapshot.wholesaleProductPence) / qty) : 0) ||
-            Math.round(unitPrice * 0.75)
-          );
+          const wholesaleUnit = quoted.prices.get(packId) ?? null;
           return {
-            packId: String(item.productId || item.packId || item.id || ''),
+            packId,
             name: String(item.name || item.formulaName || 'Curaleaf item'),
             quantity: qty,
             unitPricePence: unitPrice,
             wholesaleUnitPence: wholesaleUnit,
-            productMarginPence: (unitPrice - wholesaleUnit) * qty,
+            productMarginPence: wholesaleUnit === null ? null : (unitPrice - wholesaleUnit) * qty,
           };
         }) : [];
 
         const productRevenuePence = Number(order.medicineTotalPence || (Number(order.totalPence) - Number(order.dispensingFeePence || 0)));
         const dispensingFeePence = Number(order.dispensingFeePence || 0);
         const patientRevenuePence = Number(order.totalPence || (productRevenuePence + dispensingFeePence));
-        const wholesaleProductPence = lines.length > 0
-          ? lines.reduce((acc: number, l: any) => acc + (l.wholesaleUnitPence * l.quantity), 0)
-          : Number(snapshot?.wholesaleProductPence || Math.round(productRevenuePence * 0.75));
-        const shippingPence = Number(order.deliveryPence ?? snapshot?.shippingPence ?? (snapshot?.shippingPrice ? Number(snapshot.shippingPrice) * 100 : 500));
-        const wholesalePence = wholesaleProductPence + shippingPence;
-        const productMarginPence = productRevenuePence - wholesaleProductPence;
-        const totalContributionPence = patientRevenuePence - wholesalePence;
+        const wholesaleProductPence = quoted.wholesaleProductPence;
+        const shippingPence = quoted.shippingPence;
+        const wholesalePence = quoted.wholesalePence;
+        const productMarginPence = quoted.wholesaleComplete ? productRevenuePence - wholesaleProductPence! : null;
+        const totalContributionPence = quoted.wholesaleComplete ? patientRevenuePence - wholesalePence! : null;
 
         const financialEventAt = String(order.paidAt || order.cancelledAt || order.updatedAt || order.createdAt);
 
@@ -199,7 +195,7 @@ export function createPortalFinanceRouter(): Router {
           wholesalePence,
           productMarginPence,
           totalContributionPence,
-          wholesaleComplete: true,
+          wholesaleComplete: quoted.wholesaleComplete,
           lines,
         };
       });
@@ -212,6 +208,7 @@ export function createPortalFinanceRouter(): Router {
       const refundedRows = rangedRows.filter(r => r.refunded);
       const refundPendingRows = rangedRows.filter(r => r.refundPending);
       const pendingPaymentRows = rangedRows.filter(r => ['pending', 'awaiting_manual_payment', 'awaiting_payment'].includes(r.paymentStatus));
+      const costedRows = recognisedRows.filter(r => r.wholesaleComplete);
 
       const totals = {
         prescriptionCount: rangedRows.length,
@@ -224,13 +221,13 @@ export function createPortalFinanceRouter(): Router {
         patientRevenuePence: recognisedRows.reduce((sum, r) => sum + r.patientRevenuePence, 0),
         productRevenuePence: recognisedRows.reduce((sum, r) => sum + r.productRevenuePence, 0),
         dispensingFeesPence: recognisedRows.reduce((sum, r) => sum + r.dispensingFeePence, 0),
-        wholesaleKnownForCount: recognisedRows.length,
-        wholesalePendingForCount: 0,
-        wholesaleProductPence: recognisedRows.reduce((sum, r) => sum + r.wholesaleProductPence, 0),
-        shippingPence: recognisedRows.reduce((sum, r) => sum + r.shippingPence, 0),
-        wholesalePence: recognisedRows.reduce((sum, r) => sum + r.wholesalePence, 0),
-        productMarginPence: recognisedRows.reduce((sum, r) => sum + r.productMarginPence, 0),
-        totalContributionPence: recognisedRows.reduce((sum, r) => sum + r.totalContributionPence, 0),
+        wholesaleKnownForCount: costedRows.length,
+        wholesalePendingForCount: recognisedRows.length - costedRows.length,
+        wholesaleProductPence: costedRows.reduce((sum, r) => sum + (r.wholesaleProductPence ?? 0), 0),
+        shippingPence: costedRows.reduce((sum, r) => sum + (r.shippingPence ?? 0), 0),
+        wholesalePence: costedRows.reduce((sum, r) => sum + (r.wholesalePence ?? 0), 0),
+        productMarginPence: costedRows.reduce((sum, r) => sum + (r.productMarginPence ?? 0), 0),
+        totalContributionPence: costedRows.reduce((sum, r) => sum + (r.totalContributionPence ?? 0), 0),
       };
 
       res.setHeader('Cache-Control', 'no-store');
