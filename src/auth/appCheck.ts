@@ -26,6 +26,12 @@ if (configured && typeof window !== 'undefined') {
 
 export async function readPublicAppCheckToken(): Promise<string | null> {
   if (!appCheck) return null;
-  try { return (await getToken(appCheck, false)).token; }
-  catch { return null; }
+  for (const forceRefresh of [false, true]) {
+    try {
+      return (await getToken(appCheck, forceRefresh)).token;
+    } catch {
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+  }
+  return null;
 }

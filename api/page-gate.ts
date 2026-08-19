@@ -277,7 +277,7 @@ async function gate(request: Request) {
     const admissionResult = await dataConnect.executeGraphql<{
       staffSession: StaffSessionRecord | null;
       staffUser: StaffUserRecord | null;
-    }>(GET_PORTAL_ADMISSION_GQL, {
+    }, { sessionHash: string; staffUid: string }>(GET_PORTAL_ADMISSION_GQL, {
       variables: { sessionHash, staffUid: claims.uid },
     });
     const admission: PortalAdmissionResult = {
