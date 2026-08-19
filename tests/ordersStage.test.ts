@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderRequiresCuraleafCancel, orderStage, prescriptionStatusChipTone, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
+import { hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderAwaitingCuraleafCancel, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderRequiresCuraleafCancel, orderStage, prescriptionStatusChipTone, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
 import type { PatientOrder } from '../src/context/AppContext.tsx';
 
 const taxonomy: Array<[OrderStage, StageFilter]> = [
@@ -69,7 +69,9 @@ test('pharmacy cancel is local until Curaleaf accepts the prescription or create
     prescriptions: [{ status: 'cancelled', curaleafPrescriptionState: 'ACTIVE', placed: true, purchaseOrderState: 'CREATED' }],
   } as PatientOrder;
   assert.equal(orderRequiresCuraleafCancel(refundedWithLivePo), true);
+  assert.equal(orderAwaitingCuraleafCancel(refundedWithLivePo), true);
   assert.equal(orderCancellationResolution(refundedWithLivePo), 'needs-action');
+  assert.equal(orderAwaitingCuraleafCancel(withPo), false);
 });
 
 test('mixed ready and in-flight prescriptions do not classify the order as ready', () => {

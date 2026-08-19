@@ -250,6 +250,17 @@ export function orderRequiresCuraleafCancel(order: PatientOrder): boolean {
   return order.prescriptions.some(prescription => prescription.placed);
 }
 
+/** HHH started cancel/refund while Rocky still has a live PO or accepted prescription. */
+export function orderAwaitingCuraleafCancel(order: PatientOrder): boolean {
+  if (!orderRequiresCuraleafCancel(order)) return false;
+  return order.lifecycleStatus === 'cancelled'
+    || Boolean(order.cancellation)
+    || Boolean(order.curaleafCancellation)
+    || Boolean(order.refund)
+    || order.payment.status === 'refunded'
+    || order.payment.status === 'refund_required';
+}
+
 /**
  * Cancellation is an order outcome, not a patient status. Keep unfinished
  * supplier/refund work operational while demoting closed cancellations.

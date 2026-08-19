@@ -17,6 +17,7 @@ import {
   portalSourceLabel,
   type PatientJourneyStage,
 } from '../utils/pharmacyPatientDirectory';
+import { orderAwaitingCuraleafCancel, orderCancellationResolution, orderRequiresCuraleafCancel } from '../utils/orderStage';
 import {
   directoryContextFromHistory,
   patientCrmUrl,
@@ -109,20 +110,24 @@ function operationalOrder(order: PatientOrder) {
 }
 
 function orderNeedsResolution(order: PatientOrder) {
-  return Boolean(orderExceptionReason(order)) && !order.redoneByOrderId && order.refund?.status !== 'completed';
+  if (order.redoneByOrderId) return false;
+  if (orderAwaitingCuraleafCancel(order)) return true;
+  return Boolean(orderExceptionReason(order)) && order.refund?.status !== 'completed';
 }
 
 function deriveStatus(p: UnifiedPatient): { label: string; compactLabel: string; pill: string } {
   if (p.orders.length > 0) {
-    const cancellationAction = p.orders.find(order => order.refund?.status !== 'completed' && (
-      order.curaleafCancellation?.status === 'contact_required'
-      || order.curaleafCancellation?.status === 'awaiting_confirmation'
-      || order.cancellation?.status === 'refund_required'
-    ));
+    const callCuraleaf = p.orders.find(order => orderAwaitingCuraleafCancel(order) && !order.redoneByOrderId);
+    if (callCuraleaf) return { label: 'Call Curaleaf to cancel', compactLabel: 'Call Curaleaf', pill: 'pill-red' };
+    const cancellationAction = p.orders.find(order => orderCancellationResolution(order) === 'needs-action' && !order.redoneByOrderId);
+    if (cancellationAction?.refund?.status === 'pending_confirmation' || cancellationAction?.cancellation?.status === 'refund_required') {
+      return { label: 'Refund confirmation needed', compactLabel: 'Refund due', pill: 'pill-red' };
+    }
     if (cancellationAction) return { label: 'Cancellation needs action', compactLabel: 'Action needed', pill: 'pill-red' };
     const unresolved = p.orders.find(order => orderExceptionReason(order) && !order.redoneByOrderId);
     if (unresolved?.refund?.status === 'pending_confirmation') return { label: 'Refund confirmation needed', compactLabel: 'Refund pending', pill: 'pill-amber' };
-    if (unresolved?.refund?.status === 'completed') return { label: 'Refunded', compactLabel: 'Refunded', pill: 'pill-neutral' };
+    if (unresolved && orderCancellationResolution(unresolved) === 'refunded') return { label: 'Refunded', compactLabel: 'Refunded', pill: 'pill-neutral' };
+    if (unresolved?.refund?.status === 'completed' && !orderRequiresCuraleafCancel(unresolved)) return { label: 'Refunded', compactLabel: 'Refunded', pill: 'pill-neutral' };
     if (unresolved) {
       const replacementDraft = p.orders.some(order => order.payment.status === 'none' && order.redoContext?.originalOrderId === unresolved.id);
       return replacementDraft
@@ -806,9 +811,12 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
               .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
               .map(order => {
                 const exceptionReason = orderExceptionReason(order);
-                const refunded = order.refund?.status === 'completed';
-                const refundPending = order.refund?.status === 'pending_confirmation';
-                const paymentLabel = refunded
+                const curaleafLock = orderAwaitingCuraleafCancel(order);
+                const refunded = !curaleafLock && order.refund?.status === 'completed';
+                const refundPending = !curaleafLock && order.refund?.status === 'pending_confirmation';
+                const paymentLabel = curaleafLock
+                  ? 'Call Curaleaf'
+                  : refunded
                   ? 'Refunded'
                   : refundPending
                     ? 'Refund pending'
@@ -823,7 +831,9 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
                             : order.payment.status === 'sent'
                               ? 'Awaiting payment'
                               : 'Draft';
-                const cardTone = refunded
+                const cardTone = curaleafLock
+                  ? 'cancelled'
+                  : refunded
                   ? 'resolved'
                   : exceptionReason === 'cancelled'
                     ? 'cancelled'
@@ -836,7 +846,9 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
                           : order.payment.status === 'sent'
                             ? 'awaiting'
                             : 'draft';
-                const paymentPill = refunded
+                const paymentPill = curaleafLock
+                  ? 'order-tone--danger'
+                  : refunded
                   ? 'order-tone--resolved'
                   : refundPending || order.payment.status === 'sent'
                     ? 'order-tone--warning'
@@ -848,7 +860,9 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
                           ? 'order-tone--paid'
                           : 'order-tone--neutral';
                 const productNames = order.prescriptions.flatMap(rx => rx.items.map(item => item.name)).filter(Boolean);
-                const fulfilmentLabel = exceptionReason === 'cancelled'
+                const fulfilmentLabel = curaleafLock
+                  ? 'Purchase order still live'
+                  : exceptionReason === 'cancelled'
                   ? (order.prescriptions.some(rx => rx.purchaseOrderState === 'CANCELLED')
                     ? 'Purchase order cancelled'
                     : order.prescriptions.some(rx => rx.status === 'cancelled')
@@ -861,7 +875,9 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
                       : order.prescriptions.some(rx => rx.placed)
                         ? (RX_STATUS_LABELS[order.prescriptions[0].status as keyof typeof RX_STATUS_LABELS] ?? order.prescriptions[0].status)
                         : 'Not submitted';
-                const alertTitle = refunded
+                const alertTitle = curaleafLock
+                  ? 'Call Curaleaf before refund or replacement'
+                  : refunded
                   ? 'Patient refund recorded'
                   : order.redoneByOrderId
                     ? 'Replacement order created'
@@ -874,14 +890,16 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
                       : exceptionReason === 'rejected'
                         ? 'Paid Curaleaf rejection'
                         : 'Paid prescription expired';
-                const alertDetail = order.refund
+                const alertDetail = curaleafLock
+                  ? 'This purchase order is still live. Call Curaleaf before a refund or replacement.'
+                  : order.refund
                   ? `${order.refund.method === 'worldpay_portal' ? 'Worldpay' : 'Pharmacy'} · ${money(order.refund.amountPence / 100)}`
                   : order.redoneByOrderId
                     ? `Continued as replacement order ${order.redoneByOrderId}.`
                     : exceptionReason === 'cancelled'
                       ? 'Payment stays paid until you refund or replace this order.'
                       : 'Choose replacement or refund in Orders.';
-                const AlertIcon = refunded ? CheckCircle : exceptionReason === 'cancelled' ? XCircle : AlertTriangle;
+                const AlertIcon = curaleafLock || exceptionReason === 'cancelled' ? XCircle : refunded ? CheckCircle : AlertTriangle;
                 return (
                   <article className={`patient-chart-order patient-chart-order--${cardTone}`} key={order.id}>
                     <header>
@@ -896,7 +914,7 @@ function PatientCrmDetail({ record, workspaceLive, onCreateOrder, onOpenOrder }:
                       <div><dt>Supplier</dt><dd>{fulfilmentLabel}</dd></div>
                     </dl>
                     {productNames.length ? <p className="patient-chart-order__items">{productNames.join(', ')}</p> : null}
-                    {exceptionReason ? (
+                    {exceptionReason || curaleafLock ? (
                       <div className={`patient-order-resolution${refunded ? ' is-complete' : exceptionReason === 'cancelled' ? ' is-cancelled' : ''}`}>
                         <AlertIcon size={18} aria-hidden="true" />
                         <span><strong>{alertTitle}</strong><small>{alertDetail}</small></span>

@@ -456,7 +456,8 @@ describe('SQL pharmacy compatibility contracts', () => {
         },
       },
     });
-    assert.equal(mapped.paymentStatus, 'refunded');
+    assert.equal(mapped.paymentStatus, 'paid');
+    assert.equal(mapped.refund, undefined);
     assert.equal(mapped.curaleaf?.purchaseOrderState, 'CREATED');
     assert.equal(mapped.curaleaf?.purchaseOrderId, '2bf991a2-3bbf-43ea-ae5b-45654ae5bc4b');
     assert.equal(mapped.curaleaf?.status, 'purchase_order_submitted');

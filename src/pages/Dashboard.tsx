@@ -2,7 +2,7 @@ import { Activity, ArrowRight, ListTodo, History, FileText } from 'lucide-react'
 import { orderRevenue, useApp } from '../context/AppContext';
 import SummaryTiles from '../components/SummaryTiles';
 import { compactPatientName } from '../utils/patientName';
-import { orderCancellationResolution } from '../utils/orderStage';
+import { orderAwaitingCuraleafCancel, orderCancellationResolution } from '../utils/orderStage';
 
 export default function Dashboard() {
   const { state, dispatch } = useApp();
@@ -97,7 +97,7 @@ export default function Dashboard() {
       id: `cancellation-${order.id}`,
       orderId: order.id,
       patientName: tenantPatients.find(patient => patient.id === order.patientId)?.name ?? 'Unknown patient',
-      step: order.curaleafCancellation?.status === 'contact_required'
+      step: orderAwaitingCuraleafCancel(order) || order.curaleafCancellation?.status === 'contact_required'
         ? 'Call Curaleaf Customer Service before refunding or reordering.'
         : order.curaleafCancellation?.status === 'awaiting_confirmation'
           ? 'Waiting for Curaleaf cancellation confirmation.'
@@ -118,6 +118,7 @@ export default function Dashboard() {
   };
 
   const paymentPill = (order: (typeof tenantOrders)[number]) => {
+    if (orderAwaitingCuraleafCancel(order)) return <span className="pill pill-red">Call Curaleaf</span>;
     if (order.refund?.status === 'completed') return <span className="pill pill-neutral">Refunded</span>;
     if (order.cancellation?.status === 'refund_required') return <span className="pill pill-red">Refund due</span>;
     if (order.lifecycleStatus === 'cancelled' || order.payment.status === 'cancelled') return <span className="pill pill-neutral">Cancelled</span>;

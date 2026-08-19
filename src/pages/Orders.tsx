@@ -58,6 +58,7 @@ import {
   orderIsSplitFulfilment,
   orderPackTotals,
   orderRequiresCuraleafCancel,
+  orderAwaitingCuraleafCancel,
   orderSplitPackSnapshot,
   orderStage,
   prescriptionIsCancelled,
@@ -179,7 +180,8 @@ function recordMatchesFilter(record: OrderRecord, filter: StageFilter) {
 function recordStageMeta(record: OrderRecord) {
   const resolution = orderCancellationResolution(record.order);
   const refundDue = record.order.refund?.status === 'pending_confirmation' || record.order.cancellation?.status === 'refund_required';
-  const supplierActionOutstanding = ['contact_required', 'awaiting_confirmation'].includes(record.order.curaleafCancellation?.status ?? '')
+  const supplierActionOutstanding = orderAwaitingCuraleafCancel(record.order)
+    || ['contact_required', 'awaiting_confirmation'].includes(record.order.curaleafCancellation?.status ?? '')
     || ['curaleaf_contact_required', 'awaiting_curaleaf_confirmation'].includes(record.order.cancellation?.status ?? '');
   if (record.stage === 'cancelled' && record.order.prescriptions.some(prescription => prescription.purchaseOrderState === 'CANCELLED' || prescription.status === 'cancelled')) {
     return {
@@ -191,6 +193,14 @@ function recordStageMeta(record: OrderRecord) {
         : 'Curaleaf cancelled the supplier purchase order; its pharmacy call or case context remains in the audit trail.',
       tone: resolution === 'needs-action' ? 'danger' : 'neutral',
       icon: resolution === 'needs-action' && refundDue && !supplierActionOutstanding ? Banknote : XCircle,
+    };
+  }
+  if (resolution === 'needs-action' && orderAwaitingCuraleafCancel(record.order)) {
+    return {
+      label: 'Call Curaleaf',
+      description: 'This purchase order is still live at Curaleaf. Call them and record the cancellation before a refund or replacement.',
+      tone: 'danger',
+      icon: PhoneCall,
     };
   }
   if (resolution === 'needs-action' && refundDue && !supplierActionOutstanding) {

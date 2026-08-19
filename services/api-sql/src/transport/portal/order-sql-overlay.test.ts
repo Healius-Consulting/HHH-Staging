@@ -94,4 +94,35 @@ describe('SQL order overlay', () => {
     assert.equal(mapped.lineItems[0]?.packId, 'sql-pack');
     assert.equal(mapped.lineItems[0]?.quantity, 2);
   });
+
+  it('does not project a SQL refund while the Curaleaf purchase order is still live', () => {
+    const mapped = mapPortalOrderFromSql({
+      ...order,
+      paymentStatus: 'REFUNDED',
+      quoteSnapshot: {
+        cancellation: { status: 'refund_required' },
+        refund: { id: 'snapshot-refund', status: 'completed' },
+        curaleaf: {
+          purchaseOrderId: '2bf991a2-3bbf-43ea-ae5b-45654ae5bc4b',
+          purchaseOrderState: 'CREATED',
+          state: 'CREATED',
+          prescriptionState: 'ACTIVE',
+        },
+      },
+    }, {
+      refunds: [{
+        id: 'sql-refund',
+        organisationId: order.organisationId,
+        orderId: order.id,
+        paymentId: 'pay-1',
+        status: 'COMPLETED',
+        amountPence: 10500,
+        createdAt: '2026-08-16T12:00:00.000Z',
+      }],
+      lines: [],
+    });
+    assert.equal(mapped.paymentStatus, 'paid');
+    assert.equal(mapped.refund, undefined);
+    assert.equal(mapped.curaleaf?.purchaseOrderState, 'CREATED');
+  });
 });

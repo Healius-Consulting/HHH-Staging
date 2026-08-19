@@ -9,6 +9,7 @@ import {
   supplierFulfilmentStatus,
 } from '../../application/orders/curaleaf-fulfilment.js';
 import { parseQuote, type ParsedQuote, type ParsedQuoteItem } from '../../application/orders/quote-review.js';
+import { curaleafRequiresSupplierCancel, supplierCancellationAlreadyConfirmed } from '../../application/integrations/curaleaf-events.js';
 import { organisationAddressSummary } from '../../repositories/ports/directory.port.js';
 import type { OrderDraftRecord, OrderRecord } from '../../repositories/ports/order.port.js';
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
@@ -259,13 +260,22 @@ export function toPortalOrder(order: PortalOrderSource) {
     || snapshot?.curaleafCancellation?.status === 'confirmed';
   const isCancelledOrder = isHhhCancelled || isSupplierCancelled;
   const moneyTaken = orderMoneyWasTaken(order);
-  const existingRefund = (order.sqlRefund && typeof order.sqlRefund === 'object' ? order.sqlRefund : null)
-    ?? (snapshot?.refund && typeof snapshot.refund === 'object' ? snapshot.refund : null);
-  const refundCompleted = String(existingRefund?.status || '') === 'completed'
+  const supplierStillLive = !isSupplierCancelled
+    && !supplierCancellationAlreadyConfirmed(snapshot)
+    && curaleafRequiresSupplierCancel({ ...snapshot, curaleaf: po || persistedCuraleaf });
+  const existingRefund = supplierStillLive
+    ? null
+    : (order.sqlRefund && typeof order.sqlRefund === 'object' ? order.sqlRefund : null)
+      ?? (snapshot?.refund && typeof snapshot.refund === 'object' ? snapshot.refund : null);
+  const refundCompleted = !supplierStillLive && (
+    String(existingRefund?.status || '') === 'completed'
     || snapshotRefundCompleted(snapshot)
-    || String(order.paymentStatus).toUpperCase() === 'REFUNDED';
-  const refundPrepared = String(existingRefund?.status || '') === 'pending_confirmation'
-    || String(order.paymentStatus).toUpperCase() === 'REFUND_REQUIRED';
+    || String(order.paymentStatus).toUpperCase() === 'REFUNDED'
+  );
+  const refundPrepared = !supplierStillLive && (
+    String(existingRefund?.status || '') === 'pending_confirmation'
+    || String(order.paymentStatus).toUpperCase() === 'REFUND_REQUIRED'
+  );
   const refund = existingRefund?.status ? existingRefund : undefined;
   const isPaid = moneyTaken && !refundCompleted && !isCancelledOrder && !refundPrepared;
   const quoteReview = snapshot?.quoteReview && typeof snapshot.quoteReview === 'object' && !isSupplierCancelled
