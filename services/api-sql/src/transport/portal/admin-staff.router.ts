@@ -145,6 +145,7 @@ export function createAdminStaffRouter(): Router {
         'pharmacy_staff_invite',
         {
           pharmacyName: organisation.tradingName || organisation.name,
+          organisationId: organisation.id,
           actionLink,
         },
         ['pharmacy-staff-invite', user.uid, input.organisationId],
@@ -374,6 +375,7 @@ export function createAdminStaffRouter(): Router {
         'pharmacy_password_reset',
         {
           pharmacyName: organisation.tradingName || organisation.name,
+          organisationId: organisation.id,
           actionLink,
         },
         ['pharmacy-password-reset', profile.uid, Date.now()],
@@ -451,11 +453,19 @@ export function createAdminStaffRouter(): Router {
       }
       await auth.updateUser(uid, { multiFactor: { enrolledFactors: [] } });
       await auth.revokeRefreshTokens(uid);
+      const organisation = profile.organisationId
+        ? await organisationRepo.findOrganisationById(profile.organisationId)
+        : null;
       await queueEmailToRecipients(
         notificationRepo,
         [{ email: profile.email, displayName: profile.displayName }],
         'pharmacy_2fa_disabled',
-        { pharmacyName: profile.role === 'HHH_ADMIN' ? 'HHH admin workspace' : 'the pharmacy' },
+        {
+          pharmacyName: profile.role === 'HHH_ADMIN'
+            ? 'HHH admin workspace'
+            : organisation?.tradingName || organisation?.name || 'the pharmacy',
+          organisationId: organisation?.id || '',
+        },
         ['pharmacy-2fa-disabled', profile.uid, Date.now()],
         { organisationId: profile.organisationId },
       );

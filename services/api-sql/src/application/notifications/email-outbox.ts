@@ -28,6 +28,7 @@ function dedupeRecipients(items: Recipient[]) {
 
 export function pharmacyEmailContext(organisation: OrganisationRecord | null | undefined) {
   return {
+    organisationId: organisation?.id || '',
     pharmacyName: organisation?.tradingName || organisation?.name || 'the pharmacy',
     pharmacyPhone: organisation?.mainContactPhone || '',
     pharmacyEmail: organisation?.mainContactEmail || '',

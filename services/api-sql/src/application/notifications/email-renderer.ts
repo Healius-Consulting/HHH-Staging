@@ -1,5 +1,6 @@
 import type { EmailTemplateCode } from './message-kinds.js';
-import { brandedEmail, escapeHtml, safeHttpUrl } from './email-layout.js';
+import { brandedEmail, escapeHtml, resolveEmailHeader, safeHttpUrl } from './email-layout.js';
+import { enquiryDisplayFields } from './email-mask.js';
 
 type RenderedEmail = {
   subject: string;
@@ -23,26 +24,63 @@ function paymentReceiptUrl(receiptHash: string) {
   return `https://holistichealthhub.cc/receipt/${encodeURIComponent(receiptHash)}`;
 }
 
+function enquirySourceLabel(sourceType: string) {
+  if (sourceType === 'GENERAL_HHH_WEBSITE') return 'Website';
+  if (sourceType === 'PHARMACY_QR' || sourceType === 'LEGACY_PHARMACY_QR') return 'Pharmacy QR';
+  return sourceType.replaceAll('_', ' ').toLowerCase();
+}
+
+function isAdminAudience(kind: EmailTemplateCode, payload: unknown) {
+  return kind === 'admin_new_enquiry_received' || value(payload, 'pharmacyName') === 'HHH admin workspace';
+}
+
+function eyebrowFor(kind: EmailTemplateCode, admin: boolean) {
+  if (admin) return 'Admin alert';
+  if (
+    kind === 'pharmacy_staff_invite'
+    || kind === 'pharmacy_password_reset'
+    || kind === 'pharmacy_2fa_enabled'
+    || kind === 'pharmacy_2fa_disabled'
+  ) return 'Staff account';
+  if (kind.startsWith('patient_')) return 'Patient order update';
+  return 'Pharmacy update';
+}
+
 function render(input: {
+  kind: EmailTemplateCode;
+  payload: unknown;
   subject: string;
   preheader: string;
   title: string;
   text: string;
   paragraphs: string[];
+  highlight?: { label: string; value: string };
   cta?: { label: string; href: string };
+  detailsTitle?: string;
   details?: Array<{ label: string; value: string }>;
+  nextSteps?: string[];
   footerNote?: string;
 }): RenderedEmail {
+  const admin = isAdminAudience(input.kind, input.payload);
   return {
     subject: input.subject,
     text: input.text,
     html: brandedEmail({
       preheader: input.preheader,
+      eyebrow: eyebrowFor(input.kind, admin),
       title: input.title,
       paragraphs: input.paragraphs,
+      highlight: input.highlight,
       cta: input.cta,
+      detailsTitle: input.detailsTitle,
       details: input.details,
+      nextSteps: input.nextSteps,
       footerNote: input.footerNote,
+      header: resolveEmailHeader({
+        audience: admin ? 'admin' : 'pharmacy',
+        organisationId: value(input.payload, 'organisationId'),
+        pharmacyName: value(input.payload, 'pharmacyName'),
+      }),
     }),
   };
 }
@@ -57,6 +95,7 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
   const actionLink = safeHttpUrl(value(payload, 'actionLink'));
   const caseReference = escapeHtml(value(payload, 'caseReference'));
   const summary = escapeHtml(value(payload, 'summary'));
+  const enquiry = enquiryDisplayFields(payload);
   const pharmacyDetails = [
     { label: 'Pharmacy', value: value(payload, 'pharmacyName') },
     { label: 'Phone', value: value(payload, 'pharmacyPhone') },
@@ -67,33 +106,51 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
   switch (kind) {
     case 'patient_payment_request':
       return render({
+        kind,
+        payload,
         subject: 'Payment needed for your order',
         preheader: 'Complete payment securely so your pharmacy can continue the order.',
-        title: 'Payment awaiting',
+        title: 'Payment needed',
         text: `Hi ${value(payload, 'firstName') || 'there'},\n\nPlease complete your payment${amount ? ` of ${amount}` : ''} using this secure link:\n${paymentUrl}\n`,
         paragraphs: [
           `Hi ${firstName},`,
-          `Please complete your payment${amount ? ` of <strong>${escapeHtml(amount)}</strong>` : ''}${orderNumber ? ` for order <strong>${orderNumber}</strong>` : ''} so the pharmacy can continue processing it.`,
+          'Your order is ready to move forward. Complete payment below and the pharmacy can continue preparing it for you.',
         ],
+        highlight: amount ? { label: 'Amount due', value: amount } : undefined,
         cta: paymentUrl ? { label: 'Pay now', href: paymentUrl } : undefined,
+        detailsTitle: 'Pharmacy contact details',
         details: pharmacyDetails,
+        nextSteps: [
+          'Use the secure link above to complete payment.',
+          'We will confirm as soon as payment is received.',
+          'The pharmacy will continue processing your order.',
+        ],
         footerNote: 'This is a secure payment link. If you were not expecting this email, you can ignore it.',
       });
     case 'patient_payment_confirmation':
       return render({
+        kind,
+        payload,
         subject: 'Payment received',
         preheader: 'Your payment has been confirmed.',
-        title: 'Payment confirmed',
+        title: 'Payment received',
         text: `Hi ${value(payload, 'firstName') || 'there'},\n\nWe have received your payment${amount ? ` of ${amount}` : ''}${orderNumber ? ` for order ${value(payload, 'orderNumber')}` : ''}.\n${receiptHash ? `Receipt: ${paymentReceiptUrl(receiptHash)}\n` : ''}`,
         paragraphs: [
           `Hi ${firstName},`,
-          `We have received your payment${amount ? ` of <strong>${escapeHtml(amount)}</strong>` : ''}${orderNumber ? ` for order <strong>${orderNumber}</strong>` : ''}. The pharmacy will continue processing it.`,
+          'We have received your payment and the pharmacy can now continue processing your order.',
         ],
+        highlight: amount ? { label: 'Receipt', value: amount } : undefined,
         cta: receiptHash ? { label: 'View receipt', href: paymentReceiptUrl(receiptHash) } : undefined,
-        details: pharmacyDetails,
+        detailsTitle: 'Order details',
+        details: [
+          { label: 'Order reference', value: value(payload, 'orderNumber') },
+          ...pharmacyDetails,
+        ],
       });
     case 'patient_refunded':
       return render({
+        kind,
+        payload,
         subject: 'Your payment has been refunded',
         preheader: 'A refund has been completed for your order.',
         title: 'Payment refunded',
@@ -102,30 +159,63 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
           `Hi ${firstName},`,
           `A refund${amount ? ` of <strong>${escapeHtml(amount)}</strong>` : ''} has been completed${orderNumber ? ` for order <strong>${orderNumber}</strong>` : ''}. It can take a few working days to appear on the original payment method.`,
         ],
+        detailsTitle: 'Pharmacy contact details',
         details: pharmacyDetails,
       });
     case 'patient_ready_for_collection':
       return render({
+        kind,
+        payload,
         subject: 'Your prescription is ready to collect',
         preheader: 'Your order is ready at the pharmacy.',
-        title: 'Prescription ready',
+        title: 'Ready to collect',
         text: `Hi ${value(payload, 'firstName') || 'there'},\n\nYour order${orderNumber ? ` ${value(payload, 'orderNumber')}` : ''} is ready to collect from ${value(payload, 'pharmacyName') || 'the pharmacy'}.\n`,
         paragraphs: [
           `Hi ${firstName},`,
           `Your prescription${orderNumber ? ` for order <strong>${orderNumber}</strong>` : ''} is ready to collect from <strong>${pharmacyName}</strong>. Please bring photo ID.`,
         ],
+        detailsTitle: 'Collection details',
         details: pharmacyDetails,
+        nextSteps: [
+          'Bring photo ID when you collect.',
+          'Ask at the pharmacy counter if you are unsure where to go.',
+        ],
       });
     case 'admin_new_enquiry_received':
       return render({
+        kind,
+        payload,
         subject: 'New enquiry received',
-        preheader: 'A new eligibility enquiry is waiting.',
+        preheader: 'A new eligibility enquiry is waiting in the portal.',
         title: 'New enquiry received',
-        text: `A new enquiry has been received${value(payload, 'caseReference') ? ` (${value(payload, 'caseReference')})` : ''}.`,
-        paragraphs: [`A new enquiry has been received${caseReference ? ` (<strong>${caseReference}</strong>)` : ''}.`],
+        text: [
+          'A new eligibility enquiry has been received. Open the portal to view the full patient record.',
+          enquiry.name ? `Name: ${enquiry.name}` : '',
+          enquiry.phone ? `Phone: ${enquiry.phone}` : '',
+          enquiry.email ? `Email: ${enquiry.email}` : '',
+        ].filter(Boolean).join('\n'),
+        paragraphs: [
+          'A patient has submitted an eligibility enquiry. Identifiable details are masked here. Open the portal to view the full name, phone number and email address.',
+        ],
+        cta: { label: 'Open portal', href: 'https://portal.holistichealthhub.cc' },
+        detailsTitle: 'Patient details',
+        details: [
+          { label: 'Name', value: enquiry.name },
+          { label: 'Phone', value: enquiry.phone },
+          { label: 'Email', value: enquiry.email },
+          { label: 'Provisional pharmacy', value: value(payload, 'provisionalPharmacyName') },
+          { label: 'Source', value: enquirySourceLabel(value(payload, 'sourceType')) },
+        ],
+        nextSteps: [
+          'Open the portal to view the full patient record.',
+          'Assign or continue the enquiry from there.',
+          'Do not ask the patient to reply to this email.',
+        ],
       });
     case 'pharmacy_staff_invite':
       return render({
+        kind,
+        payload,
         subject: 'Set up your Holistic Health Hub account',
         preheader: 'You have been invited to the staff portal.',
         title: 'Sign up',
@@ -139,6 +229,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_password_reset':
       return render({
+        kind,
+        payload,
         subject: 'Reset your Holistic Health Hub password',
         preheader: 'Use this link to choose a new password.',
         title: 'Reset password',
@@ -149,6 +241,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_2fa_enabled':
       return render({
+        kind,
+        payload,
         subject: 'Authenticator app added to your account',
         preheader: 'Two-factor authentication is now switched on.',
         title: '2FA set up',
@@ -161,6 +255,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_2fa_disabled':
       return render({
+        kind,
+        payload,
         subject: 'Authenticator app removed from your account',
         preheader: 'Two-factor authentication has been turned off.',
         title: '2FA turned off',
@@ -173,6 +269,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_new_patient_referred':
       return render({
+        kind,
+        payload,
         subject: 'New patient referred to your pharmacy',
         preheader: 'A new referral is waiting in the portal.',
         title: 'New patient referred',
@@ -181,14 +279,21 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_payment_received':
       return render({
+        kind,
+        payload,
         subject: 'Payment received',
         preheader: 'A patient payment has been recorded.',
         title: 'Payment received',
         text: `Payment received${amount ? `: ${amount}` : ''}${orderNumber ? ` for order ${value(payload, 'orderNumber')}` : ''}.`,
-        paragraphs: [`Payment received${amount ? `: <strong>${escapeHtml(amount)}</strong>` : ''}${orderNumber ? ` for order <strong>${orderNumber}</strong>` : ''}.`],
+        paragraphs: [`A patient payment has been recorded${amount ? `: <strong>${escapeHtml(amount)}</strong>` : ''}${orderNumber ? ` for order <strong>${orderNumber}</strong>` : ''}.`],
+        highlight: amount ? { label: 'Amount received', value: amount } : undefined,
+        detailsTitle: 'Order details',
+        details: [{ label: 'Order reference', value: value(payload, 'orderNumber') }],
       });
     case 'pharmacy_order_accepted':
       return render({
+        kind,
+        payload,
         subject: 'Order accepted',
         preheader: 'An order is now with Curaleaf.',
         title: 'Order accepted',
@@ -197,6 +302,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_order_cancelled':
       return render({
+        kind,
+        payload,
         subject: 'Order cancelled',
         preheader: 'An order needs refund or replacement action.',
         title: 'Order cancelled',
@@ -208,6 +315,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_delivery_issue':
       return render({
+        kind,
+        payload,
         subject: 'Delivery issue requires attention',
         preheader: 'A fulfilment delay needs pharmacy awareness.',
         title: 'Delivery issue',
@@ -219,6 +328,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_order_dispatched':
       return render({
+        kind,
+        payload,
         subject: 'Order dispatched update',
         preheader: 'A supplier consignment is on the way.',
         title: 'Order dispatched',
@@ -230,6 +341,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_prescription_close_to_expiry':
       return render({
+        kind,
+        payload,
         subject: 'Prescription close to expiry',
         preheader: 'A prescription is approaching its 28-day limit.',
         title: 'Prescription close to expiry',
@@ -241,6 +354,8 @@ export function renderEmailTemplate(kind: EmailTemplateCode, payload: unknown): 
       });
     case 'pharmacy_collection_completed':
       return render({
+        kind,
+        payload,
         subject: 'Collection completed update',
         preheader: 'A collection has been recorded.',
         title: 'Collection completed',

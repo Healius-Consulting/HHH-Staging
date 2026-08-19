@@ -1,5 +1,7 @@
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { config } from '../../bootstrap/config.js';
+import { emailInlineImages } from '../notifications/email-assets.js';
+import { resolveEmailHeader } from '../notifications/email-layout.js';
 import { isEmailTemplateCode } from '../notifications/message-kinds.js';
 import { renderEmailTemplate } from '../notifications/email-renderer.js';
 import type { NotificationOutboxRecord, NotificationRepositoryPort } from '../../repositories/ports/notification.port.js';
@@ -10,7 +12,7 @@ export type MessageDeliveryDeps = {
 };
 
 type ProviderConfig =
-  | { kind: 'resend'; apiKey: string; from: string; replyTo: string | null }
+  | { kind: 'resend'; apiKey: string; from: string }
   | { kind: 'webhook'; url: string; key: string };
 
 const secretClient = new SecretManagerServiceClient();
@@ -36,10 +38,10 @@ async function readResendApiKey() {
 
 async function providerConfig(): Promise<ProviderConfig | null> {
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
-  const resendFrom = process.env.EMAIL_FROM_ADDRESS?.trim();
+  const resendFrom = process.env.EMAIL_FROM_ADDRESS?.trim() || 'noreply@holistichealthhub.cc';
   const resolvedResendApiKey = resendApiKey || await readResendApiKey();
   if (resolvedResendApiKey && resendFrom) {
-    return { kind: 'resend' as const, apiKey: resolvedResendApiKey, from: resendFrom, replyTo: process.env.EMAIL_REPLY_TO_ADDRESS?.trim() || null };
+    return { kind: 'resend' as const, apiKey: resolvedResendApiKey, from: resendFrom };
   }
   const url = process.env.PATIENT_MESSAGE_PROVIDER_URL?.trim();
   const key = process.env.PATIENT_MESSAGE_PROVIDER_KEY?.trim();
@@ -47,6 +49,22 @@ async function providerConfig(): Promise<ProviderConfig | null> {
   const genericKey = process.env.EMAIL_PROVIDER_KEY?.trim();
   if (genericUrl && genericKey) return { kind: 'webhook' as const, url: genericUrl, key: genericKey };
   return url && key ? { kind: 'webhook' as const, url, key } : null;
+}
+
+function payloadValue(payload: unknown, key: string) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
+  const found = (payload as Record<string, unknown>)[key];
+  return found == null ? '' : String(found);
+}
+
+function headerFor(record: NotificationOutboxRecord) {
+  const admin = record.templateCode === 'admin_new_enquiry_received'
+    || payloadValue(record.payload, 'pharmacyName') === 'HHH admin workspace';
+  return resolveEmailHeader({
+    audience: admin ? 'admin' : 'pharmacy',
+    organisationId: payloadValue(record.payload, 'organisationId'),
+    pharmacyName: payloadValue(record.payload, 'pharmacyName'),
+  });
 }
 
 async function deliverOne(
@@ -61,20 +79,23 @@ async function deliverOne(
   const response = provider.kind === 'resend'
     ? await (() => {
       const rendered = renderEmailTemplate(record.templateCode, record.payload);
+      const from = provider.from.includes('<') ? provider.from : `Holistic Health Hub <${provider.from}>`;
       return fetchImpl('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'User-Agent': 'HolisticHealthHub/1.0',
           'Idempotency-Key': record.id,
         },
         body: JSON.stringify({
-          from: provider.from,
+          from,
           to: [record.encryptedRecipient],
-          reply_to: provider.replyTo || undefined,
           subject: rendered.subject,
           html: rendered.html,
           text: rendered.text,
+          attachments: emailInlineImages(headerFor(record)),
           tags: [
             { name: 'template', value: record.templateCode },
             { name: 'channel', value: record.channel.toLowerCase() },
@@ -97,7 +118,10 @@ async function deliverOne(
         templateData: record.payload,
       }),
     });
-  if (!response.ok) throw new Error(`Message provider returned ${response.status}.`);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Message provider returned ${response.status}${detail ? `: ${detail.slice(0, 160)}` : '.'}`);
+  }
   const providerResponse = await response.json().catch(() => ({}));
   await deps.notificationRepo.markSent(record.id, providerResponse);
   return 'sent' as const;
@@ -118,10 +142,9 @@ export async function deliverPatientMessages(deps: MessageDeliveryDeps, limit = 
       else summary.deferred += 1;
     } catch (error) {
       summary.failed += 1;
-      await deps.notificationRepo.markFailed(
-        record.id,
-        error instanceof Error ? error.message : 'Unknown message delivery error',
-      ).catch(() => undefined);
+      const reason = error instanceof Error ? error.message : 'Unknown message delivery error';
+      console.warn('Message delivery failed', { template: record.templateCode, reason: reason.slice(0, 180) });
+      await deps.notificationRepo.markFailed(record.id, reason).catch(() => undefined);
     }
   }
   return summary;

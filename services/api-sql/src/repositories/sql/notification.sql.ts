@@ -69,7 +69,6 @@ const MARK_PROCESSING_GQL = `
       data: {
         status: PROCESSING
         attemptCount: $attemptCount
-        updatedAt_expr: "request.time"
       }
     )
   }
@@ -83,7 +82,6 @@ const MARK_SENT_GQL = `
         status: SENT
         payload: $payload
         sentAt_expr: "request.time"
-        updatedAt_expr: "request.time"
       }
     )
   }
@@ -97,7 +95,6 @@ const MARK_FAILED_GQL = `
         status: PENDING
         failureCode: $failureCode
         failedAt_expr: "request.time"
-        updatedAt_expr: "request.time"
       }
     )
   }

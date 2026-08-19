@@ -67,7 +67,6 @@ PUBLIC_APP_ORIGIN=https://<exact-public-host>
 ALLOWED_ORIGINS=https://<exact-public-host>,https://<exact-portal-host>
 IP_HASH_SECRET=<at-least-32-random-bytes>
 EMAIL_FROM_ADDRESS=noreply@holistichealthhub.cc
-EMAIL_REPLY_TO_ADDRESS=<optional-support-inbox>
 RESEND_API_KEY_SECRET_RESOURCE_NAME=projects/<firebase-project>/secrets/hhh-resend-api-key-europe-west2
 ```
 

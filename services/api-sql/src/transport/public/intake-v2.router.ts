@@ -13,6 +13,7 @@ import { SqlPostcodeSearchRepository } from '../../repositories/sql/postcode-sea
 import { sha256 } from '../../security/session-utils.js';
 import type { CreateSubmissionInput } from '../../repositories/ports/intake.port.js';
 import { listPlatformAdminRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
+import { maskEmailAddress, maskPersonName, maskPhoneNumber } from '../../application/notifications/email-mask.js';
 
 export const referralTokenSchema = z.string().min(12).max(160).regex(/^[A-Za-z0-9_-]+$/);
 const opaqueIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
@@ -229,16 +230,14 @@ export function createPublicIntakeV2Router(): Router {
           details: { sourceType, conditionCount: input.conditions.length },
         });
         const adminRecipients = await listPlatformAdminRecipients(identityRepo);
-        const submittedAt = submission.submittedAt || new Date().toISOString();
         await queueEmailToRecipients(
           notificationRepo,
           adminRecipients,
           'admin_new_enquiry_received',
           {
-            caseReference: caseReference(submission.id, submittedAt),
-            firstName: input.firstName,
-            surname: input.surname,
-            submittedAt,
+            maskedName: maskPersonName(`${input.firstName} ${input.surname}`),
+            maskedPhone: maskPhoneNumber(input.mobile),
+            maskedEmail: maskEmailAddress(input.email),
             sourceType,
             provisionalPharmacyName,
           },

@@ -1,6 +1,6 @@
 # Email roster
 
-Sender is one Holistic Health Hub address (`EMAIL_FROM_ADDRESS`, typically `noreply@holistichealthhub.cc`). Pharmacy contact details are included in the body where useful. Do not invent pharmacy-branded From addresses.
+Sender is one Holistic Health Hub address (`noreply@holistichealthhub.cc`). There is no Reply-To. This mailbox is not monitored. Pharmacy contact details are included in the body where useful. Do not invent pharmacy-branded From addresses.
 
 ## Patient emails
 

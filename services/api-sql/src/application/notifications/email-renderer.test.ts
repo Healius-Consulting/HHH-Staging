@@ -32,10 +32,15 @@ describe('email template renderer', () => {
       currency: 'GBP',
       orderNumber: 'ORD-123',
       receiptHash: 'a'.repeat(64),
+      pharmacyName: 'Eastwood Health',
+      organisationId: '6d0176bb-89a0-4e32-9bce-c934c9557c42',
     });
     assert.match(rendered.subject, /Payment received/);
     assert.match(rendered.text, /Avery/);
     assert.match(rendered.html, /ORD-123/);
+    assert.match(rendered.html, /cid:email-header-logo/);
+    assert.match(rendered.html, /cid:email-curaleaf-logo/);
+    assert.match(rendered.html, /Powered by/);
   });
 
   it('renders a pharmacy dispatch update', () => {
@@ -86,6 +91,7 @@ describe('email template renderer', () => {
     });
     assert.match(invite.subject, /Set up your Holistic Health Hub account/);
     assert.match(invite.html, /Set your password/);
+    assert.match(invite.html, /This mailbox is not monitored/);
 
     const reset = renderEmailTemplate('pharmacy_password_reset', {
       actionLink: 'https://portal.holistichealthhub.cc/reset-password?oobCode=reset',
@@ -112,5 +118,29 @@ describe('email template renderer', () => {
     assert.match(rendered.html, /&lt;script&gt;/);
     assert.equal(rendered.html.includes('javascript:alert'), false);
     assert.equal(rendered.html.includes('Pay now'), false);
+  });
+
+  it('masks enquiry contact details and keeps the full record on the portal', () => {
+    const rendered = renderEmailTemplate('admin_new_enquiry_received', {
+      firstName: 'Avery',
+      surname: 'Patel',
+      mobile: '07700900000',
+      email: 'avery@example.com',
+      caseReference: 'HHH-20260819-ABCDEF12',
+      provisionalPharmacyName: 'Eastwood Health',
+      sourceType: 'PHARMACY_QR',
+    });
+    assert.match(rendered.subject, /New enquiry received/);
+    assert.equal(rendered.html.includes('Avery Patel'), false);
+    assert.equal(rendered.html.includes('07700900000'), false);
+    assert.equal(rendered.html.includes('avery@example.com'), false);
+    assert.equal(rendered.html.includes('HHH-20260819-ABCDEF12'), false);
+    assert.match(rendered.html, /A\*{4}/);
+    assert.match(rendered.html, /P\*{4}/);
+    assert.match(rendered.html, /07\*{9}/);
+    assert.match(rendered.html, /a\*{4}@e\*{6}\.com/);
+    assert.match(rendered.html, /Open the portal/);
+    assert.match(rendered.html, /cid:email-hhh-logo/);
+    assert.match(rendered.html, /cid:email-curaleaf-logo/);
   });
 });

@@ -175,6 +175,7 @@ export function createAuthRouter(): Router {
             'pharmacy_password_reset',
             {
               pharmacyName: organisation?.tradingName || organisation?.name || 'HHH admin workspace',
+              organisationId: organisation?.id || '',
               actionLink,
             },
             ['staff-password-reset', profile.uid, Date.now()],
@@ -220,11 +221,19 @@ export function createAuthRouter(): Router {
       if (!profile || profile.disabled || profile.status === 'REMOVED') {
         throw new HttpError(401, 'A valid staff session is required.', 'UNAUTHENTICATED');
       }
+      const organisation = profile.organisationId
+        ? await organisationRepo.findOrganisationById(profile.organisationId)
+        : null;
       await queueEmailToRecipients(
         notificationRepo,
         [{ email: profile.email, displayName: profile.displayName }],
         'pharmacy_2fa_enabled',
-        { pharmacyName: profile.role === 'HHH_ADMIN' ? 'HHH admin workspace' : 'the pharmacy' },
+        {
+          pharmacyName: profile.role === 'HHH_ADMIN'
+            ? 'HHH admin workspace'
+            : organisation?.tradingName || organisation?.name || 'the pharmacy',
+          organisationId: organisation?.id || '',
+        },
         ['pharmacy-2fa-enabled', profile.uid, Date.now()],
         { organisationId: profile.organisationId },
       );
