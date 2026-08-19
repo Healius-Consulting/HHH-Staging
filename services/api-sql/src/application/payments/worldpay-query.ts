@@ -191,3 +191,31 @@ export function displayedPublicPaymentStatus(payment: { status: string } | null)
   if (!payment) return 'pending';
   return payment.status.toLowerCase();
 }
+
+export function isUsablePublicPaymentLookup(value: string): boolean {
+  return /^[A-Za-z0-9._:-]{8,128}$/.test(value);
+}
+
+export function publicPaymentStatusBody(
+  payment: {
+    status: string;
+    transactionReference?: string | null;
+    amountPence?: number;
+    currency?: string;
+  } | null,
+  lookupRef: string | null,
+) {
+  if (!payment) {
+    return {
+      status: displayedPublicPaymentStatus(null),
+      transactionReference: lookupRef,
+      message: 'Payment verification is processing...',
+    };
+  }
+  return {
+    status: displayedPublicPaymentStatus(payment),
+    transactionReference: payment.transactionReference ?? lookupRef,
+    amountPence: payment.amountPence,
+    currency: payment.currency,
+  };
+}

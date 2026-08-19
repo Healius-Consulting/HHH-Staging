@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { HttpError } from '../../domain/common/errors.js';
 import { reconcileWorldpayPaymentRecord } from '../../application/payments/worldpay-reconciliation.js';
-import { displayedPublicPaymentStatus, transactionReferenceFromWorldpayWebhook } from '../../application/payments/worldpay-query.js';
+import { isUsablePublicPaymentLookup, publicPaymentStatusBody, transactionReferenceFromWorldpayWebhook } from '../../application/payments/worldpay-query.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
@@ -10,6 +10,7 @@ import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
+import { publicPaymentStatusLimiter, publicWebhookLimiter } from '../../security/public-limits.js';
 import { sha256 } from '../../security/session-utils.js';
 
 export function createPublicPaymentRouter(): Router {
@@ -26,10 +27,12 @@ export function createPublicPaymentRouter(): Router {
   const settlementDeps = { paymentRepo, orderRepo, integrationRepo, patientFinanceDeps, patientRepo, notificationRepo, identityRepo, organisationRepo };
 
   // GET /v1/public/payments/status - Check real-time payment clearance status
-  router.get('/public/payments/status', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/public/payments/status', publicPaymentStatusLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const ref = String(req.query.ref || req.query.transactionReference || req.query.orderCode || '').trim();
-      const receipt = String(req.query.receipt || req.query.receiptHash || '').trim();
+      const rawRef = String(req.query.ref || req.query.transactionReference || req.query.orderCode || '').trim();
+      const rawReceipt = String(req.query.receipt || req.query.receiptHash || '').trim();
+      const ref = isUsablePublicPaymentLookup(rawRef) ? rawRef : '';
+      const receipt = isUsablePublicPaymentLookup(rawReceipt) ? rawReceipt : '';
 
       if (!ref && !receipt) {
         throw new HttpError(400, 'Missing reference or receipt parameter.', 'INVALID_PARAMETERS');
@@ -44,11 +47,7 @@ export function createPublicPaymentRouter(): Router {
       }
 
       if (!payment) {
-        res.status(200).json({
-          status: displayedPublicPaymentStatus(null),
-          transactionReference: ref || null,
-          message: 'Payment verification is processing...',
-        });
+        res.status(200).json(publicPaymentStatusBody(null, ref || null));
         return;
       }
 
@@ -60,16 +59,7 @@ export function createPublicPaymentRouter(): Router {
         }
       }
 
-      res.status(200).json({
-        id: payment.id,
-        orderId: payment.orderId,
-        transactionReference: payment.transactionReference,
-        status: displayedPublicPaymentStatus(payment),
-        amountPence: payment.amountPence,
-        currency: payment.currency,
-        createdAt: payment.createdAt,
-        updatedAt: payment.updatedAt,
-      });
+      res.status(200).json(publicPaymentStatusBody(payment, ref || receipt || null));
     } catch (error) {
       next(error);
     }
@@ -101,7 +91,7 @@ export function createPublicPaymentRouter(): Router {
   });
 
   // POST /v1/public/payments/worldpay/webhook - Worldpay async payment notification
-  router.post('/public/payments/worldpay/webhook', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/public/payments/worldpay/webhook', publicWebhookLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const transactionReference = transactionReferenceFromWorldpayWebhook(req.body);
       if (!transactionReference) {

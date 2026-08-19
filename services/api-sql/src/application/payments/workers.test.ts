@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   displayedPublicPaymentStatus,
+  isUsablePublicPaymentLookup,
   normaliseWorldpayPaymentQuery,
   parseWorldpayWebhookEvent,
+  publicPaymentStatusBody,
   transactionReferenceFromWorldpayWebhook,
   worldpayIdentityMatches,
   worldpayPaymentStatus,
@@ -111,6 +113,23 @@ describe('Worldpay Payment Queries', () => {
     assert.equal(transactionReferenceFromWorldpayWebhook({ orderCode: 'HHH-legacy-ref' }), 'HHH-legacy-ref');
     assert.equal(displayedPublicPaymentStatus(null), 'pending');
     assert.equal(displayedPublicPaymentStatus({ status: 'PAID' }), 'paid');
+    assert.equal(isUsablePublicPaymentLookup('WP-abc12345'), true);
+    assert.equal(isUsablePublicPaymentLookup('short'), false);
+    assert.equal(isUsablePublicPaymentLookup('https://evil.example/x'), false);
+    assert.deepEqual(
+      publicPaymentStatusBody({
+        status: 'PAID',
+        transactionReference: 'WP-abc',
+        amountPence: 12500,
+        currency: 'GBP',
+      }, 'WP-abc'),
+      {
+        status: 'paid',
+        transactionReference: 'WP-abc',
+        amountPence: 12500,
+        currency: 'GBP',
+      },
+    );
   });
 });
 

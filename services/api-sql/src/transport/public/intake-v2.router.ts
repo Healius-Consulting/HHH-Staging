@@ -10,6 +10,7 @@ import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlPostcodeSearchRepository } from '../../repositories/sql/postcode-search.sql.js';
+import { publicSubmissionLimiter } from '../../security/public-limits.js';
 import { sha256 } from '../../security/session-utils.js';
 import type { CreateSubmissionInput } from '../../repositories/ports/intake.port.js';
 import { listPlatformAdminRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
@@ -92,13 +93,6 @@ const resolveLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-const submissionLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  limit: 20,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-});
-
 export function caseReference(id: string, submittedAt: string) {
   const day = submittedAt.slice(0, 10).replaceAll('-', '');
   return `HHH-${day}-${id.replaceAll('-', '').slice(0, 8).toUpperCase()}`;
@@ -157,7 +151,7 @@ export function createPublicIntakeV2Router(): Router {
     }
   });
 
-  router.post('/public/intakes', submissionLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/public/intakes', publicSubmissionLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const input = intakeSchema.parse(req.body);
       let sourceOrganisationId: string | null = null;

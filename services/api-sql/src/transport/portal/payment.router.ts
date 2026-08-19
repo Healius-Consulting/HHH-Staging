@@ -5,6 +5,7 @@ import { executeCuraleafOrderPlacement } from '../../application/integrations/cu
 import { persistCuraleafPrescriptionIdentity } from '../../application/prescriptions/curaleaf-prescription-record.js';
 import { promotePatientAfterCuraleafPlacement } from '../../application/patient-finance/patient-finance.js';
 import { createWorldpayHostedSession } from '../../application/integrations/worldpay.service.js';
+import { createWorldpayTransactionReference } from '../../application/payments/worldpay-reference.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { listPharmacyRecipients, pharmacyEmailContext, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
@@ -231,7 +232,7 @@ export function createPortalPaymentRouter(): Router {
       }
 
       const connection = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY').catch(() => null);
-      const transactionReference = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      const transactionReference = createWorldpayTransactionReference();
 
       const successUrl = `https://holistichealthhub.cc/payment/success?ref=${encodeURIComponent(transactionReference)}`;
       const cancelUrl = `https://holistichealthhub.cc/payment/cancelled?ref=${encodeURIComponent(transactionReference)}`;
@@ -300,7 +301,7 @@ export function createPortalPaymentRouter(): Router {
       }
 
       const connection = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY').catch(() => null);
-      const transactionReference = `WP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      const transactionReference = createWorldpayTransactionReference();
       const successUrl = `https://holistichealthhub.cc/payment/success?ref=${encodeURIComponent(transactionReference)}`;
       const cancelUrl = `https://holistichealthhub.cc/payment/cancelled?ref=${encodeURIComponent(transactionReference)}`;
 
@@ -377,7 +378,7 @@ export function createPortalPaymentRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const transactionReference = input.route === 'WORLDPAY' ? `WP-${Date.now().toString(36).toUpperCase()}` : null;
+      const transactionReference = input.route === 'WORLDPAY' ? createWorldpayTransactionReference() : null;
       const receiptToken = input.route === 'MANUAL' ? crypto.randomUUID() : null;
       const receiptHash = receiptToken ? sha256(receiptToken) : null;
       const initialStatus = input.route === 'MANUAL' ? 'PAID' : 'PENDING';

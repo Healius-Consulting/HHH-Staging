@@ -1,8 +1,8 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { HttpError } from '../../domain/common/errors.js';
 import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
+import { publicSubmissionLimiter } from '../../security/public-limits.js';
 import { sha256 } from '../../security/session-utils.js';
 
 const submissionInputSchema = z.object({
@@ -32,7 +32,7 @@ export function createPublicEligibilityRouter(): Router {
   const organisationRepo = new SqlOrganisationRepository();
 
   // POST /v1/public/eligibility-submissions
-  router.post('/public/eligibility-submissions', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/public/eligibility-submissions', publicSubmissionLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const input = submissionInputSchema.parse(req.body);
       const emailHash = sha256(input.email.trim().toLowerCase());
