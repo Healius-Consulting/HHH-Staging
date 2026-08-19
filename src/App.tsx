@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
-import { AppProvider, useApp, type PharmacyTenant, type Screen, type StaffSession, type WorkspaceMode } from './context/AppContext';
+import { ORGANISATIONS, AppProvider, useApp, type PharmacyTenant, type Screen, type StaffSession, type WorkspaceMode } from './context/AppContext';
 import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
@@ -29,7 +29,7 @@ import { SetupRequired } from './onboarding/SetupRequired';
 import { usePharmacySetup } from './onboarding/usePharmacySetup';
 import { getAdminOrganisations, getPortalSession } from './shared/api';
 import type { PortalOrganisation } from './shared/contracts';
-import { isLocalPortalPreview } from './dev/localPortalPreview';
+import { isLocalPortalPreview, withLocationSearch } from './dev/localPortalPreview';
 import LocalPortalSwitcher from './dev/LocalPortalSwitcher';
 import CommandPalette from './components/CommandPalette';
 import { serverSessionAuth } from './auth/firebase';
@@ -157,6 +157,7 @@ function AuthSessionBridge() {
           return;
         }
         linkedSession.current = true;
+        if (isLocalPortalPreview) dispatch({ type: 'SET_ORGANISATIONS', organisations: ORGANISATIONS });
         dispatch({ type: 'SIGN_IN_STAFF', session });
         return;
       }
@@ -231,7 +232,7 @@ function StaffWorkspace() {
       }
     }
     const path = pharmacyPathForScreen(state.screen);
-    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+    if (window.location.pathname !== path) window.history.pushState(null, '', withLocationSearch(path));
   }, [authState.staff?.role, dispatch, state.screen]);
 
   useEffect(() => {

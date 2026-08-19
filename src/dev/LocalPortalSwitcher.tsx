@@ -3,7 +3,10 @@ import { localPortalPreview } from './localPortalPreview';
 
 export default function LocalPortalSwitcher() {
   const open = (portal: 'pharmacy' | 'admin') => {
-    window.location.assign(`${window.location.pathname}?devPortal=${portal}`);
+    const next = new URL(window.location.href);
+    next.searchParams.delete('dev');
+    next.searchParams.set('devPortal', portal);
+    window.location.assign(`${next.pathname}?${next.searchParams.toString()}${next.hash}`);
   };
 
   return (

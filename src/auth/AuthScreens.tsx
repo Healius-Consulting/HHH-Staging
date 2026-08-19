@@ -14,12 +14,18 @@ function AuthShell({ children }: { children: React.ReactNode }) {
       <section className="staff-login-brand">
         <div className="staff-login-lockup" aria-label="Holistic Health Hub">
           <HhhBrandMark />
-          <span>Holistic<br />Health Hub</span>
+          <span>
+            <strong>Holistic Health Hub</strong>
+            <small>Staff workspace</small>
+          </span>
         </div>
-        <p className="section-label">STAFF PORTAL</p>
+        <p className="staff-login-kicker">Staff portal</p>
         <h1>Referrals, payments and stock ordering made easy.</h1>
         <p>Patient accounts are not supported in this staff application. Active patients will have access to their own Curaleaf portal for ordering Rx and appointments.</p>
-        <div className="staff-login-trust"><span><ShieldCheck size={16} /> Tenant isolation</span><span><KeyRound size={16} /> {mfaRequired ? 'Mandatory MFA' : 'Verified staff access'}</span></div>
+        <div className="staff-login-trust">
+          <span><ShieldCheck size={16} aria-hidden="true" /> Tenant isolation</span>
+          <span><KeyRound size={16} aria-hidden="true" /> {mfaRequired ? 'Mandatory MFA' : 'Verified staff access'}</span>
+        </div>
       </section>
       <section className="staff-login-panel">{children}</section>
     </div>
@@ -43,7 +49,7 @@ export function ConfigurationRequired() {
   return (
     <AuthShell>
       <section className="card staff-login-card auth-configuration-required" role="status">
-        <div className="staff-login-heading"><div className="resource-icon"><LockKeyhole size={20} /></div><div><p className="section-label">Configuration required</p><h2>Connect Firebase security services</h2></div></div>
+        <div className="staff-login-heading"><div className="resource-icon"><LockKeyhole size={20} aria-hidden="true" /></div><div><p className="staff-login-kicker">Configuration required</p><h2>Connect Firebase security services</h2></div></div>
         <p>This deployment is intentionally locked because Firebase Authentication or App Check has not been configured.</p>
         <div className="banner banner-amber"><AlertCircle size={16} /><span>Add the following Vercel environment variables, then redeploy.</span></div>
         <ul className="auth-config-list">
@@ -82,7 +88,7 @@ export function StaffLogin() {
   return (
     <AuthShell>
       <form className="card staff-login-card" onSubmit={submit}>
-        <div className="staff-login-heading"><div className="resource-icon"><LockKeyhole size={20} /></div><div><p className="section-label">Staff access</p><h2>{resetMode ? 'Reset your password' : 'Sign in to HHH'}</h2></div></div>
+        <div className="staff-login-heading"><div className="resource-icon"><LockKeyhole size={20} aria-hidden="true" /></div><div><p className="staff-login-kicker">Staff access</p><h2>{resetMode ? 'Reset your password' : 'Sign in to Holistic Health Hub'}</h2></div></div>
         {state.notice && <div className="banner banner-blue" role="status"><CheckCircle2 size={15} /> {state.notice}</div>}
         <label className="staff-login-field">Email address<div className="staff-login-input"><Mail size={16} /><input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="username" required placeholder="name@pharmacy.cc" /></div></label>
         {!resetMode && <label className="staff-login-field">Password<div className="staff-login-input"><LockKeyhole size={16} /><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" required /><button className="auth-password-toggle" type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>}
@@ -140,17 +146,17 @@ export function PasswordResetScreen() {
   return (
     <AuthShell>
       <section className="card staff-login-card password-reset-card">
-        <div className="staff-login-heading"><div className="resource-icon"><KeyRound size={20} /></div><div><p className="section-label">Secure account</p><h2>{phase === 'complete' ? 'Password updated' : 'Choose a new password'}</h2></div></div>
-        {phase === 'checking' && <div className="auth-reset-status" role="status"><LoaderCircle className="spin" size={20} /> Checking your secure reset link…</div>}
-        {phase === 'invalid' && <><div className="banner banner-red" role="alert"><AlertCircle size={16} /> This reset link is invalid or has expired.</div><a className="btn btn-primary" href="/login">Request a new reset email</a></>}
-        {phase === 'complete' && <><div className="auth-reset-success"><CheckCircle2 size={30} /><div><strong>Your password is ready</strong><span>You can now sign in to the HHH staff portal.</span></div></div><a className="btn btn-primary staff-login-submit" href="/login">Continue to staff sign in</a></>}
+        <div className="staff-login-heading"><div className="resource-icon"><KeyRound size={20} aria-hidden="true" /></div><div><p className="staff-login-kicker">Secure account</p><h2>{phase === 'complete' ? 'Password updated' : phase === 'invalid' ? 'Reset link unavailable' : phase === 'checking' ? 'Checking your reset link' : 'Choose a new password'}</h2></div></div>
+        {phase === 'checking' && <div className="auth-reset-status" role="status"><LoaderCircle className="spin" size={20} aria-hidden="true" /> Checking your secure reset link…</div>}
+        {phase === 'invalid' && <><div className="banner banner-red" role="alert"><AlertCircle size={16} aria-hidden="true" /> This reset link is invalid or has expired.</div><a className="btn btn-primary staff-login-submit" href="/login">Request a new reset email</a></>}
+        {phase === 'complete' && <><div className="auth-reset-success"><CheckCircle2 size={30} aria-hidden="true" /><div><strong>Your password is ready</strong><span>You can now sign in to the Holistic Health Hub staff portal.</span></div></div><a className="btn btn-primary staff-login-submit" href="/login">Continue to staff sign in</a></>}
         {(phase === 'ready' || phase === 'saving') && <form onSubmit={submit}>
-          <p className="staff-login-note">Updating the password for <strong>{email}</strong>.</p>
-          <label className="staff-login-field">New password<div className="staff-login-input"><LockKeyhole size={16} /><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" minLength={8} required /><button className="auth-password-toggle" type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide passwords' : 'Show passwords'} aria-pressed={showPassword}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
-          <label className="staff-login-field">Confirm new password<div className="staff-login-input"><LockKeyhole size={16} /><input type={showPassword ? 'text' : 'password'} value={confirmation} onChange={event => setConfirmation(event.target.value)} autoComplete="new-password" minLength={8} required /></div></label>
+          <p>Updating the password for <strong>{email}</strong>.</p>
+          <label className="staff-login-field">New password<div className="staff-login-input"><LockKeyhole size={16} aria-hidden="true" /><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" minLength={8} required /><button className="auth-password-toggle" type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide passwords' : 'Show passwords'} aria-pressed={showPassword}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
+          <label className="staff-login-field">Confirm new password<div className="staff-login-input"><LockKeyhole size={16} aria-hidden="true" /><input type={showPassword ? 'text' : 'password'} value={confirmation} onChange={event => setConfirmation(event.target.value)} autoComplete="new-password" minLength={8} required /></div></label>
           <small className="auth-password-guidance">Use at least 8 characters. A longer, unique passphrase is recommended.</small>
-          {error && <div className="banner banner-red" role="alert"><AlertCircle size={15} /> {error}</div>}
-          <button className="btn btn-primary staff-login-submit" type="submit" disabled={phase === 'saving'}>{phase === 'saving' ? <LoaderCircle className="spin" size={16} /> : <KeyRound size={16} />} {phase === 'saving' ? 'Updating password…' : 'Update password'}</button>
+          {error && <div className="banner banner-red" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</div>}
+          <button className="btn btn-primary staff-login-submit" type="submit" disabled={phase === 'saving'}>{phase === 'saving' ? <LoaderCircle className="spin" size={16} /> : <KeyRound size={16} aria-hidden="true" />} {phase === 'saving' ? 'Updating password…' : 'Update password'}</button>
         </form>}
       </section>
     </AuthShell>
@@ -164,10 +170,10 @@ export function EmailVerificationGate() {
   return (
     <AuthShell>
       <section className="card staff-login-card">
-        <div className="staff-login-heading"><div className="resource-icon"><Mail size={20} /></div><div><p className="section-label">Identity check</p><h2>Verify your email address</h2></div></div>
-        <p>Open the Firebase verification email sent to <strong>{state.staff?.email}</strong>. Workspace data remains locked until verification is complete.</p>
+        <div className="staff-login-heading"><div className="resource-icon"><Mail size={20} aria-hidden="true" /></div><div><p className="staff-login-kicker">Identity check</p><h2>Verify your email address</h2></div></div>
+        <p>Open the verification email sent to <strong>{state.staff?.email}</strong>. Workspace data remains locked until verification is complete.</p>
         {message && <div className="banner banner-blue" role="status">{message}</div>}
-        <button className="btn btn-primary" disabled={busy} onClick={() => { setBusy(true); void refreshVerification().catch(() => setMessage('Verification could not be checked yet.')).finally(() => setBusy(false)); }}><RefreshCw size={15} /> I have verified my email</button>
+        <button className="btn btn-primary" disabled={busy} onClick={() => { setBusy(true); void refreshVerification().catch(() => setMessage('Verification could not be checked yet.')).finally(() => setBusy(false)); }}><RefreshCw size={15} aria-hidden="true" /> I have verified my email</button>
         <button className="btn" disabled={busy} onClick={() => { setBusy(true); void resendVerification().then(() => setMessage('A new verification email has been sent.')).catch(() => setMessage('A new email could not be sent yet.')).finally(() => setBusy(false)); }}>Resend verification</button>
         <button className="btn btn-sm" onClick={() => void signOutStaff()}>Use another account</button>
       </section>
@@ -182,10 +188,10 @@ export function MfaChallenge() {
   return (
     <AuthShell>
       <form className="card staff-login-card" onSubmit={event => { event.preventDefault(); setBusy(true); void completeMfaChallenge(code).finally(() => setBusy(false)); }}>
-        <div className="staff-login-heading"><div className="resource-icon"><ShieldCheck size={20} /></div><div><p className="section-label">Two-step verification</p><h2>Enter your authenticator code</h2></div></div>
-        <p>Enter the current six-digit code from the authenticator app registered to your HHH staff account.</p>
+        <div className="staff-login-heading"><div className="resource-icon"><ShieldCheck size={20} aria-hidden="true" /></div><div><p className="staff-login-kicker">Two-step verification</p><h2>Enter your authenticator code</h2></div></div>
+        <p>Enter the current six-digit code from the authenticator app registered to your Holistic Health Hub staff account.</p>
         <label className="staff-login-field">Verification code<input className="input auth-code-input" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={event => setCode(event.target.value.replace(/\D/g, ''))} required /></label>
-        {state.error && <div className="banner banner-red" role="alert"><AlertCircle size={15} /> {state.error}</div>}
+        {state.error && <div className="banner banner-red" role="alert"><AlertCircle size={15} aria-hidden="true" /> {state.error}</div>}
         <button className="btn btn-primary" type="submit" disabled={busy || code.length !== 6}>Verify and continue</button>
         <button className="btn btn-sm" type="button" onClick={() => void signOutStaff()}>Cancel sign-in</button>
       </form>
@@ -223,8 +229,8 @@ export function MfaEnrollmentGate() {
   return (
     <AuthShell>
       <form className="card staff-login-card mfa-enrollment-card" onSubmit={complete}>
-        <div className="staff-login-heading"><div className="resource-icon"><ShieldCheck size={20} /></div><div><p className="section-label">Required security setup</p><h2>Protect your staff account</h2></div></div>
-        <p>{mfaRequired ? 'HHH requires a time-based one-time password (TOTP) before staff can access pharmacy data.' : 'Set up a time-based one-time password (TOTP) to add another layer of protection to this staff account.'}</p>
+        <div className="staff-login-heading"><div className="resource-icon"><ShieldCheck size={20} aria-hidden="true" /></div><div><p className="staff-login-kicker">Required security setup</p><h2>Protect your staff account</h2></div></div>
+        <p>{mfaRequired ? 'Holistic Health Hub requires a time-based one-time password (TOTP) before staff can access pharmacy data.' : 'Set up a time-based one-time password (TOTP) to add another layer of protection to this staff account.'}</p>
         {!details ? (
           <button className="btn btn-primary" type="button" disabled={busy} onClick={begin}>Set up authenticator</button>
         ) : (
@@ -240,7 +246,7 @@ export function MfaEnrollmentGate() {
             <button className="btn btn-primary" type="submit" disabled={busy || code.length !== 6}>Verify and finish</button>
           </>
         )}
-        {(error || state.error) && <div className="banner banner-red" role="alert"><AlertCircle size={15} /> {error || state.error}</div>}
+        {(error || state.error) && <div className="banner banner-red" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error || state.error}</div>}
         <button className="btn btn-sm" type="button" onClick={() => void signOutStaff()}>Sign out</button>
       </form>
     </AuthShell>
@@ -248,5 +254,10 @@ export function MfaEnrollmentGate() {
 }
 
 export function AuthLoading() {
-  return <div className="auth-loading-page" role="status"><LoaderCircle size={22} /> Checking secure session…</div>;
+  return (
+    <div className="auth-loading-page" role="status">
+      <HhhBrandMark />
+      <p>Checking secure session…</p>
+    </div>
+  );
 }

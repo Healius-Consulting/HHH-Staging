@@ -42,7 +42,7 @@ import { useAuth } from '../auth/useAuth';
 import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacyStaff, getPlatformAdmins, getReferralLink, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, resetPharmacyStaffMfa, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
 import { workspaceClassificationLabel, type AdminReferralFinanceReport, type CuraleafConnectionStatus, type PatientRegisterExportResult, type PatientRegisterExportRow, type PharmacySetupStatus, type PharmacyStaffAccount, type PharmacyStaffInvitation, type PlatformAdminAccount, type PlatformAdminInvitation, type UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
-import { isLocalPortalPreview } from '../dev/localPortalPreview';
+import { isLocalPortalPreview, withLocationSearch } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
 import WorkspaceNavigation, { type WorkspaceNavGroup } from '../components/WorkspaceNavigation';
 import HhhBrandMark from '../components/HhhBrandMark';
@@ -838,7 +838,7 @@ export default function AdminPortal() {
 
   useEffect(() => {
     const path = selectedOrganisationId ? adminPathForOrganisation(selectedOrganisationId) : adminPathForView(view);
-    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+    if (window.location.pathname !== path) window.history.pushState(null, '', withLocationSearch(path));
   }, [selectedOrganisationId, view]);
 
   useEffect(() => {

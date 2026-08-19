@@ -182,7 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOutStaff = useCallback(async (reason?: string) => {
     if (isLocalPortalPreview) {
-      window.location.assign(window.location.pathname);
+      window.location.assign(window.location.pathname + window.location.search);
       return;
     }
     if (!firebaseConfiguration.configured) return;

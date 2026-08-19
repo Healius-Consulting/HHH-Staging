@@ -4,7 +4,7 @@ import { getCuraleafCatalogue, getCuraleafConnectionStatus, getCuraleafTrainingC
 import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationState, OrderDraftRecord, OrderRefundState, PortalOrderRecord, PortalPendingEnquiryRecord, RedoPriceResolution } from '../shared/contracts';
 import { activeRedoPriceResolution } from '../shared/contracts';
 import { mapPortalEnquiryRecord, mapPortalPatientRecord } from '../utils/pharmacyPatientDirectory';
-import { isLocalPortalPreview, localPortalPreview } from '../dev/localPortalPreview';
+import { isLocalPortalPreview, localPortalPreview, localPreviewStaff } from '../dev/localPortalPreview';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
@@ -1099,6 +1099,14 @@ let storedStaffSession: StaffSession | null = null;
 try {
   storedStaffSession = JSON.parse(sessionStorage.getItem('hhh_staff_session') || 'null') as StaffSession | null;
 } catch { storedStaffSession = null; }
+const previewStaffSession: StaffSession | null = isLocalPortalPreview && localPreviewStaff
+  ? {
+      email: localPreviewStaff.email,
+      name: localPreviewStaff.name,
+      role: localPreviewStaff.role === 'hhh_admin' ? 'admin' : 'pharmacy',
+      organisationId: localPreviewStaff.organisationId,
+    }
+  : null;
 const initialPortalMode: PortalMode = localPortalPreview === 'admin' ? 'admin' : localPortalPreview === 'pharmacy' ? 'clinician' : storedStaffSession?.role === 'admin' ? 'admin' : storedStaffSession?.role === 'pharmacy' ? 'clinician' : 'gateway';
 const initialToken = urlParams?.get('token');
 const initialCachedCatalogue = loadCachedCatalogue(storedStaffSession?.organisationId);
@@ -1121,9 +1129,9 @@ const initialState: AppState = {
   nextIds: { patient: 2000, rx: 1, order: 7, submission: 5, invoice: 4072 },
   portalMode: initialPortalMode,
   workspaceMode: 'training',
-  organisations: [],
-  currentOrganisationId: '',
-  staffSession: storedStaffSession,
+  organisations: isLocalPortalPreview ? ORGANISATIONS : [],
+  currentOrganisationId: previewStaffSession?.organisationId ?? (isLocalPortalPreview ? ORGANISATIONS[0]?.id ?? '' : ''),
+  staffSession: previewStaffSession ?? storedStaffSession,
   platformIntegrations: [
     { id: 'eligibility-api', name: 'HHH Eligibility API', description: 'Token routing and patient intake', status: 'connected' },
     { id: 'curaleaf', name: 'Curaleaf', description: 'Product, prescription and supplier ordering', status: 'pending' },
