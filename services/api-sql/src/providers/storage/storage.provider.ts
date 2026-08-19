@@ -72,6 +72,13 @@ export class StorageProvider {
     };
   }
 
+  async readPrefix(storagePath: string, byteCount = 16): Promise<Buffer> {
+    const bucket = this.storage.bucket(this.bucketName);
+    const file = bucket.file(storagePath);
+    const [bytes] = await file.download({ start: 0, end: Math.max(0, byteCount - 1) });
+    return bytes;
+  }
+
   async generateDownloadUrl(storagePath: string, expiresInSeconds = 300): Promise<string> {
     const bucket = this.storage.bucket(this.bucketName);
     const file = bucket.file(storagePath);

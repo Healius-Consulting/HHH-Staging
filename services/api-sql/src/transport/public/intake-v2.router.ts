@@ -1,5 +1,4 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { ELIGIBILITY_CONDITION_IDS } from '../../domain/eligibility/conditions.js';
 import { HttpError } from '../../domain/common/errors.js';
@@ -10,7 +9,7 @@ import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlPostcodeSearchRepository } from '../../repositories/sql/postcode-search.sql.js';
-import { publicSubmissionLimiter } from '../../security/public-limits.js';
+import { publicReferralResolveLimiter, publicSubmissionLimiter } from '../../security/public-limits.js';
 import { sha256 } from '../../security/session-utils.js';
 import type { CreateSubmissionInput } from '../../repositories/ports/intake.port.js';
 import { listPlatformAdminRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
@@ -86,13 +85,6 @@ const resolveTokenSchema = z.object({
   token: referralTokenSchema,
 }).strict();
 
-const resolveLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 120,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-});
-
 export function caseReference(id: string, submittedAt: string) {
   const day = submittedAt.slice(0, 10).replaceAll('-', '');
   return `HHH-${day}-${id.replaceAll('-', '').slice(0, 8).toUpperCase()}`;
@@ -139,7 +131,7 @@ export function createPublicIntakeV2Router(): Router {
   const notificationRepo = new SqlNotificationRepository();
   const searchRepo = new SqlPostcodeSearchRepository();
 
-  router.post('/public/referral-tokens/resolve', resolveLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/public/referral-tokens/resolve', publicReferralResolveLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { token } = resolveTokenSchema.parse(req.body);
       const resolution = await organisationRepo.findDirectoryByTokenHash(sha256(token));

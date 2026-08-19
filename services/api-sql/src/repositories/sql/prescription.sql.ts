@@ -340,8 +340,7 @@ const CREATE_PRESCRIPTION_FILE_GQL = `
       contentType: $contentType
       sizeBytes: $sizeBytes
       uploadedByUid: $uploadedByUid
-      status: UPLOADED
-      uploadedAt_expr: "request.time"
+      status: PENDING_UPLOAD
     })
   }
 `;
@@ -352,7 +351,21 @@ const COMPLETE_PRESCRIPTION_FILE_GQL = `
       key: { id: $id }
       data: {
         status: UPLOADED
+        uploadedAt_expr: "request.time"
         verifiedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
+const REJECT_PRESCRIPTION_FILE_GQL = `
+  mutation RejectPrescriptionFile($id: UUID!) {
+    prescriptionFile_update(
+      key: { id: $id }
+      data: {
+        status: REJECTED
+        verifiedAt: null
+        updatedAt_expr: "request.time"
       }
     )
   }
@@ -531,6 +544,16 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
     if (!existing) return false;
     await dataConnect.executeGraphql<any, any>(
       COMPLETE_PRESCRIPTION_FILE_GQL,
+      { variables: { id } }
+    );
+    return true;
+  }
+
+  async rejectFile(id: string, organisationId: string): Promise<boolean> {
+    const existing = await this.findFileById(id, organisationId);
+    if (!existing) return false;
+    await dataConnect.executeGraphql<any, any>(
+      REJECT_PRESCRIPTION_FILE_GQL,
       { variables: { id } }
     );
     return true;

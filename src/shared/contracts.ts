@@ -1355,8 +1355,9 @@ export interface CreatePharmacyStaffInput {
 
 export interface PharmacyStaffInvitation extends PharmacyStaffAccount {
   invitationQueued: boolean;
-  actionLink: string;
 }
+
+export interface PlatformAdminAccount {
 
 export interface PlatformAdminAccount {
   uid: string;
@@ -1374,5 +1375,4 @@ export interface CreatePlatformAdminInput {
 
 export interface PlatformAdminInvitation extends PlatformAdminAccount {
   invitationQueued: boolean;
-  actionLink: string;
 }

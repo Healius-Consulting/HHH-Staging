@@ -163,7 +163,6 @@ export function createAdminStaffRouter(): Router {
         status: 'invited',
         createdAt,
         invitationQueued: true,
-        actionLink,
       });
     } catch (error) {
       next(error);
@@ -306,7 +305,6 @@ export function createAdminStaffRouter(): Router {
         status: 'invited',
         createdAt,
         invitationQueued: true,
-        actionLink,
       });
     } catch (error) {
       next(error);

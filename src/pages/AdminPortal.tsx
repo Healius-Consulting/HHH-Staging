@@ -436,7 +436,7 @@ function PlatformAdminManager() {
     setEmailDelivery(null);
     try {
       const created = isLocalPortalPreview
-        ? { uid: `preview-admin-${Date.now()}`, displayName, email, role: 'hhh_admin' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: false, actionLink: '#local-preview' }
+        ? { uid: `preview-admin-${Date.now()}`, displayName, email, role: 'hhh_admin' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: true }
         : await createPlatformAdminInvitation({ displayName, email });
 
       const updated = [...admins, created];
@@ -455,23 +455,17 @@ function PlatformAdminManager() {
           dispatch({ type: 'ADD_TOAST', message: 'Setup email queued.', toastType: 'success' });
         } else {
           setEmailDelivery('failed');
-          dispatch({ type: 'ADD_TOAST', message: 'Account created. Copy the setup link instead.', toastType: 'warning' });
+          dispatch({ type: 'ADD_TOAST', message: 'Account created. Retry the invitation email from this screen.', toastType: 'warning' });
         }
       } catch {
         setEmailDelivery('failed');
-        dispatch({ type: 'ADD_TOAST', message: 'Account created. Copy the setup link instead.', toastType: 'warning' });
+        dispatch({ type: 'ADD_TOAST', message: 'Account created. Retry the invitation email from this screen.', toastType: 'warning' });
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The admin account could not be created.');
     } finally {
       setBusy(false);
     }
-  };
-
-  const copyInvitation = async () => {
-    if (!invitation) return;
-    await navigator.clipboard.writeText(invitation.actionLink);
-    dispatch({ type: 'ADD_TOAST', message: 'Secure account setup link copied.', toastType: 'success' });
   };
 
   const removeAdmin = async (account: PlatformAdminAccount) => {
@@ -514,7 +508,7 @@ function PlatformAdminManager() {
         <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Invite admin'}</button>
       </form>
       {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
-      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>Admin account created · {emailDelivery === 'sent' ? 'Setup email queued' : emailDelivery === 'failed' ? 'Email not queued' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? 'A password setup email has been queued. They will choose a password and set up two-factor authentication before entering the admin portal.' : 'Copy this one-time setup link and send it securely. They will choose a password and set up two-factor authentication before entering the admin portal.'}</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
+      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>Admin account created · {emailDelivery === 'sent' ? 'Setup email queued' : emailDelivery === 'failed' ? 'Email not queued' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? 'A password setup email has been queued. They will choose a password and set up two-factor authentication before entering the admin portal.' : 'A setup email could not be queued. Retry the invitation from this screen. The setup link is not shown in the browser.'}</span></div></div>}
       <div className="admin-staff-list">
         {loading && <div className="empty-state">Loading admin accounts…</div>}
         {!loading && admins.length === 0 && <div className="empty-state">No HHH admin accounts yet. Invite the first administrator above.</div>}
@@ -587,7 +581,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
     setEmailDelivery(null);
     try {
       const created = isLocalPortalPreview
-        ? { uid: `preview-${Date.now()}`, pharmacyId: organisation.id, organisationId: organisation.id, displayName, email, role: 'pharmacy_staff' as const, contactRole: staff.length ? 'staff' as const : 'owner' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: false, actionLink: '#local-preview' }
+        ? { uid: `preview-${Date.now()}`, pharmacyId: organisation.id, organisationId: organisation.id, displayName, email, role: 'pharmacy_staff' as const, contactRole: staff.length ? 'staff' as const : 'owner' as const, status: 'invited' as const, createdAt: new Date().toISOString(), invitationQueued: true }
         : await createPharmacyStaffInvitation({ pharmacyId: organisation.id, organisationId: organisation.id, displayName, email });
 
       const updated = [...staff, created];
@@ -607,23 +601,17 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
           dispatch({ type: 'ADD_TOAST', message: 'Setup email queued.', toastType: 'success' });
         } else {
           setEmailDelivery('failed');
-          dispatch({ type: 'ADD_TOAST', message: 'Account created. Copy the setup link instead.', toastType: 'warning' });
+          dispatch({ type: 'ADD_TOAST', message: 'Account created. Retry the invitation email from this screen.', toastType: 'warning' });
         }
       } catch {
         setEmailDelivery('failed');
-        dispatch({ type: 'ADD_TOAST', message: 'Account created. Copy the setup link instead.', toastType: 'warning' });
+        dispatch({ type: 'ADD_TOAST', message: 'Account created. Retry the invitation email from this screen.', toastType: 'warning' });
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The staff account could not be created.');
     } finally {
       setBusy(false);
     }
-  };
-
-  const copyInvitation = async () => {
-    if (!invitation) return;
-    await navigator.clipboard.writeText(invitation.actionLink);
-    dispatch({ type: 'ADD_TOAST', message: 'Secure account setup link copied.', toastType: 'success' });
   };
 
   const removeStaff = async (account: PharmacyStaffAccount) => {
@@ -668,7 +656,7 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
         <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Add staff account'}</button>
       </form>
       {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
-      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>{invitation.contactRole === 'owner' ? 'Owner account created' : 'Staff account created'} · {emailDelivery === 'sent' ? 'Setup email queued' : emailDelivery === 'failed' ? 'Email not queued' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? 'A password setup email has been queued. They will choose a password and set up two-factor authentication before entering the pharmacy workspace.' : 'Copy this one-time setup link and send it securely. They will choose a password and set up two-factor authentication before entering the pharmacy workspace.'}</span><code>{invitation.actionLink}</code></div><button className="btn btn-sm" type="button" onClick={() => void copyInvitation()}><Copy size={13} /> Copy setup link</button></div>}
+      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>{invitation.contactRole === 'owner' ? 'Owner account created' : 'Staff account created'} · {emailDelivery === 'sent' ? 'Setup email queued' : emailDelivery === 'failed' ? 'Email not queued' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? 'A password setup email has been queued. They will choose a password and set up two-factor authentication before entering the pharmacy workspace.' : 'A setup email could not be queued. Retry the invitation from this screen. The setup link is not shown in the browser.'}</span></div></div>}
       <div className="admin-staff-list">
         {loading && <div className="empty-state">Loading staff accounts…</div>}
         {!loading && staff.length === 0 && <div className="empty-state">No pharmacy staff accounts yet. The first person added will be tagged Owner.</div>}

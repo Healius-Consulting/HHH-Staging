@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type NextFunction, type Request, type Response } from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { directoryAddressSummary } from '../../repositories/ports/directory.port.js';
 import { SqlDirectoryRepository } from '../../repositories/sql/directory.sql.js';
@@ -10,13 +9,7 @@ import {
   projectDirectoryMapPositions,
   topFiveNearest,
 } from '../../domain/geography/postcode.js';
-
-const searchLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 45,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-});
+import { publicPostcodeSearchLimiter } from '../../security/public-limits.js';
 
 function lowerDeliveryCapability(value: string) {
   return value.toLowerCase() as 'none' | 'nationwide' | 'postcode_areas' | 'radius_miles';
@@ -31,7 +24,7 @@ export function createPublicPostcodeSearchRouter(): Router {
   const directoryRepo = new SqlDirectoryRepository();
   const searchRepo = new SqlPostcodeSearchRepository();
 
-  router.post('/public/postcode-searches', searchLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/public/postcode-searches', publicPostcodeSearchLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { postcode } = z.object({ postcode: z.string().trim().min(2).max(16) }).parse(req.body);
       const geocode = await geocodePostcode(postcode);

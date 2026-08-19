@@ -84,6 +84,7 @@ export interface PrescriptionRepositoryPort {
     uploadedByUid?: string | null;
   }): Promise<{ id?: string }>;
   completeFile(id: string, organisationId: string): Promise<boolean>;
+  rejectFile(id: string, organisationId: string): Promise<boolean>;
   restoreFile(id: string, organisationId: string): Promise<boolean>;
   markFileDeleted(id: string, organisationId: string): Promise<boolean>;
   deleteFile(id: string, organisationId: string): Promise<boolean>;

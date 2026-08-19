@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { StorageProvider } from '../../providers/storage/storage.provider.js';
-import { MAX_PRESCRIPTION_UPLOAD_BYTES, uploadedObjectMatchesDeclaration } from '../../providers/storage/upload-constraints.js';
+import { MAX_PRESCRIPTION_UPLOAD_BYTES, matchesDeclaredFileSignature, uploadedObjectMatchesDeclaration } from '../../providers/storage/upload-constraints.js';
 import type { PrescriberRecord } from '../../repositories/ports/prescription.port.js';
 import { SqlPrescriptionRepository } from '../../repositories/sql/prescription.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
@@ -103,13 +103,28 @@ export function createPortalPrescriptionRouter(): Router {
       if (!fileRecord || fileRecord.status === 'DELETED' || fileRecord.deletedAt) {
         throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');
       }
+      if (fileRecord.status === 'UPLOADED') {
+        res.status(200).json({ id: fileId, status: 'completed' });
+        return;
+      }
+      if (fileRecord.status !== 'PENDING_UPLOAD') {
+        throw new HttpError(409, 'This prescription file cannot be completed.', 'UPLOAD_NOT_COMPLETABLE');
+      }
       const uploaded = await storageProvider.getObjectMetadata(fileRecord.storagePath);
       const match = uploadedObjectMatchesDeclaration(uploaded, {
         sizeBytes: fileRecord.sizeBytes,
         contentType: fileRecord.contentType,
       });
       if (!match.ok) {
+        await storageProvider.deleteFile(fileRecord.storagePath);
+        await prescriptionRepo.rejectFile(fileId, scope.organisationId);
         throw new HttpError(400, match.message, match.code);
+      }
+      const prefix = await storageProvider.readPrefix(fileRecord.storagePath, 16);
+      if (!matchesDeclaredFileSignature(prefix, fileRecord.contentType)) {
+        await storageProvider.deleteFile(fileRecord.storagePath);
+        await prescriptionRepo.rejectFile(fileId, scope.organisationId);
+        throw new HttpError(400, 'The uploaded file content does not match the declared type.', 'UPLOAD_SIGNATURE_MISMATCH');
       }
       await prescriptionRepo.completeFile(fileId, scope.organisationId);
       res.status(200).json({ id: fileId, status: 'completed' });
@@ -144,6 +159,9 @@ export function createPortalPrescriptionRouter(): Router {
       const fileRecord = await prescriptionRepo.findFileById(fileId, scope.organisationId);
       if (!fileRecord || fileRecord.status === 'DELETED' || fileRecord.deletedAt) {
         throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');
+      }
+      if (fileRecord.status !== 'UPLOADED') {
+        throw new HttpError(409, 'This prescription file is not available to download.', 'UPLOAD_NOT_READY');
       }
 
       const downloadUrl = await storageProvider.generateDownloadUrl(fileRecord.storagePath, 300);
