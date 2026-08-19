@@ -4,6 +4,7 @@ import cors from 'cors';
 import { z } from 'zod';
 import { portalAppOrigins } from './config.js';
 import { HttpError } from '../domain/common/errors.js';
+import { requireAppCheck } from '../security/app-check.js';
 import { createAuthRouter } from '../transport/public/auth.router.js';
 import { createDirectoryRouter } from '../transport/public/directory.router.js';
 import { createPortalSetupRouter } from '../transport/portal/setup.router.js';
@@ -75,6 +76,8 @@ export function createApp(): Express {
       'Origin',
       'Cookie',
       'X-Requested-With',
+      'X-Firebase-AppCheck',
+      'x-firebase-appcheck',
     ],
     exposedHeaders: ['X-Request-ID', 'x-request-id', 'X-CSRF-Token', 'x-csrf-token'],
   }));
@@ -90,6 +93,7 @@ export function createApp(): Express {
 
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
+  app.use(requireAppCheck);
 
   // Mount v1 routers
   app.use('/v1', createAuthRouter());

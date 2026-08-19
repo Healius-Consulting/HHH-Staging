@@ -26,6 +26,7 @@ const configSchema = z.object({
     'localhost,127.0.0.1'
   ),
   // Domain backends are SQL Connect only. Firestore is not a valid runtime.
+  REQUIRE_APP_CHECK: z.enum(['true', 'false']).optional(),
   STORAGE_BACKEND: z.literal('sql').default('sql'),
   AUTH_BACKEND: z.literal('sql').default('sql'),
   INTAKE_BACKEND: z.literal('sql').default('sql'),

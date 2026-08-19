@@ -1,5 +1,6 @@
 import { Storage } from '@google-cloud/storage';
 import { config } from '../../bootstrap/config.js';
+import { MAX_PRESCRIPTION_UPLOAD_BYTES } from './upload-constraints.js';
 
 export interface SignedUploadTarget {
   id: string;
@@ -26,9 +27,11 @@ export class StorageProvider {
     sizeBytes: number;
     expiresInSeconds?: number;
   }): Promise<SignedUploadTarget> {
-    const { organisationId, fileId, filename, contentType, expiresInSeconds = 900 } = params;
+    const { organisationId, fileId, filename, contentType, sizeBytes, expiresInSeconds = 900 } = params;
     const sanitizedFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
     const storagePath = `prescriptions/${organisationId}/${fileId}/${sanitizedFilename}`;
+    const maxBytes = Math.min(Math.max(1, sizeBytes), MAX_PRESCRIPTION_UPLOAD_BYTES);
+    const contentLengthRange = `1,${maxBytes}`;
 
     const bucket = this.storage.bucket(this.bucketName);
     const file = bucket.file(storagePath);
@@ -38,6 +41,9 @@ export class StorageProvider {
       action: 'write',
       expires: Date.now() + expiresInSeconds * 1000,
       contentType,
+      extensionHeaders: {
+        'x-goog-content-length-range': contentLengthRange,
+      },
     });
 
     return {
@@ -47,7 +53,22 @@ export class StorageProvider {
       expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
       requiredHeaders: {
         'Content-Type': contentType,
+        'x-goog-content-length-range': contentLengthRange,
       },
+    };
+  }
+
+  async getObjectMetadata(storagePath: string): Promise<{ exists: boolean; sizeBytes: number; contentType: string | null }> {
+    const bucket = this.storage.bucket(this.bucketName);
+    const file = bucket.file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) return { exists: false, sizeBytes: 0, contentType: null };
+    const [metadata] = await file.getMetadata();
+    const sizeBytes = Number(metadata.size ?? 0);
+    return {
+      exists: true,
+      sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : 0,
+      contentType: typeof metadata.contentType === 'string' ? metadata.contentType : null,
     };
   }
 

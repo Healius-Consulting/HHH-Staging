@@ -44,6 +44,7 @@ jobs:
           grep -q "Administration" .vercel-private/admin/index.html
       - run: npm run build --workspace @hhh/web-gateway
       - run: npm test --workspace @hhh/api
+      - run: npm test --workspace @hhh/api-sql
       - run: npx tsx --test tests/**/*.test.ts
       - name: Assert production portal boundaries
         run: |
@@ -56,6 +57,8 @@ jobs:
           ! grep -R -q "devPortal" dist-public dist-portal
           ! grep -R -q "mode=eligibility" dist-public dist-portal
           ! grep -R -q "FIREBASE_SERVICE_ACCOUNT_JSON" dist-public dist-portal
+          ! grep -R -q "hpp-sandbox.worldpay.com" services/api-sql
+          ! grep -R -q "Guaranteed Try" services/api-sql
 
   infrastructure:
     runs-on: ubuntu-latest

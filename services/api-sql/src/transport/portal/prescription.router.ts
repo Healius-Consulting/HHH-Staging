@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { StorageProvider } from '../../providers/storage/storage.provider.js';
+import { MAX_PRESCRIPTION_UPLOAD_BYTES, uploadedObjectMatchesDeclaration } from '../../providers/storage/upload-constraints.js';
 import type { PrescriberRecord } from '../../repositories/ports/prescription.port.js';
 import { SqlPrescriptionRepository } from '../../repositories/sql/prescription.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
@@ -49,7 +50,7 @@ const uploadTargetSchema = z.object({
   organisationId: z.string().optional(),
   filename: z.string().min(1).max(255),
   contentType: z.enum(['application/pdf', 'image/jpeg', 'image/png']),
-  sizeBytes: z.number().int().positive().max(30 * 1024 * 1024), // max 30MB
+  sizeBytes: z.number().int().positive().max(MAX_PRESCRIPTION_UPLOAD_BYTES),
   patientId: z.union([uuidLikeSchema, z.literal(''), z.null()]).optional(),
 });
 
@@ -101,6 +102,14 @@ export function createPortalPrescriptionRouter(): Router {
       const fileRecord = await prescriptionRepo.findFileById(fileId, scope.organisationId);
       if (!fileRecord || fileRecord.status === 'DELETED' || fileRecord.deletedAt) {
         throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');
+      }
+      const uploaded = await storageProvider.getObjectMetadata(fileRecord.storagePath);
+      const match = uploadedObjectMatchesDeclaration(uploaded, {
+        sizeBytes: fileRecord.sizeBytes,
+        contentType: fileRecord.contentType,
+      });
+      if (!match.ok) {
+        throw new HttpError(400, match.message, match.code);
       }
       await prescriptionRepo.completeFile(fileId, scope.organisationId);
       res.status(200).json({ id: fileId, status: 'completed' });

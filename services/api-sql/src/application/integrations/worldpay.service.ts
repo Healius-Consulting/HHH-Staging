@@ -217,16 +217,15 @@ export async function revokeWorldpayCredential(resourceName: string | null) {
   }
 }
 
-async function getCredential(connection: IntegrationConnectionRecord | null, organisationId: string): Promise<WorldpayCredential> {
+async function requireStoredWorldpayCredential(
+  connection: IntegrationConnectionRecord | null,
+  organisationId: string,
+): Promise<WorldpayCredential> {
   const stored = await readStoredWorldpayCredential(connection, organisationId);
-  if (stored) return stored;
-
-  // Guaranteed Try UAT credentials fallback for hosted payment sessions only.
-  return {
-    username: 'SIRcnvJ792DZW18R',
-    password: 'DtxZxdJxE0F0MGPvaYSgRutypaH7OhgkHMJYsnrVjtpZiChMmgF64dzUMVfencCV',
-    entityId: 'PO4098149633',
-  };
+  if (!stored) {
+    throw new HttpError(503, 'Worldpay is not configured for this pharmacy.', 'WORLDPAY_NOT_CONFIGURED');
+  }
+  return stored;
 }
 
 async function worldpayFetch(url: URL, init: RequestInit, credential: WorldpayCredential) {
@@ -300,71 +299,65 @@ export async function createWorldpayHostedSession(
 ): Promise<WorldpaySessionResult> {
   const expirySeconds = input.expirySeconds || 86400 * 7;
   const expiresAt = new Date(Date.now() + expirySeconds * 1000).toISOString();
-  const credential = await getCredential(connection, organisationId);
+  const credential = await requireStoredWorldpayCredential(connection, organisationId);
+  const baseUrl = process.env.WORLDPAY_HPP_BASE_URL || 'https://try.access.worldpay.com';
+  const endpoint = new URL('/payment_pages', baseUrl);
+  const authHeader = `Basic ${Buffer.from(`${credential.username}:${credential.password}`).toString('base64')}`;
 
-  if (credential) {
-    const baseUrl = process.env.WORLDPAY_HPP_BASE_URL || 'https://try.access.worldpay.com';
-    const endpoint = new URL('/payment_pages', baseUrl);
-    const authHeader = `Basic ${Buffer.from(`${credential.username}:${credential.password}`).toString('base64')}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    try {
-      const requestBody: Record<string, unknown> = {
-        transactionReference: input.transactionReference,
-        merchant: { entity: credential.entityId },
-        narrative: { line1: (input.statementNarrative || 'HHH Pharmacy').slice(0, 24) },
-        value: { currency: input.currency || 'GBP', amount: input.amountPence },
-        expiry: String(expirySeconds),
-        resultURLs: {
-          successURL: input.successUrl || `https://holistichealthhub.cc/payment/success?ref=${encodeURIComponent(input.transactionReference)}`,
-          cancelURL: input.cancelUrl || `https://holistichealthhub.cc/payment/cancelled?ref=${encodeURIComponent(input.transactionReference)}`,
-        },
-      };
-      if (credential.customisationId) {
-        requestBody.customisation_id = credential.customisationId;
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': HPP_MEDIA_TYPE,
-          Accept: HPP_MEDIA_TYPE,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (response.ok) {
-        const body = await response.json() as Record<string, any>;
-        const payUrl = (body.url || body._links?.redirect?.href || body._links?.self?.href) as string | undefined;
-        if (payUrl) {
-          return {
-            url: payUrl,
-            transactionReference: input.transactionReference,
-            providerPaymentId: body.id,
-            expiresAt,
-            raw: body,
-          };
-        }
-      }
-
-      const errText = await response.text().catch(() => '');
-      console.warn(`Worldpay HPP response status ${response.status}: ${errText}`);
-    } catch (err) {
-      console.warn('Worldpay HPP fetch error:', err);
-    } finally {
-      clearTimeout(timeout);
+  try {
+    const requestBody: Record<string, unknown> = {
+      transactionReference: input.transactionReference,
+      merchant: { entity: credential.entityId },
+      narrative: { line1: (input.statementNarrative || 'HHH Pharmacy').slice(0, 24) },
+      value: { currency: input.currency || 'GBP', amount: input.amountPence },
+      expiry: String(expirySeconds),
+      resultURLs: {
+        successURL: input.successUrl || `https://holistichealthhub.cc/payment/success?ref=${encodeURIComponent(input.transactionReference)}`,
+        cancelURL: input.cancelUrl || `https://holistichealthhub.cc/payment/cancelled?ref=${encodeURIComponent(input.transactionReference)}`,
+      },
+    };
+    if (credential.customisationId) {
+      requestBody.customisation_id = credential.customisationId;
     }
-  }
 
-  // Guaranteed fallback URL if external network is unavailable in test environment
-  const fallbackUrl = `https://hpp-sandbox.worldpay.com/app/hpp/integration/transaction/${input.transactionReference}?ref=${encodeURIComponent(input.transactionReference)}`;
-  return {
-    url: fallbackUrl,
-    transactionReference: input.transactionReference,
-    expiresAt,
-  };
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': HPP_MEDIA_TYPE,
+        Accept: HPP_MEDIA_TYPE,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      throw new HttpError(502, 'Worldpay rejected the payment session.', 'WORLDPAY_REQUEST_FAILED');
+    }
+
+    const body = await response.json() as Record<string, any>;
+    const payUrl = (body.url || body._links?.redirect?.href || body._links?.self?.href) as string | undefined;
+    if (!payUrl) {
+      throw new HttpError(502, 'Worldpay did not return a payment URL.', 'WORLDPAY_REQUEST_FAILED');
+    }
+
+    return {
+      url: payUrl,
+      transactionReference: input.transactionReference,
+      providerPaymentId: body.id,
+      expiresAt,
+      raw: body,
+    };
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new HttpError(504, 'Worldpay did not respond in time.', 'WORLDPAY_TIMEOUT');
+    }
+    throw new HttpError(502, 'Worldpay could not be reached.', 'WORLDPAY_UNAVAILABLE');
+  } finally {
+    clearTimeout(timeout);
+  }
 }

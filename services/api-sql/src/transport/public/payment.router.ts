@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { HttpError } from '../../domain/common/errors.js';
-import { settlePaidWorldpayPayment } from '../../application/payments/worldpay-settlement.js';
+import { reconcileWorldpayPaymentRecord } from '../../application/payments/worldpay-reconciliation.js';
+import { displayedPublicPaymentStatus, transactionReferenceFromWorldpayWebhook } from '../../application/payments/worldpay-query.js';
 import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
@@ -44,25 +45,26 @@ export function createPublicPaymentRouter(): Router {
 
       if (!payment) {
         res.status(200).json({
-          status: req.query.success === 'true' ? 'paid' : 'pending',
+          status: displayedPublicPaymentStatus(null),
           transactionReference: ref || null,
           message: 'Payment verification is processing...',
         });
         return;
       }
 
-      // If called from the verified payment success return route, mark as PAID immediately
-      const isConfirmedSuccess = req.query.success === 'true' || req.query.outcome === 'success';
-      if (payment.status === 'PENDING' && isConfirmedSuccess) {
-        const settled = await settlePaidWorldpayPayment(payment, settlementDeps);
-        payment = settled.payment;
+      if (payment.status === 'PENDING' && payment.route === 'WORLDPAY') {
+        await reconcileWorldpayPaymentRecord(payment, settlementDeps);
+        const refreshedRef = String(payment.transactionReference || ref).trim();
+        if (refreshedRef) {
+          payment = await paymentRepo.findPaymentByWorldpayCode(refreshedRef) ?? payment;
+        }
       }
 
       res.status(200).json({
         id: payment.id,
         orderId: payment.orderId,
         transactionReference: payment.transactionReference,
-        status: payment.status.toLowerCase(), // 'paid', 'pending', 'failed', 'cancelled'
+        status: displayedPublicPaymentStatus(payment),
         amountPence: payment.amountPence,
         currency: payment.currency,
         createdAt: payment.createdAt,
@@ -101,32 +103,30 @@ export function createPublicPaymentRouter(): Router {
   // POST /v1/public/payments/worldpay/webhook - Worldpay async payment notification
   router.post('/public/payments/worldpay/webhook', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { orderCode, paymentStatus } = req.body;
-      if (!orderCode || typeof orderCode !== 'string') {
-        throw new HttpError(400, 'Invalid Worldpay payload.', 'INVALID_PAYLOAD');
-      }
-
-      const payment = await paymentRepo.findPaymentByWorldpayCode(orderCode);
-      if (!payment) {
-        // Return 200 to Worldpay even if unmatched to avoid webhook retry loops, but log warning
-        console.warn(`[Worldpay Webhook] Received webhook for unknown orderCode: ${orderCode}`);
-        res.status(200).send('<xml status="OK"/>');
+      const transactionReference = transactionReferenceFromWorldpayWebhook(req.body);
+      if (!transactionReference) {
+        res.status(200).json({ accepted: true, ignored: true });
         return;
       }
 
-      if (paymentStatus === 'AUTHORISED' || paymentStatus === 'CAPTURED' || paymentStatus === 'sentForSettlement') {
-        if (payment.status === 'PENDING') {
-          await settlePaidWorldpayPayment(payment, settlementDeps);
-        }
-      } else if (paymentStatus === 'REFUSED' || paymentStatus === 'CANCELLED') {
-        await paymentRepo.updatePaymentOutcome({
-          id: payment.id,
-          orderId: payment.orderId,
-          status: paymentStatus === 'CANCELLED' ? 'CANCELLED' : 'FAILED',
-        });
+      const payment = await paymentRepo.findPaymentByWorldpayCode(transactionReference);
+      if (!payment) {
+        console.warn('[Worldpay Webhook] Unmatched payment notification');
+        res.status(200).json({ accepted: true, unmatched: true });
+        return;
       }
 
-      res.status(200).send('<xml status="OK"/>');
+      const outcome = await reconcileWorldpayPaymentRecord(payment, settlementDeps);
+      if (outcome.state === 'verification_pending') {
+        res.status(200).json({ accepted: true, verificationPending: true });
+        return;
+      }
+      if (outcome.state === 'reconciliation_required') {
+        res.status(200).json({ accepted: true, reconciliationRequired: true });
+        return;
+      }
+
+      res.status(200).json({ accepted: true, reconciled: true });
     } catch (error) {
       next(error);
     }

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  displayedPublicPaymentStatus,
   normaliseWorldpayPaymentQuery,
+  parseWorldpayWebhookEvent,
+  transactionReferenceFromWorldpayWebhook,
   worldpayIdentityMatches,
   worldpayPaymentStatus,
   worldpayStatusToSql,
@@ -90,6 +93,24 @@ describe('Worldpay Payment Queries', () => {
       currency: 'GBP',
       expectedEntityId: 'PO1',
     }), false);
+  });
+
+  it('parses nested Worldpay events and ignores unsigned client success flags', () => {
+    const event = parseWorldpayWebhookEvent({
+      eventId: 'evt-123',
+      eventTimestamp: '2026-08-10T10:00:00.000Z',
+      eventDetails: {
+        type: 'sentForSettlement',
+        transactionReference: 'HHH-order-123-abcd1234',
+        paymentId: 'payment-456',
+        merchant: { entity: 'PO1234567890' },
+        amount: { value: 12500, currencyCode: 'GBP' },
+      },
+    });
+    assert.equal(event.transactionReference, 'HHH-order-123-abcd1234');
+    assert.equal(transactionReferenceFromWorldpayWebhook({ orderCode: 'HHH-legacy-ref' }), 'HHH-legacy-ref');
+    assert.equal(displayedPublicPaymentStatus(null), 'pending');
+    assert.equal(displayedPublicPaymentStatus({ status: 'PAID' }), 'paid');
   });
 });
 

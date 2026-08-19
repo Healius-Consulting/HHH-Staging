@@ -143,3 +143,51 @@ export function worldpayIdentityMatches(input: {
     && input.query.currency === input.currency
     && input.query.entityId === input.expectedEntityId;
 }
+
+export type WorldpayWebhookEvent = {
+  eventId: string;
+  eventTimestamp: string | null;
+  transactionReference: string;
+  type: string;
+  entityId: string | null;
+  paymentId: string | null;
+  amountPence: number | null;
+  currency: string | null;
+};
+
+export function parseWorldpayWebhookEvent(value: unknown): WorldpayWebhookEvent {
+  const event = object(value);
+  const details = object(event?.eventDetails);
+  const amount = object(details?.amount);
+  const merchant = object(details?.merchant);
+  const eventId = string(event?.eventId);
+  const transactionReference = string(details?.transactionReference);
+  const type = string(details?.type);
+  if (!eventId || !transactionReference || !type) {
+    throw new Error('INVALID_WORLDPAY_EVENT');
+  }
+  return {
+    eventId,
+    eventTimestamp: string(event?.eventTimestamp),
+    transactionReference,
+    type,
+    entityId: string(merchant?.entity),
+    paymentId: string(details?.paymentId),
+    amountPence: finiteNumber(amount?.value),
+    currency: string(amount?.currencyCode),
+  };
+}
+
+export function transactionReferenceFromWorldpayWebhook(value: unknown): string | null {
+  try {
+    return parseWorldpayWebhookEvent(value).transactionReference;
+  } catch {
+    const body = object(value);
+    return string(body?.orderCode) ?? string(body?.transactionReference);
+  }
+}
+
+export function displayedPublicPaymentStatus(payment: { status: string } | null): string {
+  if (!payment) return 'pending';
+  return payment.status.toLowerCase();
+}

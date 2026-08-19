@@ -30,8 +30,8 @@ describe('Worldpay credential helpers', () => {
   });
 
   it('masks the merchant entity without returning the full identifier', () => {
-    const masked = maskWorldpayIdentifier('PO4098149633');
-    assert.equal(masked.endsWith('9633'), true);
-    assert.equal(masked.includes('PO4098'), false);
+    const masked = maskWorldpayIdentifier('PO1234567890');
+    assert.equal(masked.endsWith('7890'), true);
+    assert.equal(masked.includes('PO1234'), false);
   });
 });
