@@ -1,3 +1,4 @@
+import { paidQuoteFromSnapshot } from '../../application/orders/finance-costing.js';
 import {
   advanceFulfilmentStatus,
   dispatchStatusFromLines,
@@ -6,6 +7,7 @@ import {
   normalisedFulfilmentLines,
   supplierFulfilmentStatus,
 } from '../../application/orders/curaleaf-fulfilment.js';
+import { parseQuote, type ParsedQuote, type ParsedQuoteItem } from '../../application/orders/quote-review.js';
 import { organisationAddressSummary } from '../../repositories/ports/directory.port.js';
 import type { OrderDraftRecord, OrderRecord } from '../../repositories/ports/order.port.js';
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
@@ -21,6 +23,51 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function lower(value: string) {
   return value.toLowerCase();
+}
+
+function snapshotRecord(snapshot: unknown): Record<string, unknown> {
+  return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+    ? snapshot as Record<string, unknown>
+    : {};
+}
+
+function moneyFromPence(pence: number) {
+  return (pence / 100).toFixed(2);
+}
+
+/** Paid snapshot quote only — never a later live recheck. */
+function parsedPaidQuote(snapshot: unknown): ParsedQuote | null {
+  const paid = paidQuoteFromSnapshot(snapshot);
+  if (paid) return paid;
+  const root = snapshotRecord(snapshot);
+  return parseQuote(root.pricingQuote) ?? parseQuote(root.quote);
+}
+
+function portalQuotePayload(quote: ParsedQuote) {
+  return {
+    shippingPrice: moneyFromPence(quote.shippingPence),
+    taxRate: quote.taxRate,
+    shippingPence: quote.shippingPence,
+    wholesaleProductPence: quote.items.reduce((sum, item) => sum + item.wholesalePence * item.quantity, 0),
+    items: quote.items.map(item => ({
+      packId: item.packId,
+      quantity: item.quantity,
+      inStock: item.inStock,
+      stockStatus: item.stockStatus,
+      wholesalePackPrice: moneyFromPence(item.wholesalePence),
+      patientPackPrice: moneyFromPence(item.patientPence),
+    })),
+  };
+}
+
+function lineWholesalePence(item: Record<string, unknown>, quoted: ParsedQuoteItem | undefined): number | undefined {
+  if (typeof item.wholesalePackPricePence === 'number' && Number.isFinite(item.wholesalePackPricePence) && item.wholesalePackPricePence > 0) {
+    return Math.round(item.wholesalePackPricePence);
+  }
+  const stamped = Number(item.wholesalePackPrice ?? item.wholesalePrice);
+  if (Number.isFinite(stamped) && stamped > 0) return Math.round(stamped * 100);
+  if (quoted && quoted.wholesalePence > 0) return quoted.wholesalePence;
+  return undefined;
 }
 
 const POST_PURCHASE_ORDER_FULFILMENT = new Set([
@@ -212,12 +259,15 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
   const poItemMap = new Map<string, any>(poItems.map((it: any) => [String(it.productId || it.formulaId || ''), it]));
 
   const rawLines = snapshot?.lineItems || snapshot?.items || [];
-  const pricingQuote = snapshot?.pricingQuote || snapshot?.quote || null;
-  const quoteItems = new Map((pricingQuote?.items || []).map((it: any) => [it.packId || it.productId, it]));
+  const parsedQuote = parsedPaidQuote(snapshot);
+  const quoteByPackId = new Map((parsedQuote?.items || []).map(item => [item.packId, item]));
+  const pricingQuote = parsedQuote
+    ? portalQuotePayload(parsedQuote)
+    : (snapshot?.pricingQuote || snapshot?.quote || null);
 
-  const lineItems = Array.isArray(rawLines) && rawLines.length > 0 ? rawLines.map((item: any, idx: number) => {
+  const lineItems = Array.isArray(rawLines) && rawLines.length > 0 ? rawLines.map((item: any) => {
     const packId = String(item.packId || item.productId || item.id || '');
-    const quote = quoteItems.get(packId) as any;
+    const quote = quoteByPackId.get(packId);
     const poItem = poItemMap.get(packId);
     const itemQty = Number(item.quantity ?? item.qty ?? item.count ?? (poItem?.packsOrderedCount ? Number(poItem.packsOrderedCount) : 1));
     const rawTotal = order.totalPence ? Math.max(0, order.totalPence - (order.dispensingFeePence || 0)) : 0;
@@ -225,9 +275,10 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
       item.unitPricePence ||
       item.retailPence ||
       item.patientPackPricePence ||
-      (quote ? Math.round(Number(quote.patientPackPrice || quote.patientPrice || 0) * 100) : 0) ||
+      (quote && quote.patientPence > 0 ? quote.patientPence : 0) ||
       (rawTotal && rawLines.length === 1 && itemQty > 0 ? Math.round(rawTotal / itemQty) : 0)
     );
+    const wholesalePackPricePence = lineWholesalePence(item, quote);
 
     return {
       productId: String(item.productId || item.packId || item.id || ''),
@@ -236,15 +287,22 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
       name: String(item.name || item.formulaName || (quote ? 'Curaleaf medication' : 'Curaleaf prescription item')),
       quantity: itemQty,
       unitPricePence,
+      ...(wholesalePackPricePence != null ? { wholesalePackPricePence } : {}),
     };
-  }) : poItems.map((poIt: any) => ({
-    productId: poIt.productId,
-    formulaId: poIt.formulaId,
-    packId: poIt.productId,
-    name: 'Curaleaf medication',
-    quantity: Number(poIt.packsOrderedCount || 1),
-    unitPricePence: Number(poIt.packsOrderedCount ? Math.round(Number(order.totalPence || 0) / Number(poIt.packsOrderedCount)) : Number(order.totalPence || 0)),
-  }));
+  }) : poItems.map((poIt: any) => {
+    const packId = String(poIt.productId || '');
+    const quote = quoteByPackId.get(packId);
+    const wholesalePackPricePence = quote && quote.wholesalePence > 0 ? quote.wholesalePence : undefined;
+    return {
+      productId: poIt.productId,
+      formulaId: poIt.formulaId,
+      packId: poIt.productId,
+      name: 'Curaleaf medication',
+      quantity: Number(poIt.packsOrderedCount || 1),
+      unitPricePence: Number(poIt.packsOrderedCount ? Math.round(Number(order.totalPence || 0) / Number(poIt.packsOrderedCount)) : Number(order.totalPence || 0)),
+      ...(wholesalePackPricePence != null ? { wholesalePackPricePence } : {}),
+    };
+  });
 
   const rawPrescriptions = snapshot?.prescriptions || [];
   const prescriptions = Array.isArray(rawPrescriptions) && rawPrescriptions.length > 0 ? rawPrescriptions.map((rx: any) => ({

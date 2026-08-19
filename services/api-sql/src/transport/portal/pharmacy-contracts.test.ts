@@ -212,6 +212,92 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.prescriptionFlow['rx-pending']?.state, 'PENDING_PLACEMENT');
   });
 
+  it('copies stored quote wholesale onto portal line items', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-18T18:25:53.380340Z',
+      quoteSnapshot: {
+        lineItems: [{
+          packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          formulaId: 'f74f63de-dc89-4074-9d8c-be35f5398963',
+          name: '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD',
+          quantity: 4,
+          unitPricePence: 8500,
+        }],
+        quote: {
+          shippingPrice: '5.00',
+          taxRate: '0.2',
+          items: [{
+            packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+            quantity: 4,
+            inStock: true,
+            wholesalePackPrice: '68.00',
+            patientPackPrice: '85.00',
+          }],
+        },
+      },
+    });
+    assert.equal(mapped.lineItems[0]?.wholesalePackPricePence, 6800);
+    assert.equal(mapped.pricingQuote?.items[0]?.wholesalePackPrice, '68.00');
+    assert.equal(mapped.pricingQuote?.items[0]?.packId, '9f2d6958-2d76-4338-9e5f-6fd383dfff36');
+  });
+
+  it('unwraps nested quote wrappers and id-keyed items onto line wholesale', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-18T18:25:53.380340Z',
+      quoteSnapshot: {
+        lineItems: [{
+          packId: 'pack-a',
+          productId: 'pack-a',
+          formulaId: 'formula-a',
+          name: '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD',
+          quantity: 1,
+          unitPricePence: 8500,
+        }],
+        pricingQuote: {
+          data: {
+            items: [{
+              id: 'pack-a',
+              packsOrderedCount: 1,
+              inStock: true,
+              wholesalePackPrice: '68.00',
+              patientPackPrice: '85.00',
+            }],
+            shippingPrice: '5.00',
+            taxRate: '0.2',
+          },
+        },
+      },
+    });
+    assert.equal(mapped.lineItems[0]?.wholesalePackPricePence, 6800);
+    assert.equal(mapped.pricingQuote?.items[0]?.packId, 'pack-a');
+    assert.equal(mapped.pricingQuote?.items[0]?.wholesalePackPrice, '68.00');
+  });
+
+  it('keeps wholesale stamped on snapshot line items when quote items are missing', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-18T18:25:53.380340Z',
+      quoteSnapshot: {
+        lineItems: [{
+          packId: 'pack-a',
+          productId: 'pack-a',
+          formulaId: 'formula-a',
+          name: '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD',
+          quantity: 4,
+          unitPricePence: 8500,
+          wholesalePackPricePence: 6800,
+        }],
+      },
+    });
+    assert.equal(mapped.lineItems[0]?.wholesalePackPricePence, 6800);
+  });
+
   it('maps a paid quote-review hold without inventing a purchase order', () => {
     const mapped = toPortalOrder({
       ...order,

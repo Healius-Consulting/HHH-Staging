@@ -250,8 +250,16 @@ export function orderRequiresCuraleafCancel(order: PatientOrder): boolean {
  * Cancellation is an order outcome, not a patient status. Keep unfinished
  * supplier/refund work operational while demoting closed cancellations.
  */
+function supplierCancelled(order: PatientOrder) {
+  return order.unresolvedReason === 'cancelled'
+    || order.cancellation?.status === 'refund_required'
+    || order.cancellation?.status === 'confirmed'
+    || order.curaleafCancellation?.status === 'confirmed'
+    || order.prescriptions.some(rx => rx.status === 'cancelled' || rx.purchaseOrderState === 'CANCELLED');
+}
+
 export function orderCancellationResolution(order: PatientOrder): CancellationResolution {
-  if (!order.cancellation && order.lifecycleStatus !== 'cancelled') return 'none';
+  if (!order.cancellation && order.lifecycleStatus !== 'cancelled' && !supplierCancelled(order)) return 'none';
   if (order.refund?.status === 'completed') return 'refunded';
 
   const supplierActionOutstanding = ['contact_required', 'awaiting_confirmation'].includes(order.curaleafCancellation?.status ?? '')
@@ -262,14 +270,6 @@ export function orderCancellationResolution(order: PatientOrder): CancellationRe
 
   if (supplierActionOutstanding || refundActionOutstanding) return 'needs-action';
   return 'resolved';
-}
-
-function supplierCancelled(order: PatientOrder) {
-  return order.unresolvedReason === 'cancelled'
-    || order.cancellation?.status === 'refund_required'
-    || order.cancellation?.status === 'confirmed'
-    || order.curaleafCancellation?.status === 'confirmed'
-    || order.prescriptions.some(rx => rx.status === 'cancelled' || rx.purchaseOrderState === 'CANCELLED');
 }
 
 function unresolvedOrderReason(order: PatientOrder, now: Date): UnresolvedOrderReason | null {

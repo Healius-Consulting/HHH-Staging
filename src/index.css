@@ -10708,12 +10708,119 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  align-items: center;
   overflow: visible;
 }
 
-.order-filter-more{ position: relative; flex: 0 0 auto; }
-.order-crm-controls:has(.order-filter-more[open]){ position: relative; z-index: 30; }
-.order-filter-more > summary{
+.page-body.order-crm:not(.patient-crm) .order-crm-filters{ justify-content: flex-end; }
+
+.order-crm-controls:has(.order-filter-menu.is-open){ position: relative; z-index: 30; }
+
+.order-filter-menu{ position: relative; flex: 0 0 auto; }
+
+.order-filter-trigger,
+.order-filter-chip{
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.order-filter-trigger:hover,
+.order-filter-chip:hover{ color: var(--text-primary); background: var(--bg-elevated); }
+.order-filter-trigger:focus-visible,
+.order-filter-chip:focus-visible{ outline: 2px solid var(--tenant-primary); outline-offset: 2px; }
+.order-filter-menu.is-open .order-filter-trigger,
+.order-filter-menu.is-filtered .order-filter-trigger{
+  color: var(--tenant-primary-strong);
+  border-color: color-mix(in srgb, var(--tenant-primary) 45%, var(--border));
+  background: var(--tenant-primary-soft);
+}
+
+.order-filter-chip{
+  color: var(--tenant-primary-strong);
+  border-color: color-mix(in srgb, var(--tenant-primary) 45%, var(--border));
+  background: var(--tenant-primary-soft);
+}
+
+.order-filter-menu > div[role="menu"]{
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 220px;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow: 0 12px 30px rgba(18, 35, 30, .14);
+}
+
+.order-filter-menu__group{
+  display: grid;
+  gap: 4px;
+}
+
+.order-filter-menu__group small{
+  padding: 2px 6px;
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .065em;
+  text-transform: uppercase;
+}
+
+.order-filter-menu__group button{
+  display: inline-flex;
+  min-height: 32px;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.order-filter-menu__group button:hover{ color: var(--text-primary); background: var(--bg-elevated); }
+.order-filter-menu__group button:focus-visible{ outline: 2px solid var(--tenant-primary); outline-offset: 2px; }
+.order-filter-menu__group button.active{
+  color: var(--tenant-primary-strong);
+  border-color: color-mix(in srgb, var(--tenant-primary) 45%, var(--border));
+  background: var(--tenant-primary-soft);
+}
+.order-filter-menu__group button strong{
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  background: var(--bg-elevated);
+  font-size: 9px;
+}
+.order-filter-menu__group button.active strong{ color: var(--tenant-on-primary); background: var(--tenant-primary); }
+
+.patient-crm .order-filter-more{ position: relative; flex: 0 0 auto; }
+.patient-crm .order-crm-controls:has(.order-filter-more[open]){ position: relative; z-index: 30; }
+.patient-crm .order-filter-more > summary{
   display: inline-flex;
   min-height: 32px;
   align-items: center;
@@ -10728,13 +10835,12 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   font-weight: 650;
   list-style: none;
 }
-.order-filter-more > summary::-webkit-details-marker{ display: none; }
-.order-filter-more.active > summary{ color: var(--tenant-primary-strong); border-color: color-mix(in srgb, var(--tenant-primary) 45%, var(--border)); background: var(--tenant-primary-soft); }
-.order-filter-more[open] > summary svg{ transform: rotate(180deg); }
-.order-filter-more > div{ position: absolute; z-index: 20; top: calc(100% + 6px); right: 0; display: grid; min-width: 190px; gap: 4px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); box-shadow: 0 12px 30px rgba(18, 35, 30, .14); }
-.order-filter-more > div button{ width: 100%; justify-content: space-between; }
-
-.order-crm-filters button{
+.patient-crm .order-filter-more > summary::-webkit-details-marker{ display: none; }
+.patient-crm .order-filter-more.active > summary{ color: var(--tenant-primary-strong); border-color: color-mix(in srgb, var(--tenant-primary) 45%, var(--border)); background: var(--tenant-primary-soft); }
+.patient-crm .order-filter-more[open] > summary svg{ transform: rotate(180deg); }
+.patient-crm .order-filter-more > div{ position: absolute; z-index: 20; top: calc(100% + 6px); right: 0; display: grid; min-width: 190px; gap: 4px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); box-shadow: 0 12px 30px rgba(18, 35, 30, .14); }
+.patient-crm .order-filter-more > div button{ width: 100%; justify-content: space-between; }
+.patient-crm .order-crm-filters button{
   display: inline-flex;
   min-height: 32px;
   flex: 0 0 auto;
@@ -10750,11 +10856,10 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   font-size: 10px;
   font-weight: 650;
 }
-
-.order-crm-filters button:hover{ color: var(--text-primary); background: var(--bg-elevated); }
-.order-crm-filters button.active{ color: var(--tenant-primary-strong); border-color: color-mix(in srgb, var(--tenant-primary) 45%, var(--border)); background: var(--tenant-primary-soft); }
-.order-crm-filters button strong{ display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 999px; color: var(--text-tertiary); background: var(--bg-elevated); font-size: 9px; }
-.order-crm-filters button.active strong{ color: var(--tenant-on-primary); background: var(--tenant-primary); }
+.patient-crm .order-crm-filters button:hover{ color: var(--text-primary); background: var(--bg-elevated); }
+.patient-crm .order-crm-filters button.active{ color: var(--tenant-primary-strong); border-color: color-mix(in srgb, var(--tenant-primary) 45%, var(--border)); background: var(--tenant-primary-soft); }
+.patient-crm .order-crm-filters button strong{ display: grid; min-width: 18px; height: 18px; place-items: center; border-radius: 999px; color: var(--text-tertiary); background: var(--bg-elevated); font-size: 9px; }
+.patient-crm .order-crm-filters button.active strong{ color: var(--tenant-on-primary); background: var(--tenant-primary); }
 
 .order-crm-workspace{
   display: grid;
@@ -13205,6 +13310,10 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   .patient-crm .order-crm-search{ min-height: 44px; }
   .patient-crm .order-crm-filters button,
   .patient-crm .order-filter-more > summary{ min-height: 44px; }
+  .order-crm-search{ min-height: 44px; }
+  .order-filter-trigger,
+  .order-filter-chip,
+  .order-filter-menu__group button{ min-height: 44px; }
   .patient-crm .order-journey-rail--premium{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .patient-crm .patient-chart-order__open,
   .patient-crm .order-crm-record__actions .btn{ min-height: 44px; }

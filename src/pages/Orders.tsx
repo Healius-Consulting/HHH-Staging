@@ -15,6 +15,7 @@ import {
   FileText,
   Info,
   Layers2,
+  ListFilter,
   Mail,
   Package,
   PackageCheck,
@@ -98,20 +99,36 @@ const STAGE_META: Record<OrderStage, { label: string; description: string; tone:
   cancelled: { label: 'Cancelled', description: 'Cancellation recorded for audit', tone: 'danger', icon: XCircle },
 };
 
-const PRIMARY_FILTERS: Array<{ key: StageFilter; label: string }> = [
-  { key: 'current', label: 'Current' },
-  { key: 'awaiting-payment', label: 'Awaiting payment' },
-  { key: 'awaiting-fulfilment', label: 'Awaiting fulfilment' },
-  { key: 'ready', label: 'Ready to collect' },
+const FILTER_GROUPS: Array<{ label: string; filters: Array<{ key: StageFilter; label: string }> }> = [
+  {
+    label: 'Live queue',
+    filters: [
+      { key: 'current', label: 'Current' },
+      { key: 'awaiting-payment', label: 'Awaiting payment' },
+      { key: 'awaiting-fulfilment', label: 'Awaiting fulfilment' },
+      { key: 'ready', label: 'Ready to collect' },
+    ],
+  },
+  {
+    label: 'Exceptions',
+    filters: [
+      { key: 'cancelled', label: 'Cancellations' },
+      { key: 'rejected', label: 'Rejected' },
+    ],
+  },
+  {
+    label: 'History',
+    filters: [
+      { key: 'archived', label: 'Archived' },
+      { key: 'completed', label: 'Completed' },
+      { key: 'all', label: 'All history' },
+    ],
+  },
 ];
 
-const SECONDARY_FILTERS: Array<{ key: StageFilter; label: string }> = [
-  { key: 'rejected', label: 'Rejected' },
-  { key: 'archived', label: 'Archived' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'cancelled', label: 'Cancellations' },
-  { key: 'all', label: 'All history' },
-];
+const FILTER_LABELS: Record<StageFilter, string> = Object.fromEntries(
+  FILTER_GROUPS.flatMap(group => group.filters.map(filter => [filter.key, filter.label])),
+) as Record<StageFilter, string>;
 
 function quoteReviewIsOpen(order: PatientOrder) {
   return ['required', 'awaiting_top_up', 'awaiting_refund'].includes(order.quoteReview?.status ?? '');
@@ -229,6 +246,88 @@ function formatDeliveryDate(dateKey: string) {
     month: 'short',
     timeZone: 'UTC',
   });
+}
+
+function OrderFilterControl({
+  activeFilter,
+  filterCount,
+  onChange,
+}: {
+  activeFilter: StageFilter;
+  filterCount: (filter: StageFilter) => number;
+  onChange: (filter: StageFilter) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const activeLabel = FILTER_LABELS[activeFilter];
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="order-crm-filters" ref={rootRef}>
+      {activeFilter !== 'current' ? (
+        <button
+          type="button"
+          className="order-filter-chip"
+          onClick={() => onChange('current')}
+          aria-label={`Clear ${activeLabel} filter and show Current orders`}
+        >
+          <span>{activeLabel} · {filterCount(activeFilter)}</span>
+          <X size={13} aria-hidden="true" />
+        </button>
+      ) : null}
+      <div className={`order-filter-menu${open ? ' is-open' : ''}${activeFilter !== 'current' ? ' is-filtered' : ''}`}>
+        <button
+          type="button"
+          className="order-filter-trigger"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls="order-filter-menu"
+          aria-label={activeFilter === 'current' ? 'Filter orders' : `Filter orders, ${activeLabel} selected`}
+          onClick={() => setOpen(current => !current)}
+        >
+          <ListFilter size={15} aria-hidden="true" />
+          <span>Filter</span>
+        </button>
+        {open ? (
+          <div id="order-filter-menu" role="menu" aria-label="Filter orders">
+            {FILTER_GROUPS.map(group => (
+              <div key={group.label} role="group" aria-label={group.label} className="order-filter-menu__group">
+                <small>{group.label}</small>
+                {group.filters.map(filter => (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    key={filter.key}
+                    aria-checked={activeFilter === filter.key}
+                    className={activeFilter === filter.key ? 'active' : ''}
+                    onClick={() => { onChange(filter.key); setOpen(false); }}
+                  >
+                    <span>{filter.label}</span>
+                    <strong>{filterCount(filter.key)}</strong>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export default function Orders() {
@@ -792,31 +891,12 @@ export default function Orders() {
           <Search size={15} />
           <input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, order, prescription or PO reference" aria-label="Search orders" />
         </div>
-        <div className="order-crm-filters" role="group" aria-label="Filter orders by journey stage">
-          {PRIMARY_FILTERS.map(filter => (
-            <button type="button" key={filter.key} className={activeFilter === filter.key ? 'active' : ''} aria-pressed={activeFilter === filter.key} onClick={() => setActiveFilter(filter.key)}>
-              <span>{filter.label}</span><strong>{filterCount(filter.key)}</strong>
-            </button>
-          ))}
-          <details className={`order-filter-more${SECONDARY_FILTERS.some(filter => filter.key === activeFilter) ? ' active' : ''}`}>
-            <summary>
-              <span>{SECONDARY_FILTERS.find(filter => filter.key === activeFilter)?.label ?? 'More'}</span>
-              <ChevronDown size={13} aria-hidden="true" />
-            </summary>
-            <div role="group" aria-label="More order filters">
-              {SECONDARY_FILTERS.map(filter => (
-                <button type="button" key={filter.key} className={activeFilter === filter.key ? 'active' : ''} aria-pressed={activeFilter === filter.key} onClick={event => { setActiveFilter(filter.key); event.currentTarget.closest('details')?.removeAttribute('open'); }}>
-                  <span>{filter.label}</span><strong>{filterCount(filter.key)}</strong>
-                </button>
-              ))}
-            </div>
-          </details>
-        </div>
+        <OrderFilterControl activeFilter={activeFilter} filterCount={filterCount} onChange={setActiveFilter} />
       </section>
 
       <div className="order-crm-workspace">
         <aside className={`order-crm-list${listOverflow.top ? ' is-overflow-top' : ''}${listOverflow.bottom ? ' is-overflow-bottom' : ''}`} aria-label="Orders">
-          <header><span><small>{activeFilter === 'cancelled' ? 'Cancellation history' : 'Orders'}</small><strong>{filtered.length} result{filtered.length === 1 ? '' : 's'}</strong></span></header>
+          <header><span><small>{activeFilter === 'current' ? 'Orders' : FILTER_LABELS[activeFilter]}</small><strong>{filtered.length} result{filtered.length === 1 ? '' : 's'}</strong></span></header>
           <div className="order-crm-list__scroller">
           <div className="order-crm-list__rows" ref={listRowsRef}>
             {filtered.length ? (
@@ -1290,6 +1370,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   const Icon = meta.icon;
   const cancellationResolution = orderCancellationResolution(order);
   const cancellationClosed = ['resolved', 'refunded'].includes(cancellationResolution);
+  const hideJourneyRail = stage === 'cancelled' || stage === 'collected' || cancellationResolution !== 'none';
   const allPlaced = order.prescriptions.length > 0 && order.prescriptions.every(prescription => prescription.placed);
   const canRedo = Boolean(record.unresolvedReason) && (stage === 'rejected' || stage === 'archived' || stage === 'cancelled');
   const paymentFormVisible = stage === 'awaiting-payment' && order.payment.route === 'pharmacy';
@@ -1359,7 +1440,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
         </div>
       </header>
 
-      {cancellationClosed ? <CancellationClosureSummary order={order} resolution={cancellationResolution as 'resolved' | 'refunded'} /> : <JourneyRail stage={stage} paymentPaid={order.payment.status === 'paid'} order={order} />}
+      {cancellationClosed ? <CancellationClosureSummary order={order} resolution={cancellationResolution as 'resolved' | 'refunded'} /> : hideJourneyRail ? null : <JourneyRail stage={stage} paymentPaid={order.payment.status === 'paid'} order={order} />}
 
       <ExpiryCountdown order={order} now={now} />
       <ReplacementLineage order={order} allOrders={state.orders} />
@@ -2016,24 +2097,7 @@ function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked,
 }
 
 function JourneyRail({ stage, paymentPaid, order }: { stage: OrderStage; paymentPaid: boolean; order: PatientOrder }) {
-  if (stage === 'cancelled') {
-    const phases = [
-      { label: 'Payment', detail: paymentPaid ? 'Cleared' : 'Cancelled', complete: paymentPaid },
-      { label: 'Curaleaf', detail: 'Cancelled', complete: true },
-      { label: 'Delivery', detail: 'Stopped', complete: false },
-      { label: 'Ready to collect', detail: 'Not required', complete: false },
-    ];
-    return (
-      <ol className="order-journey-rail order-journey-rail--premium" aria-label="Order journey">
-        {phases.map((phase, index) => (
-          <li key={phase.label} className={phase.complete ? 'is-complete' : 'is-pending'} aria-current={undefined}>
-            <span className="order-journey-rail__marker" aria-hidden="true">{phase.complete ? <Check size={12} /> : index + 1}</span>
-            <div className="order-journey-rail__copy"><strong>{phase.label}</strong><small>{phase.detail}</small></div>
-          </li>
-        ))}
-      </ol>
-    );
-  }
+  if (stage === 'cancelled' || stage === 'collected') return null;
   const packTotals = orderPackTotals(order);
   const curaleafComplete = ['curaleaf-approved', 'dispatched', 'delivered', 'ready', 'collected'].includes(stage);
   const deliveryFullyComplete = packTotals.ordered > 0 && packTotals.received >= packTotals.ordered;

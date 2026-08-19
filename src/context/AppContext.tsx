@@ -778,14 +778,60 @@ function customerReferenceBelongsToOrder(reference: string | null | undefined, r
   return false;
 }
 
+function asQuoteRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function quoteItemsByPackId(quote: unknown): Map<string, Record<string, unknown>> {
+  const map = new Map<string, Record<string, unknown>>();
+  const record = asQuoteRecord(quote);
+  let items = Array.isArray(record.items) ? record.items : [];
+  if (!items.length) {
+    for (const key of ['data', 'quote', 'pricingQuote']) {
+      const nested = asQuoteRecord(record[key]);
+      if (Array.isArray(nested.items) && nested.items.length) {
+        items = nested.items;
+        break;
+      }
+    }
+  }
+  for (const entry of items) {
+    const item = asQuoteRecord(entry);
+    const packId = String(item.packId || item.productId || item.pack_id || item.id || '').trim();
+    if (packId) map.set(packId, item);
+  }
+  return map;
+}
+
+function poundsFromQuoteMoney(pence: unknown, money: unknown): number | null {
+  if (typeof pence === 'number' && Number.isFinite(pence) && pence > 0) return pence / 100;
+  const value = Number(money);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function lineWholesalePounds(
+  persisted: { wholesalePackPricePence?: number } | undefined,
+  quote: Record<string, unknown> | undefined,
+  catalogueCostPence?: number,
+): number | null {
+  const fromLine = poundsFromQuoteMoney(persisted?.wholesalePackPricePence, undefined);
+  if (fromLine != null) return fromLine;
+  const fromQuote = poundsFromQuoteMoney(quote?.wholesalePackPricePence, quote?.wholesalePackPrice ?? quote?.wholesalePrice);
+  if (fromQuote != null) return fromQuote;
+  if (catalogueCostPence && catalogueCostPence > 0) return catalogueCostPence / 100;
+  return null;
+}
+
 function mapPortalOrder(record: PortalOrderRecord, index: number, records: PortalOrderRecord[], catalogue: CatalogueItem[] = []): PatientOrder {
   const orderId = index + 1;
   const rxStatus: RxStatus = portalPrescriptionStatus(record);
   const persistedQuote = record.pricingQuote ?? record.curaleaf?.quote;
-  const quoteItems = new Map(persistedQuote?.items.map(item => [item.packId, item]) ?? []);
+  const quoteItems = quoteItemsByPackId(persistedQuote);
   const orderItems = (items: Array<{ packId: string; formulaId: string; quantity: number; unitsNeededCount?: number }>): LineItem[] => items.map((item, itemIdx) => {
     const persisted = record.lineItems.find(line => line.packId === item.packId || line.productId === item.packId || line.formulaId === item.formulaId) ?? record.lineItems[itemIdx];
-    const quote = quoteItems.get(item.packId);
+    const quote = quoteItems.get(item.packId)
+      ?? (persisted?.packId ? quoteItems.get(persisted.packId) : undefined)
+      ?? (persisted?.productId ? quoteItems.get(persisted.productId) : undefined);
     let unitRetail = 0;
     const itemQty = item.quantity || 1;
     const basketItemsTotal = Math.max(0, (record.totalPence - (record.dispensingFeePence || 0)) / 100);
@@ -825,7 +871,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
       name: resolvedName,
       qty: item.quantity,
       unitsNeededCount: item.unitsNeededCount,
-      cost: quote ? Number(quote.wholesalePackPrice) : (catItem?.costPence ? catItem.costPence / 100 : null),
+      cost: lineWholesalePounds(persisted, quote, catItem?.cost != null ? Math.round(catItem.cost * 100) : undefined),
       retail: unitRetail || (catItem?.rrpPence ? catItem.rrpPence / 100 : 0),
     };
   });

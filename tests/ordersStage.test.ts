@@ -283,6 +283,27 @@ test('Curaleaf-cancelled paid orders stay in cancelled unresolved, not as unpaid
   assert.equal(orderCancellationResolution(order), 'needs-action');
 });
 
+test('supplier-cancelled purchase orders are cancellation outcomes without an HHH cancellation row', () => {
+  const unpaid = {
+    date: new Date(),
+    payment: { status: 'cancelled' },
+    prescriptions: [{ status: 'cancelled', purchaseOrderState: 'CANCELLED', placed: true }],
+  } as PatientOrder;
+  assert.equal(orderCancellationResolution(unpaid), 'resolved');
+
+  const paid = {
+    ...unpaid,
+    payment: { status: 'paid' },
+  } as PatientOrder;
+  assert.equal(orderCancellationResolution(paid), 'needs-action');
+
+  const refunded = {
+    ...paid,
+    refund: { status: 'completed' },
+  } as PatientOrder;
+  assert.equal(orderCancellationResolution(refunded), 'refunded');
+});
+
 test('Curaleaf cancel wins over an expired or archived flag on the same paid order', () => {
   const order = {
     date: new Date('2026-07-01'),

@@ -550,6 +550,7 @@ export interface PortalOrderRecord {
     name: string;
     quantity: number;
     unitPricePence: number;
+    wholesalePackPricePence?: number;
   }>;
   prescriptions?: PortalOrderInput['prescriptions'];
   prescriptionFlow?: Record<string, PrescriptionFlowRecord>;
