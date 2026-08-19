@@ -80,9 +80,12 @@ export interface PublicDirectoryResult {
   collectionAvailable: boolean;
   deliverySummary: string | null;
   intakeAvailability: 'available' | 'limited';
-  /** Server-projected relative position for the privacy-safe result map. Never coordinates. */
+  /** Server-projected position on the fixed-scale range map. Never coordinates. */
   mapPosition: { xPercent: number; yPercent: number };
 }
+
+export const PUBLIC_DIRECTORY_MAP_RADIUS_MILES = 100;
+export const PUBLIC_DIRECTORY_MAP_RADIUS_PERCENT = 42;
 
 export interface PostcodeSearchReceipt {
   searchId: string;
@@ -90,6 +93,7 @@ export interface PostcodeSearchReceipt {
   status: 'matched' | 'no_match' | 'not_found' | 'provider_unavailable';
   postcode: string;
   mapOrigin: { xPercent: number; yPercent: number };
+  mapRadiusMiles?: number;
   results: PublicDirectoryResult[];
 }
 

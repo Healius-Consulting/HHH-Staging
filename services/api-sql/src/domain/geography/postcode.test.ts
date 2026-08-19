@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { formatOrganisationAddress, parseLegacyAddressBlob } from './address.js';
-import { haversineMiles, normaliseUkPostcode, projectDirectoryMapPositions, topFiveNearest } from './postcode.js';
+import { DIRECTORY_MAP_RADIUS_MILES, haversineMiles, normaliseUkPostcode, projectDirectoryMapPositions, topFiveNearest } from './postcode.js';
 
 test('UK postcodes are normalised', () => {
   assert.equal(normaliseUkPostcode('sw1a1aa'), 'SW1A 1AA');
@@ -45,4 +45,18 @@ test('directory map positions stay inside the privacy-safe frame', () => {
   assert.equal(positions.length, 1);
   assert.ok(positions[0]!.xPercent >= 0 && positions[0]!.xPercent <= 100);
   assert.ok(positions[0]!.yPercent >= 0 && positions[0]!.yPercent <= 100);
+  assert.deepEqual(Object.keys(positions[0]!).sort(), ['xPercent', 'yPercent']);
+});
+
+test('directory map uses a fixed mile scale so a distant pharmacy stays far from the origin', () => {
+  const origin = { latitude: 52.95, longitude: -1.15 };
+  const milesPerDegreeLatitude = 69.172;
+  const tenMilesNorth = { latitude: origin.latitude + 10 / milesPerDegreeLatitude, longitude: origin.longitude };
+  const hundredMilesNorth = { latitude: origin.latitude + DIRECTORY_MAP_RADIUS_MILES / milesPerDegreeLatitude, longitude: origin.longitude };
+  const [near, far] = projectDirectoryMapPositions(origin, [tenMilesNorth, hundredMilesNorth]);
+  const nearOffset = 50 - (near?.yPercent ?? 50);
+  const farOffset = 50 - (far?.yPercent ?? 50);
+  assert.ok(nearOffset > 2 && nearOffset < 8);
+  assert.ok(farOffset > 38 && farOffset < 46);
+  assert.ok(farOffset > nearOffset * 8);
 });

@@ -5,6 +5,7 @@ import { directoryAddressSummary } from '../../repositories/ports/directory.port
 import { SqlDirectoryRepository } from '../../repositories/sql/directory.sql.js';
 import { SqlPostcodeSearchRepository } from '../../repositories/sql/postcode-search.sql.js';
 import {
+  DIRECTORY_MAP_RADIUS_MILES,
   geocodePostcode,
   projectDirectoryMapPositions,
   topFiveNearest,
@@ -61,6 +62,7 @@ export function createPublicPostcodeSearchRouter(): Router {
         status,
         postcode: geocode.postcode,
         mapOrigin: { xPercent: 50, yPercent: 50 },
+        mapRadiusMiles: DIRECTORY_MAP_RADIUS_MILES,
         results: matches.map(({ profile, miles }, index) => ({
           id: profile.organisationId,
           tradingName: profile.tradingName,

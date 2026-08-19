@@ -40,22 +40,39 @@ export function topFiveNearest<T extends { latitude: number; longitude: number }
     .slice(0, 5);
 }
 
+export const DIRECTORY_MAP_RADIUS_MILES = 100;
+export const DIRECTORY_MAP_RADIUS_PERCENT = 42;
+const MILES_PER_DEGREE_LATITUDE = 69.172;
+
+export function displacementMiles(
+  origin: { latitude: number; longitude: number },
+  destination: { latitude: number; longitude: number },
+) {
+  const midLatitudeRadians = ((origin.latitude + destination.latitude) / 2) * Math.PI / 180;
+  return {
+    east: (destination.longitude - origin.longitude) * MILES_PER_DEGREE_LATITUDE * Math.cos(midLatitudeRadians),
+    north: (destination.latitude - origin.latitude) * MILES_PER_DEGREE_LATITUDE,
+  };
+}
+
 export function projectDirectoryMapPositions(
   origin: { latitude: number; longitude: number },
   destinations: Array<{ latitude: number; longitude: number }>,
 ) {
-  const vectors = destinations.map(destination => {
-    const averageLatitudeRadians = ((origin.latitude + destination.latitude) / 2) * Math.PI / 180;
+  return destinations.map(destination => {
+    const { east, north } = displacementMiles(origin, destination);
+    let x = (east / DIRECTORY_MAP_RADIUS_MILES) * DIRECTORY_MAP_RADIUS_PERCENT;
+    let y = (north / DIRECTORY_MAP_RADIUS_MILES) * DIRECTORY_MAP_RADIUS_PERCENT;
+    const radius = Math.hypot(x, y);
+    if (radius > DIRECTORY_MAP_RADIUS_PERCENT && radius > 0) {
+      x *= DIRECTORY_MAP_RADIUS_PERCENT / radius;
+      y *= DIRECTORY_MAP_RADIUS_PERCENT / radius;
+    }
     return {
-      x: (destination.longitude - origin.longitude) * Math.cos(averageLatitudeRadians),
-      y: destination.latitude - origin.latitude,
+      xPercent: Math.round((50 + x) * 10) / 10,
+      yPercent: Math.round((50 - y) * 10) / 10,
     };
   });
-  const furthest = Math.max(0.0001, ...vectors.map(vector => Math.hypot(vector.x, vector.y)));
-  return vectors.map(vector => ({
-    xPercent: Math.round((50 + (vector.x / furthest) * 36) * 10) / 10,
-    yPercent: Math.round((50 - (vector.y / furthest) * 36) * 10) / 10,
-  }));
 }
 
 export async function geocodePostcode(postcodeValue: string): Promise<GeocodeResult> {
