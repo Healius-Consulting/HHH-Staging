@@ -43,7 +43,6 @@ jobs:
           grep -q "Pharmacy workspace" .vercel-private/pharmacy/index.html
           grep -q "Administration" .vercel-private/admin/index.html
       - run: npm run build --workspace @hhh/web-gateway
-      - run: npm test --workspace @hhh/api
       - run: npm test --workspace @hhh/api-sql
       - run: npx tsx --test tests/**/*.test.ts
       - name: Assert production portal boundaries
@@ -82,7 +81,7 @@ jobs:
       matrix:
         include:
           - name: api
-            command: docker build -f services/api/Dockerfile -t hhh-api:ci .
+            command: docker build -f services/api-sql/Dockerfile -t hhh-api:ci .
             image: hhh-api:ci
           - name: public
             command: >-
