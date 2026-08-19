@@ -42,7 +42,7 @@ export interface CreateOrderInput {
   draftId?: string | null;
   orderNumber?: string | null;
   status: 'DRAFT' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
-  paymentStatus: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
+  paymentStatus: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUND_REQUIRED' | 'REFUNDED';
   fulfilmentStatus: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'SUPPLIER_ALLOCATED' | 'PARTIALLY_DISPATCHED_TO_PHARMACY' | 'DISPATCHED_TO_PHARMACY' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXCEPTION';
   paymentRoute: 'MANUAL' | 'WORLDPAY';
   currency: string;
@@ -67,11 +67,12 @@ export interface OrderRepositoryPort {
     id: string;
     organisationId: string;
     status?: 'DRAFT' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
-    paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
-    fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'SUPPLIER_ALLOCATED' | 'PARTIALLY_DISPATCHED_TO_PHARMACY' | 'DISPATCHED_TO_PHARMACY' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXCEPTION';
+    paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUND_REQUIRED' | 'REFUNDED';
+    fulfilmentStatus?: CreateOrderInput['fulfilmentStatus'];
     paidAt?: string | null;
     cancelledAt?: string | null;
   }): Promise<boolean>;
+  setPaymentStatus(id: string, paymentStatus: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUND_REQUIRED' | 'REFUNDED'): Promise<void>;
   listTenantOrders(organisationId: string, limit?: number): Promise<OrderRecord[]>;
   listPaidOpenOrders(limit?: number): Promise<OrderRecord[]>;
   updateQuoteSnapshot(data: {

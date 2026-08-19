@@ -340,7 +340,7 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.unresolvedReason, undefined);
   });
 
-  it('keeps a paid Curaleaf-cancelled purchase order paid and unresolved, not as an unpaid cancel', () => {
+  it('keeps a paid Curaleaf-cancelled purchase order in refund_required until staff confirm the refund', () => {
     const mapped = toPortalOrder({
       ...order,
       status: 'PROCESSING',
@@ -384,13 +384,60 @@ describe('SQL pharmacy compatibility contracts', () => {
         },
       },
     });
-    assert.equal(mapped.paymentStatus, 'paid');
+    assert.equal(mapped.paymentStatus, 'refund_required');
+    assert.equal(mapped.refund?.status, 'pending_confirmation');
+    assert.equal(mapped.refund?.id, `refund-${order.id}`);
     assert.equal(mapped.status, 'cancelled');
     assert.equal(mapped.unresolvedReason, 'cancelled');
     assert.equal(mapped.quoteReview, undefined);
     assert.equal(mapped.curaleaf?.purchaseOrderState, 'CANCELLED');
     assert.equal(mapped.curaleaf?.status, 'prescription_closed');
     assert.equal(mapped.prescriptionFlow['rx-cancelled']?.state, 'CANCELLED_PURCHASE_ORDER');
+  });
+
+  it('maps a paid cancel with CANCELLED payment column and no snapshot refund into refund_required', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      status: 'CANCELLED',
+      paymentStatus: 'CANCELLED',
+      paidAt: '2026-08-18T23:32:00.000Z',
+      fulfilmentStatus: 'EXCEPTION',
+      totalPence: 10000,
+      paymentRoute: 'MANUAL',
+      quoteSnapshot: {
+        cancellation: { status: 'refund_required', reason: 'other' },
+        curaleafCancellation: { status: 'confirmed', confirmationReference: 'phone_cs_confirmed' },
+        curaleaf: {
+          status: 'prescription_closed',
+          purchaseOrderId: 'd02fd012-6595-486d-b8ec-9bc847ff5936',
+          purchaseOrderState: 'CANCELLED',
+          state: 'CANCELLED',
+        },
+      },
+    });
+    assert.equal(mapped.paymentStatus, 'refund_required');
+    assert.equal(mapped.status, 'cancelled');
+    assert.equal(mapped.refund?.status, 'pending_confirmation');
+    assert.equal(mapped.refund?.id, `refund-${order.id}`);
+    assert.equal(mapped.refund?.amountPence, 10000);
+    assert.equal(mapped.refund?.method, 'pharmacy_manual');
+    assert.equal(mapped.unresolvedReason, 'cancelled');
+  });
+
+  it('maps an unpaid cancel without paidAt as cancelled with no refund task', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      status: 'CANCELLED',
+      paymentStatus: 'CANCELLED',
+      paidAt: null,
+      fulfilmentStatus: 'EXCEPTION',
+      quoteSnapshot: {
+        cancellation: { status: 'cancelled', reason: 'other' },
+        curaleaf: { purchaseOrderState: 'CANCELLED', state: 'CANCELLED' },
+      },
+    });
+    assert.equal(mapped.paymentStatus, 'cancelled');
+    assert.equal(mapped.refund, undefined);
   });
 
   it('maps a split Curaleaf shipment onto the portal contract without inventing a full dispatch', () => {

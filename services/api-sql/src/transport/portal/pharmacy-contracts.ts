@@ -1,4 +1,5 @@
 import { paidQuoteFromSnapshot } from '../../application/orders/finance-costing.js';
+import { orderMoneyWasTaken, pendingManualRefund, snapshotRefundCompleted } from '../../application/orders/paid-refund.js';
 import {
   advanceFulfilmentStatus,
   dispatchStatusFromLines,
@@ -241,7 +242,18 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     || po?.prescriptionState === 'CANCELLED' || po?.prescriptionState === 'REJECTED'
     || snapshot?.curaleafCancellation?.status === 'confirmed';
   const isCancelledOrder = isHhhCancelled || isSupplierCancelled;
-  const isPaid = (order.paymentStatus === 'PAID' || Boolean(order.paidAt)) && order.paymentStatus !== 'CANCELLED';
+  const moneyTaken = orderMoneyWasTaken(order);
+  const refundCompleted = snapshotRefundCompleted(snapshot) || String(order.paymentStatus).toUpperCase() === 'REFUNDED';
+  const refundDue = moneyTaken && !refundCompleted && (
+    isCancelledOrder
+    || String(snapshot?.cancellation?.status || '') === 'refund_required'
+    || String(order.paymentStatus).toUpperCase() === 'REFUND_REQUIRED'
+  );
+  const existingRefund = snapshot?.refund && typeof snapshot.refund === 'object' ? snapshot.refund : null;
+  const refund = refundDue && !existingRefund?.status
+    ? pendingManualRefund(order)
+    : existingRefund ?? undefined;
+  const isPaid = moneyTaken && !refundCompleted && !isCancelledOrder && !refundDue;
   const quoteReview = snapshot?.quoteReview && typeof snapshot.quoteReview === 'object' && !isSupplierCancelled
     ? snapshot.quoteReview
     : undefined;
@@ -469,7 +481,15 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     totalPence: Number(order.totalPence),
     currency: order.currency === 'GBP' ? 'GBP' as const : 'GBP' as const,
     paymentRoute: lower(order.paymentRoute) === 'worldpay' ? 'worldpay' as const : 'manual' as const,
-    paymentStatus: isPaid ? 'paid' : isHhhCancelled || order.paymentStatus === 'CANCELLED' ? 'cancelled' : lower(order.paymentStatus),
+    paymentStatus: refundCompleted
+      ? 'refunded'
+      : refundDue
+        ? 'refund_required'
+        : moneyTaken
+          ? 'paid'
+          : isHhhCancelled || order.paymentStatus === 'CANCELLED'
+            ? 'cancelled'
+            : lower(order.paymentStatus),
     fulfilmentStatus: portalFulfilment,
     status: isCancelledOrder ? 'cancelled' : isPaid && order.status === 'SUBMITTED' ? 'processing' : lower(order.status),
     paymentTransactionReference: order.orderNumber,
@@ -481,7 +501,7 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     pharmacyContributionPence: Number(snapshot?.pharmacyContributionPence || quoteReview?.pharmacyContributionPence || 0) || undefined,
     cancellation: snapshot?.cancellation ?? undefined,
     curaleafCancellation: snapshot?.curaleafCancellation ?? undefined,
-    refund: snapshot?.refund ?? undefined,
+    refund,
     unresolvedReason: isSupplierCancelled ? 'cancelled' : undefined,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,

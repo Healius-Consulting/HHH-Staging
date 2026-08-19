@@ -41,13 +41,25 @@ import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { purgeOrderPrescriptionFiles } from '../../application/prescriptions/prescription-file-purge.js';
 import { persistCuraleafPrescriptionIdentity } from '../../application/prescriptions/curaleaf-prescription-record.js';
 import type { OrderRecord, CreateOrderInput } from '../../repositories/ports/order.port.js';
-import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 import { toPortalOrder, toPortalOrderDraft } from './pharmacy-contracts.js';
+import {
+  completedManualRefund,
+  orderMoneyWasTaken,
+  pendingManualRefund,
+  snapshotRefundCompleted,
+  snapshotWithManualRefundTask,
+  withPendingPaidRefund,
+} from '../../application/orders/paid-refund.js';
 
 const uuidLikeSchema = z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+
+function refundRecord(snapshot: unknown): Record<string, any> {
+  const root = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot as Record<string, unknown> : {};
+  return root.refund && typeof root.refund === 'object' && !Array.isArray(root.refund) ? root.refund as Record<string, unknown> : {};
+}
 
 const draftInputSchema = z.object({
   organisationId: z.string().optional(),
@@ -143,7 +155,7 @@ async function attachCuraleafToOrder(
     return toPortalOrder(order as any);
   }
   if (liveCancelled || snapshotCancelled) {
-    const nextSnapshot = stampCuraleafCancellationOnSnapshot(alignedSnapshot, {
+    const stamped = stampCuraleafCancellationOnSnapshot(alignedSnapshot, {
       action: 'confirmed',
       purchaseOrderId: String(matchedPO?.id || prior.purchaseOrderId || prior.id || ''),
       prescriptionId: typeof prior.prescriptionId === 'string' ? prior.prescriptionId : typeof matchedPO?.prescriptionId === 'string' ? matchedPO.prescriptionId : null,
@@ -151,6 +163,7 @@ async function attachCuraleafToOrder(
       reference: 'curaleaf_po_cancelled',
       note: 'Curaleaf cancelled the purchase order after pharmacy contact.',
     });
+    const nextSnapshot = snapshotWithManualRefundTask(order, stamped);
     const nextCuraleaf = {
       ...((nextSnapshot as { curaleaf?: Record<string, unknown> }).curaleaf || {}),
       prescriptionId: prior.prescriptionId || matchedPO?.prescriptionId || null,
@@ -164,6 +177,12 @@ async function attachCuraleafToOrder(
         quoteSnapshot: persisted,
         fulfilmentStatus: 'EXCEPTION',
       }).catch(err => console.warn('Curaleaf cancelled snapshot persist warning:', err));
+      if (orderMoneyWasTaken(order) && !snapshotRefundCompleted(persisted) && order.paymentStatus !== 'REFUNDED') {
+        await repos.orderRepo.setPaymentStatus(order.id, 'REFUND_REQUIRED').catch(err =>
+          console.warn('Curaleaf cancelled refund status persist warning:', err),
+        );
+        order.paymentStatus = 'REFUND_REQUIRED';
+      }
       order.fulfilmentStatus = 'EXCEPTION';
       order.quoteSnapshot = persisted;
     }
@@ -265,7 +284,6 @@ export function createPortalOrderRouter(): Router {
   const orderRepo = new SqlOrderRepository();
   const integrationRepo = new SqlIntegrationRepository();
   const identityRepo = new SqlIdentityRepository();
-  const paymentRepo = new SqlPaymentRepository();
   const fulfilmentRepo = new SqlFulfilmentRepository();
   const notificationRepo = new SqlNotificationRepository();
   const organisationRepo = new SqlOrganisationRepository();
@@ -581,20 +599,30 @@ export function createPortalOrderRouter(): Router {
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       const requiresCuraleafCancel = curaleafRequiresSupplierCancel(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot);
-      const snapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+      const stamped = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
         action: supplierOrderCancelled(order.quoteSnapshot) || !requiresCuraleafCancel ? 'confirmed' : 'requested',
         reason: input.reason,
         note: input.note,
         actorUid: scope.uid,
       });
-      const exception = requiresCuraleafCancel || order.paymentStatus === 'PAID' || supplierOrderCancelled(snapshot);
+      const snapshot = snapshotWithManualRefundTask(order, stamped, scope.uid);
+      const moneyTaken = orderMoneyWasTaken(order);
+      const exception = requiresCuraleafCancel || moneyTaken || supplierOrderCancelled(snapshot);
       await orderRepo.updateQuoteSnapshot({
         id: orderId,
         organisationId: scope.organisationId,
         quoteSnapshot: snapshot,
         fulfilmentStatus: exception ? 'EXCEPTION' : undefined,
       });
-      if (!requiresCuraleafCancel && order.paymentStatus !== 'PAID') {
+      if (!requiresCuraleafCancel && moneyTaken) {
+        await orderRepo.updateOrderStatus({
+          id: orderId,
+          organisationId: scope.organisationId,
+          status: 'CANCELLED',
+          paymentStatus: 'REFUND_REQUIRED',
+          cancelledAt: new Date().toISOString(),
+        });
+      } else if (!requiresCuraleafCancel && !moneyTaken) {
         await orderRepo.updateOrderStatus({
           id: orderId,
           organisationId: scope.organisationId,
@@ -602,7 +630,13 @@ export function createPortalOrderRouter(): Router {
           cancelledAt: new Date().toISOString(),
         });
       }
-      const mapped = toPortalOrder({ ...order, quoteSnapshot: snapshot, fulfilmentStatus: exception ? 'EXCEPTION' : order.fulfilmentStatus } as any);
+      const mapped = toPortalOrder({
+        ...order,
+        quoteSnapshot: snapshot,
+        fulfilmentStatus: exception ? 'EXCEPTION' : order.fulfilmentStatus,
+        paymentStatus: !requiresCuraleafCancel && moneyTaken ? 'REFUND_REQUIRED' : order.paymentStatus,
+        status: !requiresCuraleafCancel ? 'CANCELLED' : order.status,
+      } as any);
       res.status(201).json(mapped);
     } catch (error) { next(error); }
   });
@@ -745,12 +779,15 @@ export function createPortalOrderRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const snapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+      const stamped = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
         action: input.action,
         reference: input.reference || input.reason || 'curaleaf_contact',
         note: input.note,
         actorUid: scope.uid,
       });
+      const snapshot = snapshotWithManualRefundTask(order, stamped, scope.uid);
+      const moneyTaken = orderMoneyWasTaken(order);
+      const confirmedPaidCancel = input.action === 'confirmed' && moneyTaken;
       await orderRepo.updateQuoteSnapshot({
         id: orderId,
         organisationId: scope.organisationId,
@@ -759,8 +796,15 @@ export function createPortalOrderRouter(): Router {
           ? 'EXCEPTION'
           : undefined,
       });
+      if (confirmedPaidCancel) {
+        await orderRepo.setPaymentStatus(orderId, 'REFUND_REQUIRED');
+      }
       const latest = await orderRepo.findOrderById(orderId, scope.organisationId);
-      res.status(200).json(toPortalOrder(latest as any));
+      res.status(200).json(toPortalOrder({
+        ...(latest as object),
+        quoteSnapshot: snapshot,
+        paymentStatus: confirmedPaidCancel ? 'REFUND_REQUIRED' : latest?.paymentStatus,
+      } as any));
     } catch (error) {
       next(error);
     }
@@ -818,25 +862,35 @@ export function createPortalOrderRouter(): Router {
 
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      if (!orderMoneyWasTaken(order)) {
+        throw new HttpError(409, 'This order has no settled patient payment to refund.', 'REFUND_NOT_REQUIRED');
+      }
+      if (snapshotRefundCompleted(order.quoteSnapshot)) {
+        throw new HttpError(409, 'This order refund is already confirmed.', 'REFUND_ALREADY_COMPLETED');
+      }
 
-      const refundId = `ref-${Date.now().toString(36)}`;
-      const refundState = {
-        id: refundId,
-        status: 'pending_confirmation',
-        amountPence: Number(order.totalPence || 0),
-        method: order.paymentRoute === 'worldpay' ? 'worldpay_portal' : 'pharmacy_manual',
-        paymentReference: order.orderNumber || order.id,
-        transactionReference: order.orderNumber || order.id,
-        reason: input.reason,
-        resolution: input.resolution,
-        requestedAt: new Date().toISOString(),
-        requestedBy: scope.uid,
-      };
+      const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, unknown>;
+      const refundState = pendingManualRefund(order, scope.uid);
+      const nextSnapshot = withPendingPaidRefund({
+        ...snapshot,
+        cancellation: {
+          ...(snapshot.cancellation && typeof snapshot.cancellation === 'object' ? snapshot.cancellation : {}),
+          status: 'refund_required',
+          reason: input.reason === 'replacement_price_changed' ? 'other' : 'patient_request',
+        },
+      }, refundState);
 
+      await orderRepo.updateQuoteSnapshot({
+        id: orderId,
+        organisationId: scope.organisationId,
+        quoteSnapshot: nextSnapshot,
+        fulfilmentStatus: 'EXCEPTION',
+      });
       await orderRepo.updateOrderStatus({
         id: orderId,
         organisationId: scope.organisationId,
         status: 'CANCELLED',
+        paymentStatus: 'REFUND_REQUIRED',
         cancelledAt: new Date().toISOString(),
       });
 
@@ -863,51 +917,60 @@ export function createPortalOrderRouter(): Router {
 
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
-
-      const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
-      const review = readQuoteReview(snapshot);
-      const now = new Date().toISOString();
-
-      if (review || snapshot.refund?.kind === 'quote_difference') {
-        await orderRepo.updateQuoteSnapshot({
-          id: orderId,
-          organisationId: scope.organisationId,
-          quoteSnapshot: stampQuoteReviewOnSnapshot({
-            ...snapshot,
-            refund: {
-              id: refundId,
-              status: 'completed',
-              kind: 'paid_order',
-              amountPence: Number(order.totalPence || 0),
-              externalReference: input.externalReference,
-              confirmedAt: now,
-              confirmedBy: scope.uid,
-            },
-          }, null),
-          fulfilmentStatus: 'EXCEPTION',
-        });
+      if (!orderMoneyWasTaken(order) && !refundRecord(order.quoteSnapshot).id) {
+        throw new HttpError(409, 'This order has no settled patient payment to refund.', 'REFUND_NOT_REQUIRED');
       }
 
-      await paymentRepo.updatePaymentStatus(orderId, 'CANCELLED', orderId);
-      await orderRepo.updateOrderStatus({
+      const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
+      const priorRefund = refundRecord(snapshot);
+      const quoteDifference = priorRefund.kind === 'quote_difference' || priorRefund.reason === 'replacement_price_changed';
+      const now = new Date().toISOString();
+      if (priorRefund.id && priorRefund.id !== refundId && refundId !== `refund-${orderId}`) {
+        throw new HttpError(404, 'Refund task not found.', 'NOT_FOUND');
+      }
+
+      const nextRefund = quoteDifference
+        ? {
+          ...priorRefund,
+          id: refundId || priorRefund.id || `refund-${orderId}`,
+          status: 'completed',
+          kind: priorRefund.kind || 'quote_difference',
+          amountPence: Number(priorRefund.amountPence || order.totalPence || 0),
+          externalReference: input.externalReference,
+          confirmedAt: now,
+          confirmedBy: scope.uid,
+        }
+        : completedManualRefund(order, {
+          refundId: refundId || String(priorRefund.id || ''),
+          externalReference: input.externalReference,
+          actorUid: scope.uid,
+          now,
+        });
+
+      const nextSnapshot = quoteDifference
+        ? stampQuoteReviewOnSnapshot({ ...snapshot, refund: nextRefund }, null)
+        : { ...snapshot, refund: nextRefund };
+
+      await orderRepo.updateQuoteSnapshot({
         id: orderId,
         organisationId: scope.organisationId,
-        status: 'CANCELLED',
-        cancelledAt: now,
+        quoteSnapshot: nextSnapshot,
+        fulfilmentStatus: 'EXCEPTION',
       });
+
+      if (!quoteDifference) {
+        await orderRepo.updateOrderStatus({
+          id: orderId,
+          organisationId: scope.organisationId,
+          status: 'CANCELLED',
+          paymentStatus: 'REFUNDED',
+          cancelledAt: now,
+        });
+      }
 
       await purgeOrderPrescriptionFiles(scope.organisationId, order.quoteSnapshot).catch(error =>
         console.warn('[Prescription file] Purge after cancellation note:', error),
       );
-
-      const nextRefund = {
-        id: refundId,
-        status: 'completed',
-        amountPence: Number(order.totalPence || 0),
-        externalReference: input.externalReference,
-        confirmedAt: now,
-        confirmedBy: scope.uid,
-      };
 
       const [patient, organisation] = await Promise.all([
         patientRepo.findPatientById(scope.organisationId, order.patientId).catch(() => null),

@@ -223,6 +223,18 @@ const CANCEL_ORDER_GQL = `
   }
 `;
 
+const UPDATE_ORDER_PAYMENT_STATUS_GQL = `
+  mutation UpdateOrderPaymentStatus($id: UUID!, $paymentStatus: PaymentStatus!) {
+    order_update(
+      key: { id: $id }
+      data: {
+        paymentStatus: $paymentStatus
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
 const LIST_TENANT_ORDERS_GQL = `
   query ListTenantOrders($organisationId: UUID!, $limit: Int!) {
     orders(
@@ -472,11 +484,17 @@ export class SqlOrderRepository implements OrderRepositoryPort {
     return true;
   }
 
+  async setPaymentStatus(id: string, paymentStatus: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUND_REQUIRED' | 'REFUNDED'): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(UPDATE_ORDER_PAYMENT_STATUS_GQL, {
+      variables: { id, paymentStatus },
+    });
+  }
+
   async updateOrderStatus(data: {
     id: string;
     organisationId: string;
     status?: 'DRAFT' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
-    paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
+    paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUND_REQUIRED' | 'REFUNDED';
     fulfilmentStatus?: 'SUPPLIER_PENDING' | 'SUPPLIER_PROCESSING' | 'SUPPLIER_ALLOCATED' | 'PARTIALLY_DISPATCHED_TO_PHARMACY' | 'DISPATCHED_TO_PHARMACY' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'READY_FOR_COLLECTION' | 'COLLECTED' | 'EXCEPTION';
     paidAt?: string | null;
     cancelledAt?: string | null;
@@ -486,6 +504,7 @@ export class SqlOrderRepository implements OrderRepositoryPort {
 
     if (data.status === 'CANCELLED' || data.cancelledAt) {
       await dataConnect.executeGraphql<any, any>(CANCEL_ORDER_GQL, { variables: { id: data.id } });
+      if (data.paymentStatus) await this.setPaymentStatus(data.id, data.paymentStatus);
       return true;
     }
 

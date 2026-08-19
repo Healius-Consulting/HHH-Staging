@@ -41,6 +41,7 @@ import {
   type LineItem,
   type ManualTender,
   type PatientOrder,
+  type PaymentStatus,
   type Prescription,
 } from '../context/AppContext';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
@@ -177,15 +178,23 @@ function recordMatchesFilter(record: OrderRecord, filter: StageFilter) {
 
 function recordStageMeta(record: OrderRecord) {
   const resolution = orderCancellationResolution(record.order);
+  const refundDue = record.order.refund?.status === 'pending_confirmation' || record.order.cancellation?.status === 'refund_required';
+  const supplierActionOutstanding = ['contact_required', 'awaiting_confirmation'].includes(record.order.curaleafCancellation?.status ?? '')
+    || ['curaleaf_contact_required', 'awaiting_curaleaf_confirmation'].includes(record.order.cancellation?.status ?? '');
   if (record.stage === 'cancelled' && record.order.prescriptions.some(prescription => prescription.purchaseOrderState === 'CANCELLED' || prescription.status === 'cancelled')) {
     return {
-      label: 'Cancelled purchase order',
+      label: resolution === 'needs-action' && refundDue && !supplierActionOutstanding ? 'Refund due' : 'Cancelled purchase order',
       description: resolution === 'needs-action'
-        ? 'Curaleaf cancelled the supplier purchase order. Review the pharmacy call or case notes and complete the refund follow-up.'
+        ? refundDue && !supplierActionOutstanding
+          ? 'Patient payment is still held. Refund in Worldpay or ePOS, then confirm the reference here. HHH does not move the money automatically.'
+          : 'Curaleaf cancelled the supplier purchase order. Review the pharmacy call or case notes and complete the refund follow-up.'
         : 'Curaleaf cancelled the supplier purchase order; its pharmacy call or case context remains in the audit trail.',
       tone: resolution === 'needs-action' ? 'danger' : 'neutral',
-      icon: XCircle,
+      icon: resolution === 'needs-action' && refundDue && !supplierActionOutstanding ? Banknote : XCircle,
     };
+  }
+  if (resolution === 'needs-action' && refundDue && !supplierActionOutstanding) {
+    return { label: 'Refund due', description: 'Patient payment is still held. Refund in Worldpay or ePOS, then confirm the reference here.', tone: 'danger', icon: Banknote };
   }
   if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'danger', icon: AlertTriangle };
   if (quoteReviewIsOpen(record.order)) {
@@ -534,15 +543,22 @@ export default function Orders() {
   }) : [];
 
   const applyCancellationResponse = (order: PatientOrder, record: Awaited<ReturnType<typeof requestPortalOrderCancellation>>) => {
-    if (!record.cancellation) return;
-    dispatch({
-      type: 'SET_ORDER_CANCELLATION',
-      orderId: order.id,
-      cancellation: record.cancellation,
-      curaleafCancellation: record.curaleafCancellation,
-      lifecycleStatus: record.status,
-      paymentStatus: record.paymentStatus === 'cancelled' ? 'cancelled' : ['paid', 'refund_required', 'refunded'].includes(record.paymentStatus) ? 'paid' : 'sent',
-    });
+    const moneyStillHeld = Boolean(order.payment.paidAt) && record.refund?.status !== 'completed' && record.paymentStatus !== 'refunded';
+    const paymentStatus: PaymentStatus = ['paid', 'refund_required', 'refunded'].includes(record.paymentStatus) || (moneyStillHeld && record.paymentStatus === 'cancelled')
+      ? 'paid'
+      : record.paymentStatus === 'cancelled'
+        ? 'cancelled'
+        : 'sent';
+    if (record.cancellation) {
+      dispatch({
+        type: 'SET_ORDER_CANCELLATION',
+        orderId: order.id,
+        cancellation: record.cancellation,
+        curaleafCancellation: record.curaleafCancellation,
+        lifecycleStatus: record.status,
+        paymentStatus,
+      });
+    }
     dispatch({
       type: 'SET_QUOTE_REVIEW',
       orderId: order.id,
@@ -593,7 +609,7 @@ export default function Orders() {
       } else {
         dispatch({ type: 'CONFIRM_CURALEAF_CANCELLATION', orderId: order.id, reference });
       }
-      dispatch({ type: 'ADD_TOAST', message: action === 'contacted' ? `Curaleaf contact recorded for ${orderReference(order)}. Refund and replacement remain locked until cancellation is confirmed.` : `Curaleaf cancellation confirmed for ${orderReference(order)}. Payment stays paid until refund or replacement.`, toastType: action === 'contacted' ? 'info' : 'warning' });
+      dispatch({ type: 'ADD_TOAST', message: action === 'contacted' ? `Curaleaf contact recorded for ${orderReference(order)}. Refund remains locked until cancellation is confirmed.` : `Curaleaf cancellation confirmed for ${orderReference(order)}. Refund due — complete it in ${order.payment.route === 'worldpay' ? 'Worldpay' : 'ePOS'} and confirm the reference.`, toastType: action === 'contacted' ? 'info' : 'warning' });
       setCancellationReference('');
       setCancellationContactNote('');
       if (action === 'confirmed') setActiveFilter('cancelled');
@@ -1480,7 +1496,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
         />
       ) : null}
 
-      {order.payment.status === 'paid' && !reviewOpen && (stage === 'rejected' || stage === 'archived' || stage === 'cancelled' || Boolean(order.cancellation) || order.prescriptions.some(rx => rx.purchaseOrderState === 'CANCELLED' || rx.status === 'cancelled')) ? (
+      {((order.payment.status === 'paid' || order.refund?.status === 'pending_confirmation') && !reviewOpen && (stage === 'rejected' || stage === 'archived' || stage === 'cancelled' || Boolean(order.cancellation) || order.prescriptions.some(rx => rx.purchaseOrderState === 'CANCELLED' || rx.status === 'cancelled'))) ? (
         <PaidExceptionResolution
           order={order}
           canReplace={true}
@@ -2064,12 +2080,12 @@ function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked,
   onRequestRefund: () => void;
   onConfirmRefund: () => void;
 }) {
-  const method = order.payment.route === 'worldpay' ? 'Worldpay portal' : 'Pharmacy payment system';
+  const method = order.payment.route === 'worldpay' ? 'Worldpay portal' : 'ePOS';
   const reference = order.refund?.paymentReference ?? order.payment.ref ?? 'Reference unavailable';
   return (
     <section className={`order-resolution${order.refund?.status === 'completed' ? ' order-resolution--complete' : ''}`}>
       <header>
-        <span><small>Paid-order resolution</small><strong>{order.refund?.status === 'completed' ? 'Refund completed' : order.refund ? 'Manual refund awaiting confirmation' : canReplace ? 'Choose replacement or refund' : 'Prepare patient refund'}</strong></span>
+        <span><small>Paid-order resolution</small><strong>{order.refund?.status === 'completed' ? 'Refund completed' : order.refund ? 'Refund due' : canReplace ? 'Choose replacement or refund' : 'Refund due'}</strong></span>
         <span className="order-resolution__amount"><small>Patient paid</small><strong>{money(order.payment.amount)}</strong></span>
       </header>
       <div className="order-resolution__reference">
@@ -2085,7 +2101,7 @@ function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked,
         </div>
       ) : order.refund.status === 'pending_confirmation' ? (
         <div className="order-resolution__confirm">
-          <ol><li>Sign in to {method}.</li><li>Find payment <code>{reference}</code> and refund {money(order.refund.amountPence / 100)}.</li><li>Enter the Worldpay refund reference below and confirm.</li></ol>
+          <ol><li>Sign in to {method}.</li><li>Find payment <code>{reference}</code> and refund {money(order.refund.amountPence / 100)}.</li><li>Enter the refund reference below and confirm. HHH records the confirmation but does not move the money.</li></ol>
           <label><span>Refund confirmation reference</span><input className="input" value={refundReference} onChange={event => onRefundReferenceChange(event.target.value)} placeholder="Worldpay refund / command ID" /></label>
           <button type="button" className="btn btn-primary btn-sm" disabled={busy || refundReference.trim().length < 3} onClick={onConfirmRefund}><CheckCircle2 size={13} /> {busy ? 'Recording…' : 'Confirm refund completed'}</button>
         </div>

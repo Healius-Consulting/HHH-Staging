@@ -18,6 +18,7 @@ import {
   type CuraleafEventKind,
 } from '../integrations/curaleaf-events.js';
 import { listPharmacyRecipients, queueEmailToRecipients } from '../notifications/email-outbox.js';
+import { orderMoneyWasTaken, snapshotRefundCompleted, snapshotWithManualRefundTask } from '../orders/paid-refund.js';
 import { curaleafApiRequest } from '../integrations/curaleaf.service.js';
 import type { CuraleafPurchaseOrderLike, CuraleafShipmentLike } from '../orders/curaleaf-fulfilment.js';
 import type { IdentityRepositoryPort } from '../../repositories/ports/identity.port.js';
@@ -36,7 +37,17 @@ export type CuraleafPollDeps = {
 };
 
 async function persistSupplierCancellation(
-  order: { id: string; organisationId: string; patientId?: string | null; orderNumber?: string | null; quoteSnapshot?: unknown },
+  order: {
+    id: string;
+    organisationId: string;
+    patientId?: string | null;
+    orderNumber?: string | null;
+    quoteSnapshot?: unknown;
+    paymentStatus?: string | null;
+    paidAt?: string | null;
+    totalPence?: number | null;
+    paymentRoute?: string | null;
+  },
   deps: CuraleafPollDeps,
   input: {
     source: 'prescriber' | 'prescription' | 'purchase_order';
@@ -49,7 +60,7 @@ async function persistSupplierCancellation(
   },
 ) {
   if (supplierCancellationAlreadyConfirmed(order.quoteSnapshot)) return;
-  const nextSnapshot = input.afterPharmacyCall
+  const stamped = input.afterPharmacyCall
     ? stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
       action: 'confirmed',
       purchaseOrderId: input.purchaseOrderId,
@@ -65,12 +76,16 @@ async function persistSupplierCancellation(
       prescriberId: input.prescriberId,
       note: input.summary,
     });
+  const nextSnapshot = input.afterPharmacyCall ? snapshotWithManualRefundTask(order, stamped) : stamped;
   await deps.orderRepo.updateQuoteSnapshot({
     id: order.id,
     organisationId: order.organisationId,
     quoteSnapshot: nextSnapshot,
     fulfilmentStatus: 'EXCEPTION',
   });
+  if (input.afterPharmacyCall && orderMoneyWasTaken(order) && !snapshotRefundCompleted(nextSnapshot) && order.paymentStatus !== 'REFUNDED') {
+    await deps.orderRepo.setPaymentStatus(order.id, 'REFUND_REQUIRED');
+  }
   const recipients = await listPharmacyRecipients(order.organisationId, deps);
   await queueEmailToRecipients(
     deps.notificationRepo,

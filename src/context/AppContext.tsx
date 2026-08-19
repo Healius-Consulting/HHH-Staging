@@ -822,6 +822,34 @@ function lineWholesalePounds(
   return null;
 }
 
+function portalMoneyTaken(record: PortalOrderRecord) {
+  return ['paid', 'refund_required', 'refunded'].includes(record.paymentStatus) || Boolean(record.paidAt);
+}
+
+function portalRefundCompleted(record: PortalOrderRecord) {
+  return record.refund?.status === 'completed' || record.paymentStatus === 'refunded';
+}
+
+function portalRefundDue(record: PortalOrderRecord) {
+  if (!portalMoneyTaken(record) || portalRefundCompleted(record)) return false;
+  return record.paymentStatus === 'refund_required'
+    || record.cancellation?.status === 'refund_required'
+    || ((record.paymentStatus === 'cancelled' || record.status === 'cancelled') && Boolean(record.paidAt));
+}
+
+function pendingPortalRefund(record: PortalOrderRecord): OrderRefundState {
+  return {
+    id: `refund-${record.id}`,
+    status: 'pending_confirmation',
+    amountPence: record.totalPence,
+    method: record.paymentRoute === 'worldpay' ? 'worldpay_portal' : 'pharmacy_manual',
+    paymentReference: record.paymentTransactionReference ?? record.id,
+    reason: 'patient_cancelled',
+    resolution: 'cancel',
+    requestedAt: record.paidAt ?? record.updatedAt ?? record.createdAt,
+  };
+}
+
 function mapPortalOrder(record: PortalOrderRecord, index: number, records: PortalOrderRecord[], catalogue: CatalogueItem[] = []): PatientOrder {
   const orderId = index + 1;
   const rxStatus: RxStatus = portalPrescriptionStatus(record);
@@ -1000,8 +1028,9 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
         shipmentId: record.curaleaf?.shipmentIds?.[0],
         shipmentIds: record.curaleaf?.shipmentIds ?? [],
       }];
-  const paid = ['paid', 'refund_required', 'refunded'].includes(record.paymentStatus);
-  const cancelled = record.paymentStatus === 'cancelled';
+  const refundDue = portalRefundDue(record);
+  const paid = portalMoneyTaken(record);
+  const cancelled = !paid && record.paymentStatus === 'cancelled';
   const redoSourceBackendId = record.redoContext ? String(record.redoOfOrderId ?? record.redoContext.originalOrderId) : null;
   let redoSource = redoSourceBackendId ? records.find(candidate => candidate.id === redoSourceBackendId) : undefined;
   let redoSequence = 0;
@@ -1039,7 +1068,7 @@ function mapPortalOrder(record: PortalOrderRecord, index: number, records: Porta
     },
     prescriptions,
     curaleafApprovedAt: record.curaleafApprovedAt ?? null,
-    refund: record.refund,
+    refund: record.refund ?? (refundDue ? pendingPortalRefund(record) : undefined),
     cancellation: record.cancellation,
     curaleafCancellation: record.curaleafCancellation,
     pharmacyContribution: record.pharmacyContributionPence ? record.pharmacyContributionPence / 100 : 0,
@@ -1834,6 +1863,19 @@ function reducer(state: AppState, action: Action): AppState {
           lifecycleStatus: hasCuraleafOrder ? order.lifecycleStatus : 'cancelled',
           payment: hasCuraleafOrder || order.payment.status === 'paid' ? order.payment : { ...order.payment, status: 'cancelled' },
           quoteReview: undefined,
+          refund: hasCuraleafOrder || order.payment.status !== 'paid' || order.refund
+            ? order.refund
+            : {
+              id: `refund-${order.backendId || order.id}`,
+              status: 'pending_confirmation' as const,
+              amountPence: Math.round(order.payment.amount * 100),
+              method: order.payment.route === 'worldpay' ? 'worldpay_portal' as const : 'pharmacy_manual' as const,
+              paymentReference: order.payment.ref ?? `ORDER-${order.id}`,
+              reason: 'patient_cancelled' as const,
+              resolution: 'cancel' as const,
+              requestedAt,
+              requestedBy: state.staffSession?.name ?? 'Pharmacy staff',
+            },
           cancellation: {
             status: hasCuraleafOrder ? 'curaleaf_contact_required' : order.payment.status === 'paid' ? 'refund_required' : 'cancelled',
             reason: action.reason,
@@ -1870,6 +1912,19 @@ function reducer(state: AppState, action: Action): AppState {
         ...order,
         lifecycleStatus: 'cancelled',
         cancellation: order.cancellation ? { ...order.cancellation, status: order.payment.status === 'paid' ? 'refund_required' : 'cancelled' } : order.cancellation,
+        refund: order.payment.status === 'paid' && order.refund?.status !== 'completed'
+          ? order.refund ?? {
+            id: `refund-${order.backendId || order.id}`,
+            status: 'pending_confirmation' as const,
+            amountPence: Math.round(order.payment.amount * 100),
+            method: order.payment.route === 'worldpay' ? 'worldpay_portal' as const : 'pharmacy_manual' as const,
+            paymentReference: order.payment.ref ?? `ORDER-${order.id}`,
+            reason: 'patient_cancelled' as const,
+            resolution: 'cancel' as const,
+            requestedAt: new Date().toISOString(),
+            requestedBy: state.staffSession?.name ?? 'Pharmacy staff',
+          }
+          : order.refund,
         curaleafCancellation: {
           ...order.curaleafCancellation,
           status: 'confirmed',

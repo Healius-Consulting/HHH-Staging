@@ -10,6 +10,7 @@ import {
   purgeOrderPrescriptionFiles,
 } from '../prescriptions/prescription-file-purge.js';
 import { persistCuraleafPrescriptionIdentity } from '../prescriptions/curaleaf-prescription-record.js';
+import { orderMoneyWasTaken, snapshotRefundCompleted, snapshotWithManualRefundTask } from '../orders/paid-refund.js';
 import {
   isCuraleafPrescriberRejected,
   isCuraleafRejectedRequest,
@@ -370,19 +371,23 @@ export async function executeCuraleafOrderPlacement(
     );
     if (matchedPurchaseOrder?.id) {
       if (isCuraleafTerminalRejection(matchedPurchaseOrder.state || matchedPurchaseOrder.purchaseOrderState)) {
-        const cancelledSnapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+        const cancelledSnapshot = snapshotWithManualRefundTask(order, stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
           action: 'confirmed',
           purchaseOrderId: String(matchedPurchaseOrder.id),
           prescriptionId: priorCuraleaf?.prescriptionId ?? null,
           reference: 'curaleaf_po_cancelled',
           note: 'Curaleaf cancelled the purchase order after pharmacy contact.',
-        });
-        await new SqlOrderRepository().updateQuoteSnapshot({
+        }));
+        const orderRepo = new SqlOrderRepository();
+        await orderRepo.updateQuoteSnapshot({
           id: order.id,
           organisationId: connection.organisationId,
           quoteSnapshot: cancelledSnapshot,
           fulfilmentStatus: 'EXCEPTION',
         });
+        if (orderMoneyWasTaken(order) && !snapshotRefundCompleted(cancelledSnapshot) && order.paymentStatus !== 'REFUNDED') {
+          await orderRepo.setPaymentStatus(order.id, 'REFUND_REQUIRED');
+        }
         return { skipped: true, reason: 'Curaleaf purchase order was cancelled' };
       }
       await purgeOrderPrescriptionFiles(connection.organisationId, snapshot).catch(error =>

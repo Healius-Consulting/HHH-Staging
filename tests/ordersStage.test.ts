@@ -304,6 +304,18 @@ test('supplier-cancelled purchase orders are cancellation outcomes without an HH
   assert.equal(orderCancellationResolution(refunded), 'refunded');
 });
 
+test('paid cancel with a pending manual refund stays in refund-due needs-action', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    unresolvedReason: 'cancelled',
+    cancellation: { status: 'refund_required' },
+    refund: { status: 'pending_confirmation' },
+    prescriptions: [{ status: 'cancelled', purchaseOrderState: 'CANCELLED', placed: true }],
+  } as PatientOrder;
+  assert.equal(orderCancellationResolution(order), 'needs-action');
+});
+
 test('Curaleaf cancel wins over an expired or archived flag on the same paid order', () => {
   const order = {
     date: new Date('2026-07-01'),
