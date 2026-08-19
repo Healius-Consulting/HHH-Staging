@@ -191,44 +191,23 @@ function recordStageMeta(record: OrderRecord) {
   if (resolution === 'resolved') return { label: 'Resolved', description: 'Cancellation closed with no action outstanding', tone: 'resolved', icon: CheckCircle2 };
   const split = orderSplitPackSnapshot(record.order);
   const isSplit = orderIsSplitFulfilment(record.order);
-  if (isSplit && orderHasUncollectedReceivedPacks(record.order)) {
+  const splitFulfilment = isSplit && orderHasUncollectedReceivedPacks(record.order)
+    ? `${split.atPharmacy} pack(s) checked in · ${split.withCuraleaf + split.inTransit} still in transit or awaiting dispatch`
+    : orderHasPartialCollection(record.order) && !orderHasInTransitPacks(record.order) && !orderHasUncollectedReceivedPacks(record.order)
+      ? 'Arrived packs handed out; remainder awaiting dispatch'
+      : orderHasPartialPharmacyReceipt(record.order) && !orderHasInTransitPacks(record.order)
+        ? 'First consignment checked in; remainder awaiting dispatch'
+        : isSplit && orderHasInTransitPacks(record.order)
+          ? (split.withCuraleaf > 0
+            ? `${split.inTransit} of ${split.total} packs in transit · ${split.withCuraleaf} awaiting dispatch`
+            : `${split.inTransit} of ${split.total} packs with courier`)
+          : isSplit && split.withCuraleaf > 0 && !orderHasInTransitPacks(record.order)
+            ? `${split.withCuraleaf} pack(s) awaiting dispatch after the first consignment`
+            : null;
+  if (splitFulfilment) {
     return {
-      label: 'Part ready',
-      description: `${split.atPharmacy} pack(s) checked in · ${split.withCuraleaf + split.inTransit} still in transit or awaiting dispatch`,
-      tone: 'partial',
-      icon: Layers2,
-    };
-  }
-  if (orderHasPartialCollection(record.order) && !orderHasInTransitPacks(record.order) && !orderHasUncollectedReceivedPacks(record.order)) {
-    return {
-      label: 'Part collected',
-      description: 'Arrived packs handed out; remainder awaiting dispatch',
-      tone: 'partial',
-      icon: Layers2,
-    };
-  }
-  if (orderHasPartialPharmacyReceipt(record.order) && !orderHasInTransitPacks(record.order)) {
-    return {
-      label: 'Part delivered',
-      description: 'First consignment checked in; remainder awaiting dispatch',
-      tone: 'partial',
-      icon: Layers2,
-    };
-  }
-  if (isSplit && orderHasInTransitPacks(record.order)) {
-    return {
-      label: 'Part in transit',
-      description: split.withCuraleaf > 0
-        ? `${split.inTransit} of ${split.total} packs in transit · ${split.withCuraleaf} awaiting dispatch`
-        : `${split.inTransit} of ${split.total} packs with courier`,
-      tone: 'partial',
-      icon: Layers2,
-    };
-  }
-  if (isSplit && split.withCuraleaf > 0 && !orderHasInTransitPacks(record.order)) {
-    return {
-      label: 'Awaiting next shipment',
-      description: `${split.withCuraleaf} pack(s) awaiting dispatch after the first consignment`,
+      label: 'Split fulfilment',
+      description: splitFulfilment,
       tone: 'partial',
       icon: Layers2,
     };
@@ -1435,7 +1414,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
       ) : null}
 
       <div className="order-crm-record__body">
-        <section className={`order-crm-main${order.prescriptions.length > 0 && order.prescriptions.every(prescriptionIsCancelled) ? ' order-crm-main--cancelled' : ''}`}>
+        <section className="order-crm-main">
           <div className="order-crm-section-heading"><span><small>Prescription fulfilment</small><strong>{order.prescriptions.length} prescription{order.prescriptions.length === 1 ? '' : 's'}</strong></span><FileText size={16} /></div>
           <div className="order-crm-prescriptions">
             {order.prescriptions.map((prescription, index) => <PrescriptionCard
