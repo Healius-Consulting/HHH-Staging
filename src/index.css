@@ -10259,38 +10259,18 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 .eligibility-location-copy span{ color: #718079; font-size: 9px; text-align: right; }
 .eligibility-location-map{
   position: relative;
-  aspect-ratio: 1;
-  width: min(100%, 400px);
-  min-height: 0;
-  margin-inline: auto;
+  min-height: 280px;
   overflow: hidden;
   background-color: #edf4ef;
-  background-image: linear-gradient(rgba(72, 116, 95, .055) 1px, transparent 1px), linear-gradient(90deg, rgba(72, 116, 95, .055) 1px, transparent 1px);
-  background-size: 24px 24px, 24px 24px;
+  background-image: linear-gradient(rgba(72, 116, 95, .055) 1px, transparent 1px), linear-gradient(90deg, rgba(72, 116, 95, .055) 1px, transparent 1px), radial-gradient(circle at 77% 18%, rgba(255,255,255,.88), transparent 24%), radial-gradient(circle at 19% 78%, rgba(213,230,220,.8), transparent 27%);
+  background-size: 24px 24px, 24px 24px, auto, auto;
   border: 1px solid #cbdcd3;
   border-radius: 14px;
   isolation: isolate;
 }
-.eligibility-location-map::after{ display: none; }
-.eligibility-location-map > svg{ position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; }
-.eligibility-location-map > svg circle{ fill: none; stroke: rgba(23, 109, 85, .28); stroke-width: .7; }
-.eligibility-location-map > svg text{ fill: #5d7468; font-size: 3.1px; font-weight: 700; text-anchor: middle; }
-.eligibility-location-map > svg .eligibility-location-compass{ fill: #304c40; font-size: 3.6px; font-weight: 800; }
-.eligibility-location-scale{
-  position: absolute;
-  right: 10px;
-  bottom: 8px;
-  z-index: 2;
-  padding: 4px 7px;
-  color: #557067;
-  background: rgba(255,255,255,.9);
-  border: 1px solid rgba(198,216,207,.85);
-  border-radius: 5px;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: .03em;
-  text-transform: uppercase;
-}
+.eligibility-location-map::after{ content: 'Approximate map'; position: absolute; right: 10px; bottom: 8px; z-index: 1; padding: 4px 7px; color: #557067; background: rgba(255,255,255,.86); border: 1px solid rgba(198,216,207,.85); border-radius: 5px; font-size: 8px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.eligibility-location-map > svg{ position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; }
+.eligibility-location-map > svg path{ fill: none; stroke: #fff; stroke-width: 3.5; vector-effect: non-scaling-stroke; }
 .eligibility-location-map > button{
   position: absolute;
   z-index: 3;
@@ -10636,7 +10616,7 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   .eligibility-location-search .btn{ width: 100%; justify-content: center; }
   .eligibility-location-copy{ align-items: flex-start; flex-direction: column; gap: 3px; }
   .eligibility-location-copy span{ text-align: left; }
-  .eligibility-location-map{ width: min(100%, 320px); }
+  .eligibility-location-map{ min-height: 225px; }
   .eligibility-form-grid{ gap: 15px; }
   .eligibility-form-footer{ padding: 0 20px 22px; }
   .eligibility-legal{ margin: 0 20px 24px; }

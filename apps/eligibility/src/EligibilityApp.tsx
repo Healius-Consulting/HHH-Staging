@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, HeartPulse, LoaderCircle, LockKeyhole, MapPin, Search, ShieldCheck } from 'lucide-react';
 import { CONDITIONS, conditionLabel } from '@hhh/domain';
 import { createEligibilitySubmission, createV2Intake, resolvePublicReferralToken, searchPublicPharmacies } from '../../../src/shared/api';
-import { HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL, PUBLIC_DIRECTORY_MAP_RADIUS_MILES, PUBLIC_DIRECTORY_MAP_RADIUS_PERCENT, type EligibilitySubmissionInput, type PostcodeSearchReceipt, type PublicDirectoryResult, type PublicPharmacy, type V2IntakeReceipt } from '../../../src/shared/contracts';
+import { HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL, type EligibilitySubmissionInput, type PostcodeSearchReceipt, type PublicDirectoryResult, type PublicPharmacy, type V2IntakeReceipt } from '../../../src/shared/contracts';
 import { tenantThemeVariables } from '../../../src/utils/tenantTheme';
 import { parseEligibilityReferralRoute } from './referralRoute';
 
@@ -205,21 +205,9 @@ export default function EligibilityApp() {
           <p className="eligibility-location-privacy"><LockKeyhole size={13} /> Your postcode stays out of the page URL, browser storage and analytics.</p>
           {error && <div className="banner banner-red" role="alert"><AlertTriangle size={16} /> {error}</div>}
           {search?.results.length ? <div className="eligibility-location-results" aria-live="polite">
-            <div className="eligibility-location-copy"><strong>{search.results.length} nearest participating {search.results.length === 1 ? 'pharmacy' : 'pharmacies'}</strong><span>Results for {search.postcode}. Pins use a fixed {search.mapRadiusMiles ?? PUBLIC_DIRECTORY_MAP_RADIUS_MILES}-mile range, so a distant pharmacy stays near the outer ring.</span></div>
-            <div className="eligibility-location-map" role="group" aria-label={`Approximate pharmacy locations within ${search.mapRadiusMiles ?? PUBLIC_DIRECTORY_MAP_RADIUS_MILES} miles of ${search.postcode}`}>
-              <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-                {[25, 50, 100]
-                  .filter(miles => miles <= (search.mapRadiusMiles ?? PUBLIC_DIRECTORY_MAP_RADIUS_MILES))
-                  .map(miles => {
-                    const radius = (miles / (search.mapRadiusMiles ?? PUBLIC_DIRECTORY_MAP_RADIUS_MILES)) * PUBLIC_DIRECTORY_MAP_RADIUS_PERCENT;
-                    return <g key={miles}>
-                      <circle cx="50" cy="50" r={radius} />
-                      <text x={50 + radius - 1.2} y="51.4" textAnchor="end">{miles} mi</text>
-                    </g>;
-                  })}
-                <text className="eligibility-location-compass" x="50" y="7">N</text>
-              </svg>
-              <span className="eligibility-location-scale">25, 50 and 100 mile rings</span>
+            <div className="eligibility-location-copy"><strong>{search.results.length} nearest participating {search.results.length === 1 ? 'pharmacy' : 'pharmacies'}</strong><span>Results for {search.postcode}. Distances and map positions are approximate.</span></div>
+            <div className="eligibility-location-map" role="group" aria-label={`Approximate pharmacy locations near ${search.postcode}`}>
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M-5 76 C18 60 26 67 43 47 S72 30 105 13" /><path d="M9 -5 C20 20 13 34 34 49 S62 69 79 105" /><path d="M-5 29 C23 32 38 18 56 28 S78 56 105 58" /></svg>
               <span className="eligibility-location-origin" style={{ left: `${search.mapOrigin.xPercent}%`, top: `${search.mapOrigin.yPercent}%` }}><span aria-hidden="true" />Your postcode</span>
               {search.results.map((result, index) => <button
                 key={result.id}
