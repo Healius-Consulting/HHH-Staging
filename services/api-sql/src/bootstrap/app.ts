@@ -2,8 +2,8 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import helmet from 'helmet';
 import cors from 'cors';
 import { z } from 'zod';
-import { portalAppOrigins } from './config.js';
 import { HttpError } from '../domain/common/errors.js';
+import { isPermittedWebOrigin } from '../security/origins.js';
 import { requireAppCheck } from '../security/app-check.js';
 import { createAuthRouter } from '../transport/public/auth.router.js';
 import { createDirectoryRouter } from '../transport/public/directory.router.js';
@@ -24,24 +24,7 @@ import { createPortalIntegrationRouter } from '../transport/portal/integration.r
 import { createPortalFinanceRouter } from '../transport/portal/finance.router.js';
 
 export function isOriginPermitted(origin: string | undefined): boolean {
-  if (!origin) return true;
-  if (portalAppOrigins.has(origin)) return true;
-  try {
-    const url = new URL(origin);
-    const host = url.hostname.toLowerCase();
-    if (host.endsWith('.vercel.app')) return true;
-    if (host === 'localhost' || host === '127.0.0.1') return true;
-    if (
-      host === 'holistichealthhub.cc' || host.endsWith('.holistichealthhub.cc') ||
-      host === 'holistichealthhub.live' || host.endsWith('.holistichealthhub.live') ||
-      host === 'hhh.thinktimeless.co.uk' || host === 'www.hhh.thinktimeless.co.uk' ||
-      host === 'portal.hhh.thinktimeless.co.uk' ||
-      host === 'staging.thinktimeless.co.uk'
-    ) return true;
-  } catch {
-    return false;
-  }
-  return false;
+  return isPermittedWebOrigin(origin);
 }
 
 export function createApp(): Express {

@@ -253,8 +253,8 @@ export function createPortalIntegrationRouter(): Router {
     } catch (error) { next(error); }
   };
 
-  router.post('/portal/integrations/curaleaf/quote', requireStaff('any'), getQuote);
-  router.post('/portal/integrations/curaleaf/training/quote', requireStaff('any'), getQuote);
+  router.post('/portal/integrations/curaleaf/quote', requireCsrf, requireStaff('any'), getQuote);
+  router.post('/portal/integrations/curaleaf/training/quote', requireCsrf, requireStaff('any'), getQuote);
 
   router.get('/portal/integrations/curaleaf/activity', requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -268,7 +268,7 @@ export function createPortalIntegrationRouter(): Router {
     } catch (error) { next(error); }
   });
 
-  router.post('/portal/integrations/curaleaf/prescriptions/manual', requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/portal/integrations/curaleaf/prescriptions/manual', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const organisationId = await authorisedOrganisationId(req.context, req.body?.organisationId, organisationRepo);
       const connection = await integrationRepo.findConnection(organisationId, 'CURALEAF');
@@ -284,7 +284,7 @@ export function createPortalIntegrationRouter(): Router {
     } catch (error) { next(error); }
   });
 
-  router.post('/portal/integrations/curaleaf/prescriptions/barcode', requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/portal/integrations/curaleaf/prescriptions/barcode', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const organisationId = await authorisedOrganisationId(req.context, req.body?.organisationId, organisationRepo);
       const connection = await integrationRepo.findConnection(organisationId, 'CURALEAF');
@@ -300,7 +300,7 @@ export function createPortalIntegrationRouter(): Router {
     } catch (error) { next(error); }
   });
 
-  router.post('/portal/integrations/curaleaf/prescriptions/scan', requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/portal/integrations/curaleaf/prescriptions/scan', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const organisationId = await authorisedOrganisationId(req.context, req.body?.organisationId, organisationRepo);
       const connection = await integrationRepo.findConnection(organisationId, 'CURALEAF');

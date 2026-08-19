@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
-import { portalAppOrigins, secureSessionCookies } from '../bootstrap/config.js';
+import { secureSessionCookies } from '../bootstrap/config.js';
 import { HttpError } from '../domain/common/errors.js';
+import { isPermittedWebOrigin } from './origins.js';
 import { constantTimeEqual, parseCookies, randomToken, SESSION_ABSOLUTE_MS } from './session-utils.js';
 
 export const csrfCookieName = secureSessionCookies ? '__Host-hhh_csrf' : 'hhh_csrf';
@@ -28,19 +29,8 @@ export function issueCsrf(request: Request, response: Response): string {
 export function isOriginAllowed(request: Request): boolean {
   const source = request.get('origin') ?? request.get('referer');
   if (!source) return true;
-
   try {
-    const origin = new URL(source).origin;
-    if (portalAppOrigins.has(origin)) return true;
-    const url = new URL(origin);
-    const host = url.hostname.toLowerCase();
-    if (host.endsWith('.vercel.app')) return true;
-    if (host === 'localhost' || host === '127.0.0.1') return true;
-    if (
-      host === 'holistichealthhub.cc' || host.endsWith('.holistichealthhub.cc') ||
-      host === 'holistichealthhub.live' || host.endsWith('.holistichealthhub.live')
-    ) return true;
-    return false;
+    return isPermittedWebOrigin(new URL(source).origin);
   } catch {
     return false;
   }
