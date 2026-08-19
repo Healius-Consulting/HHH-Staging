@@ -1709,6 +1709,8 @@ td.font-semibold{
 .eligibility-legal{ font-size: 11px; text-align: center; }
 
 .eligibility-message{ margin-top: 12vh; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.eligibility-brand + .eligibility-message{ margin-top: 28px; }
+.eligibility-message .eligibility-home{ margin-top: 8px; }
 
 .eligibility-result-icon{ width: 70px; height: 70px; border-radius: 50%; display: grid; place-items: center; }
 
@@ -10122,7 +10124,24 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
   border-bottom: 1px solid #d9e2de;
 }
 
-.eligibility-brand__identity{ display: flex; align-items: center; gap: 12px; }
+.eligibility-brand__identity{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+a.eligibility-brand__identity:hover strong,
+a.eligibility-brand__identity:focus-visible strong{ color: var(--tenant-primary-strong, #176d55); }
+.eligibility-brand__actions{ display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.eligibility-home{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  text-decoration: none;
+}
 .eligibility-brand .gateway-logo{ width: 44px; height: 44px; border-radius: 11px; }
 .eligibility-brand .gateway-logo--hhh{ overflow: visible; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
 .eligibility-brand .gateway-logo--hhh img{ width: 100%; height: 100%; object-fit: contain; }
@@ -10596,7 +10615,7 @@ html[data-theme] :is(.app-main, .page-container, .admin-shell, .admin-content){
 
 @media (max-width: 560px){
   .eligibility-shell{ padding: 0 12px 52px; }
-  .eligibility-brand{ min-height: 72px; margin-bottom: 14px; }
+  .eligibility-brand{ min-height: 72px; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
   .eligibility-brand .gateway-logo{ width: 39px; height: 39px; }
   .eligibility-brand__secure{ width: 36px; height: 36px; justify-content: center; padding: 0; }
   .eligibility-brand__secure svg{ width: 15px; height: 15px; }

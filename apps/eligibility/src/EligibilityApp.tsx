@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, HeartPulse, LoaderCircle, LockKeyhole, MapPin, Search, ShieldCheck } from 'lucide-react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, HeartPulse, Home, LoaderCircle, LockKeyhole, MapPin, Search, ShieldCheck } from 'lucide-react';
 import { CONDITIONS, conditionLabel } from '@hhh/domain';
 import { createEligibilitySubmission, createV2Intake, resolvePublicReferralToken, searchPublicPharmacies } from '../../../src/shared/api';
 import { HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL, type EligibilitySubmissionInput, type PostcodeSearchReceipt, type PublicDirectoryResult, type PublicPharmacy, type V2IntakeReceipt } from '../../../src/shared/contracts';
@@ -22,6 +22,33 @@ const HHH_PUBLIC_IDENTITY: PublicPharmacy = {
   id: 'holistic-health-hub', name: 'Holistic Health Hub', tradingName: 'Holistic Health Hub', logoText: 'HHH',
   gphcNumber: '', superintendent: '', address: '', primaryColour: '#124f3b',
 };
+const PUBLIC_HOME_HREF = '/';
+
+function EligibilityBrand({
+  identity,
+  token,
+}: {
+  identity: Pick<PublicPharmacy, 'name' | 'logoText'>;
+  token: string;
+}) {
+  const identityMarkup = <>
+    <div className={`gateway-logo${token ? '' : ' gateway-logo--hhh'}`}>{token ? identity.logoText : <img src={HHH_MARK} alt="" />}</div>
+    <div><strong>{identity.name}</strong><span>{token ? 'In partnership with Holistic Health Hub' : 'Personalised healthcare'}</span></div>
+  </>;
+  return <header className="eligibility-brand">
+    {token
+      ? <div className="eligibility-brand__identity">{identityMarkup}</div>
+      : <a className="eligibility-brand__identity" href={PUBLIC_HOME_HREF}>{identityMarkup}</a>}
+    <div className="eligibility-brand__actions">
+      {!token && <a className="btn btn-secondary eligibility-home" href={PUBLIC_HOME_HREF}><Home size={15} aria-hidden="true" /> Return home</a>}
+      <span className="eligibility-brand__secure"><LockKeyhole size={14} /> Private and secure</span>
+    </div>
+  </header>;
+}
+
+function EligibilityShell({ themeStyle, children }: { themeStyle: CSSProperties; children: ReactNode }) {
+  return <main className="eligibility-shell tenant-surface" style={themeStyle}>{children}</main>;
+}
 
 export default function EligibilityApp() {
   const [referralRoute] = useState(() => parseEligibilityReferralRoute(window.location.search));
@@ -165,19 +192,16 @@ export default function EligibilityApp() {
     setConditionError('');
   };
 
-  if (loading) return <main className="eligibility-shell tenant-surface" style={themeStyle}><section className="eligibility-card eligibility-message"><LoaderCircle className="spin" size={34} /><h1>Checking your pharmacy link</h1></section></main>;
-  if (error && !pharmacy) return <main className="eligibility-shell tenant-surface" style={themeStyle}><section className="eligibility-card eligibility-message"><AlertTriangle size={36} /><h1>Unable to open this form</h1><p>{error}</p><p>Please ask your pharmacy for its current eligibility link.</p></section></main>;
+  if (loading) return <EligibilityShell themeStyle={themeStyle}><EligibilityBrand identity={HHH_PUBLIC_IDENTITY} token={token} /><section className="eligibility-card eligibility-message"><LoaderCircle className="spin" size={34} /><h1>Checking your pharmacy link</h1></section></EligibilityShell>;
+  if (error && !pharmacy) return <EligibilityShell themeStyle={themeStyle}><EligibilityBrand identity={HHH_PUBLIC_IDENTITY} token={token} /><section className="eligibility-card eligibility-message"><AlertTriangle size={36} /><h1>Unable to open this form</h1><p>{error}</p><p>Please ask your pharmacy for its current eligibility link.</p>{!token && <a className="btn btn-primary eligibility-home" href={PUBLIC_HOME_HREF}><Home size={16} aria-hidden="true" /> Return home</a>}</section></EligibilityShell>;
   if (!pharmacy) return null;
 
   const brandIdentity = token ? pharmacy : HHH_PUBLIC_IDENTITY;
 
-  if (complete) return <main className="eligibility-shell tenant-surface" style={themeStyle}><section className="eligibility-card eligibility-message"><div className={`eligibility-result-icon ${eligible ? 'pass' : 'review'}`}><CheckCircle2 size={32} /></div><p className="section-label">{receipt ? `Case ${receipt.caseReference}` : `Submitted via ${pharmacy.name}`}</p><h1>{intakeVersion === 'v1' ? eligible ? 'Thank you — your pharmacy will be in touch' : 'Thank you — your answers need a clinical review' : 'Thank you — HHH will be in touch'}</h1><p>{receipt ? token ? `HHH received your application for ${pharmacy.tradingName}. HHH will review it and contact you before referring it to that pharmacy; the dedicated destination will not change.` : `${receipt.provisionalPharmacyName ? `${receipt.provisionalPharmacyName} has been recorded as your preference. ` : ''}Your application remains with HHH while the team reviews it and contacts you. Nothing is sent to a pharmacy until HHH completes the referral.` : `Your enquiry has been securely linked to ${pharmacy.name}.`} This is not a diagnosis or guarantee of treatment.</p>{receipt?.warning && <div className="banner banner-amber">Your selected pharmacy became unavailable, so HHH will allocate your application manually.</div>}</section></main>;
+  if (complete) return <EligibilityShell themeStyle={themeStyle}><EligibilityBrand identity={brandIdentity} token={token} /><section className="eligibility-card eligibility-message"><div className={`eligibility-result-icon ${eligible ? 'pass' : 'review'}`}><CheckCircle2 size={32} /></div><p className="section-label">{receipt ? `Case ${receipt.caseReference}` : `Submitted via ${pharmacy.name}`}</p><h1>{intakeVersion === 'v1' ? eligible ? 'Thank you — your pharmacy will be in touch' : 'Thank you — your answers need a clinical review' : 'Thank you — HHH will be in touch'}</h1><p>{receipt ? token ? `HHH received your application for ${pharmacy.tradingName}. HHH will review it and contact you before referring it to that pharmacy; the dedicated destination will not change.` : `${receipt.provisionalPharmacyName ? `${receipt.provisionalPharmacyName} has been recorded as your preference. ` : ''}Your application remains with HHH while the team reviews it and contacts you. Nothing is sent to a pharmacy until HHH completes the referral.` : `Your enquiry has been securely linked to ${pharmacy.name}.`} This is not a diagnosis or guarantee of treatment.</p>{receipt?.warning && <div className="banner banner-amber">Your selected pharmacy became unavailable, so HHH will allocate your application manually.</div>}{!token && <a className="btn btn-primary eligibility-home" href={PUBLIC_HOME_HREF}><Home size={16} aria-hidden="true" /> Return home</a>}</section></EligibilityShell>;
 
-  return <main className="eligibility-shell tenant-surface" style={themeStyle}>
-    <header className="eligibility-brand">
-      <div className="eligibility-brand__identity"><div className={`gateway-logo${token ? '' : ' gateway-logo--hhh'}`}>{token ? brandIdentity.logoText : <img src={HHH_MARK} alt="" />}</div><div><strong>{brandIdentity.name}</strong><span>{token ? 'In partnership with Holistic Health Hub' : 'Personalised healthcare'}</span></div></div>
-      <span className="eligibility-brand__secure"><LockKeyhole size={14} /> Private and secure</span>
-    </header>
+  return <EligibilityShell themeStyle={themeStyle}>
+    <EligibilityBrand identity={brandIdentity} token={token} />
     <div className="eligibility-layout">
       <aside className="eligibility-intro">
         <p className="section-label">Private pre-screening · about 2 minutes</p>
@@ -273,5 +297,5 @@ export default function EligibilityApp() {
         <p className="eligibility-legal">{isLocalPreview ? 'Local preview only — this form does not transmit or store the information entered.' : 'HHH is a platform of Healius Consulting. The approved live privacy notice must identify the verified legal entity and explain the pharmacy and platform operator’s data-protection roles before patient information is accepted.'}</p>
       </form>
     </div>
-  </main>;
+  </EligibilityShell>;
 }
