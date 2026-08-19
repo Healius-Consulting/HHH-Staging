@@ -1,87 +1,21 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   Activity, ArrowRight, Brain, Check, ChevronDown, ChevronRight, Clock3, Flower2,
-  Globe2, HeartHandshake, HeartPulse, Leaf, Mail, Menu, MoonStar, Orbit, PackageCheck,
+  Globe2, HeartHandshake, HeartPulse, Leaf, Menu, MoonStar, Orbit, PackageCheck,
   ShieldCheck, ShieldPlus, Sparkles, Stethoscope, UserRoundCheck, Video, X,
 } from 'lucide-react';
 import './public-site.css';
+import { posts } from './journalPosts';
 
 const MARK = '/holistic-health-hub-mark.png';
 const HERO_IMAGE = '/hhh-consultation-hero.jpg';
-const WELLBEING_IMAGE = '/hhh-wellbeing-couple.jpg';
 const ELIGIBILITY_IMAGE = '/hhh-eligibility-check.jpg';
 const SPECIALIST_IMAGE = '/hhh-specialist-consult.jpg';
 const PHARMACY_IMAGE = '/hhh-pharmacy-care.jpg';
 const SUPPORT_IMAGE = '/hhh-ongoing-support.jpg';
+const WELLBEING_IMAGE = '/hhh-wellbeing-couple.jpg';
 
 const CANONICAL_ORIGIN = 'https://holistichealthhub.cc';
-
-const posts = [
-  {
-    slug: 'sleep-easy-7-ways-to-get-a-better-nights-rest-naturally',
-    title: 'Sleep Easy - 7 ways to get a better nights rest naturally',
-    author: 'Holistic Health Hub',
-    date: 'Mar 15, 2024',
-    dateIso: '2024-03-15T09:00:00+00:00',
-    read: '5 min read',
-    category: 'Sleep',
-    art: 'sleep',
-    excerpt: 'Today is World Sleep Day—the annual celebration of healthy sleeping patterns and awareness day for sleep disorders.',
-    body: [
-      'A good night’s sleep supports physical recovery, mood and concentration. Small, repeatable changes to your routine can make a meaningful difference.',
-      'Keep a regular bedtime, create a calm and dark sleep environment, reduce late caffeine and screen time, and make room for gentle movement during the day.',
-      'If poor sleep is persistent or affecting daily life, speak to a healthcare professional. The right support should always be tailored to you.',
-    ],
-  },
-  {
-    slug: 'cannabis-for-anxiety-what-you-need-to-know',
-    title: 'Medical Cannabis for Anxiety: What You Need to Know',
-    author: 'Holistic Health Hub',
-    date: 'Feb 14, 2024',
-    dateIso: '2024-02-14T09:00:00+00:00',
-    read: '5 min read',
-    category: 'Mental wellbeing',
-    art: 'anxiety',
-    excerpt: 'In today’s fast-paced world, anxiety has emerged as a silent shadow, affecting millions globally.',
-    body: [
-      'Anxiety can affect sleep, work, relationships and physical wellbeing. Treatment may include talking therapies, lifestyle support and licensed medicines.',
-      'Cannabis-based products for medicinal use are prescription-only medicines. A specialist doctor must assess whether they are appropriate after conventional treatment options have been explored.',
-      'Benefits and side effects vary from person to person. A careful clinical review and ongoing monitoring are essential.',
-    ],
-  },
-  {
-    slug: 'navigating-pain-relief-the-role-of-medical-cannabis-in-chronic-pain-management',
-    title: 'Navigating Pain Relief: The Role of Medical Cannabis in Chronic Pain Management',
-    author: 'Shaylen Patel',
-    date: 'Jan 31, 2024',
-    dateIso: '2024-01-31T09:00:00+00:00',
-    read: '3 min read',
-    category: 'Pain',
-    art: 'pain',
-    excerpt: 'Chronic pain represents a profound challenge in healthcare, persisting far beyond the expected period of healing.',
-    body: [
-      'Chronic pain is complex and can affect every part of daily life. Effective care often brings together physical, psychological and medical approaches.',
-      'The body’s endocannabinoid system plays a role in pain signalling and inflammation. This is one reason specialist clinicians continue to study cannabis-based medicines for selected patients.',
-      'Treatment decisions should be evidence-led, individual and regularly reviewed by a specialist.',
-    ],
-  },
-  {
-    slug: 'the-endocannabinoid-system-bringing-your-body-back-to-balance',
-    title: 'The Endocannabinoid System: Bringing your body back to balance',
-    author: 'Shaylen Patel',
-    date: 'Jan 26, 2024',
-    dateIso: '2024-01-26T09:00:00+00:00',
-    read: '2 min read',
-    category: 'CBPM 101',
-    art: 'balance',
-    excerpt: 'The endocannabinoid system is a complex cell-signalling system involved in establishing and maintaining balance.',
-    body: [
-      'The endocannabinoid system is found throughout the body and helps regulate processes including appetite, mood, sleep, memory and pain.',
-      'Endocannabinoids, receptors and enzymes work together to help maintain balance. Plant cannabinoids may interact with parts of this system in different ways.',
-      'Research is still developing, so clinical advice and appropriate monitoring remain vital.',
-    ],
-  },
-] as const;
 
 const steps = [
   {
@@ -126,6 +60,9 @@ const conditionGroups = [
   {
     title: 'Pain',
     icon: <Activity aria-hidden="true" />,
+    image: HERO_IMAGE,
+    imageAlt: 'A consultant clinician listening to a patient during a private consultation',
+    imagePosition: '78% 42%',
     lead: 'For chronic and complex pain conditions where conventional treatments have not provided sufficient relief.',
     items: [
       'Arthritis', 'Back pain', 'Cancer-related pain', 'Chronic pain', 'Cluster headache',
@@ -136,6 +73,9 @@ const conditionGroups = [
   {
     title: 'Neurological',
     icon: <Brain aria-hidden="true" />,
+    image: SPECIALIST_IMAGE,
+    imageAlt: 'A specialist clinician in a video consultation, reviewing a patient’s condition',
+    imagePosition: 'center 30%',
     lead: 'Specialist-assessed neurological indications evaluated under dedicated clinical protocols.',
     items: [
       'Autistic spectrum disorder', 'Epilepsy (adult and child)', 'Multiple sclerosis',
@@ -145,6 +85,9 @@ const conditionGroups = [
   {
     title: 'Psychiatric',
     icon: <Flower2 aria-hidden="true" />,
+    image: SUPPORT_IMAGE,
+    imageAlt: 'A patient support specialist listening and taking notes during a follow-up conversation',
+    imagePosition: 'center 35%',
     lead: 'Targeted support for mental wellbeing under consultant psychiatric oversight.',
     items: [
       'ADHD', 'Agoraphobia', 'Anxiety', 'Depression', 'Insomnia',
@@ -154,6 +97,9 @@ const conditionGroups = [
   {
     title: 'Other conditions',
     icon: <ShieldPlus aria-hidden="true" />,
+    image: PHARMACY_IMAGE,
+    imageAlt: 'A community pharmacist listening to a patient at the dispensary counter',
+    imagePosition: 'center 40%',
     lead: 'Gastrointestinal, palliative and specialized clinical indications reviewed individually.',
     items: [
       'Anorexia', 'Binge eating disorder', 'Bulimia nervosa', 'Cancer-related appetite loss',
@@ -213,7 +159,6 @@ function SiteHeader() {
           <PublicLink href="/about" className={path === '/about' ? 'is-active' : ''}>About</PublicLink>
           <PublicLink href="/blog" className={path.startsWith('/blog') || path.startsWith('/post/') ? 'is-active' : ''}>Journal</PublicLink>
           <PublicLink href="/faq" className={path === '/faq' ? 'is-active' : ''}>FAQs</PublicLink>
-          <PublicLink href="/contact" className={path === '/contact' ? 'is-active' : ''}>Contact</PublicLink>
           <PublicLink href="/eligibility" className="hhh-button hhh-button--rust hhh-nav__cta">
             Check eligibility <ArrowRight aria-hidden="true" />
           </PublicLink>
@@ -248,7 +193,6 @@ function SiteFooter() {
           <PublicLink href="/about">About our mission</PublicLink>
           <PublicLink href="/blog">Health journal</PublicLink>
           <PublicLink href="/faq">Patient FAQs</PublicLink>
-          <PublicLink href="/contact">Contact team</PublicLink>
         </div>
         <div>
           <strong>Legal &amp; Trust</strong>
@@ -271,31 +215,36 @@ function SiteFooter() {
 
 function PageShell({ children }: { children: ReactNode }) {
   useEffect(() => {
+    document.documentElement.classList.add('hhh-public-active');
     document.body.classList.add('hhh-public-active');
     window.scrollTo(0, 0);
 
-    const blocks = document.querySelectorAll('.hhh-reveal-block');
+    const sections = document.querySelectorAll<HTMLElement>('#main-content > *');
+    sections.forEach((section, index) => {
+      section.style.setProperty('--enter-i', String(index));
+    });
+    document.body.style.setProperty('--page-beats', String(Math.max(sections.length - 1, 0)));
+
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      blocks.forEach(block => block.classList.add('is-visible'));
-      return () => document.body.classList.remove('hhh-public-active');
+      document.body.classList.add('hhh-page-ready');
+      return () => {
+        document.documentElement.classList.remove('hhh-public-active');
+        document.body.classList.remove('hhh-public-active');
+        document.body.classList.remove('hhh-page-ready');
+        document.body.style.removeProperty('--page-beats');
+      };
     }
 
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('is-visible');
-            observer.unobserve(entry.target);
-          }
-        });
-      },
-      { threshold: 0.12, rootMargin: '0px 0px -40px 0px' }
-    );
+    const frame = window.requestAnimationFrame(() => {
+      document.body.classList.add('hhh-page-ready');
+    });
 
-    blocks.forEach(block => observer.observe(block));
     return () => {
-      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      document.documentElement.classList.remove('hhh-public-active');
       document.body.classList.remove('hhh-public-active');
+      document.body.classList.remove('hhh-page-ready');
+      document.body.style.removeProperty('--page-beats');
     };
   }, []);
 
@@ -428,19 +377,13 @@ function HomePage() {
     <PageShell>
       <main id="main-content">
         {/* Cinematic Hero */}
-        <section className="hhh-hero hhh-reveal">
+        <section className="hhh-hero">
           <div className="hhh-section-inner hhh-hero__inner">
-            <div className="hhh-hero__copy">
-              <div className="hhh-pill-kicker">
-                <Leaf aria-hidden="true" />
-                <span>Personalised specialist healthcare · UK</span>
-              </div>
+            <div className="hhh-hero__copy hhh-rise-copy">
+              <p className="hhh-kicker">Personalised specialist healthcare · UK</p>
               <h1>Feel heard.<br />Find a way forward.</h1>
               <p className="hhh-hero__lede">
-                At Holistic Health Hub, we are dedicated to improving your health and well-being. We offer access to specialist therapies, including comprehensive medical cannabis (CBPM) treatment programmes for a variety of conditions, provided by specialist healthcare professionals.
-              </p>
-              <p>
-                Get access to evidence-based treatment and compassionate care through our network of trusted partnered pharmacies and specialist clinic.
+                Access specialist therapies, including medical cannabis (CBPM) treatment programmes, through Holistic Health Hub and our network of trusted partnered pharmacies and specialist clinic.
               </p>
               <div className="hhh-hero__actions">
                 <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
@@ -466,12 +409,12 @@ function HomePage() {
                   width="720"
                   height="570"
                 />
-                <div className="hhh-hero__tag-badge">
-                  <span><HeartPulse aria-hidden="true" /></span>
-                  <div>
-                    <strong>Care built around you</strong>
-                    <small>From first questions to ongoing support</small>
-                  </div>
+              </div>
+              <div className="hhh-hero__tag-badge">
+                <span><HeartPulse aria-hidden="true" /></span>
+                <div>
+                  <strong>Care built around you</strong>
+                  <small>From first questions to ongoing support</small>
                 </div>
               </div>
               <div className="hhh-hero__arc-motif" aria-hidden="true" />
@@ -730,31 +673,20 @@ function InnerPageHero({
   eyebrow,
   title,
   copy,
-  image,
-  imageAlt,
   children,
 }: {
   eyebrow: string;
   title: ReactNode;
   copy: string;
-  image?: string;
-  imageAlt?: string;
   children?: ReactNode;
 }) {
   return (
-    <section className={`hhh-inner-hero hhh-reveal${image ? ' hhh-inner-hero--with-image' : ''}`}>
-      <div className="hhh-section-inner">
-        <div className="hhh-inner-hero__copy">
-          <p className="hhh-kicker">{eyebrow}</p>
-          <h1>{title}</h1>
-          <p>{copy}</p>
-          {children && <div className="hhh-inner-hero__actions">{children}</div>}
-        </div>
-        {image && (
-          <div className="hhh-inner-hero__media">
-            <img src={image} alt={imageAlt ?? ''} />
-          </div>
-        )}
+    <section className="hhh-page-head">
+      <div className="hhh-section-inner hhh-rise-copy">
+        <p className="hhh-kicker">{eyebrow}</p>
+        <h1>{title}</h1>
+        <p>{copy}</p>
+        {children && <div className="hhh-page-head__actions">{children}</div>}
       </div>
     </section>
   );
@@ -794,13 +726,73 @@ function ConditionsPage() {
           </PublicLink>
         </InnerPageHero>
 
-        <section className="hhh-condition-groups hhh-section-inner hhh-reveal-block">
+        <section className="hhh-about-story">
+          <div className="hhh-section-inner hhh-about-story__inner">
+            <figure className="hhh-about-story__media">
+              <img
+                src={ELIGIBILITY_IMAGE}
+                alt="A patient privately completing a confidential eligibility pre-check at home"
+                width="720"
+                height="900"
+              />
+              <figcaption>
+                <strong>Private eligibility review</strong>
+                <small>Your application stays with HHH first</small>
+              </figcaption>
+            </figure>
+            <div className="hhh-about-story__copy">
+              <p className="hhh-kicker">Before a referral</p>
+              <h2>Treatment is never automatic.</h2>
+              <p>
+                Holistic Health Hub reviews your eligibility first. A GMC-registered doctor who specialises in your condition then decides whether a cannabis-based medicine is clinically appropriate.
+              </p>
+              <p>
+                That decision is made with a multi-disciplinary team, and only after conventional treatment options have been explored.
+              </p>
+              <p className="hhh-about-story__note">
+                The lists below are examples of conditions that may be considered. They are not a diagnosis, and they are not a promise of a prescription.
+              </p>
+              <div className="hhh-about-copy__actions">
+                <PublicLink href="/how-it-works" className="hhh-button hhh-button--outline">See how it works</PublicLink>
+                <PublicLink href="/about" className="hhh-text-link">
+                  Meet HHH <ChevronRight aria-hidden="true" />
+                </PublicLink>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="hhh-about-role" aria-label="How conditions are assessed">
+          <div className="hhh-section-inner">
+            {[
+              { num: '01', title: 'Two treatments tried', copy: 'You may be eligible if two therapies or treatments for your condition have not provided sufficient benefit.' },
+              { num: '02', title: 'Specialist assessment', copy: 'A consultant physician on the GMC Specialist Register assesses you in relation to your specific condition.' },
+              { num: '03', title: 'MDT review', copy: 'A multi-disciplinary team of doctors and pharmacists reviews whether a CBPM is clinically appropriate for you.' },
+            ].map(item => (
+              <article key={item.title}>
+                <span>{item.num}</span>
+                <h2>{item.title}</h2>
+                <p>{item.copy}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="hhh-condition-groups hhh-section-inner">
           {conditionGroups.map((group, index) => (
             <article key={group.title} style={{ '--stagger-index': index } as CSSProperties}>
-              <div className="hhh-condition-group__head">
-                <span>{group.icon}</span>
-                <h2>{group.title}</h2>
-              </div>
+              <figure className="hhh-condition-group__media">
+                <img
+                  src={group.image}
+                  alt={group.imageAlt}
+                  loading="lazy"
+                  style={{ objectPosition: group.imagePosition }}
+                />
+                <figcaption className="hhh-condition-group__head">
+                  <span>{group.icon}</span>
+                  <h2>{group.title}</h2>
+                </figcaption>
+              </figure>
               <p className="hhh-condition-group__lead">{group.lead}</p>
               <ul>
                 {group.items.map(item => (
@@ -835,11 +827,12 @@ function PricingPage() {
   return (
     <PageShell>
       <main id="main-content">
-        <section className="hhh-pricing-head hhh-section-inner hhh-reveal">
-          <p className="hhh-kicker">Simple, transparent pricing</p>
-          <h1>Get the personalised care you deserve, at affordable prices.</h1>
-          <p>All appointments are with a consultant physician on the GMC Specialist Register who specialises in your condition.</p>
-          <div className="hhh-price-grid">
+        <section className="hhh-page-head">
+          <div className="hhh-section-inner hhh-rise-copy">
+            <p className="hhh-kicker">Simple, transparent pricing</p>
+            <h1>Get the personalised care you deserve, at affordable prices.</h1>
+            <p>All appointments are with a consultant physician on the GMC Specialist Register who specialises in your condition.</p>
+            <div className="hhh-price-grid">
             {[
               ['Initial consultation', '£30', 'Comprehensive specialist medical assessment & MDT review'],
               ['Follow-up consultation', '£30', 'Detailed dosage review and therapeutic outcome monitoring'],
@@ -853,6 +846,7 @@ function PricingPage() {
                 <p className="hhh-price-desc">{desc}</p>
               </article>
             ))}
+            </div>
           </div>
         </section>
 
@@ -941,81 +935,110 @@ function AboutPage() {
   return (
     <PageShell>
       <main id="main-content">
-        {/* About Hero: Oversized photo with solid green panel BELOW the photo (never text over busy photography) */}
-        <section className="hhh-about-hero hhh-reveal">
-          <div className="hhh-about-hero__media">
-            <img
-              src={WELLBEING_IMAGE}
-              alt="A couple walking together comfortably through a lush garden park"
-              fetchPriority="high"
-              width="1280"
-              height="600"
-            />
-          </div>
-          <div className="hhh-about-hero__copy">
-            <div className="hhh-section-inner">
-              <p className="hhh-kicker">Our purpose</p>
-              <h1>Get back to doing the things you enjoy most.</h1>
-              <p className="hhh-about-hero__sub">
-                Bridging the gap between specialist medical care and trusted local community pharmacies.
+        <InnerPageHero
+          eyebrow="Our purpose"
+          title={<>Get back to doing the things<br />you enjoy most.</>}
+          copy="Holistic Health Hub is the referral hub between you, a specialist clinic, and a trusted community pharmacy."
+        />
+
+        <section className="hhh-about-story">
+          <div className="hhh-section-inner hhh-about-story__inner">
+            <figure className="hhh-about-story__media">
+              <img
+                src={WELLBEING_IMAGE}
+                alt="A couple walking together through a garden, arm in arm"
+                width="720"
+                height="900"
+              />
+              <figcaption>
+                <strong>Ordinary life, properly supported</strong>
+                <small>The reason care should feel personal</small>
+              </figcaption>
+            </figure>
+            <div className="hhh-about-story__copy">
+              <p className="hhh-kicker">Why HHH exists</p>
+              <h2>Plant-based options, with the right people around you.</h2>
+              <p>
+                Our mission is to provide holistic plant-based treatment options to those in need. Your team can include specialist <strong>doctors</strong>, clinical <strong>pharmacists</strong> and <strong>nurses</strong>, all committed to providing personalised care to each patient.
               </p>
+              <p>
+                They understand that every patient is unique, and will work closely with you to develop a medical cannabis treatment plan that is tailored to your specific needs, where that is clinically appropriate.
+              </p>
+              <p className="hhh-about-story__note">
+                HHH reviews eligibility and stays with you through intake. A specialist clinician makes treatment decisions. Your nominated pharmacy supports dispensing once the referral is ready.
+              </p>
+              <div className="hhh-about-copy__actions">
+                <PublicLink href="/conditions" className="hhh-button hhh-button--outline">Explore conditions</PublicLink>
+                <PublicLink href="/pricing" className="hhh-button hhh-button--outline">View pricing</PublicLink>
+              </div>
             </div>
           </div>
         </section>
 
-        {/* Editorial Narrative */}
-        <section className="hhh-about-copy hhh-section-inner hhh-reveal-block">
-          <p>
-            Our mission is to provide holistic plant-based treatment options to those in need. Your team can include specialist <strong>doctors</strong>, clinical <strong>pharmacists</strong> and <strong>nurses</strong>, all committed to providing personalised care to each patient.
-          </p>
-          <p>
-            They understand that every patient is unique, and will work closely with you to develop a medical cannabis treatment plan that is tailored to your specific needs, where that is clinically appropriate.
-          </p>
-          <div className="hhh-about-copy__actions">
-            <PublicLink href="/conditions" className="hhh-button hhh-button--outline">Explore conditions</PublicLink>
-            <PublicLink href="/pricing" className="hhh-button hhh-button--outline">View pricing</PublicLink>
+        <section className="hhh-about-role" aria-label="How Holistic Health Hub fits">
+          <div className="hhh-section-inner">
+            {[
+              { num: '01', title: 'Referral hub', copy: 'HHH is not the prescribing clinic. We review eligibility, answer pre-screening questions, and confirm where your referral should go.' },
+              { num: '02', title: 'Specialist clinic', copy: 'A GMC-registered doctor who specialises in your condition assesses you. Treatment decisions are clinical, made with an MDT, and never automatic.' },
+              { num: '03', title: 'Nominated pharmacy', copy: 'Your community pharmacy supports payment, dispensing, and delivery or collection once an appropriate prescription is issued.' },
+            ].map(item => (
+              <article key={item.title}>
+                <span>{item.num}</span>
+                <h2>{item.title}</h2>
+                <p>{item.copy}</p>
+              </article>
+            ))}
           </div>
         </section>
 
-        {/* Care Team Roles */}
-        <section className="hhh-team hhh-reveal-block">
+        <section className="hhh-team">
           <div className="hhh-section-inner">
             <p className="hhh-kicker">Your care team</p>
             <h2>Specialists, pharmacists and nurses, working around you.</h2>
             <div className="hhh-team__grid">
               {[
                 {
-                  icon: <Stethoscope aria-hidden="true" />,
+                  image: SPECIALIST_IMAGE,
+                  imageAlt: 'A specialist clinician in a video consultation, speaking with a patient from a calm clinic desk',
                   title: 'Specialist doctors',
                   copy: 'A GMC-registered doctor who specialises in your condition assesses your history and decides whether a prescription is clinically appropriate.',
                 },
                 {
-                  icon: <PackageCheck aria-hidden="true" />,
+                  image: PHARMACY_IMAGE,
+                  imageAlt: 'A community pharmacist listening to a patient across the dispensary counter',
                   title: 'Clinical pharmacists',
                   copy: 'Your nominated community pharmacy supports dispensing, medication reviews, and convenient delivery or dispensary collection.',
                 },
                 {
-                  icon: <HeartPulse aria-hidden="true" />,
+                  image: SUPPORT_IMAGE,
+                  imageAlt: 'A patient support coordinator taking notes during a phone conversation',
                   title: 'Nurses & patient support',
                   copy: 'Personalised follow-up sits alongside the clinic and pharmacy, so care and communication do not stop after the first appointment.',
                 },
               ].map((item, index) => (
                 <article key={item.title} style={{ '--stagger-index': index } as CSSProperties}>
-                  <span>{item.icon}</span>
-                  <h3>{item.title}</h3>
-                  <p>{item.copy}</p>
+                  <figure>
+                    <img src={item.image} alt={item.imageAlt} loading="lazy" />
+                  </figure>
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p>{item.copy}</p>
+                  </div>
                 </article>
               ))}
             </div>
           </div>
         </section>
 
-        {/* Ecological Commitment */}
-        <section className="hhh-planet hhh-reveal-block">
+        <section className="hhh-planet">
           <div className="hhh-section-inner">
-            <div>
+            <div className="hhh-planet__intro">
               <p className="hhh-kicker">Our commitment to the planet</p>
               <h2>Care that looks<br />beyond today.</h2>
+              <div className="hhh-planet__mark" aria-hidden="true">
+                <Leaf />
+                <span>Ecologi</span>
+              </div>
             </div>
             <div>
               <p><strong>We believe it is our collective duty to preserve the planet and the various forms of life that live on it.</strong></p>
@@ -1085,6 +1108,48 @@ function HowItWorksPage() {
   );
 }
 
+function FaqAccordion() {
+  const [openIndex, setOpenIndex] = useState(0);
+
+  return (
+    <div className="hhh-faq__list" role="region" aria-label="Frequently asked questions">
+      {faqs.map(([question, answer], index) => {
+        const isOpen = openIndex === index;
+        const panelId = `faq-panel-${index}`;
+        const buttonId = `faq-button-${index}`;
+
+        return (
+          <div key={question} className={`hhh-faq__item${isOpen ? ' is-open' : ''}`}>
+            <h3>
+              <button
+                id={buttonId}
+                type="button"
+                aria-expanded={isOpen}
+                aria-controls={panelId}
+                onClick={() => setOpenIndex(isOpen ? -1 : index)}
+              >
+                <span>{question}</span>
+                <span className="hhh-faq__plus" aria-hidden="true">
+                  <ChevronDown />
+                </span>
+              </button>
+            </h3>
+            <div
+              id={panelId}
+              className="hhh-faq__panel"
+              aria-hidden={!isOpen}
+            >
+              <div className="hhh-faq__panel-inner">
+                <p>{answer}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function FaqPage() {
   return (
     <PageShell>
@@ -1099,30 +1164,18 @@ function FaqPage() {
           </PublicLink>
         </InnerPageHero>
 
-        <section className="hhh-faq hhh-section-inner hhh-reveal-block">
+        <section className="hhh-faq hhh-section-inner">
           <aside className="hhh-faq__intro">
             <span><Sparkles aria-hidden="true" /></span>
             <p className="hhh-kicker">Frequently asked</p>
             <h2>Start with the essentials.</h2>
             <p>These answers are general information, not medical advice. A specialist clinician makes individual treatment decisions.</p>
-            <PublicLink href="/contact" className="hhh-text-link">
+            <PublicLink href="/eligibility" className="hhh-text-link">
               Still have a question? <ArrowRight aria-hidden="true" />
             </PublicLink>
           </aside>
 
-          <div className="hhh-faq__list" role="region" aria-label="Frequently Asked Questions list">
-            {faqs.map(([question, answer], index) => (
-              <details key={question} open={index === 0}>
-                <summary>
-                  <span>{question}</span>
-                  <span className="hhh-faq__plus" aria-hidden="true">
-                    <ChevronDown />
-                  </span>
-                </summary>
-                <p>{answer}</p>
-              </details>
-            ))}
-          </div>
+          <FaqAccordion />
         </section>
 
         <PageCta
@@ -1132,58 +1185,6 @@ function FaqPage() {
           href="/eligibility"
           label="Start eligibility check"
         />
-      </main>
-    </PageShell>
-  );
-}
-
-function ContactPage() {
-  return (
-    <PageShell>
-      <main id="main-content">
-        <InnerPageHero
-          eyebrow="We’re here to help"
-          title={<>Start the right<br />conversation.</>}
-          copy="Choose the secure eligibility route for anything about your health, or email our team with a general service enquiry."
-        >
-          <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-            Start eligibility check <ArrowRight aria-hidden="true" />
-          </PublicLink>
-        </InnerPageHero>
-
-        <section className="hhh-contact hhh-section-inner hhh-reveal-block">
-          <div className="hhh-contact__heading">
-            <p className="hhh-kicker">Choose how to get in touch</p>
-            <h2>Two clear routes, depending on what you need.</h2>
-          </div>
-
-          <div className="hhh-contact__layout">
-            <article className="hhh-contact__card" style={{ '--stagger-index': 0 } as CSSProperties}>
-              <span className="hhh-contact__icon"><Mail aria-hidden="true" /></span>
-              <p className="hhh-kicker">General enquiries</p>
-              <h3>Email the HHH team</h3>
-              <p>For questions about our service, pricing, partnering pharmacies, or how the referral journey works.</p>
-              <a className="hhh-contact__email" href="mailto:info@holistichealthhub.live">
-                info@holistichealthhub.live
-              </a>
-              <div className="hhh-contact__notice">
-                <ShieldCheck aria-hidden="true" />
-                <p><strong>Keep health information secure.</strong> Please do not send medical history, symptoms, or prescription details by email.</p>
-              </div>
-            </article>
-
-            <article className="hhh-contact__card hhh-contact__card--green" style={{ '--stagger-index': 1 } as CSSProperties}>
-              <span className="hhh-contact__icon"><HeartPulse aria-hidden="true" /></span>
-              <p className="hhh-kicker">Health &amp; eligibility</p>
-              <h3>Use the secure form</h3>
-              <p>Tell HHH about your health circumstances, choose a participating community pharmacy, or continue with Holistic Health Hub Allocation.</p>
-              <PublicLink href="/eligibility" className="hhh-button hhh-button--pale">
-                Start eligibility check <ArrowRight aria-hidden="true" />
-              </PublicLink>
-              <small>Your application goes to HHH first. A pharmacy sees a patient record only after HHH confirms the clinical referral.</small>
-            </article>
-          </div>
-        </section>
       </main>
     </PageShell>
   );
@@ -1229,22 +1230,11 @@ function BlogPage() {
   return (
     <PageShell>
       <main id="main-content">
-        <section className="hhh-blog-hero hhh-reveal">
-          <div className="hhh-section-inner">
-            <div>
-              <p className="hhh-kicker">The HHH Journal</p>
-              <h1>Ideas for feeling<br />more like yourself.</h1>
-              <p>Clear, considered reading on sleep, pain management, mental wellbeing, and cannabis-based medicines.</p>
-            </div>
-            <div className="hhh-blog-hero__note">
-              <Leaf aria-hidden="true" />
-              <div>
-                <span>Written to inform</span>
-                <small>General health information, never a substitute for individual clinical advice.</small>
-              </div>
-            </div>
-          </div>
-        </section>
+        <InnerPageHero
+          eyebrow="The HHH journal"
+          title={<>Ideas for feeling<br />more like yourself.</>}
+          copy="Clear, considered reading on sleep, pain management, mental wellbeing, and cannabis-based medicines."
+        />
 
         <section className="hhh-blog hhh-section-inner hhh-reveal-block">
           <article className="hhh-blog-feature">
@@ -1285,14 +1275,33 @@ function ArticlePage({ slug }: { slug: string }) {
   return (
     <PageShell>
       <main id="main-content">
-        <article className="hhh-article hhh-section-inner hhh-reveal">
+        <article className="hhh-article hhh-section-inner">
           <PublicLink href="/blog" className="hhh-text-link">← Back to all journal articles</PublicLink>
+          <div className="hhh-rise-copy hhh-page-head__intro">
           <p className="hhh-post-meta">{post.author} · {post.date} · {post.read}</p>
           <h1>{post.title}</h1>
           <p className="hhh-article__lead">{post.excerpt}</p>
+          </div>
           <PostArtwork post={post} large />
           <div className="hhh-article__content">
-            {post.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+            {post.body.map((block, index) => {
+              if (block.type === 'h2') return <h2 key={index}>{block.text}</h2>;
+              if (block.type === 'ul') {
+                return (
+                  <ul key={index}>
+                    {block.items.map(item => <li key={item}>{item}</li>)}
+                  </ul>
+                );
+              }
+              if (block.type === 'ol') {
+                return (
+                  <ol key={index}>
+                    {block.items.map(item => <li key={item}>{item}</li>)}
+                  </ol>
+                );
+              }
+              return <p key={index}>{block.text}</p>;
+            })}
           </div>
           <aside className="hhh-article__disclaimer">
             <strong>Important Clinical Notice</strong>
@@ -1308,12 +1317,14 @@ function PrivacyPage() {
   return (
     <PageShell>
       <main id="main-content">
-        <article className="hhh-legal hhh-section-inner hhh-reveal">
+        <article className="hhh-legal hhh-section-inner">
+          <div className="hhh-rise-copy hhh-page-head__intro">
           <p className="hhh-kicker">Legal &amp; Privacy</p>
           <h1>Privacy Policy</h1>
           <p>
             This privacy policy explains how Holistic Health Hub collects, uses and shares personal information when you visit our website or use our services. We are committed to protecting your privacy and complying with the UK GDPR and Data Protection Act 2018.
           </p>
+          </div>
           <p>
             <strong>ICO Registration:</strong> We comply with current requirements to notify our data processing activities to the Information Commissioner’s Office and are registered under number <strong>ZB639206</strong>.
           </p>
@@ -1372,12 +1383,14 @@ function ConsentPage() {
   return (
     <PageShell>
       <main id="main-content">
-        <article className="hhh-legal hhh-section-inner hhh-reveal">
+        <article className="hhh-legal hhh-section-inner">
+          <div className="hhh-rise-copy hhh-page-head__intro">
           <p className="hhh-kicker">Terms &amp; Consent</p>
           <h1>Consent and terms of use</h1>
           <p>
             New eligibility applications are reviewed first by Holistic Health Hub. A community pharmacy does not receive the application while HHH is completing its intake and referral checks.
           </p>
+          </div>
 
           <h2>Your information and consent</h2>
           <p>
@@ -1409,13 +1422,15 @@ function NotFoundPage() {
   return (
     <PageShell>
       <main id="main-content">
-        <section className="hhh-not-found hhh-section-inner hhh-reveal">
+        <section className="hhh-page-head">
+          <div className="hhh-section-inner hhh-rise-copy">
           <p className="hhh-kicker">404 Error</p>
           <h1>We couldn’t find that page.</h1>
           <p>The link may have moved, or the page may no longer be published. Return home to continue your care journey.</p>
           <PublicLink href="/" className="hhh-button hhh-button--rust">
             Back to homepage <ArrowRight aria-hidden="true" />
           </PublicLink>
+          </div>
         </section>
       </main>
     </PageShell>
@@ -1519,12 +1534,6 @@ export default function PublicSite() {
             type: 'website',
             is404: false,
           },
-          '/contact': {
-            title: 'Contact Us | Patient Support & General Enquiries | Holistic Health Hub',
-            description: 'Contact the Holistic Health Hub team for general service enquiries, or begin a confidential online eligibility check securely.',
-            type: 'website',
-            is404: false,
-          },
           '/blog': {
             title: 'Journal & Educational Articles | Medical Cannabis & Wellbeing | HHH',
             description: 'Educational articles and clinical insights on sleep, chronic pain management, anxiety, the endocannabinoid system, and medical cannabis.',
@@ -1543,7 +1552,7 @@ export default function PublicSite() {
             type: 'website',
             is404: false,
           },
-        }[path as '/' | '/how-it-works' | '/conditions' | '/pricing' | '/about' | '/faq' | '/contact' | '/blog' | '/privacy' | '/consent'] ?? {
+        }[path as '/' | '/how-it-works' | '/conditions' | '/pricing' | '/about' | '/faq' | '/blog' | '/privacy' | '/consent'] ?? {
           title: 'Page Not Found | Holistic Health Hub',
           description: 'The requested Holistic Health Hub page could not be found. Return to our homepage to continue.',
           type: 'website',
@@ -1661,7 +1670,10 @@ export default function PublicSite() {
   if (path === '/pricing') return <PricingPage />;
   if (path === '/about') return <AboutPage />;
   if (path === '/faq' || path === '/general-5') return <FaqPage />;
-  if (path === '/contact') return <ContactPage />;
+  if (path === '/contact') {
+    window.location.replace('/eligibility');
+    return null;
+  }
   if (path === '/blog' || path.startsWith('/blog/categories/')) return <BlogPage />;
   if (path === '/privacy' || path === '/general-5-1') return <PrivacyPage />;
   if (path === '/consent') return <ConsentPage />;

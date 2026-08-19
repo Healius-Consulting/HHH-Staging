@@ -28,25 +28,35 @@ function EligibilityBrand({
   identity,
   token,
 }: {
-  identity: Pick<PublicPharmacy, 'name' | 'logoText'>;
+  identity: Pick<PublicPharmacy, 'name'>;
   token: string;
 }) {
   const identityMarkup = <>
-    <div className={`gateway-logo${token ? '' : ' gateway-logo--hhh'}`}>{token ? identity.logoText : <img src={HHH_MARK} alt="" />}</div>
-    <div><strong>{identity.name}</strong><span>{token ? 'In partnership with Holistic Health Hub' : 'Personalised healthcare'}</span></div>
+    <img className="eligibility-brand__mark" src={HHH_MARK} alt="" width="46" height="46" />
+    <span>
+      <strong>Holistic Health Hub</strong>
+      <small>{token ? `In partnership with ${identity.name}` : 'Personalised healthcare'}</small>
+    </span>
   </>;
   return <header className="eligibility-brand">
-    {token
-      ? <div className="eligibility-brand__identity">{identityMarkup}</div>
-      : <a className="eligibility-brand__identity" href={PUBLIC_HOME_HREF}>{identityMarkup}</a>}
-    <div className="eligibility-brand__actions">
-      {!token && <a className="btn btn-secondary eligibility-home" href={PUBLIC_HOME_HREF}><Home size={15} aria-hidden="true" /> Return home</a>}
-      <span className="eligibility-brand__secure"><LockKeyhole size={14} /> Private and secure</span>
+    <div className="eligibility-brand__inner">
+      {token
+        ? <div className="eligibility-brand__identity">{identityMarkup}</div>
+        : <a className="eligibility-brand__identity" href={PUBLIC_HOME_HREF} aria-label="Holistic Health Hub Home">{identityMarkup}</a>}
+      <div className="eligibility-brand__actions">
+        {!token && <a className="eligibility-home" href={PUBLIC_HOME_HREF}><Home size={15} aria-hidden="true" /> Return home</a>}
+        <span className="eligibility-brand__secure"><LockKeyhole size={14} /> Private and secure</span>
+      </div>
     </div>
   </header>;
 }
 
 function EligibilityShell({ themeStyle, children }: { themeStyle: CSSProperties; children: ReactNode }) {
+  useEffect(() => {
+    document.body.classList.add('eligibility-active');
+    return () => document.body.classList.remove('eligibility-active');
+  }, []);
+
   return <main className="eligibility-shell tenant-surface" style={themeStyle}>{children}</main>;
 }
 
