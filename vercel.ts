@@ -100,13 +100,32 @@ export const config = {
     { source: '/v1/(.*)', destination: `${apiOrigin}/v1/$1` },
     { source: '/v2/(.*)', destination: `${apiOrigin}/v2/$1` },
   ] : [
+    { source: '/sitemap.xml', destination: '/sitemap.xml' },
+    { source: '/sitemaps.xml', destination: '/sitemaps.xml' },
+    { source: '/robots.txt', destination: '/robots.txt' },
     { source: '/v1/(.*)', destination: `${apiOrigin}/v1/$1` },
     { source: '/v2/(.*)', destination: `${apiOrigin}/v2/$1` },
-    { source: '/(.*)', destination: '/index.html' },
+    { source: '/((?!sitemap\\.xml|sitemaps\\.xml|robots\\.txt).*)', destination: '/index.html' },
   ],
   headers: [
-    { source: '/(.*)', headers: [...securityHeaders, { key: 'Cache-Control', value: 'private, no-store' }] },
+    {
+      source: '/(sitemap|sitemaps).xml',
+      headers: [
+        ...securityHeaders,
+        { key: 'Content-Type', value: 'application/xml; charset=utf-8' },
+        { key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400' },
+      ],
+    },
+    {
+      source: '/robots.txt',
+      headers: [
+        ...securityHeaders,
+        { key: 'Content-Type', value: 'text/plain; charset=utf-8' },
+        { key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400' },
+      ],
+    },
     { source: '/assets/(.*)', headers: [...securityHeaders, { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
+    { source: '/(.*)', headers: [...securityHeaders, { key: 'Cache-Control', value: 'private, no-store' }] },
   ],
 };
 

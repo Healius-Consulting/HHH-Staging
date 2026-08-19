@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /eligibility
+Disallow: /payment
+Disallow: /payments
+Disallow: /order
+
+Sitemap: https://holistichealthhub.cc/sitemap.xml
+Sitemap: https://holistichealthhub.cc/sitemaps.xml
