@@ -1358,8 +1358,6 @@ export interface PharmacyStaffInvitation extends PharmacyStaffAccount {
 }
 
 export interface PlatformAdminAccount {
-
-export interface PlatformAdminAccount {
   uid: string;
   email: string;
   displayName: string;
