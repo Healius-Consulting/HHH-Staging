@@ -11,10 +11,11 @@ import {
 const configuredEnvironment = Object.fromEntries(REQUIRED_FIREBASE_CLIENT_VARIABLES.map(name => [name, `${name}-value`]));
 
 test('deployment builds require App Check whenever the API security boundary enables it', () => {
-  assert.deepEqual(missingSurfaceBuildVariables('portal', configuredEnvironment), []);
+  assert.deepEqual(missingSurfaceBuildVariables('portal', configuredEnvironment), ['VITE_FIREBASE_APP_CHECK_SITE_KEY']);
+  assert.deepEqual(missingSurfaceBuildVariables('public', configuredEnvironment), ['VITE_FIREBASE_APP_CHECK_SITE_KEY']);
   assert.deepEqual(
-    missingSurfaceBuildVariables('portal', { ...configuredEnvironment, VITE_REQUIRE_APP_CHECK: 'true' }),
-    ['VITE_FIREBASE_APP_CHECK_SITE_KEY'],
+    missingSurfaceBuildVariables('portal', { ...configuredEnvironment, VITE_FIREBASE_APP_CHECK_SITE_KEY: 'site-key' }),
+    [],
   );
   assert.throws(
     () => assertSurfaceBuildEnvironment('portal', { ...configuredEnvironment, VITE_REQUIRE_APP_CHECK: 'true' }),
@@ -25,7 +26,7 @@ test('deployment builds require App Check whenever the API security boundary ena
 test('only the public site and combined portal are deployable surfaces', () => {
   assert.deepEqual(missingSurfaceBuildVariables('admin', {}), []);
   assert.deepEqual(missingSurfaceBuildVariables('pharmacy', {}), []);
-  assert.deepEqual(missingSurfaceBuildVariables('portal', {}), REQUIRED_FIREBASE_CLIENT_VARIABLES);
+  assert.deepEqual(missingSurfaceBuildVariables('portal', {}), [...REQUIRED_FIREBASE_CLIENT_VARIABLES, 'VITE_FIREBASE_APP_CHECK_SITE_KEY']);
 });
 
 test('portal builds reject malformed eligibility form URLs before Settings can render', () => {
@@ -33,7 +34,11 @@ test('portal builds reject malformed eligibility form URLs before Settings can r
   assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'http://example.test/eligibility' }), ['VITE_ELIGIBILITY_FORM_URL']);
   assert.deepEqual(invalidSurfaceBuildVariables('portal', { VITE_ELIGIBILITY_FORM_URL: 'https://holistichealthhub.live/eligibility' }), []);
   assert.throws(
-    () => assertSurfaceBuildEnvironment('portal', { ...configuredEnvironment, VITE_ELIGIBILITY_FORM_URL: 'broken-url' }),
+    () => assertSurfaceBuildEnvironment('portal', {
+      ...configuredEnvironment,
+      VITE_FIREBASE_APP_CHECK_SITE_KEY: 'site-key',
+      VITE_ELIGIBILITY_FORM_URL: 'broken-url',
+    }),
     /VITE_ELIGIBILITY_FORM_URL/,
   );
 });

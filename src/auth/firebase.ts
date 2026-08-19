@@ -16,14 +16,13 @@ const options: FirebaseOptions = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
 };
 const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY as string | undefined;
-const appCheckRequired = import.meta.env.VITE_REQUIRE_APP_CHECK === 'true';
 
 const missingKeys = [
   ['VITE_FIREBASE_API_KEY', options.apiKey],
   ['VITE_FIREBASE_AUTH_DOMAIN', options.authDomain],
   ['VITE_FIREBASE_PROJECT_ID', options.projectId],
   ['VITE_FIREBASE_APP_ID', options.appId],
-  ...(!import.meta.env.DEV && appCheckRequired ? [['VITE_FIREBASE_APP_CHECK_SITE_KEY', appCheckSiteKey]] : []),
+  ...(!import.meta.env.DEV ? [['VITE_FIREBASE_APP_CHECK_SITE_KEY', appCheckSiteKey]] : []),
 ].filter(([, value]) => !value).map(([key]) => key as string);
 
 export const firebaseConfiguration = {
@@ -45,7 +44,7 @@ if (firebaseConfiguration.configured) {
   app = getApps().length ? getApp() : initializeApp(options);
   auth = getAuth(app);
 
-  if (appCheckRequired && appCheckSiteKey && typeof window !== 'undefined') {
+  if (appCheckSiteKey && typeof window !== 'undefined') {
     try {
       appCheck = initializeAppCheck(app, {
         provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
@@ -64,10 +63,13 @@ export function requireFirebaseAuth(): Auth {
 
 export async function readAppCheckToken(): Promise<string | null> {
   if (!appCheck) return null;
-  try {
-    return (await getAppCheckToken(appCheck, false)).token;
-  } catch (error) {
-    console.warn('Firebase App Check token is currently unavailable.', error);
-    return null;
+  for (const forceRefresh of [false, true]) {
+    try {
+      return (await getAppCheckToken(appCheck, forceRefresh)).token;
+    } catch (error) {
+      console.warn('Firebase App Check token is currently unavailable.', error);
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
   }
+  return null;
 }
