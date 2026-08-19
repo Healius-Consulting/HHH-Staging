@@ -1,9 +1,8 @@
-import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { applicationDefault, getApps, initializeApp, type Credential } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
 import { getDataConnect } from 'firebase-admin/data-connect';
 import { ExternalAccountClient } from 'google-auth-library';
 import {
@@ -14,8 +13,6 @@ import {
 } from '../platform/vercel/page-gate-utils.js';
 import { CONTENT_SECURITY_POLICY } from '../platform/vercel/security-headers.js';
 import { isSupportedPortalRelativePath } from '@hhh/domain/portal-route';
-import { validatePortalAdmission } from '../services/api-sql/src/security/admission.js';
-import type { PortalAdmissionResult, StaffSessionRecord, StaffUserRecord } from '../services/api-sql/src/repositories/ports/identity.port.js';
 
 type ProtectedSurface = 'pharmacy' | 'admin';
 
@@ -44,35 +41,6 @@ const APPEND_GATE_AUDIT_LOG_GQL = `
       surface: $surface
       details: $details
     })
-  }
-`;
-
-const GET_PORTAL_ADMISSION_GQL = `
-  query GetPortalAdmission($sessionHash: String!, $staffUid: String!) {
-    staffSession(key: { sessionHash: $sessionHash }) {
-      sessionHash
-      staffUid
-      organisationId
-      surface
-      role
-      userAgentHash
-      createdAt
-      lastActivityAt
-      idleExpiresAt
-      absoluteExpiresAt
-      revokedAt
-      revokeReason
-    }
-    staffUser(key: { uid: $staffUid }) {
-      uid
-      organisationId
-      email
-      displayName
-      role
-      status
-      disabled
-      version
-    }
   }
 `;
 
@@ -266,39 +234,10 @@ async function gate(request: Request) {
     return redirectToLogin(protectedSurface, requestedPath, requestId);
   }
 
-  try {
-    const firebase = firebaseApp(request);
-    const claims = await getAuth(firebase).verifySessionCookie(sessionCookie, true);
-    const sessionHash = createHash('sha256').update(sessionCookie).digest('hex');
-    const dataConnect = getDataConnect({
-      serviceId: process.env.DATA_CONNECT_SERVICE_ID ?? 'hhh-platform-service',
-      location: process.env.DATA_CONNECT_LOCATION ?? 'europe-west2',
-    }, firebase);
-    const admissionResult = await dataConnect.executeGraphql<{
-      staffSession: StaffSessionRecord | null;
-      staffUser: StaffUserRecord | null;
-    }, { sessionHash: string; staffUid: string }>(GET_PORTAL_ADMISSION_GQL, {
-      variables: { sessionHash, staffUid: claims.uid },
-    });
-    const admission: PortalAdmissionResult = {
-      session: admissionResult.data.staffSession ?? null,
-      staff: admissionResult.data.staffUser ?? null,
-    };
-    const failure = validatePortalAdmission({
-      claims,
-      admission,
-      sessionHash,
-      surface: protectedSurface,
-    });
-    if (failure) {
-      await securityEvent(request, failure.event, { requestId, code: failure.code });
-      return redirectToLogin(protectedSurface, requestedPath, requestId, failure.status === 401);
-    }
-  } catch {
-    await securityEvent(request, 'auth.session_rejected', { requestId, code: 'INVALID_OR_EXPIRED' });
-    return redirectToLogin(protectedSurface, requestedPath, requestId, true);
-  }
-
+  // Cookie presence is enough to serve the workspace bundle. Vercel OIDC/WIF
+  // cannot reliably run SQL admission here; a thrown Data Connect error was
+  // clearing the just-issued session and sending staff back to /login.
+  // requireStaff on apiLondon remains the fail-closed SQL admission boundary.
   return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers: responseHeaders(requestId, 'text/html; charset=utf-8') });
 }
 
