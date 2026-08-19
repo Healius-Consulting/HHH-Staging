@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { formatOrganisationAddress, parseLegacyAddressBlob } from './address.js';
-import { DIRECTORY_MAP_RADIUS_MILES, haversineMiles, normaliseUkPostcode, projectDirectoryMapPositions, topFiveNearest } from './postcode.js';
+import { DIRECTORY_MAP_MIN_RADIUS_MILES, haversineMiles, normaliseUkPostcode, projectDirectoryMapPositions, topFiveNearest } from './postcode.js';
 
 test('UK postcodes are normalised', () => {
   assert.equal(normaliseUkPostcode('sw1a1aa'), 'SW1A 1AA');
@@ -48,15 +48,29 @@ test('directory map positions stay inside the privacy-safe frame', () => {
   assert.deepEqual(Object.keys(positions[0]!).sort(), ['xPercent', 'yPercent']);
 });
 
-test('directory map uses a fixed mile scale so a distant pharmacy stays far from the origin', () => {
+test('directory map keeps a nearby pharmacy close when the furthest result is about 100 miles', () => {
   const origin = { latitude: 52.95, longitude: -1.15 };
   const milesPerDegreeLatitude = 69.172;
   const tenMilesNorth = { latitude: origin.latitude + 10 / milesPerDegreeLatitude, longitude: origin.longitude };
-  const hundredMilesNorth = { latitude: origin.latitude + DIRECTORY_MAP_RADIUS_MILES / milesPerDegreeLatitude, longitude: origin.longitude };
+  const hundredMilesNorth = { latitude: origin.latitude + 100 / milesPerDegreeLatitude, longitude: origin.longitude };
   const [near, far] = projectDirectoryMapPositions(origin, [tenMilesNorth, hundredMilesNorth]);
   const nearOffset = 50 - (near?.yPercent ?? 50);
   const farOffset = 50 - (far?.yPercent ?? 50);
   assert.ok(nearOffset > 2 && nearOffset < 8);
-  assert.ok(farOffset > 38 && farOffset < 46);
+  assert.ok(farOffset > 35 && farOffset < 46);
   assert.ok(farOffset > nearOffset * 8);
+});
+
+test('directory map separates a 100-mile pharmacy from a 260-mile pharmacy', () => {
+  const origin = { latitude: 52.95, longitude: -1.15 };
+  const milesPerDegreeLatitude = 69.172;
+  const hundredMilesNorth = { latitude: origin.latitude + 100 / milesPerDegreeLatitude, longitude: origin.longitude };
+  const twoHundredSixtyMilesNorth = { latitude: origin.latitude + 260 / milesPerDegreeLatitude, longitude: origin.longitude };
+  const [near, far] = projectDirectoryMapPositions(origin, [hundredMilesNorth, twoHundredSixtyMilesNorth]);
+  const nearOffset = 50 - (near?.yPercent ?? 50);
+  const farOffset = 50 - (far?.yPercent ?? 50);
+  assert.ok(nearOffset > 12 && nearOffset < 22);
+  assert.ok(farOffset > 35 && farOffset < 46);
+  assert.ok(farOffset > nearOffset * 2);
+  assert.ok(DIRECTORY_MAP_MIN_RADIUS_MILES < 100);
 });

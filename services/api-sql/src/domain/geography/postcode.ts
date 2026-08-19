@@ -40,7 +40,7 @@ export function topFiveNearest<T extends { latitude: number; longitude: number }
     .slice(0, 5);
 }
 
-export const DIRECTORY_MAP_RADIUS_MILES = 100;
+export const DIRECTORY_MAP_MIN_RADIUS_MILES = 80;
 export const DIRECTORY_MAP_RADIUS_PERCENT = 42;
 const MILES_PER_DEGREE_LATITUDE = 69.172;
 
@@ -55,19 +55,26 @@ export function displacementMiles(
   };
 }
 
+export function directoryMapScaleMiles(
+  origin: { latitude: number; longitude: number },
+  destinations: Array<{ latitude: number; longitude: number }>,
+) {
+  const furthest = destinations.reduce((miles, destination) => {
+    const { east, north } = displacementMiles(origin, destination);
+    return Math.max(miles, Math.hypot(east, north));
+  }, 0);
+  return Math.max(DIRECTORY_MAP_MIN_RADIUS_MILES, furthest * 1.05);
+}
+
 export function projectDirectoryMapPositions(
   origin: { latitude: number; longitude: number },
   destinations: Array<{ latitude: number; longitude: number }>,
 ) {
+  const scaleMiles = directoryMapScaleMiles(origin, destinations);
   return destinations.map(destination => {
     const { east, north } = displacementMiles(origin, destination);
-    let x = (east / DIRECTORY_MAP_RADIUS_MILES) * DIRECTORY_MAP_RADIUS_PERCENT;
-    let y = (north / DIRECTORY_MAP_RADIUS_MILES) * DIRECTORY_MAP_RADIUS_PERCENT;
-    const radius = Math.hypot(x, y);
-    if (radius > DIRECTORY_MAP_RADIUS_PERCENT && radius > 0) {
-      x *= DIRECTORY_MAP_RADIUS_PERCENT / radius;
-      y *= DIRECTORY_MAP_RADIUS_PERCENT / radius;
-    }
+    const x = (east / scaleMiles) * DIRECTORY_MAP_RADIUS_PERCENT;
+    const y = (north / scaleMiles) * DIRECTORY_MAP_RADIUS_PERCENT;
     return {
       xPercent: Math.round((50 + x) * 10) / 10,
       yPercent: Math.round((50 - y) * 10) / 10,

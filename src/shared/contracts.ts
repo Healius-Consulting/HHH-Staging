@@ -80,7 +80,7 @@ export interface PublicDirectoryResult {
   collectionAvailable: boolean;
   deliverySummary: string | null;
   intakeAvailability: 'available' | 'limited';
-  /** Server-projected position on the fixed-scale range map. Never coordinates. */
+  /** Server-projected position on the approximate map. Never coordinates. */
   mapPosition: { xPercent: number; yPercent: number };
 }
 
