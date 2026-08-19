@@ -14,6 +14,14 @@ const SPECIALIST_IMAGE = '/hhh-specialist-consult.jpg';
 const PHARMACY_IMAGE = '/hhh-pharmacy-care.jpg';
 const SUPPORT_IMAGE = '/hhh-ongoing-support.jpg';
 const WELLBEING_IMAGE = '/hhh-wellbeing-couple.jpg';
+const PAIN_IMAGE = '/hhh-condition-pain.jpg';
+const NEUROLOGICAL_IMAGE = '/hhh-condition-neurological.jpg';
+const PSYCHIATRIC_IMAGE = '/hhh-condition-psychiatric.jpg';
+const OTHER_CONDITIONS_IMAGE = '/hhh-condition-other.jpg';
+const CARE_INCLUDED_IMAGE = '/hhh-care-included.jpg';
+const TEAM_SPECIALIST_IMAGE = '/hhh-team-specialist.jpg';
+const TEAM_PHARMACIST_IMAGE = '/hhh-team-pharmacist.jpg';
+const TEAM_NURSE_IMAGE = '/hhh-team-nurse.jpg';
 
 const CANONICAL_ORIGIN = 'https://holistichealthhub.cc';
 
@@ -60,9 +68,9 @@ const conditionGroups = [
   {
     title: 'Pain',
     icon: <Activity aria-hidden="true" />,
-    image: HERO_IMAGE,
-    imageAlt: 'A consultant clinician listening to a patient during a private consultation',
-    imagePosition: '78% 42%',
+    image: PAIN_IMAGE,
+    imageAlt: 'A patient sitting quietly by a window at home, taking a moment during a long-term pain condition',
+    imagePosition: 'center 28%',
     lead: 'For chronic and complex pain conditions where conventional treatments have not provided sufficient relief.',
     items: [
       'Arthritis', 'Back pain', 'Cancer-related pain', 'Chronic pain', 'Cluster headache',
@@ -73,9 +81,9 @@ const conditionGroups = [
   {
     title: 'Neurological',
     icon: <Brain aria-hidden="true" />,
-    image: SPECIALIST_IMAGE,
-    imageAlt: 'A specialist clinician in a video consultation, reviewing a patient’s condition',
-    imagePosition: 'center 30%',
+    image: NEUROLOGICAL_IMAGE,
+    imageAlt: 'A specialist clinician listening to a patient during a neurological assessment',
+    imagePosition: 'center 22%',
     lead: 'Specialist-assessed neurological indications evaluated under dedicated clinical protocols.',
     items: [
       'Autistic spectrum disorder', 'Epilepsy (adult and child)', 'Multiple sclerosis',
@@ -85,9 +93,9 @@ const conditionGroups = [
   {
     title: 'Psychiatric',
     icon: <Flower2 aria-hidden="true" />,
-    image: SUPPORT_IMAGE,
-    imageAlt: 'A patient support specialist listening and taking notes during a follow-up conversation',
-    imagePosition: 'center 35%',
+    image: PSYCHIATRIC_IMAGE,
+    imageAlt: 'A clinician and a patient talking in a calm, private consultation room',
+    imagePosition: 'center 32%',
     lead: 'Targeted support for mental wellbeing under consultant psychiatric oversight.',
     items: [
       'ADHD', 'Agoraphobia', 'Anxiety', 'Depression', 'Insomnia',
@@ -97,9 +105,9 @@ const conditionGroups = [
   {
     title: 'Other conditions',
     icon: <ShieldPlus aria-hidden="true" />,
-    image: PHARMACY_IMAGE,
-    imageAlt: 'A community pharmacist listening to a patient at the dispensary counter',
-    imagePosition: 'center 40%',
+    image: OTHER_CONDITIONS_IMAGE,
+    imageAlt: 'A nurse sitting with an older patient at home during a quiet care conversation',
+    imagePosition: 'center 38%',
     lead: 'Gastrointestinal, palliative and specialized clinical indications reviewed individually.',
     items: [
       'Anorexia', 'Binge eating disorder', 'Bulimia nervosa', 'Cancer-related appetite loss',
@@ -911,8 +919,8 @@ function PricingPage() {
         <section className="hhh-included hhh-section-inner hhh-reveal-block">
           <div className="hhh-included__image">
             <img
-              src={PHARMACY_IMAGE}
-              alt="A registered community pharmacist consulting with a patient at the pharmacy dispensary"
+              src={CARE_INCLUDED_IMAGE}
+              alt="A community pharmacist preparing a discreet prescription bag at the dispensary"
               loading="lazy"
             />
           </div>
@@ -1060,20 +1068,20 @@ function AboutPage() {
             <div className="hhh-team__grid">
               {[
                 {
-                  image: SPECIALIST_IMAGE,
-                  imageAlt: 'A specialist clinician in a video consultation, speaking with a patient from a calm clinic desk',
+                  image: TEAM_SPECIALIST_IMAGE,
+                  imageAlt: 'A specialist doctor in a calm clinic, ready to listen during a consultation',
                   title: 'Specialist doctors',
                   copy: 'A GMC-registered doctor who specialises in your condition assesses your history and decides whether a prescription is clinically appropriate.',
                 },
                 {
-                  image: PHARMACY_IMAGE,
-                  imageAlt: 'A community pharmacist listening to a patient across the dispensary counter',
+                  image: TEAM_PHARMACIST_IMAGE,
+                  imageAlt: 'A community pharmacist checking a medicine before dispensing',
                   title: 'Clinical pharmacists',
                   copy: 'Your nominated community pharmacy supports dispensing, medication reviews, and convenient delivery or dispensary collection.',
                 },
                 {
-                  image: SUPPORT_IMAGE,
-                  imageAlt: 'A patient support coordinator taking notes during a phone conversation',
+                  image: TEAM_NURSE_IMAGE,
+                  imageAlt: 'A nurse and patient-support coordinator listening during a follow-up conversation',
                   title: 'Nurses & patient support',
                   copy: 'Personalised follow-up sits alongside the clinic and pharmacy, so care and communication do not stop after the first appointment.',
                 },
