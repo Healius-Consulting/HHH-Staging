@@ -296,12 +296,16 @@ function PageShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.add('hhh-public-active');
     document.body.classList.add('hhh-public-active');
-    window.scrollTo(0, 0);
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 
     const blocks = document.querySelectorAll('.hhh-reveal-block');
+    const unlock = () => {
+      document.documentElement.classList.remove('hhh-public-active');
+      document.body.classList.remove('hhh-public-active');
+    };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       blocks.forEach(block => block.classList.add('is-visible'));
-      return;
+      return unlock;
     }
 
     const observer = new IntersectionObserver(
@@ -319,6 +323,7 @@ function PageShell({ children }: { children: ReactNode }) {
     blocks.forEach(block => observer.observe(block));
     return () => {
       observer.disconnect();
+      unlock();
     };
   }, []);
 
@@ -338,30 +343,38 @@ function PageShell({ children }: { children: ReactNode }) {
  */
 function StickyStepNarrative() {
   const [activeStep, setActiveStep] = useState(0);
-  const stepRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const stepRefs = useRef<(HTMLElement | null)[]>([]);
 
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            const index = Number(entry.target.getAttribute('data-step-index'));
-            if (!Number.isNaN(index)) {
-              setActiveStep(index);
-            }
-          }
-        });
-      },
-      { rootMargin: '-15% 0px -25% 0px', threshold: [0.15, 0.5] }
-    );
-
-    stepRefs.current.forEach(ref => {
-      if (ref) observer.observe(ref);
-    });
-
-    return () => observer.disconnect();
+    let frame = 0;
+    const syncActiveStep = () => {
+      frame = 0;
+      const pinPoint = Math.min(window.innerHeight * 0.42, 108 + 280);
+      let next = 0;
+      let closest = Number.POSITIVE_INFINITY;
+      stepRefs.current.forEach((el, index) => {
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const dist = Math.abs(rect.top + Math.min(rect.height * 0.35, 180) - pinPoint);
+        if (dist < closest) {
+          closest = dist;
+          next = index;
+        }
+      });
+      setActiveStep(current => (current === next ? current : next));
+    };
+    const onScroll = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(syncActiveStep);
+    };
+    syncActiveStep();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   return (

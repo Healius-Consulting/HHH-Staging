@@ -40,25 +40,25 @@
   box-sizing: border-box;
 }
 
-/* ==========================================================================
-   Document Scroll Unlock (Overrides portal 100vh lock)
-   ========================================================================== */
-
-html {
-  height: auto !important;
-  min-height: 100% !important;
-  overflow-x: clip !important;
-  overflow-y: auto !important;
-  scroll-behavior: smooth;
+/* Pharmacy shell CSS locks html/body to 100vh + overflow:hidden. Unlock the
+   viewport as the only scroller. Do not put overflow-y:auto on html/body —
+   that creates a nested scrollport and breaks position:sticky on How it works. */
+html.hhh-public-active,
+html:has(body.hhh-public-active) {
+  height: auto;
+  min-height: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+  scroll-behavior: auto;
 }
 
-body {
+body.hhh-public-active {
   margin: 0;
   padding: 0;
-  height: auto !important;
-  min-height: 100vh !important;
-  width: 100% !important;
-  max-width: 100% !important;
+  height: auto;
+  min-height: 100%;
+  width: auto;
+  max-width: 100%;
   color: var(--text-body);
   background-color: var(--cream);
   font-family: var(--sans);
@@ -66,18 +66,16 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow-x: clip !important;
-  overflow-y: visible !important;
-  position: relative !important;
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
-#root {
-  height: auto !important;
-  min-height: 100% !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  overflow: visible !important;
-  position: relative !important;
+body.hhh-public-active #root {
+  height: auto;
+  min-height: 100%;
+  width: auto;
+  max-width: 100%;
+  overflow: visible;
 }
 
 /* Subtle organic film grain texture */
@@ -589,9 +587,10 @@ p {
 
 .hhh-sticky-chapter__pinned {
   position: sticky;
-  top: 120px;
-  z-index: 10;
-  height: fit-content;
+  top: 108px;
+  z-index: 2;
+  align-self: start;
+  height: auto;
 }
 
 .hhh-sticky-chapter__frame {
@@ -694,17 +693,26 @@ p {
 .hhh-sticky-chapter__steps {
   display: flex;
   flex-direction: column;
-  gap: 70px;
+  gap: 0;
   width: 100%;
 }
 
 .hhh-sticky-chapter__step {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: min(72vh, 760px);
   padding: 36px 36px 40px;
   background: var(--white);
   border: 1px solid var(--border-card);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s ease, border-color 0.3s ease;
+  margin-bottom: 28px;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.hhh-sticky-chapter__step:last-child {
+  margin-bottom: 0;
 }
 
 .hhh-sticky-chapter__step.is-active {
@@ -2765,6 +2773,11 @@ p {
 
   .hhh-sticky-chapter__pinned {
     display: none;
+  }
+
+  .hhh-sticky-chapter__step {
+    min-height: 0;
+    margin-bottom: 20px;
   }
 
   .hhh-sticky-chapter__step-mobile-media {
