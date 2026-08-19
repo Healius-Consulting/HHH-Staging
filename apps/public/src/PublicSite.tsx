@@ -24,6 +24,10 @@ const TEAM_PHARMACIST_IMAGE = '/hhh-team-pharmacist.jpg';
 const TEAM_NURSE_IMAGE = '/hhh-team-nurse.jpg';
 
 const CANONICAL_ORIGIN = 'https://holistichealthhub.cc';
+const ECOLOGI_PROFILE_HREF = 'https://ecologi.com/holistichealthhub?r=657837efdee615d57964704e';
+const ECOLOGI_FUND_HREF = 'https://ecologi.com/holistichealthhub?gift=true&r=657837efdee615d57964704e';
+const ECOLOGI_IMPACT_URL = 'https://public.ecologi.com/users/holistichealthhub/impact';
+const ECOLOGI_TREES_FALLBACK = 10;
 
 const steps = [
   {
@@ -970,6 +974,70 @@ function PricingPage() {
   );
 }
 
+function formatEcologiNumber(value: number) {
+  return new Intl.NumberFormat('en-GB', {
+    maximumFractionDigits: Number.isInteger(value) ? 0 : 1,
+  }).format(value);
+}
+
+function EcologiImpactCard() {
+  const [trees, setTrees] = useState(ECOLOGI_TREES_FALLBACK);
+  const [extras, setExtras] = useState<{ value: number; label: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch(ECOLOGI_IMPACT_URL)
+      .then(response => (response.ok ? response.json() : Promise.reject(new Error('Ecologi impact unavailable'))))
+      .then(data => {
+        if (cancelled || typeof data?.trees !== 'number') return;
+        setTrees(data.trees);
+        setExtras([
+          data.carbonOffset > 0 ? { value: data.carbonOffset, label: 'tonnes CO₂e avoided' } : null,
+          data.carbonRemoval > 0 ? { value: data.carbonRemoval, label: 'tonnes CO₂e removed' } : null,
+          data.habitatRestoration > 0 ? { value: data.habitatRestoration, label: 'm² habitat restored' } : null,
+        ].filter((item): item is { value: number; label: string } => item !== null));
+      })
+      .catch(() => {
+        if (!cancelled) setTrees(ECOLOGI_TREES_FALLBACK);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <aside className="hhh-planet__proof">
+      <p className="hhh-planet__proof-kicker">With Ecologi</p>
+      <strong className="hhh-planet__stat">{formatEcologiNumber(trees)}</strong>
+      <span className="hhh-planet__stat-label">{trees === 1 ? 'tree funded' : 'trees funded'}</span>
+      {extras.length > 0 && (
+        <ul className="hhh-planet__extras">
+          {extras.map(item => (
+            <li key={item.label}>
+              <b>{formatEcologiNumber(item.value)}</b> {item.label}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="hhh-planet__actions">
+        <a
+          className="hhh-button hhh-button--pale"
+          href={ECOLOGI_FUND_HREF}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Plant trees with Ecologi <ArrowRight aria-hidden="true" />
+        </a>
+        <a className="hhh-planet__profile" href={ECOLOGI_PROFILE_HREF} target="_blank" rel="noopener noreferrer">
+          View our forest
+        </a>
+      </div>
+    </aside>
+  );
+}
+
 function AboutPage() {
   return (
     <PageShell>
@@ -1102,19 +1170,16 @@ function AboutPage() {
 
         <section className="hhh-planet">
           <div className="hhh-section-inner">
-            <div className="hhh-planet__intro">
+            <div className="hhh-planet__copy">
               <p className="hhh-kicker">Our commitment to the planet</p>
-              <h2>Care that looks<br />beyond today.</h2>
-              <div className="hhh-planet__mark" aria-hidden="true">
-                <Leaf />
-                <span>Ecologi</span>
-              </div>
-            </div>
-            <div>
-              <p><strong>We believe it is our collective duty to preserve the planet and the various forms of life that live on it.</strong></p>
+              <h2>Care that looks beyond today.</h2>
+              <p className="hhh-planet__lede">
+                We believe it is our collective duty to preserve the planet and the various forms of life that live on it.
+              </p>
               <p>Future generations deserve a greener planet with better air quality.</p>
               <p>Cannabis itself is a carbon sequester, meaning it takes in more CO2 than it produces. That is not enough on its own, so for every CBPM prescription dispensed at a participating pharmacy, we support tree planting through Ecologi.</p>
             </div>
+            <EcologiImpactCard />
           </div>
         </section>
       </main>

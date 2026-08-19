@@ -49,6 +49,13 @@ test('the protected CSP permits only the signed Storage origin needed for upload
   assert.equal(connectDirective?.includes('https://*'), false);
 });
 
+test('the protected CSP permits the Ecologi reporting API on the public About page', () => {
+  const connectDirective = CONTENT_SECURITY_POLICY.split(';').map(value => value.trim()).find(value => value.startsWith('connect-src '));
+  const imgDirective = CONTENT_SECURITY_POLICY.split(';').map(value => value.trim()).find(value => value.startsWith('img-src '));
+  assert.ok(connectDirective?.includes('https://public.ecologi.com'));
+  assert.equal(imgDirective?.includes('https://api.ecologi.com'), false);
+});
+
 test('the protected CSP permits the documented reCAPTCHA Enterprise browser endpoints', () => {
   const directives = CONTENT_SECURITY_POLICY.split(';').map(value => value.trim());
   assert.ok(directives.find(value => value.startsWith('script-src '))?.includes('https://www.gstatic.com/recaptcha/'));
