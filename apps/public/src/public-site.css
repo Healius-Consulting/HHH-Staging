@@ -40,9 +40,23 @@
   box-sizing: border-box;
 }
 
+/* The public bundle also loads src/index.css, which locks the pharmacy shell to
+   100vh + overflow:hidden. Unlock document scroll for marketing pages. */
+html:has(body.hhh-public-active),
+html.hhh-public-active {
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 body.hhh-public-active {
   margin: 0;
   padding: 0;
+  height: auto;
+  min-height: 100%;
+  width: auto;
+  max-width: 100%;
   color: var(--text-body);
   background-color: var(--cream);
   font-family: var(--sans);
@@ -51,6 +65,15 @@ body.hhh-public-active {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body.hhh-public-active #root {
+  height: auto;
+  min-height: 100%;
+  width: auto;
+  max-width: 100%;
+  overflow: visible;
 }
 
 /* Subtle organic film grain texture */

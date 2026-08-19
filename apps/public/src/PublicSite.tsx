@@ -294,13 +294,18 @@ function SiteFooter() {
 
 function PageShell({ children }: { children: ReactNode }) {
   useEffect(() => {
+    document.documentElement.classList.add('hhh-public-active');
     document.body.classList.add('hhh-public-active');
     window.scrollTo(0, 0);
 
     const blocks = document.querySelectorAll('.hhh-reveal-block');
+    const unlock = () => {
+      document.documentElement.classList.remove('hhh-public-active');
+      document.body.classList.remove('hhh-public-active');
+    };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       blocks.forEach(block => block.classList.add('is-visible'));
-      return () => document.body.classList.remove('hhh-public-active');
+      return unlock;
     }
 
     const observer = new IntersectionObserver(
@@ -318,7 +323,7 @@ function PageShell({ children }: { children: ReactNode }) {
     blocks.forEach(block => observer.observe(block));
     return () => {
       observer.disconnect();
-      document.body.classList.remove('hhh-public-active');
+      unlock();
     };
   }, []);
 
