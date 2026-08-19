@@ -108,3 +108,49 @@ export async function geocodePostcode(postcodeValue: string): Promise<GeocodeRes
 
   return { status: 'provider_unavailable', postcode, provider: 'postcodes_io' };
 }
+
+export async function geocodePostcodes(postcodeValues: string[]): Promise<Map<string, { latitude: number; longitude: number }>> {
+  const unique = new Map<string, string>();
+  for (const value of postcodeValues) {
+    try {
+      const postcode = normaliseUkPostcode(value);
+      if (!isNorthernIrelandPostcode(postcode) && !unique.has(postcode)) unique.set(postcode, value);
+    } catch {
+      continue;
+    }
+  }
+  const matched = new Map<string, { latitude: number; longitude: number }>();
+  if (!unique.size || postcodeProviderOpenUntil > Date.now()) return matched;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4_000);
+  try {
+    const response = await fetch('https://api.postcodes.io/postcodes?filter=postcode,longitude,latitude', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ postcodes: [...unique.keys()] }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`provider_${response.status}`);
+    const payload = await response.json() as {
+      result?: Array<{ query?: string; result?: { postcode?: string; latitude?: number; longitude?: number } | null }>;
+    };
+    postcodeProviderFailures = 0;
+    for (const row of payload.result ?? []) {
+      const result = row.result;
+      if (!result || typeof result.latitude !== 'number' || typeof result.longitude !== 'number') continue;
+      try {
+        const postcode = normaliseUkPostcode(result.postcode ?? row.query ?? '');
+        matched.set(postcode, { latitude: result.latitude, longitude: result.longitude });
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    postcodeProviderFailures += 1;
+    if (postcodeProviderFailures >= 5) postcodeProviderOpenUntil = Date.now() + 30_000;
+  } finally {
+    clearTimeout(timeout);
+  }
+  return matched;
+}

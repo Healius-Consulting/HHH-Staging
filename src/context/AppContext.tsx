@@ -2134,7 +2134,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.catalogueSource, state.staffSession, state.workspaceMode]);
 
   useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || (state.workspaceMode === 'training' && !currentOrganisationIsTest)) return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || currentOrganisation?.status !== 'live' || currentOrganisationIsTest) return;
     let cancelled = false;
     const organisationId = state.currentOrganisationId;
     getPortalPatientDirectory(organisationId).then(directory => {
@@ -2147,7 +2147,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }).catch(error => console.warn('Patient directory sync unavailable:', error));
     return () => { cancelled = true; };
-  }, [currentOrganisationIsTest, state.currentOrganisationId, state.staffSession, state.workspaceMode]);
+  }, [currentOrganisation?.status, currentOrganisationIsTest, state.currentOrganisationId, state.staffSession]);
 
   useEffect(() => {
     if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || state.workspaceMode !== 'live') return;

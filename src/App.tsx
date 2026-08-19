@@ -296,14 +296,14 @@ function StaffWorkspace() {
         )}
         {allocationHolding && (
           <div className="intake-live-banner" role="status">
-            <strong>HHH allocation holding workspace</strong>
-            <span>Existing test patients and orders remain connected to Curaleaf TEST. New dedicated-link applications stay in the HHH admin workspace and appear here only after HHH completes the fixed-destination referral.</span>
+            <strong>Holistic Health Hub Allocation</strong>
+            <span>This hidden workspace is for HHH allocation only. It does not appear on the public eligibility form. New dedicated-link applications stay with HHH and appear here only after HHH completes the referral.</span>
           </div>
         )}
         {state.workspaceMode === 'intake' && (
           <div className="intake-live-banner" role="status">
             <strong>Eligibility intake live</strong>
-            <span>New QR and website-chosen enquiries appear in Patients immediately. HHH may accept that pharmacy or move the enquiry. Referral marks the patient referred.</span>
+            <span>Patients can choose this pharmacy on the public form. Enquiry details stay with HHH until go-live. After go-live, assigned enquiries appear in Patients while HHH completes the referral.</span>
           </div>
         )}
         <div id="pharmacy-main-content" className="page-container" tabIndex={-1}>{renderScreen()}</div>

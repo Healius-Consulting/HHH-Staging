@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ClipboardList, LoaderCircle, LockKeyhole, MapPin, RefreshCw, Search, Send, ShieldCheck, UserRound } from 'lucide-react';
 import { decideV2ProgrammeOnboarding, getAdminGeneralIntake, getAdminIntakeDetail, getAdminPharmacyReferralIntake, getAssignmentCandidates, reassignIntake, updateIntakeFollowUp } from '../shared/api';
-import type { V2EligibilityQueueItem } from '../shared/contracts';
+import { HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL, workspaceClassificationLabel, type V2EligibilityQueueItem } from '../shared/contracts';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 
 type Detail = Record<string, unknown>;
@@ -242,7 +242,7 @@ export default function AdminIntakeV2() {
   return <div className="admin-v2-intake">
     <section className="admin-v2-intake__boundary" aria-label="Patient intake security boundary">
       <ShieldCheck size={19} />
-      <span><strong>HHH intake workspace</strong><small>The current assigned pharmacy can see this person as an enquiry. Referral is the gate that marks them referred. Moving assignment transfers visibility.</small></span>
+      <span><strong>HHH intake workspace</strong><small>HHH can review every enquiry as it arrives. A live pharmacy sees assigned enquiries in Patients. Training workspaces and pharmacies that have not gone live cannot. Referral is the gate that marks them referred.</small></span>
       <button type="button" className="btn btn-sm" onClick={() => void load()} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh</button>
     </section>
 
@@ -264,7 +264,7 @@ export default function AdminIntakeV2() {
         {!selected ? <div className="admin-v2-intake__placeholder"><ClipboardList size={28} /><h2>Select a patient</h2><p>Choose someone from the protected queue to review their form, update the intended pharmacy, and complete the referral.</p></div> : detailLoading || !detail ? <div className="empty-state"><LoaderCircle className="spin" size={22} /> Loading full authorised form…</div> : <>
           <header className="admin-v2-intake__detail-head"><div><p className="section-label">{selected.caseReference}</p><h2>{selected.patientDisplayName}</h2><p>Submitted {dateTime(selected.submittedAt)}</p></div><span className="pill pill-info"><LockKeyhole size={12} /> HHH review</span></header>
 
-          <section className="admin-v2-case__notice"><ShieldCheck size={18} /><span><strong>Enquiry visibility follows the current pharmacy</strong><small>The assigned pharmacy can already see this person in Patients. Completing referral marks them referred. Moving assignment removes them from the previous pharmacy.</small></span></section>
+          <section className="admin-v2-case__notice"><ShieldCheck size={18} /><span><strong>Enquiry visibility follows go-live</strong><small>The assigned destination is recorded now. A live pharmacy can see the enquiry in Patients. {HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL}, Primary Pharmacy and Alternate Pharmacy stay hidden from the public form. Completing referral marks the patient referred.</small></span></section>
 
           <div className="admin-v2-case__summary">
             <section><h3><UserRound size={16} /> Patient and contact</h3><dl><div><dt>Date of birth</dt><dd>{String(detail.dob ?? '—')}</dd></div><div><dt>Postcode</dt><dd>{String(detail.postcode ?? '—')}</dd></div><div><dt>Email</dt><dd>{String(detail.email ?? '—')}</dd></div><div><dt>Mobile</dt><dd>{String(detail.mobile ?? '—')}</dd></div></dl></section>
@@ -274,11 +274,15 @@ export default function AdminIntakeV2() {
           <div className="admin-v2-intake__forms">
             <section className="admin-v2-panel admin-v2-intake__assignment">
               <header><span><MapPin size={16} /><strong>Current pharmacy assignment</strong></span><span className="pill pill-neutral">Pending</span></header>
-              <div className="admin-v2-intake__route"><span><small>Original source</small><strong>{sourceName}</strong><p>Audit attribution only</p></span><span aria-hidden="true">→</span><span><small>Current destination</small><strong>{destinationName}</strong><p>Who can see this enquiry now</p></span></div>
-              <p>Accept the chosen or QR pharmacy, or move the enquiry before referral. Saving a new destination removes the original pharmacy’s access and gives the new pharmacy the enquiry.</p>
+              <div className="admin-v2-intake__route"><span><small>Original source</small><strong>{sourceName}</strong><p>Audit attribution only</p></span><span aria-hidden="true">→</span><span><small>Current destination</small><strong>{destinationName}</strong><p>Intended pharmacy after go-live</p></span></div>
+              <p>Accept the chosen or QR pharmacy, or move the enquiry before referral. Saving a new destination updates who will see it after go-live. {HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL} remains available as a hidden destination.</p>
               <div className="search-box"><Search size={15} /><input value={candidateQuery} onChange={event => setCandidateQuery(event.target.value)} placeholder="Search eligible pharmacies" aria-label="Search eligible pharmacies" /></div>
               <button type="button" className="btn btn-sm" onClick={() => void findCandidates()} disabled={busy}>Search pharmacies</button>
-              <label>Pending destination<select className="input" value={destination} onChange={event => setDestination(event.target.value)}><option value="">Select a pharmacy</option>{candidates.map(candidate => <option key={String(candidate.id)} value={String(candidate.id)}>{String(candidate.tradingName)} · GPhC {String(candidate.gphcNumber ?? 'not recorded')}</option>)}</select></label>
+              <label>Pending destination<select className="input" value={destination} onChange={event => setDestination(event.target.value)}><option value="">Select a pharmacy</option>{candidates.map(candidate => {
+                const classification = String(candidate.workspaceClassification ?? '');
+                const extra = classification === 'allocation_holding' || classification === 'training' ? ` · ${workspaceClassificationLabel(classification)}` : '';
+                return <option key={String(candidate.id)} value={String(candidate.id)}>{String(candidate.tradingName)} · GPhC {String(candidate.gphcNumber ?? 'not recorded')}{extra}</option>;
+              })}</select></label>
               <label>Reason<select className="input" value={reason} onChange={event => setReason(event.target.value as typeof reason)}><option value="patient_preference">Patient preference</option><option value="capacity">Capacity</option><option value="delivery_or_collection">Delivery or collection needs</option><option value="geographic_coverage">Geographic coverage</option><option value="service_compatibility">Service compatibility</option><option value="administrative_correction">Administrative correction</option></select></label>
               <label>Private HHH note<textarea className="input" rows={3} value={allocationNote} onChange={event => setAllocationNote(event.target.value)} /></label>
               <button type="button" className="btn" disabled={busy || !destination || sameId(destination, currentDestinationId)} onClick={() => void saveDestination()}>Move pending enquiry</button>

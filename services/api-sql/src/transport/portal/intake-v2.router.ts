@@ -4,16 +4,18 @@ import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { asUuid, sameUuid } from '../../domain/common/uuid.js';
 import type { PlatformSubmissionRecord } from '../../repositories/ports/intake.port.js';
-import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
 import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { listPharmacyRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
+import { canReceiveReferral, pharmacyOperationalAccess } from '../../domain/organisation/access.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertPlatformScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 import { isDedicatedSqlIntake, isOpenSqlIntake, toAdminIntakeDetail, toAdminIntakeQueueItem } from './intake-contracts.js';
+
+export { canReceiveReferral };
 
 const caseIdSchema = z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
 export const queueQuerySchema = z.object({
@@ -76,13 +78,6 @@ function assertPending(record: PlatformSubmissionRecord) {
   if (record.pharmacyAccessStatus !== 'WITHHELD' || record.outcomeStatus !== 'OPEN') {
     throw new HttpError(409, 'This intake has already left the protected HHH queue.', 'INTAKE_NOT_PENDING');
   }
-}
-
-export function canReceiveReferral(organisation: OrganisationRecord | null) {
-  return Boolean(
-    organisation
-    && ['INTAKE_LIVE', 'LIVE'].includes(organisation.status),
-  );
 }
 
 export function createPortalIntakeV2Router(): Router {
@@ -310,8 +305,8 @@ export function createPortalIntakeV2Router(): Router {
         throw new HttpError(409, 'Required referral and data-sharing consent is not recorded.', 'CONSENT_REQUIRED');
       }
       const destination = await organisationRepo.findOrganisationById(record.assignedOrganisationId);
-      if (!canReceiveReferral(destination)) {
-        throw new HttpError(409, 'The selected pharmacy is not currently eligible to receive referrals.', 'DESTINATION_UNAVAILABLE');
+      if (!pharmacyOperationalAccess(destination)) {
+        throw new HttpError(409, 'The selected pharmacy cannot receive the patient record until it is live.', 'DESTINATION_UNAVAILABLE');
       }
       const patientId = randomUUID();
       await intakeRepo.activateSubmission({
@@ -342,7 +337,9 @@ export function createPortalIntakeV2Router(): Router {
         surface: 'admin',
         details: { patientId, notePresent: Boolean(input.notes), sourceOrganisationId: record.sourceOrganisationId },
       });
-      const pharmacyRecipients = await listPharmacyRecipients(record.assignedOrganisationId, { identityRepo, organisationRepo });
+      const pharmacyRecipients = pharmacyOperationalAccess(destination)
+        ? await listPharmacyRecipients(record.assignedOrganisationId, { identityRepo, organisationRepo })
+        : [];
       await queueEmailToRecipients(
         notificationRepo,
         pharmacyRecipients,

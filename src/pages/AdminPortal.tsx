@@ -40,7 +40,7 @@ import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { useAuth } from '../auth/useAuth';
 import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacyStaff, getPlatformAdmins, getReferralLink, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, resetPharmacyStaffMfa, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
-import type { AdminReferralFinanceReport, CuraleafConnectionStatus, PatientRegisterExportResult, PatientRegisterExportRow, PharmacySetupStatus, PharmacyStaffAccount, PharmacyStaffInvitation, PlatformAdminAccount, PlatformAdminInvitation, UpdateOrganisationInput } from '../shared/contracts';
+import { workspaceClassificationLabel, type AdminReferralFinanceReport, type CuraleafConnectionStatus, type PatientRegisterExportResult, type PatientRegisterExportRow, type PharmacySetupStatus, type PharmacyStaffAccount, type PharmacyStaffInvitation, type PlatformAdminAccount, type PlatformAdminInvitation, type UpdateOrganisationInput } from '../shared/contracts';
 import { SETUP_TASKS } from '../onboarding/setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -1368,10 +1368,10 @@ export default function AdminPortal() {
                   <div className="readiness-cell">
                     <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
                     <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
-                    <div className="go-live-gate-pills"><span className="pill pill-info">{goLive?.allocationHolding ? 'Allocation holding' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span></div>
+                    <div className="go-live-gate-pills"><span className="pill pill-info">{goLive?.allocationHolding ? 'Holistic Health Hub Allocation' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span></div>
                   </div>
                   <div className="admin-org-actions">
-                    <span className={`pill ${statusPill(org.status)}`}>{statusLabel(org.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Allocation holding</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
+                    <span className={`pill ${statusPill(org.status)}`}>{statusLabel(org.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Holistic Health Hub Allocation</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
                     <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button>
                   </div>
                 </article>
@@ -1398,7 +1398,7 @@ export default function AdminPortal() {
                         <small>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
                       </div>
                       <div className="company-group-card__meta">
-                        <span className="pill pill-info">{goLive?.allocationHolding ? 'Allocation holding' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span>
+                        <span className="pill pill-info">{goLive?.allocationHolding ? 'Holistic Health Hub Allocation' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span>
                         <div>
                           <strong>{earningPatientsCount}</strong> earning patients · <strong>£{accruedCommission}</strong> accrued
                         </div>
@@ -1419,10 +1419,10 @@ export default function AdminPortal() {
                       <div className="readiness-cell">
                         <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
                         <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
-                        <div className="go-live-gate-pills"><span className="pill pill-info">{goLive?.allocationHolding ? 'Allocation holding' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span></div>
+                        <div className="go-live-gate-pills"><span className="pill pill-info">{goLive?.allocationHolding ? 'Holistic Health Hub Allocation' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span></div>
                       </div>
                       <div className="admin-org-actions">
-                        <span className={`pill ${statusPill(org.status)}`}>{statusLabel(org.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Allocation holding</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
+                        <span className={`pill ${statusPill(org.status)}`}>{statusLabel(org.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Holistic Health Hub Allocation</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
                         <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage branch</button>
                       </div>
                     </article>
@@ -1680,7 +1680,7 @@ export default function AdminPortal() {
           <section className="card admin-patient-table compliance-register">
             <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Setup tasks are an operational checklist only. Live intake is controlled by each pharmacy's current status and is not blocked by off-platform evidence.</p></div></div>
             {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
-            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Operational checklist</th><th>Workspace</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const readiness = tenantReadiness(organisation.id); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>For the pharmacy's own operational handover</small></td><td><span className="pill pill-info">{organisation.workspaceClassification?.replaceAll('_', ' ') ?? 'standard'}</span></td><td><span className={`pill ${statusPill(organisation.status)}`}>{statusLabel(organisation.status)}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
+            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Operational checklist</th><th>Workspace</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const readiness = tenantReadiness(organisation.id); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>For the pharmacy's own operational handover</small></td><td><span className="pill pill-info">{workspaceClassificationLabel(organisation.workspaceClassification)}</span></td><td><span className={`pill ${statusPill(organisation.status)}`}>{statusLabel(organisation.status)}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
           </section>
         </>
       )}

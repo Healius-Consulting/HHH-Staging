@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, HeartPulse, LoaderCircle, LockKeyhole, MapPin, Search, ShieldCheck } from 'lucide-react';
 import { CONDITIONS, conditionLabel } from '@hhh/domain';
 import { createEligibilitySubmission, createV2Intake, resolvePublicReferralToken, searchPublicPharmacies } from '../../../src/shared/api';
-import type { EligibilitySubmissionInput, PostcodeSearchReceipt, PublicDirectoryResult, PublicPharmacy, V2IntakeReceipt } from '../../../src/shared/contracts';
+import { HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL, type EligibilitySubmissionInput, type PostcodeSearchReceipt, type PublicDirectoryResult, type PublicPharmacy, type V2IntakeReceipt } from '../../../src/shared/contracts';
 import { tenantThemeVariables } from '../../../src/utils/tenantTheme';
 import { parseEligibilityReferralRoute } from './referralRoute';
 
@@ -228,11 +228,11 @@ export default function EligibilityApp() {
             </div>
             {selectedDirectoryProfileId ? <div className="banner banner-green" role="status"><CheckCircle2 size={17} /> {pharmacy.tradingName} recorded as your preference. Your application stays with HHH until the referral is completed.</div> : <div className="eligibility-location-required" role="status"><MapPin size={17} /><span><strong>Select one pharmacy to continue</strong><small>You can use a pin or the list. The form cannot be submitted until you choose.</small></span></div>}
           </div> : search ? <div className="eligibility-location-manual" aria-live="polite">
-            <div className="banner banner-amber"><AlertTriangle size={17} /><span>{search.status === 'provider_unavailable' ? 'The postcode service is temporarily unavailable.' : search.status === 'not_found' ? 'We could not find that postcode.' : 'No published participating pharmacy is currently available.'} You can still send the form to HHH for manual allocation.</span></div>
+            <div className="banner banner-amber"><AlertTriangle size={17} /><span>{search.status === 'provider_unavailable' ? 'The postcode service is temporarily unavailable.' : search.status === 'not_found' ? 'We could not find that postcode.' : 'No participating pharmacy is currently available nearby.'} You can still send the form to {HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL}.</span></div>
             <div className={`eligibility-hhh-allocation${manualProceed ? ' is-selected' : ''}`}>
               <span className="eligibility-hhh-allocation__mark" aria-hidden="true"><img src={HHH_MARK} alt="" /></span>
-              <span><strong>Holistic Health Hub allocation</strong><small>Your application stays with HHH until an appropriate pharmacy is confirmed.</small></span>
-              {manualProceed ? <span className="eligibility-hhh-allocation__selected" role="status"><CheckCircle2 size={16} /> Selected</span> : <button className="btn btn-secondary" type="button" onClick={continueManual}>Choose HHH allocation</button>}
+              <span><strong>{HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL}</strong><small>Your application stays with HHH until an appropriate pharmacy is confirmed.</small></span>
+              {manualProceed ? <span className="eligibility-hhh-allocation__selected" role="status"><CheckCircle2 size={16} /> Selected</span> : <button className="btn btn-secondary" type="button" onClick={continueManual}>Choose {HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL}</button>}
             </div>
           </div> : <div className="eligibility-location-required" role="status"><Search size={17} /><span><strong>Search before submitting</strong><small>Your remaining form fields are available below, but a pharmacy choice is required before submission.</small></span></div>}
         </section>}

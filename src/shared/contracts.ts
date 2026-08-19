@@ -1272,6 +1272,14 @@ export interface PortalOrganisation {
   workspaceClassification?: 'standard' | 'training' | 'allocation_holding';
 }
 
+export const HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL = 'Holistic Health Hub Allocation';
+
+export function workspaceClassificationLabel(classification?: string | null) {
+  if (classification === 'allocation_holding') return HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL;
+  if (classification === 'training') return 'Training workspace';
+  return 'Standard workspace';
+}
+
 export interface OrganisationLogoUploadTarget {
   uploadUrl: string;
   requiredHeaders: Record<string, string>;

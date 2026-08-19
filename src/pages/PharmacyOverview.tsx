@@ -137,7 +137,7 @@ export default function PharmacyOverview() {
               {overview.organisation.status.replace('_', ' ')}
             </span>
             {overview.organisation.trainingMode && <span className="status-badge status-badge--training">Training data</span>}
-            {overview.organisation.allocationHoldingMode && <span className="status-badge status-badge--intake_live">Allocation holding</span>}
+            {overview.organisation.allocationHoldingMode && <span className="status-badge status-badge--intake_live">Holistic Health Hub Allocation</span>}
             <span>As of {formatAsOf(overview.asOf)}</span>
           </div>
         </div>

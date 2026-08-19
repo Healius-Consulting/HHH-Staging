@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import { buildOrganisationProfileUpdate, syncDirectoryProfileFromOrganisation } from '../../application/organisation/profile-sync.js';
 import { HttpError } from '../../domain/common/errors.js';
+import { pharmacyOperationalAccess } from '../../domain/organisation/access.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlDirectoryRepository } from '../../repositories/sql/directory.sql.js';
@@ -39,13 +40,26 @@ export function createPortalPharmacyRouter(): Router {
   const identityRepo = new SqlIdentityRepository();
   const integrationRepo = new SqlIntegrationRepository();
 
+  async function operationalRecords(organisationId: string) {
+    const organisation = await organisationRepo.findOrganisationById(organisationId);
+    if (!organisation) {
+      throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+    }
+    if (!pharmacyOperationalAccess(organisation)) {
+      return { organisation, patients: [], orders: [], pendingEnquiries: [] };
+    }
+    const [patients, orders, pendingEnquiries] = await Promise.all([
+      patientRepo.listTenantPatients(organisationId),
+      orderRepo.listTenantOrders(organisationId),
+      intakeRepo.listTenantPendingEnquiries(organisationId),
+    ]);
+    return { organisation, patients, orders, pendingEnquiries };
+  }
+
   router.get('/portal/patient-directory', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertTenantScope(req.context!);
-      const [patients, pendingEnquiries] = await Promise.all([
-        patientRepo.listTenantPatients(scope.organisationId),
-        intakeRepo.listTenantPendingEnquiries(scope.organisationId),
-      ]);
+      const { patients, pendingEnquiries } = await operationalRecords(scope.organisationId);
       res.setHeader('Cache-Control', 'private, no-store');
       res.status(200).json(buildPharmacyPatientDirectory({ patients, pendingEnquiries }));
     } catch (error) {
@@ -56,7 +70,7 @@ export function createPortalPharmacyRouter(): Router {
   router.get('/portal/patients', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertTenantScope(req.context!);
-      const patients = await patientRepo.listTenantPatients(scope.organisationId);
+      const { patients } = await operationalRecords(scope.organisationId);
       res.status(200).json(patients.map(toPortalPatient));
     } catch (error) {
       next(error);
@@ -66,7 +80,7 @@ export function createPortalPharmacyRouter(): Router {
   router.get('/portal/enquiries', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertTenantScope(req.context!);
-      const pendingEnquiries = await intakeRepo.listTenantPendingEnquiries(scope.organisationId);
+      const { pendingEnquiries } = await operationalRecords(scope.organisationId);
       res.setHeader('Cache-Control', 'private, no-store');
       res.status(200).json(pendingEnquiries.map(toPortalPendingEnquiry));
     } catch (error) {
@@ -77,17 +91,11 @@ export function createPortalPharmacyRouter(): Router {
   router.get('/portal/overview', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertTenantScope(req.context!);
-      const [organisation, patients, orders, pendingEnquiries, curaleaf, worldpay] = await Promise.all([
-        organisationRepo.findOrganisationById(scope.organisationId),
-        patientRepo.listTenantPatients(scope.organisationId),
-        orderRepo.listTenantOrders(scope.organisationId),
-        intakeRepo.listTenantPendingEnquiries(scope.organisationId),
+      const [{ organisation, patients, orders, pendingEnquiries }, curaleaf, worldpay] = await Promise.all([
+        operationalRecords(scope.organisationId),
         integrationRepo.findConnection(scope.organisationId, 'CURALEAF'),
         integrationRepo.findConnection(scope.organisationId, 'WORLDPAY'),
       ]);
-      if (!organisation) {
-        throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
-      }
       res.setHeader('Cache-Control', 'private, no-store');
       res.status(200).json(buildSqlPharmacyOverview({
         organisation,
