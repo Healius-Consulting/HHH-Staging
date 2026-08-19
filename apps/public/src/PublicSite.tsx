@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   Activity, ArrowRight, Brain, Check, ChevronDown, ChevronRight, Clock3, Flower2,
-  Globe2, HeartHandshake, HeartPulse, Leaf, Mail, Menu, MoonStar, Orbit, PackageCheck,
-  ShieldCheck, ShieldPlus, Sparkles, Stethoscope, UserRoundCheck, Video, X,
+  Globe2, HeartHandshake, HeartPulse, Leaf, Menu, MoonStar, Orbit, PackageCheck,
+  ShieldCheck, ShieldPlus, Sparkles, Stethoscope, Trees, UserRoundCheck, Video, X,
 } from 'lucide-react';
 import './public-site.css';
 
@@ -92,6 +92,7 @@ const steps = [
     image: ELIGIBILITY_IMAGE,
     imageAlt: 'A patient privately completing a confidential eligibility pre-check at home',
     tag: 'Private intake review',
+    highlights: ['2-minute confidential assessment', 'No GP referral required to start', 'Protected intake boundary'],
   },
   {
     number: '02',
@@ -101,6 +102,7 @@ const steps = [
     image: SPECIALIST_IMAGE,
     imageAlt: 'A consultant specialist physician discussing treatment options with a patient during a video assessment',
     tag: 'Consultant physician & MDT review',
+    highlights: ['GMC-registered specialist doctors', 'Comprehensive medical review', 'Independent MDT clinical approval'],
   },
   {
     number: '03',
@@ -110,6 +112,7 @@ const steps = [
     image: PHARMACY_IMAGE,
     imageAlt: 'A community pharmacist providing prescription guidance at the pharmacy dispensary',
     tag: 'Nominated community pharmacy',
+    highlights: ['GPhC-registered dispensing', 'Direct delivery or local collection', 'Clear indicative medicine costs'],
   },
   {
     number: '04',
@@ -119,6 +122,7 @@ const steps = [
     image: SUPPORT_IMAGE,
     imageAlt: 'A dedicated patient support specialist conducting an ongoing health follow-up',
     tag: 'Dedicated check-ins & reviews',
+    highlights: ['Quarterly specialist reviews', 'Continuous dosage titration support', 'Dedicated patient assistance'],
   },
 ] as const;
 
@@ -163,18 +167,36 @@ const conditionGroups = [
   },
 ] as const;
 
-const faqs = [
-  ['Is medical cannabis legal in the UK?', 'Cannabis based products for medicinal use (CBPM) have been legal for medicinal purposes in the UK since November 2018. They require a valid prescription issued by a specialist doctor on the GMC Specialist Register.'],
-  ['Are CBPMs safe?', 'Like all medicines, CBPMs can cause side effects and are not suitable for everyone. A specialist clinician weighs the potential benefits and risks for your specific circumstances and monitors your treatment plan on an ongoing basis.'],
-  ['What can CBPMs be prescribed for?', 'A specialist may consider CBPMs for a range of conditions—including chronic pain, neurological conditions, anxiety, insomnia, and palliative symptoms—when conventional licensed treatments have not provided sufficient relief.'],
-  ['What do CBPMs look like?', 'Depending on your individual clinical prescription, products can include dried flower for vaporisation, sublingual oils, or inhalation cartridges. Your clinical team and dispensing pharmacist explain exactly how the prescribed medicine should be used.'],
-  ['Will CBPMs get me high?', 'Treatment is prescribed and carefully monitored to achieve therapeutic clinical benefit. THC can affect alertness or cause intoxication, which is why dosing, titration and specialist medical guidance are strictly observed.'],
-  ['What is the difference between CBD and THC?', 'CBD and THC are two primary cannabinoids with distinct physiological effects. THC is psychoactive; CBD is non-intoxicating. Prescription products may contain formulated ratios of one or both, tailored by your specialist doctor.'],
-  ['What’s the difference between CBD products and CBPMs?', 'Over-the-counter CBD wellness products sold on the high street are not the same as prescription cannabis-based medicines, which require formal clinical oversight, pharmaceutical GMP quality certification, and tailored clinical dosing.'],
-  ['What does EU GMP medical cannabis mean?', 'EU GMP (Good Manufacturing Practice) refers to stringent European pharmaceutical manufacturing standards designed to guarantee consistent quality, purity, and controlled production without contaminants.'],
-  ['What is a Summary Care Record (SCR)?', 'A Summary Care Record contains key information from your GP medical file (including current medications, allergies, and health history). With your explicit consent, it allows the assessing specialist clinician to review your treatment history safely.'],
-  ['How do I get a prescription for CBPMs?', 'A specialist doctor must assess you through a clinical consultation. If treatment is appropriate and approved by the multi-disciplinary team (MDT), the prescription is transmitted to your nominated pharmacy for dispensing.'],
-  ['Am I eligible for CBPM therapy?', 'Eligibility generally requires that you have a diagnosed eligible condition and have previously tried at least two licensed therapies or medications that proved ineffective or caused intolerable side effects. Complete the secure HHH eligibility pre-check to start a review.'],
+const faqCategories = [
+  {
+    id: 'legality',
+    label: 'Legality & Safety',
+    items: [
+      ['Is medical cannabis legal in the UK?', 'Cannabis based products for medicinal use (CBPM) have been legal for medicinal purposes in the UK since November 2018. They require a valid prescription issued by a specialist doctor on the GMC Specialist Register.'],
+      ['Are CBPMs safe?', 'Like all medicines, CBPMs can cause side effects and are not suitable for everyone. A specialist clinician weighs the potential benefits and risks for your specific circumstances and monitors your treatment plan on an ongoing basis.'],
+      ['What is the difference between CBD and THC?', 'CBD and THC are two primary cannabinoids with distinct physiological effects. THC is psychoactive; CBD is non-intoxicating. Prescription products may contain formulated ratios of one or both, tailored by your specialist doctor.'],
+      ['What does EU GMP medical cannabis mean?', 'EU GMP (Good Manufacturing Practice) refers to stringent European pharmaceutical manufacturing standards designed to guarantee consistent quality, purity, and controlled production without contaminants.'],
+      ['What is a Summary Care Record (SCR)?', 'A Summary Care Record contains key information from your GP medical file (including current medications, allergies, and health history). With your explicit consent, it allows the assessing specialist clinician to review your treatment history safely.'],
+    ] as const,
+  },
+  {
+    id: 'clinical',
+    label: 'Prescription & Dosing',
+    items: [
+      ['What can CBPMs be prescribed for?', 'A specialist may consider CBPMs for a range of conditions—including chronic pain, neurological conditions, anxiety, insomnia, and palliative symptoms—when conventional licensed treatments have not provided sufficient relief.'],
+      ['What do CBPMs look like?', 'Depending on your individual clinical prescription, products can include dried flower for vaporisation, sublingual oils, or inhalation cartridges. Your clinical team and dispensing pharmacist explain exactly how the prescribed medicine should be used.'],
+      ['Will CBPMs get me high?', 'Treatment is prescribed and carefully monitored to achieve therapeutic clinical benefit. THC can affect alertness or cause intoxication, which is why dosing, titration and specialist medical guidance are strictly observed.'],
+      ['What’s the difference between CBD products and CBPMs?', 'Over-the-counter CBD wellness products sold on the high street are not the same as prescription cannabis-based medicines, which require formal clinical oversight, pharmaceutical GMP quality certification, and tailored clinical dosing.'],
+    ] as const,
+  },
+  {
+    id: 'process',
+    label: 'Eligibility & Process',
+    items: [
+      ['Am I eligible for CBPM therapy?', 'Eligibility generally requires that you have a diagnosed eligible condition and have previously tried at least two licensed therapies or medications that proved ineffective or caused intolerable side effects. Complete the secure HHH eligibility pre-check to start a review.'],
+      ['How do I get a prescription for CBPMs?', 'A specialist doctor must assess you through a clinical consultation. If treatment is appropriate and approved by the multi-disciplinary team (MDT), the prescription is transmitted to your nominated pharmacy for dispensing.'],
+    ] as const,
+  },
 ] as const;
 
 function PublicLink({ href, children, className = '', ...props }: { href: string; children: ReactNode; className?: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
@@ -213,7 +235,6 @@ function SiteHeader() {
           <PublicLink href="/about" className={path === '/about' ? 'is-active' : ''}>About</PublicLink>
           <PublicLink href="/blog" className={path.startsWith('/blog') || path.startsWith('/post/') ? 'is-active' : ''}>Journal</PublicLink>
           <PublicLink href="/faq" className={path === '/faq' ? 'is-active' : ''}>FAQs</PublicLink>
-          <PublicLink href="/contact" className={path === '/contact' ? 'is-active' : ''}>Contact</PublicLink>
           <PublicLink href="/eligibility" className="hhh-button hhh-button--rust hhh-nav__cta">
             Check eligibility <ArrowRight aria-hidden="true" />
           </PublicLink>
@@ -229,7 +250,7 @@ function SiteFooter() {
       <div className="hhh-footer__inner">
         <div className="hhh-footer__brand">
           <img src={MARK} alt="Holistic Health Hub" width="58" height="58" />
-          <p>Personalised specialist healthcare, connecting patients with specialist doctors and trusted community pharmacies.</p>
+          <p>Personalised specialist healthcare in the UK, connecting patients with specialist clinicians and trusted community pharmacies.</p>
           <div className="hhh-footer__badges">
             <span>ICO Registered ZB639206</span>
             <span>UK Medical Cannabis (CBPM)</span>
@@ -240,7 +261,7 @@ function SiteFooter() {
           <strong>Care Journey</strong>
           <PublicLink href="/how-it-works">How it works</PublicLink>
           <PublicLink href="/conditions">Treatable conditions</PublicLink>
-          <PublicLink href="/pricing">Pricing &amp; costs</PublicLink>
+          <PublicLink href="/pricing">Pricing &amp; fees</PublicLink>
           <PublicLink href="/eligibility">Eligibility check</PublicLink>
         </div>
         <div>
@@ -248,13 +269,15 @@ function SiteFooter() {
           <PublicLink href="/about">About our mission</PublicLink>
           <PublicLink href="/blog">Health journal</PublicLink>
           <PublicLink href="/faq">Patient FAQs</PublicLink>
-          <PublicLink href="/contact">Contact team</PublicLink>
+          <PublicLink href="/eligibility">Start referral</PublicLink>
         </div>
         <div>
           <strong>Legal &amp; Trust</strong>
           <PublicLink href="/privacy">Privacy policy</PublicLink>
           <PublicLink href="/consent">Consent &amp; terms</PublicLink>
-          <a href="mailto:info@holistichealthhub.live">info@holistichealthhub.live</a>
+          <a href="mailto:info@holistichealthhub.live" className="hhh-footer__email">
+            info@holistichealthhub.live
+          </a>
           <div className="hhh-social" aria-label="Social links">
             <a href="https://www.instagram.com/holistichealthhub1" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
               <span>ig</span>
@@ -356,7 +379,7 @@ function StickyStepNarrative() {
               />
             ))}
             <div className="hhh-sticky-chapter__badge">
-              <span className="hhh-sticky-chapter__badge-number">Step {steps[activeStep].number}</span>
+              <span className="hhh-sticky-chapter__badge-number">Step {steps[activeStep].number} of 04</span>
               <span className="hhh-sticky-chapter__badge-title">{steps[activeStep].title}</span>
             </div>
             <div className="hhh-sticky-chapter__arc" />
@@ -391,6 +414,15 @@ function StickyStepNarrative() {
 
                 <h2>{step.number}. {step.title}</h2>
                 <p>{step.copy}</p>
+
+                <ul className="hhh-sticky-chapter__highlights">
+                  {step.highlights.map(item => (
+                    <li key={item}>
+                      <Check aria-hidden="true" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
 
                 <div className="hhh-sticky-chapter__step-footer">
                   {idx === 0 && (
@@ -941,67 +973,131 @@ function AboutPage() {
   return (
     <PageShell>
       <main id="main-content">
-        {/* About Hero: Oversized photo with solid green panel BELOW the photo (never text over busy photography) */}
+        {/* Luxury About Hero: Editorial Composition */}
         <section className="hhh-about-hero hhh-reveal">
-          <div className="hhh-about-hero__media">
-            <img
-              src={WELLBEING_IMAGE}
-              alt="A couple walking together comfortably through a lush garden park"
-              fetchPriority="high"
-              width="1280"
-              height="600"
-            />
-          </div>
-          <div className="hhh-about-hero__copy">
-            <div className="hhh-section-inner">
-              <p className="hhh-kicker">Our purpose</p>
+          <div className="hhh-section-inner hhh-about-hero__inner">
+            <div className="hhh-about-hero__copy-panel">
+              <div className="hhh-pill-kicker">
+                <HeartPulse aria-hidden="true" />
+                <span>Our Mission &amp; Clinical Ethos</span>
+              </div>
               <h1>Get back to doing the things you enjoy most.</h1>
-              <p className="hhh-about-hero__sub">
-                Bridging the gap between specialist medical care and trusted local community pharmacies.
+              <p className="hhh-about-hero__lead">
+                Bridging the gap between specialist medical care and trusted local community pharmacies across the UK.
               </p>
+              <div className="hhh-about-hero__actions">
+                <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
+                  Check eligibility <ArrowRight aria-hidden="true" />
+                </PublicLink>
+                <PublicLink href="/how-it-works" className="hhh-text-link">
+                  How our model works <ChevronRight aria-hidden="true" />
+                </PublicLink>
+              </div>
+            </div>
+
+            <div className="hhh-about-hero__frame">
+              <img
+                src={WELLBEING_IMAGE}
+                alt="A couple walking together comfortably through a lush garden park"
+                fetchPriority="high"
+                width="1180"
+                height="560"
+              />
+              <div className="hhh-about-hero__arc" aria-hidden="true" />
             </div>
           </div>
         </section>
 
-        {/* Editorial Narrative */}
-        <section className="hhh-about-copy hhh-section-inner hhh-reveal-block">
-          <p>
-            Our mission is to provide holistic plant-based treatment options to those in need. Your team can include specialist <strong>doctors</strong>, clinical <strong>pharmacists</strong> and <strong>nurses</strong>, all committed to providing personalised care to each patient.
-          </p>
-          <p>
-            They understand that every patient is unique, and will work closely with you to develop a medical cannabis treatment plan that is tailored to your specific needs, where that is clinically appropriate.
-          </p>
-          <div className="hhh-about-copy__actions">
-            <PublicLink href="/conditions" className="hhh-button hhh-button--outline">Explore conditions</PublicLink>
-            <PublicLink href="/pricing" className="hhh-button hhh-button--outline">View pricing</PublicLink>
+        {/* Editorial Manifesto */}
+        <section className="hhh-about-manifesto hhh-reveal-block">
+          <div className="hhh-section-inner">
+            <div className="hhh-about-manifesto__header">
+              <p className="hhh-kicker">Our Philosophy</p>
+              <h2>Healthcare should be personal, evidence-led, and accessible.</h2>
+            </div>
+
+            <div className="hhh-about-manifesto__grid">
+              <div className="hhh-about-manifesto__lead-col">
+                <p className="hhh-lead-quote">
+                  “We believe that when conventional options fail to bring relief, patients deserve compassionate, regulated access to specialist clinical guidance.”
+                </p>
+                <p>
+                  At Holistic Health Hub, our mission is to provide holistic plant-based treatment options to those in need. We work closely with specialist <strong>doctors</strong>, clinical <strong>pharmacists</strong> and <strong>nurses</strong>, all committed to delivering tailored care to each patient.
+                </p>
+              </div>
+
+              <div className="hhh-about-manifesto__pillars">
+                {[
+                  {
+                    num: '01',
+                    title: 'Specialist-Led Assessments',
+                    desc: 'Every assessment is conducted by a GMC-registered specialist physician who thoroughly evaluates your medical history and treatment goals.',
+                  },
+                  {
+                    num: '02',
+                    title: 'Multi-Disciplinary Team (MDT)',
+                    desc: 'Clinical decisions are never automated. Each prescribing plan is independently reviewed by an MDT of doctors and pharmacists.',
+                  },
+                  {
+                    num: '03',
+                    title: 'Community Pharmacy Network',
+                    desc: 'We connect clinical care with trusted dispensing pharmacies to offer convenient delivery, collection, and continuous support.',
+                  },
+                ].map(item => (
+                  <div key={item.num} className="hhh-manifesto-pillar">
+                    <span>{item.num}</span>
+                    <div>
+                      <h3>{item.title}</h3>
+                      <p>{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
 
         {/* Care Team Roles */}
         <section className="hhh-team hhh-reveal-block">
           <div className="hhh-section-inner">
-            <p className="hhh-kicker">Your care team</p>
-            <h2>Specialists, pharmacists and nurses, working around you.</h2>
+            <div className="hhh-team__header">
+              <p className="hhh-kicker">Your Care Team</p>
+              <h2>Specialists, pharmacists and coordinators, working around you.</h2>
+              <p className="hhh-team__lead">
+                Every member of your care network plays a dedicated role to ensure safe, continuous medical support.
+              </p>
+            </div>
+
             <div className="hhh-team__grid">
               {[
                 {
                   icon: <Stethoscope aria-hidden="true" />,
-                  title: 'Specialist doctors',
-                  copy: 'A GMC-registered doctor who specialises in your condition assesses your history and decides whether a prescription is clinically appropriate.',
+                  role: 'Clinical Assessment',
+                  title: 'Specialist Doctors',
+                  copy: 'Consultant physicians on the GMC Specialist Register who evaluate your condition, design evidence-led treatment plans, and supervise prescribing.',
+                  badge: 'GMC Registered',
                 },
                 {
                   icon: <PackageCheck aria-hidden="true" />,
-                  title: 'Clinical pharmacists',
-                  copy: 'Your nominated community pharmacy supports dispensing, medication reviews, and convenient delivery or dispensary collection.',
+                  role: 'Medication & Dispensing',
+                  title: 'Clinical Pharmacists',
+                  copy: 'Registered pharmacists who oversee pharmaceutical dispensing, perform dosage checks, and manage direct delivery or dispensary collection.',
+                  badge: 'GPhC Regulated',
                 },
                 {
-                  icon: <HeartPulse aria-hidden="true" />,
-                  title: 'Nurses & patient support',
-                  copy: 'Personalised follow-up sits alongside the clinic and pharmacy, so care and communication do not stop after the first appointment.',
+                  icon: <HeartHandshake aria-hidden="true" />,
+                  role: 'Patient Journey',
+                  title: 'Support Coordinators',
+                  copy: 'Dedicated patient care staff who assist with intake questions, follow-up scheduling, and seamless coordination between you, clinic and pharmacy.',
+                  badge: 'Dedicated Care',
                 },
               ].map((item, index) => (
                 <article key={item.title} style={{ '--stagger-index': index } as CSSProperties}>
-                  <span>{item.icon}</span>
+                  <div className="hhh-team__card-top">
+                    <span className="hhh-team__icon">{item.icon}</span>
+                    <span className="hhh-team__badge">{item.badge}</span>
+                  </div>
+                  <span className="hhh-team__role">{item.role}</span>
                   <h3>{item.title}</h3>
                   <p>{item.copy}</p>
                 </article>
@@ -1013,17 +1109,37 @@ function AboutPage() {
         {/* Ecological Commitment */}
         <section className="hhh-planet hhh-reveal-block">
           <div className="hhh-section-inner">
-            <div>
-              <p className="hhh-kicker">Our commitment to the planet</p>
-              <h2>Care that looks<br />beyond today.</h2>
-            </div>
-            <div>
-              <p><strong>We believe it is our collective duty to preserve the planet and the various forms of life that live on it.</strong></p>
-              <p>Future generations deserve a greener planet with better air quality.</p>
-              <p>Cannabis itself is a carbon sequester, meaning it takes in more CO2 than it produces. That is not enough on its own, so for every CBPM prescription dispensed at a participating pharmacy, we support tree planting through Ecologi.</p>
-              <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-                Check your eligibility <ArrowRight aria-hidden="true" />
-              </PublicLink>
+            <div className="hhh-planet__card">
+              <div className="hhh-planet__copy">
+                <div className="hhh-planet__badge">
+                  <Trees aria-hidden="true" />
+                  <span>Sustainability &amp; Ecologi Partnership</span>
+                </div>
+                <h2>Care that looks beyond today.</h2>
+                <p>
+                  <strong>We believe it is our collective duty to preserve our planet and support a greener future.</strong>
+                </p>
+                <p>
+                  Cannabis itself is a natural carbon sequester, absorbing CO₂ from the atmosphere as it grows. To go further, for every CBPM prescription dispensed through our participating community pharmacy network, we support tree planting through Ecologi.
+                </p>
+                <div className="hhh-planet__stats">
+                  <div>
+                    <strong>1 Prescription</strong>
+                    <small>1 Tree planted with Ecologi</small>
+                  </div>
+                  <div>
+                    <strong>Carbon Positive</strong>
+                    <small>Offsetting healthcare logistics</small>
+                  </div>
+                </div>
+                <PublicLink href="/eligibility" className="hhh-button hhh-button--pale">
+                  Check your eligibility <ArrowRight aria-hidden="true" />
+                </PublicLink>
+              </div>
+              <div className="hhh-planet__visual" aria-hidden="true">
+                <div className="hhh-planet__circle" />
+                <Trees className="hhh-planet__icon" />
+              </div>
             </div>
           </div>
         </section>
@@ -1086,6 +1202,8 @@ function HowItWorksPage() {
 }
 
 function FaqPage() {
+  const [activeCategory, setActiveCategory] = useState('all');
+
   return (
     <PageShell>
       <main id="main-content">
@@ -1105,23 +1223,56 @@ function FaqPage() {
             <p className="hhh-kicker">Frequently asked</p>
             <h2>Start with the essentials.</h2>
             <p>These answers are general information, not medical advice. A specialist clinician makes individual treatment decisions.</p>
-            <PublicLink href="/contact" className="hhh-text-link">
-              Still have a question? <ArrowRight aria-hidden="true" />
-            </PublicLink>
+
+            <div className="hhh-faq__filters" role="tablist" aria-label="FAQ categories">
+              <button
+                type="button"
+                className={`hhh-faq__filter-btn ${activeCategory === 'all' ? 'is-active' : ''}`}
+                onClick={() => setActiveCategory('all')}
+              >
+                All Questions
+              </button>
+              {faqCategories.map(cat => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  className={`hhh-faq__filter-btn ${activeCategory === cat.id ? 'is-active' : ''}`}
+                  onClick={() => setActiveCategory(cat.id)}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="hhh-faq__enquiry-card">
+              <ShieldCheck aria-hidden="true" />
+              <div>
+                <strong>Need individual help?</strong>
+                <p>Start the private eligibility check or email general service questions to our team.</p>
+                <a href="mailto:info@holistichealthhub.live">info@holistichealthhub.live</a>
+              </div>
+            </div>
           </aside>
 
           <div className="hhh-faq__list" role="region" aria-label="Frequently Asked Questions list">
-            {faqs.map(([question, answer], index) => (
-              <details key={question} open={index === 0}>
-                <summary>
-                  <span>{question}</span>
-                  <span className="hhh-faq__plus" aria-hidden="true">
-                    <ChevronDown />
-                  </span>
-                </summary>
-                <p>{answer}</p>
-              </details>
-            ))}
+            {faqCategories
+              .filter(cat => activeCategory === 'all' || activeCategory === cat.id)
+              .map(cat => (
+                <div key={cat.id} className="hhh-faq__category-group">
+                  <span className="hhh-faq__category-heading">{cat.label}</span>
+                  {cat.items.map(([question, answer], index) => (
+                    <details key={question} open={index === 0 && activeCategory !== 'all'}>
+                      <summary>
+                        <span>{question}</span>
+                        <span className="hhh-faq__plus" aria-hidden="true">
+                          <ChevronDown />
+                        </span>
+                      </summary>
+                      <p>{answer}</p>
+                    </details>
+                  ))}
+                </div>
+              ))}
           </div>
         </section>
 
@@ -1132,58 +1283,6 @@ function FaqPage() {
           href="/eligibility"
           label="Start eligibility check"
         />
-      </main>
-    </PageShell>
-  );
-}
-
-function ContactPage() {
-  return (
-    <PageShell>
-      <main id="main-content">
-        <InnerPageHero
-          eyebrow="We’re here to help"
-          title={<>Start the right<br />conversation.</>}
-          copy="Choose the secure eligibility route for anything about your health, or email our team with a general service enquiry."
-        >
-          <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-            Start eligibility check <ArrowRight aria-hidden="true" />
-          </PublicLink>
-        </InnerPageHero>
-
-        <section className="hhh-contact hhh-section-inner hhh-reveal-block">
-          <div className="hhh-contact__heading">
-            <p className="hhh-kicker">Choose how to get in touch</p>
-            <h2>Two clear routes, depending on what you need.</h2>
-          </div>
-
-          <div className="hhh-contact__layout">
-            <article className="hhh-contact__card" style={{ '--stagger-index': 0 } as CSSProperties}>
-              <span className="hhh-contact__icon"><Mail aria-hidden="true" /></span>
-              <p className="hhh-kicker">General enquiries</p>
-              <h3>Email the HHH team</h3>
-              <p>For questions about our service, pricing, partnering pharmacies, or how the referral journey works.</p>
-              <a className="hhh-contact__email" href="mailto:info@holistichealthhub.live">
-                info@holistichealthhub.live
-              </a>
-              <div className="hhh-contact__notice">
-                <ShieldCheck aria-hidden="true" />
-                <p><strong>Keep health information secure.</strong> Please do not send medical history, symptoms, or prescription details by email.</p>
-              </div>
-            </article>
-
-            <article className="hhh-contact__card hhh-contact__card--green" style={{ '--stagger-index': 1 } as CSSProperties}>
-              <span className="hhh-contact__icon"><HeartPulse aria-hidden="true" /></span>
-              <p className="hhh-kicker">Health &amp; eligibility</p>
-              <h3>Use the secure form</h3>
-              <p>Tell HHH about your health circumstances, choose a participating community pharmacy, or continue with Holistic Health Hub Allocation.</p>
-              <PublicLink href="/eligibility" className="hhh-button hhh-button--pale">
-                Start eligibility check <ArrowRight aria-hidden="true" />
-              </PublicLink>
-              <small>Your application goes to HHH first. A pharmacy sees a patient record only after HHH confirms the clinical referral.</small>
-            </article>
-          </div>
-        </section>
       </main>
     </PageShell>
   );
@@ -1471,6 +1570,12 @@ function updateJsonLd(schemaId: string, schema: object | null) {
 export default function PublicSite() {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
 
+  // If user hits legacy /contact, immediately redirect to /eligibility
+  if (path === '/contact') {
+    window.location.replace('/eligibility');
+    return null;
+  }
+
   useEffect(() => {
     const isPost = path.startsWith('/post/');
     const article = isPost ? posts.find(item => item.slug === path.slice('/post/'.length)) : null;
@@ -1519,12 +1624,6 @@ export default function PublicSite() {
             type: 'website',
             is404: false,
           },
-          '/contact': {
-            title: 'Contact Us | Patient Support & General Enquiries | Holistic Health Hub',
-            description: 'Contact the Holistic Health Hub team for general service enquiries, or begin a confidential online eligibility check securely.',
-            type: 'website',
-            is404: false,
-          },
           '/blog': {
             title: 'Journal & Educational Articles | Medical Cannabis & Wellbeing | HHH',
             description: 'Educational articles and clinical insights on sleep, chronic pain management, anxiety, the endocannabinoid system, and medical cannabis.',
@@ -1543,7 +1642,7 @@ export default function PublicSite() {
             type: 'website',
             is404: false,
           },
-        }[path as '/' | '/how-it-works' | '/conditions' | '/pricing' | '/about' | '/faq' | '/contact' | '/blog' | '/privacy' | '/consent'] ?? {
+        }[path as '/' | '/how-it-works' | '/conditions' | '/pricing' | '/about' | '/faq' | '/blog' | '/privacy' | '/consent'] ?? {
           title: 'Page Not Found | Holistic Health Hub',
           description: 'The requested Holistic Health Hub page could not be found. Return to our homepage to continue.',
           type: 'website',
@@ -1607,10 +1706,11 @@ export default function PublicSite() {
 
     // Page Specific Schema
     if (path === '/faq') {
+      const allFaqItems = faqCategories.flatMap(c => c.items);
       updateJsonLd('hhh-schema-faq', {
         '@context': 'https://schema.org',
         '@type': 'FAQPage',
-        mainEntity: faqs.map(([q, a]) => ({
+        mainEntity: allFaqItems.map(([q, a]) => ({
           '@type': 'Question',
           name: q,
           acceptedAnswer: {
@@ -1649,7 +1749,6 @@ export default function PublicSite() {
     }
 
     return () => {
-      // Clean up dynamic schemas on unmount
       updateJsonLd('hhh-schema-faq', null);
       updateJsonLd('hhh-schema-article', null);
     };
@@ -1661,7 +1760,6 @@ export default function PublicSite() {
   if (path === '/pricing') return <PricingPage />;
   if (path === '/about') return <AboutPage />;
   if (path === '/faq' || path === '/general-5') return <FaqPage />;
-  if (path === '/contact') return <ContactPage />;
   if (path === '/blog' || path.startsWith('/blog/categories/')) return <BlogPage />;
   if (path === '/privacy' || path === '/general-5-1') return <PrivacyPage />;
   if (path === '/consent') return <ConsentPage />;

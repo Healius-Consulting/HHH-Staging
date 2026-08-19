@@ -82,6 +82,7 @@ export const config = {
     { source: '/admin/overview', destination: '/admin', permanent: true },
   ] : [
     ...thinktimelessPublicRedirects,
+    { source: '/contact', destination: '/eligibility', permanent: true },
     { source: '/general-5', destination: '/faq', permanent: true },
     { source: '/general-5-1', destination: '/privacy', permanent: true },
   ],
