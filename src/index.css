@@ -2814,15 +2814,26 @@ html[data-reduced-motion='true'] *, html[data-reduced-motion='true'] *::before, 
   max-width: 600px;
 }
 
+.mfa-qr-figure{
+  margin: 20px auto 8px;
+  text-align: center;
+}
+
+.mfa-qr-figure figcaption{
+  margin-top: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--font-xs);
+}
+
 .mfa-qr-code{
   display: block;
   width: min(220px, 70vw);
   height: auto;
-  margin: 20px auto;
+  margin: 0 auto;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--bg-surface);
+  background: #fff;
 }
 
 .mfa-manual-key{

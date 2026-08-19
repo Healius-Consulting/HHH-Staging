@@ -4,6 +4,7 @@ import { FirebaseError } from 'firebase/app';
 import { AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, LogIn, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
 import { firebaseConfiguration, mfaRequired } from './firebase';
 import { requireFirebaseAuth } from './firebase';
+import { totpQrDataUrl } from './totpQr';
 import { useAuth } from './useAuth';
 import HhhBrandMark from '../components/HhhBrandMark';
 
@@ -194,7 +195,7 @@ export function MfaChallenge() {
 
 export function MfaEnrollmentGate() {
   const { state, beginTotpEnrollment, completeTotpEnrollment, signOutStaff } = useAuth();
-  const [details, setDetails] = useState<{ secretKey: string; qrCodeUrl: string } | null>(null);
+  const [details, setDetails] = useState<{ secretKey: string; qrImageSrc: string | null } | null>(null);
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -202,7 +203,14 @@ export function MfaEnrollmentGate() {
   const begin = () => {
     setBusy(true);
     setError(null);
-    void beginTotpEnrollment().then(setDetails).catch(cause => setError(cause instanceof Error ? cause.message : 'Authenticator enrolment could not begin.')).finally(() => setBusy(false));
+    void beginTotpEnrollment()
+      .then(async enrollment => {
+        const qrImageSrc = await totpQrDataUrl(enrollment.qrCodeUrl);
+        setDetails({ secretKey: enrollment.secretKey, qrImageSrc });
+        if (!qrImageSrc) setError('The QR code could not be drawn. Use the manual setup key.');
+      })
+      .catch(cause => setError(cause instanceof Error ? cause.message : 'Authenticator enrolment could not begin.'))
+      .finally(() => setBusy(false));
   };
 
   const complete = (event: FormEvent<HTMLFormElement>) => {
@@ -221,7 +229,12 @@ export function MfaEnrollmentGate() {
           <button className="btn btn-primary" type="button" disabled={busy} onClick={begin}>Set up authenticator</button>
         ) : (
           <>
-            <img className="mfa-qr-code" src={details.qrCodeUrl} alt="QR code for authenticator enrolment" />
+            {details.qrImageSrc ? (
+              <figure className="mfa-qr-figure">
+                <img className="mfa-qr-code" src={details.qrImageSrc} width={220} height={220} alt="QR code for authenticator enrolment" />
+                <figcaption>Scan with your authenticator app</figcaption>
+              </figure>
+            ) : null}
             <div className="mfa-manual-key"><span>Manual setup key</span><code>{details.secretKey}</code></div>
             <label className="staff-login-field">Six-digit verification code<input className="input auth-code-input" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={event => setCode(event.target.value.replace(/\D/g, ''))} required /></label>
             <button className="btn btn-primary" type="submit" disabled={busy || code.length !== 6}>Verify and finish</button>
