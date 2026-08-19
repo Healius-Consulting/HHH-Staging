@@ -160,7 +160,7 @@ export default function ManualPrescriptionEditor({
       .filter(product => typeFilter === 'all' || product.type === typeFilter)
       .filter(product => !needle || `${product.name} ${product.type} ${product.unit ?? ''}`.toLocaleLowerCase('en-GB').includes(needle));
   }, [activeProducts, query, typeFilter]);
-  const visibleProducts = filteredProducts.slice(0, 16);
+  const visibleProducts = filteredProducts.slice(0, hideSelectedList ? 24 : 16);
 
   useEffect(() => {
     setPrescriberQuery(prescription.prescriber);

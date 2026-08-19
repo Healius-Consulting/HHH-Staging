@@ -1585,17 +1585,18 @@ export default function CreateOrder() {
             </main>
 
             <aside id="rx-guided-card-4" hidden={guidedLayout && guidedReveal < 4} className={`${guidedLayout ? 'rx-guided__payment' : 'rx-checkout-rail'}${guidedLayout && guidedReveal >= 4 ? ` rx-guided-reveal is-in${guidedStep === 4 ? ' is-current' : ''}` : ''}`}>
-              <section className="rx-checkout-panel card" id="rx-order-review">
+              <section className={`rx-checkout-panel card${guidedLayout ? ' rx-checkout-panel--guided' : ''}`} id="rx-order-review">
                 <header>
                   <p className="section-label">Step 4 · Order {activeOrderRef}</p>
                   <strong>{paidRedo ? 'Review and carry over payment' : 'Review and request payment'}</strong>
                   <small>{patient?.name ?? 'Patient not linked'} · {activeOrder.prescriptions.length} prescription record{activeOrder.prescriptions.length === 1 ? '' : 's'}</small>
                 </header>
+                <div className="rx-checkout-panel__review">
                 <dl className="rx-order-totals">
                   <div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div>
-                  <div><dt>Wholesale Total (excl VAT)</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div>
+                  <div><dt>Wholesale total (excl VAT)</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div>
                   <div><dt>Patient-price subtotal</dt><dd>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)}</dd></div>
-                  <div><dt>gross margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${money(orderRevenue(activeOrder) - orderCost(activeOrder))} · ${orderMargin}%`}</dd></div>
+                  <div><dt>Gross margin</dt><dd className={orderMargin === null ? '' : orderMargin >= 25 ? 'text-green' : 'text-amber'}>{orderMargin === null ? 'Pending' : `${money(orderRevenue(activeOrder) - orderCost(activeOrder))} · ${orderMargin}%`}</dd></div>
                 </dl>
                 <div className={`rx-checkout-readiness${quoteError ? ' has-error' : ''}`}>
                   <span className="section-label">{state.workspaceMode === 'training' ? 'Curaleaf test quote' : 'Live Curaleaf quote'}</span>
@@ -1633,6 +1634,8 @@ export default function CreateOrder() {
                     </div> : null}
                   </div>
                 ) : null}
+                </div>
+                <div className="rx-checkout-panel__pay">
                 <details className="rx-payment-gate" open={!readyForPayment}>
                   <summary>
                     <span><small>Payment gate</small><strong>{readyForPayment ? 'All required checks passed' : `${outstandingPaymentGates.length} requirement${outstandingPaymentGates.length === 1 ? '' : 's'} outstanding`}</strong></span>
@@ -1653,9 +1656,12 @@ export default function CreateOrder() {
                     </div>
                   )}
                   <p className="rx-payment-route-note">{paidRedo ? 'The original payment remains linked only after the replacement prescription passes every gate.' : 'The selected route becomes immutable when the order enters payment.'}</p>
-                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : paidRedo ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? 'send payment link' : 'Continue with manual payment'}</button>
                 </div>
-                {!readyForPayment && <p className="rx-checkout-blocker"><AlertTriangle size={13} /><span><strong>Payment remains locked</strong>{outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}{outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}</span></p>}
+                </div>
+                <footer className="rx-checkout-panel__submit">
+                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : paidRedo ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? 'send payment link' : 'Continue with manual payment'}</button>
+                  {!readyForPayment ? <p className="rx-checkout-blocker"><AlertTriangle size={13} /><span><strong>Payment remains locked</strong>{outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}{outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}</span></p> : null}
+                </footer>
               </section>
             </aside>
           </div>
