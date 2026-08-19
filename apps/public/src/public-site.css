@@ -1614,10 +1614,6 @@ body.hhh-page-ready .hhh-article > *:not(.hhh-page-head__intro):not(.hhh-text-li
   margin-top: 28px;
 }
 
-.hhh-page-head .hhh-price-grid {
-  margin-top: 48px;
-}
-
 /* ==========================================================================
    Inner Page Hero & Editorial Templates
    ========================================================================== */
@@ -1832,295 +1828,6 @@ body.hhh-page-ready .hhh-article > *:not(.hhh-page-head__intro):not(.hhh-text-li
 
 .hhh-condition-group__footer .hhh-button {
   width: 100%;
-}
-
-/* ==========================================================================
-   Pricing Page
-   ========================================================================== */
-
-.hhh-pricing-head {
-  padding-block: 0;
-}
-
-.hhh-pricing-head h1 {
-  max-width: 900px;
-  margin-top: 14px;
-  color: var(--green);
-  font-size: clamp(48px, 6.2vw, 82px);
-  letter-spacing: -0.05em;
-  line-height: 1.02;
-}
-
-.hhh-pricing-head > p {
-  max-width: 660px;
-  margin-top: 22px;
-  color: var(--ink-muted);
-  font-size: 17px;
-  line-height: 1.65;
-}
-
-.hhh-price-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-  margin-top: 48px;
-}
-
-.hhh-price-grid article {
-  padding: 34px 30px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  box-shadow: 0 12px 35px rgba(36, 63, 52, 0.05);
-  display: flex;
-  flex-direction: column;
-  transition: transform 0.45s var(--ease-out), box-shadow 0.45s ease;
-}
-
-.hhh-price-grid article:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 20px 48px rgba(36, 63, 52, 0.09);
-}
-
-.hhh-price-num {
-  color: var(--rust);
-  font-family: var(--serif);
-  font-size: 16px;
-  font-weight: 500;
-  margin-bottom: 12px;
-}
-
-.hhh-price-grid h2 {
-  font-size: 23px;
-  color: var(--green);
-  font-weight: 500;
-  margin: 0;
-}
-
-.hhh-price-amount {
-  font-family: var(--serif);
-  font-size: 52px;
-  color: var(--green);
-  font-weight: 500;
-  line-height: 1;
-  margin: 16px 0 4px;
-}
-
-.hhh-price-fee-label {
-  color: var(--ink-subtle);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 700;
-}
-
-.hhh-price-desc {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  color: var(--ink-muted);
-  font-size: 13.5px;
-  line-height: 1.6;
-}
-
-/* Medication Band */
-.hhh-medication {
-  padding: 85px 0;
-  background: var(--green);
-  color: #fff;
-}
-
-.hhh-medication .hhh-kicker {
-  color: #f0d2c4;
-}
-
-.hhh-medication h2 {
-  max-width: 880px;
-  margin-top: 10px;
-  color: #fff;
-  font-size: clamp(38px, 4.8vw, 62px);
-  letter-spacing: -0.04em;
-  line-height: 1.06;
-}
-
-.hhh-medication > .hhh-section-inner > p {
-  max-width: 680px;
-  margin-top: 14px;
-  color: #d8eae1;
-  font-size: 15px;
-}
-
-.hhh-medication__grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-  margin-top: 44px;
-}
-
-.hhh-medication article {
-  padding: 30px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 22px;
-  color: #fff;
-  transition: transform 0.4s var(--ease-out), background 0.3s ease;
-}
-
-.hhh-medication article:hover {
-  transform: translateY(-4px);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.hhh-medication article span {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
-  margin-bottom: 22px;
-}
-
-.hhh-medication article svg {
-  width: 22px;
-  height: 22px;
-}
-
-.hhh-medication article h3 {
-  margin: 0 0 6px;
-  font-size: 26px;
-  font-weight: 500;
-}
-
-.hhh-medication article strong {
-  display: block;
-  font-size: 18px;
-  color: #b9e8cb;
-  margin-bottom: 12px;
-}
-
-.hhh-medication article p {
-  color: #dbeae2;
-  font-size: 13.5px;
-  line-height: 1.65;
-  margin: 0;
-}
-
-/* Included in Care Feature */
-.hhh-included {
-  display: grid;
-  grid-template-columns: 1fr 1.15fr;
-  align-items: center;
-  gap: 70px;
-  padding-block: 95px;
-}
-
-.hhh-included__image {
-  height: 560px;
-  border-radius: 260px 260px 24px 24px;
-  overflow: hidden;
-  background: var(--sand);
-  box-shadow: 0 25px 60px rgba(28, 55, 45, 0.14);
-}
-
-.hhh-included__image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: saturate(0.92) contrast(1.04);
-}
-
-.hhh-included__copy h2 {
-  margin: 12px 0 24px;
-  color: var(--green);
-  font-size: clamp(34px, 4vw, 52px);
-  letter-spacing: -0.035em;
-  line-height: 1.1;
-}
-
-.hhh-included__list {
-  display: grid;
-  gap: 14px;
-  margin-bottom: 34px;
-}
-
-.hhh-included__item {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 16px;
-  color: #2b3d34;
-}
-
-.hhh-included__item svg {
-  width: 20px;
-  min-width: 20px;
-  margin-top: 3px;
-  color: var(--bright);
-}
-
-/* Timeline */
-.hhh-timeline {
-  padding: 85px 0;
-  background: var(--sand);
-}
-
-.hhh-timeline h2 {
-  margin-top: 10px;
-  color: var(--green);
-  font-size: clamp(36px, 4.4vw, 54px);
-  letter-spacing: -0.035em;
-}
-
-.hhh-timeline__grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 22px;
-  margin-top: 40px;
-}
-
-.hhh-timeline article {
-  padding: 32px 28px;
-  border-left: 3px solid var(--rust);
-  background: #fff;
-  border-radius: 0 20px 20px 0;
-  box-shadow: 0 10px 30px rgba(74, 62, 45, 0.06);
-  transition: transform 0.4s var(--ease-out);
-}
-
-.hhh-timeline article:hover {
-  transform: translateY(-4px);
-}
-
-.hhh-timeline__badge {
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--rust);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-}
-
-.hhh-timeline h3 {
-  margin: 10px 0 6px;
-  font-size: 22px;
-  color: var(--green);
-}
-
-.hhh-timeline__price {
-  display: block;
-  font-family: var(--serif);
-  font-size: 32px;
-  color: var(--green);
-  margin-bottom: 12px;
-}
-
-.hhh-timeline p {
-  color: var(--ink-muted);
-  font-size: 13.5px;
-  line-height: 1.6;
-  margin: 0;
 }
 
 /* ==========================================================================
@@ -3222,9 +2929,6 @@ body.hhh-page-ready .hhh-article > *:not(.hhh-page-head__intro):not(.hhh-text-li
   .hhh-testimonials__grid,
   .hhh-post-grid,
   .hhh-post-grid--wide,
-  .hhh-price-grid,
-  .hhh-medication__grid,
-  .hhh-timeline__grid,
   .hhh-team__grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -3239,15 +2943,6 @@ body.hhh-page-ready .hhh-article > *:not(.hhh-page-head__intro):not(.hhh-text-li
 
   .hhh-condition-card {
     grid-template-columns: 1fr;
-  }
-
-  .hhh-included {
-    grid-template-columns: 1fr;
-    gap: 40px;
-  }
-
-  .hhh-included__image {
-    height: 440px;
   }
 
   .hhh-about-story__inner {
@@ -3423,9 +3118,6 @@ body.hhh-page-ready .hhh-article > *:not(.hhh-page-head__intro):not(.hhh-text-li
   .hhh-testimonials__grid,
   .hhh-post-grid,
   .hhh-post-grid--wide,
-  .hhh-price-grid,
-  .hhh-medication__grid,
-  .hhh-timeline__grid,
   .hhh-team__grid,
   .hhh-key-benefits__list,
   .hhh-condition-groups {
@@ -3567,10 +3259,7 @@ body.hhh-page-ready .hhh-article > *:not(.hhh-page-head__intro):not(.hhh-text-li
   .hhh-network article,
   .hhh-key-benefits article,
   .hhh-about-role article,
-  .hhh-price-grid article,
-  .hhh-medication article,
   .hhh-team article,
-  .hhh-timeline article,
   .hhh-blog-feature {
     opacity: 1 !important;
     transform: none !important;

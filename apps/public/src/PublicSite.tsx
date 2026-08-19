@@ -18,7 +18,6 @@ const PAIN_IMAGE = '/hhh-condition-pain.jpg';
 const NEUROLOGICAL_IMAGE = '/hhh-condition-neurological.jpg';
 const PSYCHIATRIC_IMAGE = '/hhh-condition-psychiatric.jpg';
 const OTHER_CONDITIONS_IMAGE = '/hhh-condition-other.jpg';
-const CARE_INCLUDED_IMAGE = '/hhh-care-included.jpg';
 const TEAM_SPECIALIST_IMAGE = '/hhh-team-specialist.jpg';
 const TEAM_PHARMACIST_IMAGE = '/hhh-team-pharmacist.jpg';
 const TEAM_NURSE_IMAGE = '/hhh-team-nurse.jpg';
@@ -167,7 +166,6 @@ function SiteHeader() {
           <PublicLink href="/" className={path === '/' ? 'is-active' : ''}>Home</PublicLink>
           <PublicLink href="/how-it-works" className={path === '/how-it-works' ? 'is-active' : ''}>How it works</PublicLink>
           <PublicLink href="/conditions" className={path === '/conditions' ? 'is-active' : ''}>Conditions</PublicLink>
-          <PublicLink href="/pricing" className={path === '/pricing' ? 'is-active' : ''}>Pricing</PublicLink>
           <PublicLink href="/about" className={path === '/about' ? 'is-active' : ''}>About</PublicLink>
           <PublicLink href="/blog" className={path.startsWith('/blog') || path.startsWith('/post/') ? 'is-active' : ''}>Journal</PublicLink>
           <PublicLink href="/faq" className={path === '/faq' ? 'is-active' : ''}>FAQs</PublicLink>
@@ -197,7 +195,6 @@ function SiteFooter() {
           <strong>Care Journey</strong>
           <PublicLink href="/how-it-works">How it works</PublicLink>
           <PublicLink href="/conditions">Treatable conditions</PublicLink>
-          <PublicLink href="/pricing">Pricing &amp; costs</PublicLink>
           <PublicLink href="/eligibility">Eligibility check</PublicLink>
           <a href="https://portal.holistichealthhub.cc" rel="nofollow">Pharmacy portal</a>
         </div>
@@ -367,8 +364,8 @@ function StickyStepNarrative() {
                       </span>
                     )}
                     {idx === 3 && (
-                      <PublicLink href="/pricing" className="hhh-text-link">
-                        View care timeline &amp; transparent fees <ChevronRight aria-hidden="true" />
+                      <PublicLink href="/eligibility" className="hhh-text-link">
+                        Check eligibility <ChevronRight aria-hidden="true" />
                       </PublicLink>
                     )}
                   </div>
@@ -741,8 +738,8 @@ function ConditionsPage() {
           title={<>Conditions that can be treated<br />with medical cannabis (CBPM)</>}
           copy="If you have tried two therapies or treatments for these conditions that have not provided sufficient benefit, you may be eligible for referral. A specialist clinician assesses you and decides whether treatment is appropriate."
         >
-          <PublicLink href="/pricing" className="hhh-text-link">
-            See pricing &amp; fees <ChevronRight aria-hidden="true" />
+          <PublicLink href="/how-it-works" className="hhh-text-link">
+            See how it works <ChevronRight aria-hidden="true" />
           </PublicLink>
         </InnerPageHero>
 
@@ -859,116 +856,11 @@ function ConditionsPage() {
 
         <PageCta
           kicker="Next question"
-          title="What is the cost of treatment?"
-          copy="Consultation fees are published clearly at £30 per appointment, and indicative medicine prices are confirmed before you proceed."
-          href="/pricing"
-          label="View pricing"
+          title="Ready to see whether you may be eligible?"
+          copy="Consultation and medicine fees are discussed at your first specialist appointment, and confirmed before you proceed."
+          href="/eligibility"
+          label="Check eligibility"
         />
-      </main>
-    </PageShell>
-  );
-}
-
-function PricingPage() {
-  return (
-    <PageShell>
-      <main id="main-content">
-        <section className="hhh-page-head">
-          <div className="hhh-section-inner hhh-rise-copy">
-            <p className="hhh-kicker">Simple, transparent pricing</p>
-            <h1>Get the personalised care you deserve, at affordable prices.</h1>
-            <p>All appointments are with a consultant physician on the GMC Specialist Register who specialises in your condition.</p>
-            <div className="hhh-price-grid">
-            {[
-              ['Initial consultation', '£30', 'Comprehensive specialist medical assessment & MDT review'],
-              ['Follow-up consultation', '£30', 'Detailed dosage review and therapeutic outcome monitoring'],
-              ['Quarterly check-up', '£30', 'Regular reviews to ensure your care remains effective'],
-            ].map(([label, price, desc], index) => (
-              <article key={label} style={{ '--stagger-index': index } as CSSProperties}>
-                <span className="hhh-price-num">0{index + 1}</span>
-                <h2>{label}</h2>
-                <strong className="hhh-price-amount">{price}</strong>
-                <span className="hhh-price-fee-label">Consultation fee</span>
-                <p className="hhh-price-desc">{desc}</p>
-              </article>
-            ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Medication Breakdown */}
-        <section className="hhh-medication hhh-reveal-block">
-          <div className="hhh-section-inner">
-            <p className="hhh-kicker">Prescribed Medication</p>
-            <h2>Affordable medicine through your community pharmacy</h2>
-            <p>Indicative medicine prices; your exact treatment and costs are confirmed by your pharmacy before you proceed.</p>
-            <div className="hhh-medication__grid">
-              {[
-                ['Dried Flower', 'From £5.50 per gram', 'Vaporised medical cannabis flower prescribed by clinical strain and cannabinoid profile.'],
-                ['Sublingual Oils', 'From £30 per 10ml bottle', 'Formulated whole-plant cannabinoid oils for metered sublingual administration.'],
-                ['Vape Cartridges', 'From £49 per cartridge', 'Standardised inhalation cartridges for rapid onset and measured therapeutic dosing.'],
-              ].map(([name, price, detail], index) => (
-                <article key={name} style={{ '--stagger-index': index } as CSSProperties}>
-                  <span><Leaf aria-hidden="true" /></span>
-                  <h3>{name}</h3>
-                  <strong>{price}</strong>
-                  <p>{detail}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Included in Care Feature */}
-        <section className="hhh-included hhh-section-inner hhh-reveal-block">
-          <div className="hhh-included__image">
-            <img
-              src={CARE_INCLUDED_IMAGE}
-              alt="A community pharmacist preparing a discreet prescription bag at the dispensary"
-              loading="lazy"
-            />
-          </div>
-          <div className="hhh-included__copy">
-            <p className="hhh-kicker">What’s included in your care?</p>
-            <h2>Support that continues beyond your first appointment.</h2>
-            <div className="hhh-included__list">
-              {[
-                'Personalised treatment plans developed with specialist clinicians',
-                'Multi-disciplinary clinical team (MDT) review before prescribing',
-                'Community pharmacy dispensing with direct delivery or collection',
-                'Ongoing patient support team to assist with queries and check-ins',
-                'No waiting list — fast-track intake review and scheduling',
-              ].map(item => (
-                <div className="hhh-included__item" key={item}>
-                  <Check aria-hidden="true" />
-                  <span>{item}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Care Timeline */}
-        <section className="hhh-timeline hhh-reveal-block">
-          <div className="hhh-section-inner">
-            <p className="hhh-kicker">Your care timeline</p>
-            <h2>Your first months of care</h2>
-            <div className="hhh-timeline__grid">
-              {[
-                ['Month 1', 'Initial consultation', '£30', 'Consultation with specialist physician and initial prescription review.'],
-                ['Month 2', 'Follow-up consultation', '£30', 'Assessing therapeutic response, symptom improvement and dosage.'],
-                ['Month 5', 'Quarterly check-up', '£30', 'Long-term monitoring and ongoing support thereafter every 3 months.'],
-              ].map(([month, label, price, note], index) => (
-                <article key={month} style={{ '--stagger-index': index } as CSSProperties}>
-                  <span className="hhh-timeline__badge">{month}</span>
-                  <h3>{label}</h3>
-                  <strong className="hhh-timeline__price">{price}</strong>
-                  <p>{note}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
       </main>
     </PageShell>
   );
@@ -1076,7 +968,7 @@ function AboutPage() {
               </p>
               <div className="hhh-about-copy__actions">
                 <PublicLink href="/conditions" className="hhh-button hhh-button--outline">Explore conditions</PublicLink>
-                <PublicLink href="/pricing" className="hhh-button hhh-button--outline">View pricing</PublicLink>
+                <PublicLink href="/how-it-works" className="hhh-button hhh-button--outline">See how it works</PublicLink>
               </div>
             </div>
           </div>
@@ -1196,8 +1088,8 @@ function HowItWorksPage() {
           title={<>From first questions<br />to ongoing support.</>}
           copy="Holistic Health Hub stays at the centre of your intake and referral. A specialist clinic assesses you, and a pharmacy receives your record only when the referral is ready."
         >
-          <PublicLink href="/pricing" className="hhh-text-link">
-            See pricing <ChevronRight aria-hidden="true" />
+          <PublicLink href="/eligibility" className="hhh-text-link">
+            Check eligibility <ChevronRight aria-hidden="true" />
           </PublicLink>
         </InnerPageHero>
 
@@ -1526,7 +1418,7 @@ function ConsentPage() {
 
           <h2>Treatment costs</h2>
           <p>
-            Private medical consultations and prescribed cannabis-based medicines involve fees (£30 consultation fees and indicative medication pricing). Applicable charges are confirmed before you proceed with treatment.
+            Private medical consultations and prescribed cannabis-based medicines involve fees. Applicable charges are discussed at your first consultation and confirmed before you proceed with treatment.
           </p>
 
           <h2>Questions</h2>
@@ -1638,12 +1530,6 @@ export default function PublicSite() {
             type: 'website',
             is404: false,
           },
-          '/pricing': {
-            title: 'Transparent Pricing | £30 Specialist Consultations & Medication Costs | Holistic Health Hub',
-            description: 'Clear, transparent pricing: £30 initial and follow-up specialist consultations, with indicative pharmacy medication pricing.',
-            type: 'website',
-            is404: false,
-          },
           '/about': {
             title: 'About Us | Specialist Clinicians & Community Pharmacy Network | Holistic Health Hub',
             description: 'Meet Holistic Health Hub. Discover our personal, pharmacy-connected approach to specialist medical care and our commitment to the planet.',
@@ -1652,7 +1538,7 @@ export default function PublicSite() {
           },
           '/faq': {
             title: 'Frequently Asked Questions | UK Medical Cannabis & CBPM Therapy | Holistic Health Hub',
-            description: 'Clear, accurate answers to common questions about UK medical cannabis legality, eligibility, consultation process, and prescription costs.',
+            description: 'Clear, accurate answers to common questions about UK medical cannabis legality, eligibility, and the consultation process.',
             type: 'website',
             is404: false,
           },
@@ -1670,11 +1556,11 @@ export default function PublicSite() {
           },
           '/consent': {
             title: 'Consent & Terms of Use | Holistic Health Hub',
-            description: 'Understand patient consent, intake review terms, clinical MDT assessments, and treatment pricing for Holistic Health Hub.',
+            description: 'Understand patient consent, intake review terms, and clinical MDT assessments for Holistic Health Hub.',
             type: 'website',
             is404: false,
           },
-        }[path as '/' | '/how-it-works' | '/conditions' | '/pricing' | '/about' | '/faq' | '/blog' | '/privacy' | '/consent'] ?? {
+        }[path as '/' | '/how-it-works' | '/conditions' | '/about' | '/faq' | '/blog' | '/privacy' | '/consent'] ?? {
           title: 'Page Not Found | Holistic Health Hub',
           description: 'The requested Holistic Health Hub page could not be found. Return to our homepage to continue.',
           type: 'website',
@@ -1789,7 +1675,10 @@ export default function PublicSite() {
   if (path === '/') return <HomePage />;
   if (path === '/how-it-works') return <HowItWorksPage />;
   if (path === '/conditions') return <ConditionsPage />;
-  if (path === '/pricing') return <PricingPage />;
+  if (path === '/pricing') {
+    window.location.replace('/how-it-works');
+    return null;
+  }
   if (path === '/about') return <AboutPage />;
   if (path === '/faq' || path === '/general-5') return <FaqPage />;
   if (path === '/contact') {
