@@ -14864,9 +14864,21 @@ html[data-theme='dark'] .auth-loading-page{
 
 .rx-guided__work{
   display: flex;
+  width: 100%;
   min-width: 0;
   flex-direction: column;
+  align-items: stretch;
   gap: 16px;
+}
+
+.rx-guided__work > *,
+.rx-workbench--guided .rx-workbench-main,
+.rx-workbench--guided .rx-guided-card,
+.rx-workbench--guided .rx-formulary-stage,
+.rx-workbench--guided .rx-guided__payment,
+.rx-workbench--guided .rx-checkout-panel{
+  width: 100%;
+  max-width: none;
 }
 
 .rx-guided__payment{
@@ -14880,11 +14892,7 @@ html[data-theme='dark'] .auth-loading-page{
 }
 
 .rx-workbench--guided{
-  padding-bottom: 24px;
-}
-
-.rx-workbench--guided .rx-guided__work{
-  padding-right: min(400px, 42vw);
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
 }
 
 .rx-basket-drawer{
@@ -15062,10 +15070,6 @@ body:has(.local-preview-switcher) .rx-basket-drawer{
 
   .rx-workbench--guided{
     padding-bottom: calc(96px + env(safe-area-inset-bottom));
-  }
-
-  .rx-workbench--guided .rx-guided__work{
-    padding-right: 0;
   }
 
   .rx-basket-drawer__list > li{

@@ -88,7 +88,7 @@
 .manual-rx-picker__field { display: flex; align-items: center; gap: 8px; margin: 10px 10px 8px; padding-left: 11px; border: 1px solid var(--border-strong, var(--border)); border-radius: 9px; background: var(--bg-surface); }
 .manual-rx-picker__field:focus-within { border-style: solid; border-color: var(--tenant-primary); box-shadow: 0 0 0 3px var(--tenant-primary-soft); }
 .manual-rx-picker__field svg { color: var(--text-secondary); }
-.manual-rx-picker__field .input { border: 0; box-shadow: none; }
+.manual-rx-picker__field .input { flex: 1; min-width: 0; width: 100%; border: 0; box-shadow: none; }
 .manual-rx-picker__filters { display: flex; gap: 6px; overflow-x: auto; padding: 0 10px 9px; scrollbar-width: none; }
 .manual-rx-picker__filters button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; min-height: 29px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-secondary); background: var(--bg-surface); font-size: 9px; font-weight: 700; }
 .manual-rx-picker__filters button small { display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border-radius: 999px; color: var(--text-tertiary); background: var(--bg-elevated); font-size: 7px; font-variant-numeric: tabular-nums; }
