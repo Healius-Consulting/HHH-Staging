@@ -58,6 +58,43 @@ export function snapshotWithManualRefundTask(
   return withPendingPaidRefund(snapshot, pendingManualRefund(order, actorUid));
 }
 
+export type SqlRefundRow = {
+  id: string;
+  status: string;
+  amountPence: number | string;
+  cause?: string | null;
+  route?: string | null;
+  externalReference?: string | null;
+  createdAt?: string | null;
+  confirmedAt?: string | null;
+  confirmedByUid?: string | null;
+};
+
+export function portalRefundFromSql(row: SqlRefundRow) {
+  const status = String(row.status || '').toUpperCase();
+  return {
+    id: row.id,
+    status: status === 'COMPLETED' ? 'completed' as const
+      : status === 'FAILED' ? 'failed' as const
+        : 'pending_confirmation' as const,
+    amountPence: Math.max(0, Number(row.amountPence || 0)),
+    method: String(row.route || '').toUpperCase() === 'WORLDPAY' ? 'worldpay_portal' as const : 'pharmacy_manual' as const,
+    paymentReference: row.externalReference || row.id,
+    transactionReference: row.externalReference || row.id,
+    reason: row.cause || 'patient_cancelled',
+    resolution: 'cancel' as const,
+    requestedAt: row.createdAt || undefined,
+    requestedBy: row.confirmedByUid || undefined,
+    externalReference: row.externalReference || undefined,
+    confirmedAt: row.confirmedAt || undefined,
+    confirmedBy: row.confirmedByUid || undefined,
+  };
+}
+
+export function sqlRefundCompleted(row?: SqlRefundRow | null) {
+  return String(row?.status || '').toUpperCase() === 'COMPLETED';
+}
+
 export function completedManualRefund(
   order: Parameters<typeof pendingManualRefund>[0],
   input: { refundId?: string | null; externalReference: string; actorUid?: string | null; now?: string },

@@ -142,7 +142,7 @@ export async function placeOrderAfterWorldpaySettlement(
         prescriberId: placed.prescriberId,
         purchaseOrder: placed.purchaseOrder ?? null,
         fulfilmentStatus: placed.purchaseOrder ? 'SUPPLIER_PROCESSING' : undefined,
-      }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
+      });
     }
   }
 

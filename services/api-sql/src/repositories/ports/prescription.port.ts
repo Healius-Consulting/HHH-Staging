@@ -98,4 +98,13 @@ export interface PrescriptionRepositoryPort {
   findPrescriptionBySupplierId(organisationId: string, supplierPrescriptionId: string): Promise<PrescriptionRecord | null>;
   findPrescriptionBySerial(organisationId: string, serialNumber: string): Promise<PrescriptionRecord | null>;
   recordSupplierPrescription(input: UpsertOrderPrescriptionInput): Promise<PrescriptionRecord>;
+  listOrderPrescriptionsByOrganisation(organisationId: string, limit?: number): Promise<Array<{
+    orderId: string;
+    prescriptionId: string;
+    supplierPurchaseOrderId: string | null;
+    placementState: string;
+  }>>;
+  findOrderIdsBySupplierPurchaseOrderId(organisationId: string, supplierPurchaseOrderId: string): Promise<string[]>;
+  findOrderIdsBySupplierPrescriptionId(organisationId: string, supplierPrescriptionId: string): Promise<string[]>;
+  attachSupplierPurchaseOrder(orderId: string, supplierPurchaseOrderId: string): Promise<void>;
 }

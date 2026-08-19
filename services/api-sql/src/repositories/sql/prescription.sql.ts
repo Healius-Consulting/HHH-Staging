@@ -253,6 +253,56 @@ const UPDATE_PRESCRIPTION_SUPPLIER_GQL = `
   }
 `;
 
+const LIST_ORDER_PRESCRIPTIONS_GQL = `
+  query ListOrderPrescriptionsByOrganisation($organisationId: UUID!, $limit: Int!) {
+    orderPrescriptions(where: { order: { organisationId: { eq: $organisationId } } }, limit: $limit) {
+      orderId
+      prescriptionId
+      supplierPurchaseOrderId
+      placementState
+    }
+  }
+`;
+
+const LIST_ORDER_PRESCRIPTIONS_BY_PO_GQL = `
+  query ListOrderPrescriptionsByPurchaseOrder($organisationId: UUID!, $supplierPurchaseOrderId: String!) {
+    orderPrescriptions(
+      where: {
+        supplierPurchaseOrderId: { eq: $supplierPurchaseOrderId }
+        order: { organisationId: { eq: $organisationId } }
+      }
+      limit: 20
+    ) {
+      orderId
+    }
+  }
+`;
+
+const LIST_ORDER_PRESCRIPTIONS_BY_RX_GQL = `
+  query ListOrderPrescriptionsBySupplierPrescription($organisationId: UUID!, $supplierPrescriptionId: String!) {
+    orderPrescriptions(
+      where: {
+        prescription: { supplierPrescriptionId: { eq: $supplierPrescriptionId } }
+        order: { organisationId: { eq: $organisationId } }
+      }
+      limit: 20
+    ) {
+      orderId
+    }
+  }
+`;
+
+const LIST_ORDER_PRESCRIPTIONS_BY_ORDER_GQL = `
+  query ListOrderPrescriptionsByOrder($orderId: UUID!) {
+    orderPrescriptions(where: { orderId: { eq: $orderId } }, limit: 20) {
+      orderId
+      prescriptionId
+      supplierPurchaseOrderId
+      placementState
+    }
+  }
+`;
+
 const UPSERT_ORDER_PRESCRIPTION_GQL = `
   mutation UpsertOrderPrescription(
     $orderId: UUID!
@@ -579,5 +629,58 @@ export class SqlPrescriptionRepository implements PrescriptionRepositoryPort {
     });
 
     return saved;
+  }
+
+  async listOrderPrescriptionsByOrganisation(organisationId: string, limit = 500) {
+    const result = await dataConnect.executeGraphql<{
+      orderPrescriptions: Array<{
+        orderId: string;
+        prescriptionId: string;
+        supplierPurchaseOrderId: string | null;
+        placementState: string;
+      }>;
+    }, { organisationId: string; limit: number }>(
+      LIST_ORDER_PRESCRIPTIONS_GQL,
+      { variables: { organisationId, limit } },
+    );
+    return result.data.orderPrescriptions ?? [];
+  }
+
+  async findOrderIdsBySupplierPurchaseOrderId(organisationId: string, supplierPurchaseOrderId: string): Promise<string[]> {
+    const result = await dataConnect.executeGraphql<{ orderPrescriptions: Array<{ orderId: string }> }, any>(
+      LIST_ORDER_PRESCRIPTIONS_BY_PO_GQL,
+      { variables: { organisationId, supplierPurchaseOrderId } },
+    );
+    return [...new Set((result.data.orderPrescriptions ?? []).map(row => row.orderId))];
+  }
+
+  async findOrderIdsBySupplierPrescriptionId(organisationId: string, supplierPrescriptionId: string): Promise<string[]> {
+    const result = await dataConnect.executeGraphql<{ orderPrescriptions: Array<{ orderId: string }> }, any>(
+      LIST_ORDER_PRESCRIPTIONS_BY_RX_GQL,
+      { variables: { organisationId, supplierPrescriptionId } },
+    );
+    return [...new Set((result.data.orderPrescriptions ?? []).map(row => row.orderId))];
+  }
+
+  async attachSupplierPurchaseOrder(orderId: string, supplierPurchaseOrderId: string): Promise<void> {
+    const result = await dataConnect.executeGraphql<{
+      orderPrescriptions: Array<{ orderId: string; prescriptionId: string; placementState: string }>;
+    }, { orderId: string }>(
+      LIST_ORDER_PRESCRIPTIONS_BY_ORDER_GQL,
+      { variables: { orderId } },
+    );
+    const links = result.data.orderPrescriptions ?? [];
+    for (const link of links) {
+      await dataConnect.executeGraphql(UPSERT_ORDER_PRESCRIPTION_GQL, {
+        variables: {
+          orderId,
+          prescriptionId: link.prescriptionId,
+          placementState: ['PENDING_PLACEMENT', 'HELD_PRICE', 'HELD_STOCK', 'CANCELLATION_PENDING_REFUND', 'PLACED', 'HELD_FOR_RENEWAL', 'CANCELLED_REFUNDED'].includes(link.placementState)
+            ? link.placementState
+            : 'PENDING_PLACEMENT',
+          supplierPurchaseOrderId,
+        },
+      });
+    }
   }
 }

@@ -340,7 +340,7 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.unresolvedReason, undefined);
   });
 
-  it('keeps a paid Curaleaf-cancelled purchase order in refund_required until staff confirm the refund', () => {
+  it('keeps a paid Curaleaf-cancelled purchase order paid so staff can choose replacement or refund', () => {
     const mapped = toPortalOrder({
       ...order,
       status: 'PROCESSING',
@@ -384,9 +384,8 @@ describe('SQL pharmacy compatibility contracts', () => {
         },
       },
     });
-    assert.equal(mapped.paymentStatus, 'refund_required');
-    assert.equal(mapped.refund?.status, 'pending_confirmation');
-    assert.equal(mapped.refund?.id, `refund-${order.id}`);
+    assert.equal(mapped.paymentStatus, 'paid');
+    assert.equal(mapped.refund, undefined);
     assert.equal(mapped.status, 'cancelled');
     assert.equal(mapped.unresolvedReason, 'cancelled');
     assert.equal(mapped.quoteReview, undefined);
@@ -395,7 +394,7 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.prescriptionFlow['rx-cancelled']?.state, 'CANCELLED_PURCHASE_ORDER');
   });
 
-  it('maps a paid cancel with CANCELLED payment column and no snapshot refund into refund_required', () => {
+  it('maps a paid cancel with CANCELLED payment column and no snapshot refund as still paid, without inventing a refund task', () => {
     const mapped = toPortalOrder({
       ...order,
       status: 'CANCELLED',
@@ -415,12 +414,9 @@ describe('SQL pharmacy compatibility contracts', () => {
         },
       },
     });
-    assert.equal(mapped.paymentStatus, 'refund_required');
+    assert.equal(mapped.paymentStatus, 'paid');
     assert.equal(mapped.status, 'cancelled');
-    assert.equal(mapped.refund?.status, 'pending_confirmation');
-    assert.equal(mapped.refund?.id, `refund-${order.id}`);
-    assert.equal(mapped.refund?.amountPence, 10000);
-    assert.equal(mapped.refund?.method, 'pharmacy_manual');
+    assert.equal(mapped.refund, undefined);
     assert.equal(mapped.unresolvedReason, 'cancelled');
   });
 
@@ -438,6 +434,32 @@ describe('SQL pharmacy compatibility contracts', () => {
     });
     assert.equal(mapped.paymentStatus, 'cancelled');
     assert.equal(mapped.refund, undefined);
+  });
+
+  it('keeps a live Curaleaf purchase order visible after HHH marks the order cancelled and refunded', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      status: 'CANCELLED',
+      paymentStatus: 'REFUNDED',
+      paidAt: null,
+      fulfilmentStatus: 'EXCEPTION',
+      quoteSnapshot: {
+        cancellation: { status: 'refund_required' },
+        refund: { id: 'refund-1', status: 'completed' },
+        curaleaf: {
+          status: 'purchase_order_submitted',
+          purchaseOrderId: '2bf991a2-3bbf-43ea-ae5b-45654ae5bc4b',
+          purchaseOrderState: 'CREATED',
+          state: 'CREATED',
+          prescriptionState: 'ACTIVE',
+          customerReference: 'HHH-e7e91a37-42c8-4af7-ada8-6e653317dc04-2ed86c9782',
+        },
+      },
+    });
+    assert.equal(mapped.paymentStatus, 'refunded');
+    assert.equal(mapped.curaleaf?.purchaseOrderState, 'CREATED');
+    assert.equal(mapped.curaleaf?.purchaseOrderId, '2bf991a2-3bbf-43ea-ae5b-45654ae5bc4b');
+    assert.equal(mapped.curaleaf?.status, 'purchase_order_submitted');
   });
 
   it('maps a split Curaleaf shipment onto the portal contract without inventing a full dispatch', () => {
@@ -975,5 +997,50 @@ describe('SQL pharmacy compatibility contracts', () => {
       { integration: 'worldpay', state: 'unavailable', environment: 'production', checkedAt: null },
     ]);
     assert.equal(JSON.stringify(integrations).includes('secrets/'), false);
+  });
+
+  it('prefers a SQL refund over a snapshot refund', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      status: 'CANCELLED',
+      paymentStatus: 'REFUND_REQUIRED',
+      paidAt: '2026-08-18T23:32:00.000Z',
+      fulfilmentStatus: 'EXCEPTION',
+      quoteSnapshot: {
+        refund: { id: 'snapshot-refund', status: 'pending_confirmation', amountPence: 1 },
+      },
+      sqlRefund: {
+        id: 'sql-refund',
+        status: 'completed',
+        amountPence: 10500,
+        method: 'pharmacy_manual',
+      },
+    });
+    assert.equal(mapped.refund?.id, 'sql-refund');
+    assert.equal(mapped.refund?.status, 'completed');
+    assert.equal(mapped.paymentStatus, 'refunded');
+  });
+
+  it('prefers SQL order lines over snapshot items', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-18T18:00:00.000Z',
+      quoteSnapshot: {
+        lineItems: [{ packId: 'snap-pack', productId: 'snap-pack', name: 'Snapshot pack', quantity: 9, unitPricePence: 1 }],
+      },
+      sqlLines: [{
+        packId: 'sql-pack',
+        productId: 'sql-pack',
+        formulaId: 'formula-1',
+        name: 'SQL pack',
+        quantity: 2,
+        unitPricePence: 8500,
+      }],
+    });
+    assert.equal(mapped.lineItems.length, 1);
+    assert.equal(mapped.lineItems[0].packId, 'sql-pack');
+    assert.equal(mapped.lineItems[0].quantity, 2);
+    assert.equal(mapped.lineItems[0].unitPricePence, 8500);
   });
 });

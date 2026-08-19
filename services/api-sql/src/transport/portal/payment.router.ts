@@ -148,7 +148,7 @@ export function createPortalPaymentRouter(): Router {
           prescriberId: curaleafResult.prescriberId,
           purchaseOrder: curaleafResult.purchaseOrder ?? null,
           fulfilmentStatus: curaleafResult.purchaseOrder ? 'SUPPLIER_PROCESSING' : undefined,
-        }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
+        });
       }
 
       await promotePatientAfterCuraleafPlacement(patientFinanceDeps, order, curaleafResult).catch(err =>
@@ -394,6 +394,10 @@ export function createPortalPaymentRouter(): Router {
         receiptHash,
       });
 
+      if (initialStatus === 'PAID' && paymentResult.id) {
+        await paymentRepo.updatePaymentStatus(paymentResult.id, 'PAID', orderId, receiptHash);
+      }
+
       res.status(201).json({
         id: paymentResult.id,
         status: initialStatus,
@@ -424,18 +428,21 @@ export function createPortalPaymentRouter(): Router {
       const input = refundSchema.parse(req.body);
       const idempotencyKeyHash = sha256(input.idempotencyKey);
 
+      const stored = (await paymentRepo.listTenantPayments(scope.organisationId, 500)).find(row => row.id === paymentId);
+      if (!stored) throw new HttpError(404, 'Payment not found.', 'NOT_FOUND');
       const refundResult = await paymentRepo.createRefund({
         organisationId: scope.organisationId,
+        orderId: stored.orderId,
         paymentId,
         amountPence: input.amountPence,
-        currency: 'GBP',
-        status: 'SUCCEEDED',
-        reason: input.reason,
-        idempotencyKeyHash,
-        issuedByUid: scope.uid,
+        currency: stored.currency || 'GBP',
+        cause: input.reason,
+        route: stored.route,
+        status: 'PENDING_CONFIRMATION',
+        idempotencyKey: idempotencyKeyHash,
       });
 
-      res.status(201).json({ id: refundResult.id, status: 'refund_issued' });
+      res.status(201).json({ id: refundResult.id, status: 'refund_pending_confirmation' });
     } catch (error) {
       next(error);
     }

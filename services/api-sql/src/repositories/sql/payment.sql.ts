@@ -1,5 +1,6 @@
 import { dataConnect } from '../../bootstrap/firebase.js';
-import type { PaymentRecord, PaymentRepositoryPort, PaymentSqlStatus } from '../ports/payment.port.js';
+import { pendingPaymentsToCancel, selectLivePayment } from '../../application/payments/live-payment.js';
+import type { PaymentRecord, PaymentRepositoryPort, PaymentSqlStatus, RefundRecord } from '../ports/payment.port.js';
 
 const PAYMENT_FIELDS = `
   id
@@ -40,7 +41,7 @@ const GET_PAYMENT_BY_RECEIPT_HASH_GQL = `
 
 const GET_PAYMENT_BY_ORDER_ID_GQL = `
   query GetPaymentByOrderId($orderId: UUID!, $organisationId: UUID!) {
-    payments(where: { orderId: { eq: $orderId }, organisationId: { eq: $organisationId } }, limit: 5) {
+    payments(where: { orderId: { eq: $orderId }, organisationId: { eq: $organisationId } }, limit: 50) {
       ${PAYMENT_FIELDS}
     }
   }
@@ -59,7 +60,7 @@ const LIST_PENDING_WORLDPAY_PAYMENTS_GQL = `
     payments(
       where: {
         route: { eq: WORLDPAY }
-        status: { in: [PENDING, CANCELLED, EXPIRED] }
+        status: { eq: PENDING }
       }
       limit: $limit
     ) {
@@ -131,6 +132,18 @@ const UPDATE_PAYMENT_STATUS_GQL = `
   }
 `;
 
+const CANCEL_PAYMENT_GQL = `
+  mutation CancelPayment($id: UUID!, $status: PaymentStatus!) {
+    payment_update(
+      key: { id: $id }
+      data: {
+        status: $status
+        updatedAt_expr: "request.time"
+      }
+    )
+  }
+`;
+
 const UPDATE_PAYMENT_OUTCOME_GQL = `
   mutation UpdatePaymentOutcome(
     $id: UUID!
@@ -162,27 +175,72 @@ const UPDATE_ORDER_PAYMENT_STATUS_GQL = `
   }
 `;
 
+const REFUND_FIELDS = `
+  id organisationId orderId paymentId status amountPence currency cause route
+  idempotencyKey externalReference confirmedByUid createdAt confirmedAt
+`;
+
 const CREATE_REFUND_GQL = `
   mutation CreateRefund(
     $organisationId: UUID!
+    $orderId: UUID!
     $paymentId: UUID!
     $amountPence: Int64!
     $currency: String!
+    $cause: String!
+    $route: PaymentRoute!
     $status: RefundStatus!
-    $reason: String!
-    $idempotencyKeyHash: String!
-    $issuedByUid: String!
+    $idempotencyKey: String!
   ) {
     refund_insert(data: {
       organisationId: $organisationId
+      orderId: $orderId
       paymentId: $paymentId
       amountPence: $amountPence
       currency: $currency
+      cause: $cause
+      route: $route
       status: $status
-      reason: $reason
-      idempotencyKeyHash: $idempotencyKeyHash
-      issuedByUid: $issuedByUid
+      idempotencyKey: $idempotencyKey
     })
+  }
+`;
+
+const LIST_REFUNDS_BY_ORDER_GQL = `
+  query ListRefundsByOrder($orderId: UUID!, $organisationId: UUID!) {
+    refunds(where: { orderId: { eq: $orderId }, organisationId: { eq: $organisationId } }, limit: 20) {
+      ${REFUND_FIELDS}
+    }
+  }
+`;
+
+const LIST_TENANT_REFUNDS_GQL = `
+  query ListTenantRefunds($organisationId: UUID!, $limit: Int!) {
+    refunds(where: { organisationId: { eq: $organisationId } }, limit: $limit) {
+      ${REFUND_FIELDS}
+    }
+  }
+`;
+
+const FIND_REFUND_BY_KEY_GQL = `
+  query FindRefundByIdempotencyKey($idempotencyKey: String!) {
+    refunds(where: { idempotencyKey: { eq: $idempotencyKey } }, limit: 1) {
+      ${REFUND_FIELDS}
+    }
+  }
+`;
+
+const CONFIRM_REFUND_GQL = `
+  mutation ConfirmRefund($id: UUID!, $externalReference: String!, $confirmedByUid: String!) {
+    refund_update(
+      key: { id: $id }
+      data: {
+        status: COMPLETED
+        externalReference: $externalReference
+        confirmedByUid: $confirmedByUid
+        confirmedAt_expr: "request.time"
+      }
+    )
   }
 `;
 
@@ -203,12 +261,25 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
     return result.data.payments?.[0] ?? null;
   }
 
-  async findPaymentByOrderId(orderId: string, organisationId: string): Promise<PaymentRecord | null> {
+  async listPaymentsByOrderId(orderId: string, organisationId: string): Promise<PaymentRecord[]> {
     const result = await dataConnect.executeGraphql<{ payments: PaymentRecord[] }, any>(
       GET_PAYMENT_BY_ORDER_ID_GQL,
       { variables: { orderId, organisationId } }
     );
-    return result.data.payments?.[0] ?? null;
+    return result.data.payments ?? [];
+  }
+
+  async findPaymentByOrderId(orderId: string, organisationId: string): Promise<PaymentRecord | null> {
+    return selectLivePayment(await this.listPaymentsByOrderId(orderId, organisationId));
+  }
+
+  async cancelPendingPaymentsForOrder(orderId: string, organisationId: string, keepId?: string | null): Promise<void> {
+    const pending = pendingPaymentsToCancel(await this.listPaymentsByOrderId(orderId, organisationId), keepId);
+    for (const payment of pending) {
+      await dataConnect.executeGraphql(CANCEL_PAYMENT_GQL, {
+        variables: { id: payment.id, status: 'CANCELLED' },
+      });
+    }
   }
 
   async listTenantPayments(organisationId: string, limit = 200): Promise<PaymentRecord[]> {
@@ -242,6 +313,9 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
     manualTender?: string | null;
     manualReference?: string | null;
   }): Promise<{ id?: string }> {
+    if (data.status === 'PENDING' || data.status === 'PAID') {
+      await this.cancelPendingPaymentsForOrder(data.orderId, data.organisationId);
+    }
     const result = await dataConnect.executeGraphql<{ payment_insert: { id: string } }, any>(
       CREATE_PAYMENT_GQL,
       {
@@ -266,9 +340,13 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
   }
 
   async updatePaymentStatus(id: string, status: 'PAID' | 'FAILED' | 'CANCELLED', orderId: string, receiptHash?: string | null): Promise<void> {
-    await dataConnect.executeGraphql<any, any>(UPDATE_PAYMENT_STATUS_GQL, {
-      variables: { id, status, orderId, receiptHash: receiptHash ?? null },
-    });
+    if (status === 'PAID') {
+      await dataConnect.executeGraphql<any, any>(UPDATE_PAYMENT_STATUS_GQL, {
+        variables: { id, status, orderId, receiptHash: receiptHash ?? null },
+      });
+      return;
+    }
+    await dataConnect.executeGraphql(CANCEL_PAYMENT_GQL, { variables: { id, status } });
   }
 
   async updatePaymentOutcome(data: {
@@ -308,29 +386,74 @@ export class SqlPaymentRepository implements PaymentRepositoryPort {
 
   async createRefund(data: {
     organisationId: string;
+    orderId: string;
     paymentId: string;
     amountPence: number;
     currency: string;
-    status: 'SUCCEEDED' | 'PENDING' | 'FAILED';
-    reason: string;
-    idempotencyKeyHash: string;
-    issuedByUid: string;
-  }): Promise<{ id?: string }> {
-    const result = await dataConnect.executeGraphql<{ refund_insert: { id: string } }, any>(
+    cause: string;
+    route: 'MANUAL' | 'WORLDPAY';
+    status?: 'PENDING_CONFIRMATION' | 'COMPLETED' | 'FAILED';
+    idempotencyKey: string;
+    confirmedByUid?: string | null;
+  }): Promise<RefundRecord> {
+    const existing = await this.findRefundByIdempotencyKey(data.idempotencyKey);
+    if (existing) return existing;
+    await dataConnect.executeGraphql<{ refund_insert: { id: string } }, any>(
       CREATE_REFUND_GQL,
       {
         variables: {
           organisationId: data.organisationId,
+          orderId: data.orderId,
           paymentId: data.paymentId,
           amountPence: data.amountPence,
           currency: data.currency,
-          status: data.status,
-          reason: data.reason,
-          idempotencyKeyHash: data.idempotencyKeyHash,
-          issuedByUid: data.issuedByUid,
+          cause: data.cause,
+          route: data.route,
+          status: data.status ?? 'PENDING_CONFIRMATION',
+          idempotencyKey: data.idempotencyKey,
         },
       }
     );
-    return { id: result.data.refund_insert?.id };
+    const saved = await this.findRefundByIdempotencyKey(data.idempotencyKey);
+    if (!saved) throw new Error('Refund could not be stored.');
+    return saved;
+  }
+
+  async listRefundsByOrderId(orderId: string, organisationId: string): Promise<RefundRecord[]> {
+    const result = await dataConnect.executeGraphql<{ refunds: RefundRecord[] }, any>(
+      LIST_REFUNDS_BY_ORDER_GQL,
+      { variables: { orderId, organisationId } },
+    );
+    return result.data.refunds ?? [];
+  }
+
+  async listTenantRefunds(organisationId: string, limit = 500): Promise<RefundRecord[]> {
+    const result = await dataConnect.executeGraphql<{ refunds: RefundRecord[] }, any>(
+      LIST_TENANT_REFUNDS_GQL,
+      { variables: { organisationId, limit } },
+    );
+    return result.data.refunds ?? [];
+  }
+
+  async findRefundByIdempotencyKey(idempotencyKey: string): Promise<RefundRecord | null> {
+    const result = await dataConnect.executeGraphql<{ refunds: RefundRecord[] }, any>(
+      FIND_REFUND_BY_KEY_GQL,
+      { variables: { idempotencyKey } },
+    );
+    return result.data.refunds?.[0] ?? null;
+  }
+
+  async confirmRefund(data: {
+    id: string;
+    externalReference: string;
+    confirmedByUid: string;
+  }): Promise<void> {
+    await dataConnect.executeGraphql(CONFIRM_REFUND_GQL, {
+      variables: {
+        id: data.id,
+        externalReference: data.externalReference,
+        confirmedByUid: data.confirmedByUid,
+      },
+    });
   }
 }

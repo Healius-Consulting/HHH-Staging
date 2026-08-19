@@ -231,19 +231,23 @@ function orderAllOrderedPacksReceived(order: PatientOrder) {
  */
 export function orderRequiresCuraleafCancel(order: PatientOrder): boolean {
   if (order.curaleafCancellation?.status === 'confirmed') return false;
+  const livePurchaseOrder = order.prescriptions.some(prescription =>
+    Boolean(prescription.purchaseOrderState)
+    && prescription.purchaseOrderState !== 'CANCELLED'
+    && prescription.purchaseOrderState !== 'REJECTED'
+  );
+  const livePrescription = order.prescriptions.some(prescription =>
+    prescription.curaleafPrescriptionState === 'ACTIVE'
+    || prescription.curaleafPrescriptionState === 'FULFILLED'
+  );
+  if (livePurchaseOrder || livePrescription) return true;
   if (order.prescriptions.some(prescription =>
     prescription.purchaseOrderState === 'CANCELLED'
     || prescription.curaleafPrescriptionState === 'CANCELLED'
-    || prescription.status === 'cancelled'
   )) {
     return false;
   }
-  return order.prescriptions.some(prescription =>
-    prescription.curaleafPrescriptionState === 'ACTIVE'
-    || prescription.curaleafPrescriptionState === 'FULFILLED'
-    || prescription.placed
-    || (prescription.purchaseOrderState != null && prescription.purchaseOrderState !== 'CANCELLED')
-  );
+  return order.prescriptions.some(prescription => prescription.placed);
 }
 
 /**
@@ -260,6 +264,7 @@ function supplierCancelled(order: PatientOrder) {
 
 export function orderCancellationResolution(order: PatientOrder): CancellationResolution {
   if (!order.cancellation && order.lifecycleStatus !== 'cancelled' && !supplierCancelled(order)) return 'none';
+  if (orderRequiresCuraleafCancel(order)) return 'needs-action';
   if (order.refund?.status === 'completed') return 'refunded';
 
   const supplierActionOutstanding = ['contact_required', 'awaiting_confirmation'].includes(order.curaleafCancellation?.status ?? '')

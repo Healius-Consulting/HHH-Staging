@@ -62,6 +62,14 @@ test('pharmacy cancel is local until Curaleaf accepts the prescription or create
   assert.equal(orderRequiresCuraleafCancel(pending), false);
   assert.equal(orderRequiresCuraleafCancel(accepted), true);
   assert.equal(orderRequiresCuraleafCancel(withPo), true);
+  const refundedWithLivePo = {
+    payment: { status: 'paid' },
+    refund: { status: 'completed' },
+    lifecycleStatus: 'cancelled',
+    prescriptions: [{ status: 'cancelled', curaleafPrescriptionState: 'ACTIVE', placed: true, purchaseOrderState: 'CREATED' }],
+  } as PatientOrder;
+  assert.equal(orderRequiresCuraleafCancel(refundedWithLivePo), true);
+  assert.equal(orderCancellationResolution(refundedWithLivePo), 'needs-action');
 });
 
 test('mixed ready and in-flight prescriptions do not classify the order as ready', () => {

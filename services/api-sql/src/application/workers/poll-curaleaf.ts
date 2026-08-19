@@ -18,7 +18,6 @@ import {
   type CuraleafEventKind,
 } from '../integrations/curaleaf-events.js';
 import { listPharmacyRecipients, queueEmailToRecipients } from '../notifications/email-outbox.js';
-import { orderMoneyWasTaken, snapshotRefundCompleted, snapshotWithManualRefundTask } from '../orders/paid-refund.js';
 import { curaleafApiRequest } from '../integrations/curaleaf.service.js';
 import type { CuraleafPurchaseOrderLike, CuraleafShipmentLike } from '../orders/curaleaf-fulfilment.js';
 import type { IdentityRepositoryPort } from '../../repositories/ports/identity.port.js';
@@ -26,6 +25,8 @@ import type { IntegrationConnectionRecord } from '../../repositories/ports/integ
 import type { NotificationRepositoryPort } from '../../repositories/ports/notification.port.js';
 import type { OrganisationRepositoryPort } from '../../repositories/ports/organisation.port.js';
 import type { OrderRepositoryPort } from '../../repositories/ports/order.port.js';
+import type { PrescriptionRepositoryPort } from '../../repositories/ports/prescription.port.js';
+import { resolveOrdersForCuraleafEntity } from './poll-curaleaf-match.js';
 import { SqlWorkerEventRepository } from '../../repositories/sql/worker-event.sql.js';
 
 export type CuraleafPollDeps = {
@@ -33,8 +34,27 @@ export type CuraleafPollDeps = {
   notificationRepo: NotificationRepositoryPort;
   identityRepo: IdentityRepositoryPort;
   organisationRepo: OrganisationRepositoryPort;
+  prescriptionRepo?: PrescriptionRepositoryPort;
   events?: SqlWorkerEventRepository;
 };
+
+async function sqlOrderIdsForPurchaseOrder(
+  organisationId: string,
+  purchaseOrderId: string,
+  deps: CuraleafPollDeps,
+) {
+  if (!deps.prescriptionRepo || !purchaseOrderId) return [];
+  return deps.prescriptionRepo.findOrderIdsBySupplierPurchaseOrderId(organisationId, purchaseOrderId);
+}
+
+async function sqlOrderIdsForPrescription(
+  organisationId: string,
+  prescriptionId: string,
+  deps: CuraleafPollDeps,
+) {
+  if (!deps.prescriptionRepo || !prescriptionId) return [];
+  return deps.prescriptionRepo.findOrderIdsBySupplierPrescriptionId(organisationId, prescriptionId);
+}
 
 async function persistSupplierCancellation(
   order: {
@@ -60,7 +80,7 @@ async function persistSupplierCancellation(
   },
 ) {
   if (supplierCancellationAlreadyConfirmed(order.quoteSnapshot)) return;
-  const stamped = input.afterPharmacyCall
+  const nextSnapshot = input.afterPharmacyCall
     ? stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
       action: 'confirmed',
       purchaseOrderId: input.purchaseOrderId,
@@ -76,16 +96,12 @@ async function persistSupplierCancellation(
       prescriberId: input.prescriberId,
       note: input.summary,
     });
-  const nextSnapshot = input.afterPharmacyCall ? snapshotWithManualRefundTask(order, stamped) : stamped;
   await deps.orderRepo.updateQuoteSnapshot({
     id: order.id,
     organisationId: order.organisationId,
     quoteSnapshot: nextSnapshot,
     fulfilmentStatus: 'EXCEPTION',
   });
-  if (input.afterPharmacyCall && orderMoneyWasTaken(order) && !snapshotRefundCompleted(nextSnapshot) && order.paymentStatus !== 'REFUNDED') {
-    await deps.orderRepo.setPaymentStatus(order.id, 'REFUND_REQUIRED');
-  }
   const recipients = await listPharmacyRecipients(order.organisationId, deps);
   await queueEmailToRecipients(
     deps.notificationRepo,
@@ -142,9 +158,15 @@ async function pollKind(
       );
       const record = curaleafEntityRecord(raw, kind);
       if (kind === 'purchaseOrder' && isCuraleafTerminalRejection(record.state)) {
-        const orders = await deps.orderRepo.listTenantOrders(connection.organisationId, 500);
+        const purchaseOrder = record as CuraleafPurchaseOrderLike;
+        const sqlIds = await sqlOrderIdsForPurchaseOrder(connection.organisationId, String(purchaseOrder.id || ''), deps);
+        const orders = await resolveOrdersForCuraleafEntity(
+          connection.organisationId,
+          sqlIds,
+          deps,
+          order => orderMatchesCancelledPurchaseOrder(order, purchaseOrder),
+        );
         for (const order of orders) {
-          if (!orderMatchesCancelledPurchaseOrder(order, record as CuraleafPurchaseOrderLike)) continue;
           const afterPharmacyCall = pharmacyAlreadyAskedCuraleafToCancel(order.quoteSnapshot);
           await persistSupplierCancellation(order, deps, {
             source: 'purchase_order',
@@ -158,9 +180,14 @@ async function pollKind(
         }
       }
       if (kind === 'prescription' && isCuraleafTerminalRejection(record.state)) {
-        const orders = await deps.orderRepo.listTenantOrders(connection.organisationId, 500);
+        const sqlIds = await sqlOrderIdsForPrescription(connection.organisationId, String(record.id || ''), deps);
+        const orders = await resolveOrdersForCuraleafEntity(
+          connection.organisationId,
+          sqlIds,
+          deps,
+          order => orderMatchesCancelledPrescription(order, record),
+        );
         for (const order of orders) {
-          if (!orderMatchesCancelledPrescription(order, record)) continue;
           const afterPharmacyCall = pharmacyAlreadyAskedCuraleafToCancel(order.quoteSnapshot);
           await persistSupplierCancellation(order, deps, {
             source: 'prescription',
@@ -187,10 +214,20 @@ async function pollKind(
         }
       }
       if (kind === 'shipment') {
-        const orders = await deps.orderRepo.listTenantOrders(connection.organisationId, 500);
+        const shipment = record as CuraleafShipmentLike;
+        const sqlIds = await sqlOrderIdsForPurchaseOrder(
+          connection.organisationId,
+          String(shipment.purchaseOrderId || ''),
+          deps,
+        );
+        const orders = await resolveOrdersForCuraleafEntity(
+          connection.organisationId,
+          sqlIds,
+          deps,
+          order => shipmentBelongsToOrder(order, shipment),
+        );
         for (const order of orders) {
-          if (!shipmentBelongsToOrder(order, record as CuraleafShipmentLike)) continue;
-          const next = applyShipmentSnapshot(order, record as CuraleafShipmentLike);
+          const next = applyShipmentSnapshot(order, shipment);
           await deps.orderRepo.updateQuoteSnapshot({
             id: order.id,
             organisationId: order.organisationId,
@@ -212,7 +249,7 @@ async function pollKind(
                   ? 'A partial order has been dispatched.'
                   : 'An order has been dispatched.',
               },
-              ['pharmacy-order-dispatched', order.id, (record as CuraleafShipmentLike).id, next.fulfilmentStatus],
+              ['pharmacy-order-dispatched', order.id, shipment.id, next.fulfilmentStatus],
               { organisationId: order.organisationId, patientId: order.patientId, orderId: order.id },
             );
           }

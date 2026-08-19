@@ -36,8 +36,10 @@ import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
+import { SqlOrderLineRepository } from '../../repositories/sql/order-line.sql.js';
 import { SqlPatientFinanceRepository } from '../../repositories/sql/patient-finance.sql.js';
 import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
+import { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
 import { purgeOrderPrescriptionFiles } from '../../application/prescriptions/prescription-file-purge.js';
 import { persistCuraleafPrescriptionIdentity } from '../../application/prescriptions/curaleaf-prescription-record.js';
 import type { OrderRecord, CreateOrderInput } from '../../repositories/ports/order.port.js';
@@ -46,11 +48,16 @@ import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 import { toPortalOrder, toPortalOrderDraft } from './pharmacy-contracts.js';
 import {
+  loadOrderChildren,
+  loadOrganisationOrderChildren,
+  mapPortalOrderFromSql,
+} from './order-sql-overlay.js';
+import { parseQuote } from '../../application/orders/quote-review.js';
+import {
   completedManualRefund,
   orderMoneyWasTaken,
   pendingManualRefund,
   snapshotRefundCompleted,
-  snapshotWithManualRefundTask,
   withPendingPaidRefund,
 } from '../../application/orders/paid-refund.js';
 
@@ -59,6 +66,38 @@ const uuidLikeSchema = z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4
 function refundRecord(snapshot: unknown): Record<string, any> {
   const root = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot as Record<string, unknown> : {};
   return root.refund && typeof root.refund === 'object' && !Array.isArray(root.refund) ? root.refund as Record<string, unknown> : {};
+}
+
+async function paymentForManualRefund(
+  paymentRepo: SqlPaymentRepository,
+  order: OrderRecord,
+) {
+  const existing = await paymentRepo.findPaymentByOrderId(order.id, order.organisationId);
+  if (existing && ['PAID', 'REFUND_REQUIRED', 'REFUNDED'].includes(existing.status)) return existing;
+  const created = await paymentRepo.createPayment({
+    organisationId: order.organisationId,
+    orderId: order.id,
+    patientId: order.patientId,
+    status: 'PAID',
+    amountPence: Math.max(0, Number(order.totalPence || 0)),
+    currency: order.currency || 'GBP',
+    route: String(order.paymentRoute || '').toUpperCase() === 'WORLDPAY' ? 'WORLDPAY' : 'MANUAL',
+    receiptHash: `refund-${order.id}`,
+  });
+  if (!created.id) throw new HttpError(503, 'A payment record could not be stored for this refund.', 'PAYMENT_RECORD_MISSING');
+  return {
+    id: created.id,
+    organisationId: order.organisationId,
+    orderId: order.id,
+    patientId: order.patientId,
+    status: 'PAID' as const,
+    amountPence: Math.max(0, Number(order.totalPence || 0)),
+    currency: order.currency || 'GBP',
+    route: String(order.paymentRoute || '').toUpperCase() === 'WORLDPAY' ? 'WORLDPAY' as const : 'MANUAL' as const,
+    receiptHash: `refund-${order.id}`,
+    version: 1,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 const draftInputSchema = z.object({
@@ -155,7 +194,7 @@ async function attachCuraleafToOrder(
     return toPortalOrder(order as any);
   }
   if (liveCancelled || snapshotCancelled) {
-    const stamped = stampCuraleafCancellationOnSnapshot(alignedSnapshot, {
+    const nextSnapshot = stampCuraleafCancellationOnSnapshot(alignedSnapshot, {
       action: 'confirmed',
       purchaseOrderId: String(matchedPO?.id || prior.purchaseOrderId || prior.id || ''),
       prescriptionId: typeof prior.prescriptionId === 'string' ? prior.prescriptionId : typeof matchedPO?.prescriptionId === 'string' ? matchedPO.prescriptionId : null,
@@ -163,7 +202,6 @@ async function attachCuraleafToOrder(
       reference: 'curaleaf_po_cancelled',
       note: 'Curaleaf cancelled the purchase order after pharmacy contact.',
     });
-    const nextSnapshot = snapshotWithManualRefundTask(order, stamped);
     const nextCuraleaf = {
       ...((nextSnapshot as { curaleaf?: Record<string, unknown> }).curaleaf || {}),
       prescriptionId: prior.prescriptionId || matchedPO?.prescriptionId || null,
@@ -177,12 +215,6 @@ async function attachCuraleafToOrder(
         quoteSnapshot: persisted,
         fulfilmentStatus: 'EXCEPTION',
       }).catch(err => console.warn('Curaleaf cancelled snapshot persist warning:', err));
-      if (orderMoneyWasTaken(order) && !snapshotRefundCompleted(persisted) && order.paymentStatus !== 'REFUNDED') {
-        await repos.orderRepo.setPaymentStatus(order.id, 'REFUND_REQUIRED').catch(err =>
-          console.warn('Curaleaf cancelled refund status persist warning:', err),
-        );
-        order.paymentStatus = 'REFUND_REQUIRED';
-      }
       order.fulfilmentStatus = 'EXCEPTION';
       order.quoteSnapshot = persisted;
     }
@@ -282,6 +314,8 @@ async function attachCuraleafToOrder(
 export function createPortalOrderRouter(): Router {
   const router = Router();
   const orderRepo = new SqlOrderRepository();
+  const orderLineRepo = new SqlOrderLineRepository();
+  const paymentRepo = new SqlPaymentRepository();
   const integrationRepo = new SqlIntegrationRepository();
   const identityRepo = new SqlIdentityRepository();
   const fulfilmentRepo = new SqlFulfilmentRepository();
@@ -434,6 +468,24 @@ export function createPortalOrderRouter(): Router {
         createdByUid: scope.uid,
       });
 
+      if (result.id) {
+        const quoted = parseQuote(input.pricingQuote) ?? parseQuote(quoteSnapshot);
+        const quoteByPack = new Map((quoted?.items || []).map(item => [item.packId, item]));
+        await orderLineRepo.replaceOrderLines(result.id, input.lineItems.map(item => {
+          const quote = quoteByPack.get(item.packId);
+          return {
+            orderId: result.id as string,
+            packId: item.packId,
+            formulaId: item.formulaId ?? null,
+            formulaName: item.name ?? null,
+            quantity: item.quantity,
+            fixedPatientPricePence: item.unitPricePence ?? quote?.patientPence ?? 0,
+            wholesalePackPricePence: quote?.wholesalePence ?? null,
+            lineMedicineRevenuePence: (item.unitPricePence ?? quote?.patientPence ?? 0) * item.quantity,
+          };
+        }));
+      }
+
       if (input.draftId) {
         await orderRepo.deleteDraft(input.draftId, scope.organisationId).catch(() => undefined);
       }
@@ -463,22 +515,11 @@ export function createPortalOrderRouter(): Router {
     try {
       const scope = assertTenantScope(req.context!);
       const orders = await orderRepo.listTenantOrders(scope.organisationId);
-
-      const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
-      let curaleafPOs: any[] = [];
-      let curaleafShipments: any[] = [];
-      if (connection?.secretResourceName) {
-        [curaleafPOs, curaleafShipments] = await Promise.all([
-          fetchCuraleafPurchaseOrders(connection).catch(() => []),
-          fetchCuraleafShipments(connection).catch(() => []),
-        ]);
-      }
-
-      const ordersWithPOs = await Promise.all(orders.map(order => (
-        attachCuraleafToOrder(order, curaleafPOs, curaleafShipments, { orderRepo, fulfilmentRepo })
-      )));
-
-      res.status(200).json(ordersWithPOs);
+      const children = await loadOrganisationOrderChildren(scope.organisationId, paymentRepo, orderLineRepo);
+      res.status(200).json(orders.map(order => mapPortalOrderFromSql(order, {
+        refunds: children.refundsByOrder.get(order.id) ?? [],
+        lines: children.linesByOrder.get(order.id) ?? [],
+      })));
     } catch (error) {
       next(error);
     }
@@ -495,18 +536,29 @@ export function createPortalOrderRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
-      let curaleafPOs: any[] = [];
-      let curaleafShipments: any[] = [];
-      if (connection?.secretResourceName) {
-        [curaleafPOs, curaleafShipments] = await Promise.all([
-          fetchCuraleafPurchaseOrders(connection).catch(() => []),
-          fetchCuraleafShipments(connection).catch(() => []),
-        ]);
+      if (String(req.query.refresh || '') === '1') {
+        const connection = await integrationRepo.findConnection(scope.organisationId, 'CURALEAF').catch(() => null);
+        let curaleafPOs: unknown[] = [];
+        let curaleafShipments: unknown[] = [];
+        if (connection?.secretResourceName) {
+          [curaleafPOs, curaleafShipments] = await Promise.all([
+            fetchCuraleafPurchaseOrders(connection).catch(() => []),
+            fetchCuraleafShipments(connection).catch(() => []),
+          ]);
+        }
+        const mapped = await attachCuraleafToOrder(order, curaleafPOs, curaleafShipments, { orderRepo, fulfilmentRepo });
+        const overlay = await loadOrderChildren(order, paymentRepo, orderLineRepo);
+        const sqlMapped = mapPortalOrderFromSql(order, overlay);
+        res.status(200).json({
+          ...mapped,
+          refund: sqlMapped.refund ?? mapped.refund,
+          lineItems: sqlMapped.lineItems?.length ? sqlMapped.lineItems : mapped.lineItems,
+        });
+        return;
       }
 
-      const mapped = await attachCuraleafToOrder(order, curaleafPOs, curaleafShipments, { orderRepo, fulfilmentRepo });
-      res.status(200).json(mapped);
+      const overlay = await loadOrderChildren(order, paymentRepo, orderLineRepo);
+      res.status(200).json(mapPortalOrderFromSql(order, overlay));
     } catch (error) {
       next(error);
     }
@@ -559,7 +611,7 @@ export function createPortalOrderRouter(): Router {
           prescriberId: curaleafResult.prescriberId,
           purchaseOrder: curaleafResult.purchaseOrder ?? null,
           fulfilmentStatus: curaleafResult.purchaseOrder ? 'SUPPLIER_PROCESSING' : undefined,
-        }).catch(err => console.warn('Curaleaf placement snapshot persist warning:', err));
+        });
       }
 
       await promotePatientAfterCuraleafPlacement(patientFinanceDeps, order, curaleafResult).catch(err =>
@@ -599,13 +651,12 @@ export function createPortalOrderRouter(): Router {
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       const requiresCuraleafCancel = curaleafRequiresSupplierCancel(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot);
-      const stamped = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+      const snapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
         action: supplierOrderCancelled(order.quoteSnapshot) || !requiresCuraleafCancel ? 'confirmed' : 'requested',
         reason: input.reason,
         note: input.note,
         actorUid: scope.uid,
       });
-      const snapshot = snapshotWithManualRefundTask(order, stamped, scope.uid);
       const moneyTaken = orderMoneyWasTaken(order);
       const exception = requiresCuraleafCancel || moneyTaken || supplierOrderCancelled(snapshot);
       await orderRepo.updateQuoteSnapshot({
@@ -614,15 +665,7 @@ export function createPortalOrderRouter(): Router {
         quoteSnapshot: snapshot,
         fulfilmentStatus: exception ? 'EXCEPTION' : undefined,
       });
-      if (!requiresCuraleafCancel && moneyTaken) {
-        await orderRepo.updateOrderStatus({
-          id: orderId,
-          organisationId: scope.organisationId,
-          status: 'CANCELLED',
-          paymentStatus: 'REFUND_REQUIRED',
-          cancelledAt: new Date().toISOString(),
-        });
-      } else if (!requiresCuraleafCancel && !moneyTaken) {
+      if (!requiresCuraleafCancel) {
         await orderRepo.updateOrderStatus({
           id: orderId,
           organisationId: scope.organisationId,
@@ -634,7 +677,6 @@ export function createPortalOrderRouter(): Router {
         ...order,
         quoteSnapshot: snapshot,
         fulfilmentStatus: exception ? 'EXCEPTION' : order.fulfilmentStatus,
-        paymentStatus: !requiresCuraleafCancel && moneyTaken ? 'REFUND_REQUIRED' : order.paymentStatus,
         status: !requiresCuraleafCancel ? 'CANCELLED' : order.status,
       } as any);
       res.status(201).json(mapped);
@@ -779,15 +821,12 @@ export function createPortalOrderRouter(): Router {
         throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
       }
 
-      const stamped = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
+      const snapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
         action: input.action,
         reference: input.reference || input.reason || 'curaleaf_contact',
         note: input.note,
         actorUid: scope.uid,
       });
-      const snapshot = snapshotWithManualRefundTask(order, stamped, scope.uid);
-      const moneyTaken = orderMoneyWasTaken(order);
-      const confirmedPaidCancel = input.action === 'confirmed' && moneyTaken;
       await orderRepo.updateQuoteSnapshot({
         id: orderId,
         organisationId: scope.organisationId,
@@ -796,14 +835,10 @@ export function createPortalOrderRouter(): Router {
           ? 'EXCEPTION'
           : undefined,
       });
-      if (confirmedPaidCancel) {
-        await orderRepo.setPaymentStatus(orderId, 'REFUND_REQUIRED');
-      }
       const latest = await orderRepo.findOrderById(orderId, scope.organisationId);
       res.status(200).json(toPortalOrder({
         ...(latest as object),
         quoteSnapshot: snapshot,
-        paymentStatus: confirmedPaidCancel ? 'REFUND_REQUIRED' : latest?.paymentStatus,
       } as any));
     } catch (error) {
       next(error);
@@ -862,8 +897,15 @@ export function createPortalOrderRouter(): Router {
 
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      if (curaleafRequiresSupplierCancel(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot)) {
+        throw new HttpError(409, 'Confirm the Curaleaf cancellation before preparing a patient refund.', 'CURALEAF_CANCEL_REQUIRED');
+      }
       if (!orderMoneyWasTaken(order)) {
         throw new HttpError(409, 'This order has no settled patient payment to refund.', 'REFUND_NOT_REQUIRED');
+      }
+      const existingRefunds = await paymentRepo.listRefundsByOrderId(orderId, scope.organisationId);
+      if (existingRefunds.some(row => String(row.status).toUpperCase() === 'COMPLETED')) {
+        throw new HttpError(409, 'This order refund is already confirmed.', 'REFUND_ALREADY_COMPLETED');
       }
       if (snapshotRefundCompleted(order.quoteSnapshot)) {
         throw new HttpError(409, 'This order refund is already confirmed.', 'REFUND_ALREADY_COMPLETED');
@@ -871,6 +913,18 @@ export function createPortalOrderRouter(): Router {
 
       const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, unknown>;
       const refundState = pendingManualRefund(order, scope.uid);
+      const payment = await paymentForManualRefund(paymentRepo, order);
+      const storedRefund = await paymentRepo.createRefund({
+        organisationId: scope.organisationId,
+        orderId,
+        paymentId: payment.id,
+        amountPence: refundState.amountPence,
+        currency: order.currency || 'GBP',
+        cause: input.reason,
+        route: String(order.paymentRoute || '').toUpperCase() === 'WORLDPAY' ? 'WORLDPAY' : 'MANUAL',
+        status: 'PENDING_CONFIRMATION',
+        idempotencyKey: `manual-refund:${orderId}`,
+      });
       const nextSnapshot = withPendingPaidRefund({
         ...snapshot,
         cancellation: {
@@ -878,7 +932,7 @@ export function createPortalOrderRouter(): Router {
           status: 'refund_required',
           reason: input.reason === 'replacement_price_changed' ? 'other' : 'patient_request',
         },
-      }, refundState);
+      }, { ...refundState, id: storedRefund.id });
 
       await orderRepo.updateQuoteSnapshot({
         id: orderId,
@@ -898,7 +952,7 @@ export function createPortalOrderRouter(): Router {
         console.warn('[Prescription file] Purge after cancellation note:', error),
       );
 
-      res.status(201).json(refundState);
+      res.status(201).json({ ...refundState, id: storedRefund.id });
     } catch (error) {
       next(error);
     }
@@ -917,22 +971,41 @@ export function createPortalOrderRouter(): Router {
 
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
-      if (!orderMoneyWasTaken(order) && !refundRecord(order.quoteSnapshot).id) {
+      const sqlRefunds = await paymentRepo.listRefundsByOrderId(orderId, scope.organisationId);
+      const sqlRefund = sqlRefunds.find(row => row.id === refundId)
+        ?? sqlRefunds.find(row => String(row.status).toUpperCase() === 'PENDING_CONFIRMATION')
+        ?? null;
+      if (!orderMoneyWasTaken(order) && !refundRecord(order.quoteSnapshot).id && !sqlRefund) {
         throw new HttpError(409, 'This order has no settled patient payment to refund.', 'REFUND_NOT_REQUIRED');
       }
 
       const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
       const priorRefund = refundRecord(snapshot);
       const quoteDifference = priorRefund.kind === 'quote_difference' || priorRefund.reason === 'replacement_price_changed';
+      if (!quoteDifference && curaleafRequiresSupplierCancel(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot)) {
+        throw new HttpError(409, 'Confirm the Curaleaf cancellation before recording a patient refund.', 'CURALEAF_CANCEL_REQUIRED');
+      }
       const now = new Date().toISOString();
-      if (priorRefund.id && priorRefund.id !== refundId && refundId !== `refund-${orderId}`) {
+      if (!sqlRefund && priorRefund.id && priorRefund.id !== refundId && refundId !== `refund-${orderId}`) {
+        throw new HttpError(404, 'Refund task not found.', 'NOT_FOUND');
+      }
+      if (sqlRefund && sqlRefund.id !== refundId && refundId !== `refund-${orderId}`) {
         throw new HttpError(404, 'Refund task not found.', 'NOT_FOUND');
       }
 
+      if (sqlRefund && !quoteDifference) {
+        await paymentRepo.confirmRefund({
+          id: sqlRefund.id,
+          externalReference: input.externalReference,
+          confirmedByUid: scope.uid,
+        });
+      }
+
+      const confirmedId = sqlRefund?.id || refundId || String(priorRefund.id || `refund-${orderId}`);
       const nextRefund = quoteDifference
         ? {
           ...priorRefund,
-          id: refundId || priorRefund.id || `refund-${orderId}`,
+          id: confirmedId,
           status: 'completed',
           kind: priorRefund.kind || 'quote_difference',
           amountPence: Number(priorRefund.amountPence || order.totalPence || 0),
@@ -941,7 +1014,7 @@ export function createPortalOrderRouter(): Router {
           confirmedBy: scope.uid,
         }
         : completedManualRefund(order, {
-          refundId: refundId || String(priorRefund.id || ''),
+          refundId: confirmedId,
           externalReference: input.externalReference,
           actorUid: scope.uid,
           now,

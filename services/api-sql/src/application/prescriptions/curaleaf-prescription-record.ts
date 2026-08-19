@@ -111,7 +111,24 @@ export async function persistCuraleafPrescriptionIdentity(input: {
     fulfilmentStatus: input.fulfilmentStatus,
   });
 
-  if (!input.prescriptionId || !input.patientId) return snapshot;
+  const order = await orderRepo.findOrderById(input.orderId, input.organisationId);
+  const patientId = input.patientId || order?.patientId || null;
+  const purchaseOrderId = typeof input.purchaseOrder?.id === 'string'
+    ? input.purchaseOrder.id
+    : typeof input.purchaseOrder?.purchaseOrderId === 'string'
+      ? input.purchaseOrder.purchaseOrderId
+      : null;
+  const prescriptionRepo = new SqlPrescriptionRepository();
+
+  if (!input.prescriptionId) {
+    if (purchaseOrderId) {
+      await prescriptionRepo.attachSupplierPurchaseOrder(input.orderId, purchaseOrderId);
+    }
+    return snapshot;
+  }
+  if (!patientId) {
+    throw new Error('Order is missing a patient, so the Curaleaf prescription cannot be stored.');
+  }
 
   const root = asRecord(snapshot);
   const prescriptions = Array.isArray(root.prescriptions) ? root.prescriptions.map(asRecord) : [];
@@ -130,33 +147,24 @@ export async function persistCuraleafPrescriptionIdentity(input: {
   const patientDob = typeof patient.dob === 'string' && patient.dob ? patient.dob.slice(0, 10) : '1900-01-01';
   const fileIds = prescriptionFileIdsFromSnapshot(snapshot);
   const fileId = fileIds[0] && UUID_LIKE.test(fileIds[0]) ? fileIds[0] : null;
-  const placed = Boolean(input.purchaseOrder && (input.purchaseOrder.id || input.purchaseOrder.purchaseOrderId));
+  const placed = Boolean(purchaseOrderId);
 
-  try {
-    const prescriptionRepo = new SqlPrescriptionRepository();
-    await prescriptionRepo.recordSupplierPrescription({
-      organisationId: input.organisationId,
-      orderId: input.orderId,
-      patientId: input.patientId,
-      fileId,
-      supplierPrescriptionId: input.prescriptionId,
-      serialNumber,
-      issueDate,
-      expiryDate,
-      status: placed ? 'PLACED' : 'PENDING_PLACEMENT',
-      patientNameSnapshot: patientName,
-      patientDobSnapshot: patientDob,
-      prescriberSnapshot: rx.prescriber ?? {},
-      supplierPurchaseOrderId: typeof input.purchaseOrder?.id === 'string'
-        ? input.purchaseOrder.id
-        : typeof input.purchaseOrder?.purchaseOrderId === 'string'
-          ? input.purchaseOrder.purchaseOrderId
-          : null,
-      placementState: placed ? 'PLACED' : 'PENDING_PLACEMENT',
-    });
-  } catch (error) {
-    console.warn('[Prescription] Failed to persist Curaleaf prescription ID to SQL:', error);
-  }
+  await prescriptionRepo.recordSupplierPrescription({
+    organisationId: input.organisationId,
+    orderId: input.orderId,
+    patientId,
+    fileId,
+    supplierPrescriptionId: input.prescriptionId,
+    serialNumber,
+    issueDate,
+    expiryDate,
+    status: placed ? 'PLACED' : 'PENDING_PLACEMENT',
+    patientNameSnapshot: patientName,
+    patientDobSnapshot: patientDob,
+    prescriberSnapshot: rx.prescriber ?? {},
+    supplierPurchaseOrderId: purchaseOrderId,
+    placementState: placed ? 'PLACED' : 'PENDING_PLACEMENT',
+  });
 
   return snapshot;
 }

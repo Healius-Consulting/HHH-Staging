@@ -29,12 +29,31 @@ export interface PaymentRecord {
   updatedAt?: string;
 }
 
+export interface RefundRecord {
+  id: string;
+  organisationId: string;
+  orderId: string;
+  paymentId: string;
+  status: 'PENDING_CONFIRMATION' | 'COMPLETED' | 'FAILED' | string;
+  amountPence: number | string;
+  currency?: string | null;
+  cause?: string | null;
+  route?: 'MANUAL' | 'WORLDPAY' | string | null;
+  idempotencyKey?: string | null;
+  externalReference?: string | null;
+  confirmedByUid?: string | null;
+  createdAt?: string | null;
+  confirmedAt?: string | null;
+}
+
 export interface PaymentRepositoryPort {
   findPaymentByWorldpayCode(worldpayOrderCode: string): Promise<PaymentRecord | null>;
   findPaymentByReceiptHash(receiptHash: string): Promise<PaymentRecord | null>;
   findPaymentByOrderId(orderId: string, organisationId: string): Promise<PaymentRecord | null>;
+  listPaymentsByOrderId(orderId: string, organisationId: string): Promise<PaymentRecord[]>;
   listTenantPayments(organisationId: string, limit?: number): Promise<PaymentRecord[]>;
   listPendingWorldpayPayments(limit?: number): Promise<PaymentRecord[]>;
+  cancelPendingPaymentsForOrder(orderId: string, organisationId: string, keepId?: string | null): Promise<void>;
   createPayment(data: {
     organisationId: string;
     orderId: string;
@@ -61,12 +80,22 @@ export interface PaymentRepositoryPort {
   }): Promise<void>;
   createRefund(data: {
     organisationId: string;
+    orderId: string;
     paymentId: string;
     amountPence: number;
     currency: string;
-    status: 'SUCCEEDED' | 'PENDING' | 'FAILED';
-    reason: string;
-    idempotencyKeyHash: string;
-    issuedByUid: string;
-  }): Promise<{ id?: string }>;
+    cause: string;
+    route: 'MANUAL' | 'WORLDPAY';
+    status?: 'PENDING_CONFIRMATION' | 'COMPLETED' | 'FAILED';
+    idempotencyKey: string;
+    confirmedByUid?: string | null;
+  }): Promise<RefundRecord>;
+  listRefundsByOrderId(orderId: string, organisationId: string): Promise<RefundRecord[]>;
+  listTenantRefunds(organisationId: string, limit?: number): Promise<RefundRecord[]>;
+  findRefundByIdempotencyKey(idempotencyKey: string): Promise<RefundRecord | null>;
+  confirmRefund(data: {
+    id: string;
+    externalReference: string;
+    confirmedByUid: string;
+  }): Promise<void>;
 }

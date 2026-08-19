@@ -1,0 +1,75 @@
+import { portalRefundFromSql } from '../../application/orders/paid-refund.js';
+import type { OrderLineRecord } from '../../repositories/ports/order-line.port.js';
+import type { OrderRecord } from '../../repositories/ports/order.port.js';
+import type { RefundRecord } from '../../repositories/ports/payment.port.js';
+import type { SqlOrderLineRepository } from '../../repositories/sql/order-line.sql.js';
+import type { SqlPaymentRepository } from '../../repositories/sql/payment.sql.js';
+import { toPortalOrder, type PortalSqlLine } from './pharmacy-contracts.js';
+
+export type OrderSqlChildren = {
+  refunds: RefundRecord[];
+  lines: OrderLineRecord[];
+};
+
+export function sqlLinesToPortal(lines: OrderLineRecord[]): PortalSqlLine[] {
+  return lines.map(line => ({
+    packId: line.packId,
+    productId: line.packId,
+    formulaId: line.formulaId || undefined,
+    name: line.formulaName || undefined,
+    quantity: Number(line.quantity || 0),
+    unitPricePence: Number(line.fixedPatientPricePence || 0),
+    wholesalePackPricePence: line.wholesalePackPricePence == null ? undefined : Number(line.wholesalePackPricePence),
+  }));
+}
+
+export function latestRefund(rows: RefundRecord[]) {
+  return [...rows].sort((left, right) => (
+    Date.parse(String(right.createdAt || 0)) - Date.parse(String(left.createdAt || 0))
+  ))[0] ?? null;
+}
+
+export function mapPortalOrderFromSql(order: OrderRecord, children?: OrderSqlChildren) {
+  const refund = children?.refunds?.length ? latestRefund(children.refunds) : null;
+  return toPortalOrder({
+    ...order,
+    sqlRefund: refund ? portalRefundFromSql(refund) : undefined,
+    sqlLines: children?.lines?.length ? sqlLinesToPortal(children.lines) : undefined,
+  });
+}
+
+export async function loadOrganisationOrderChildren(
+  organisationId: string,
+  paymentRepo: SqlPaymentRepository,
+  orderLineRepo: SqlOrderLineRepository,
+): Promise<{ refundsByOrder: Map<string, RefundRecord[]>; linesByOrder: Map<string, OrderLineRecord[]> }> {
+  const [refunds, lines] = await Promise.all([
+    paymentRepo.listTenantRefunds(organisationId, 500).catch(() => [] as RefundRecord[]),
+    orderLineRepo.listByOrganisation(organisationId, 500).catch(() => [] as OrderLineRecord[]),
+  ]);
+  const refundsByOrder = new Map<string, RefundRecord[]>();
+  for (const refund of refunds) {
+    const list = refundsByOrder.get(refund.orderId) ?? [];
+    list.push(refund);
+    refundsByOrder.set(refund.orderId, list);
+  }
+  const linesByOrder = new Map<string, OrderLineRecord[]>();
+  for (const line of lines) {
+    const list = linesByOrder.get(line.orderId) ?? [];
+    list.push(line);
+    linesByOrder.set(line.orderId, list);
+  }
+  return { refundsByOrder, linesByOrder };
+}
+
+export async function loadOrderChildren(
+  order: OrderRecord,
+  paymentRepo: SqlPaymentRepository,
+  orderLineRepo: SqlOrderLineRepository,
+): Promise<OrderSqlChildren> {
+  const [refunds, lines] = await Promise.all([
+    paymentRepo.listRefundsByOrderId(order.id, order.organisationId).catch(() => [] as RefundRecord[]),
+    orderLineRepo.listByOrderId(order.id).catch(() => [] as OrderLineRecord[]),
+  ]);
+  return { refunds, lines };
+}

@@ -1393,6 +1393,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   const curaleafCancellationLocked = Boolean(order.curaleafCancellation && order.curaleafCancellation.status !== 'confirmed');
   const mayCancel = !order.cancellation && !['collected', 'cancelled'].includes(stage);
   const hasCuraleafOrder = orderRequiresCuraleafCancel(order);
+  const mayCallCuraleaf = hasCuraleafOrder && order.curaleafCancellation?.status !== 'confirmed';
   const remainingOpen = order.prescriptions.some(prescription =>
     (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
   );
@@ -1451,7 +1452,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
           </div>
           <div className="order-crm-record__actions" role="group" aria-label="Order actions">
             {canFullHandout ? <button type="button" className="btn btn-primary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(false)}><Check size={13} /> Hand over</button> : null}
-            {mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={hasCuraleafOrder ? onCallCuraleaf : onOpenCancellation}>{hasCuraleafOrder ? <PhoneCall size={13} /> : <XCircle size={13} />} {hasCuraleafOrder ? 'Call Curaleaf to cancel' : 'Cancel order'}</button> : null}
+            {mayCallCuraleaf ? <button type="button" className="btn btn-secondary btn-sm" onClick={onCallCuraleaf}><PhoneCall size={13} /> Call Curaleaf to cancel</button> : mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenCancellation}><XCircle size={13} /> Cancel order</button> : null}
           </div>
         </div>
       </header>
@@ -1496,11 +1497,11 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
         />
       ) : null}
 
-      {((order.payment.status === 'paid' || order.refund?.status === 'pending_confirmation') && !reviewOpen && (stage === 'rejected' || stage === 'archived' || stage === 'cancelled' || Boolean(order.cancellation) || order.prescriptions.some(rx => rx.purchaseOrderState === 'CANCELLED' || rx.status === 'cancelled'))) ? (
+      {((order.payment.status === 'paid' || order.refund?.status === 'pending_confirmation' || order.refund?.status === 'completed') && !reviewOpen && (stage === 'rejected' || stage === 'archived' || stage === 'cancelled' || Boolean(order.cancellation) || order.prescriptions.some(rx => rx.purchaseOrderState === 'CANCELLED' || rx.status === 'cancelled'))) ? (
         <PaidExceptionResolution
           order={order}
-          canReplace={true}
-          lockedByCuraleaf={false}
+          canReplace={!hasCuraleafOrder}
+          lockedByCuraleaf={hasCuraleafOrder}
           busy={refundBusy}
           refundReference={refundReference}
           onRefundReferenceChange={onRefundReferenceChange}
@@ -2069,7 +2070,7 @@ function OrderCancellationPanel({ order, editorOpen, note, busy, onClose, onNote
   );
 }
 
-function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked, busy, refundReference, onRefundReferenceChange, onReplace, onRequestRefund, onConfirmRefund }: {
+function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf, busy, refundReference, onRefundReferenceChange, onReplace, onRequestRefund, onConfirmRefund }: {
   order: PatientOrder;
   canReplace: boolean;
   lockedByCuraleaf?: boolean;
@@ -2085,7 +2086,13 @@ function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked,
   return (
     <section className={`order-resolution${order.refund?.status === 'completed' ? ' order-resolution--complete' : ''}`}>
       <header>
-        <span><small>Paid-order resolution</small><strong>{order.refund?.status === 'completed' ? 'Refund completed' : order.refund ? 'Refund due' : canReplace ? 'Choose replacement or refund' : 'Refund due'}</strong></span>
+        <span><small>Paid-order resolution</small><strong>{
+          lockedByCuraleaf ? 'Call Curaleaf before refund or replacement'
+            : order.refund?.status === 'completed' ? 'Refund completed'
+            : order.refund ? 'Refund due'
+            : canReplace ? 'Choose replacement or refund'
+            : 'Refund due'
+        }</strong></span>
         <span className="order-resolution__amount"><small>Patient paid</small><strong>{money(order.payment.amount)}</strong></span>
       </header>
       <div className="order-resolution__reference">
@@ -2093,7 +2100,11 @@ function PaidExceptionResolution({ order, canReplace, lockedByCuraleaf: _locked,
         <span><small>{method} payment ID</small><code>{reference}</code></span>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => void navigator.clipboard.writeText(reference)}>Copy ID</button>
       </div>
-      {!order.refund ? (
+      {lockedByCuraleaf ? (
+        <div className="order-resolution__choices">
+          <small>This purchase order is still live at Curaleaf. Record their cancellation before creating a replacement or preparing the patient refund in {method}.</small>
+        </div>
+      ) : !order.refund ? (
         <div className="order-resolution__choices">
           {canReplace ? <button type="button" className="btn btn-primary btn-sm" onClick={onReplace}><RefreshCw size={13} /> Create replacement</button> : null}
           <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onRequestRefund}><XCircle size={13} /> Cancel & prepare full refund</button>

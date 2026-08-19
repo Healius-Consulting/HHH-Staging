@@ -1,5 +1,5 @@
 import { paidQuoteFromSnapshot } from '../../application/orders/finance-costing.js';
-import { orderMoneyWasTaken, pendingManualRefund, snapshotRefundCompleted } from '../../application/orders/paid-refund.js';
+import { orderMoneyWasTaken, snapshotRefundCompleted } from '../../application/orders/paid-refund.js';
 import {
   advanceFulfilmentStatus,
   dispatchStatusFromLines,
@@ -232,7 +232,23 @@ export function buildPharmacyPatientDirectory(input: {
   };
 }
 
-export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
+export type PortalSqlLine = {
+  packId: string;
+  productId?: string;
+  formulaId?: string;
+  name?: string;
+  quantity: number;
+  unitPricePence?: number;
+  wholesalePackPricePence?: number;
+};
+
+export type PortalOrderSource = OrderRecord & {
+  curaleaf?: any;
+  sqlRefund?: Record<string, unknown> | null;
+  sqlLines?: PortalSqlLine[] | null;
+};
+
+export function toPortalOrder(order: PortalOrderSource) {
   const snapshot = (order.quoteSnapshot ?? {}) as any;
   const persistedCuraleaf = snapshot?.curaleaf && typeof snapshot.curaleaf === 'object' ? snapshot.curaleaf : null;
   const po = order.curaleaf || persistedCuraleaf;
@@ -243,17 +259,15 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     || snapshot?.curaleafCancellation?.status === 'confirmed';
   const isCancelledOrder = isHhhCancelled || isSupplierCancelled;
   const moneyTaken = orderMoneyWasTaken(order);
-  const refundCompleted = snapshotRefundCompleted(snapshot) || String(order.paymentStatus).toUpperCase() === 'REFUNDED';
-  const refundDue = moneyTaken && !refundCompleted && (
-    isCancelledOrder
-    || String(snapshot?.cancellation?.status || '') === 'refund_required'
-    || String(order.paymentStatus).toUpperCase() === 'REFUND_REQUIRED'
-  );
-  const existingRefund = snapshot?.refund && typeof snapshot.refund === 'object' ? snapshot.refund : null;
-  const refund = refundDue && !existingRefund?.status
-    ? pendingManualRefund(order)
-    : existingRefund ?? undefined;
-  const isPaid = moneyTaken && !refundCompleted && !isCancelledOrder && !refundDue;
+  const existingRefund = (order.sqlRefund && typeof order.sqlRefund === 'object' ? order.sqlRefund : null)
+    ?? (snapshot?.refund && typeof snapshot.refund === 'object' ? snapshot.refund : null);
+  const refundCompleted = String(existingRefund?.status || '') === 'completed'
+    || snapshotRefundCompleted(snapshot)
+    || String(order.paymentStatus).toUpperCase() === 'REFUNDED';
+  const refundPrepared = String(existingRefund?.status || '') === 'pending_confirmation'
+    || String(order.paymentStatus).toUpperCase() === 'REFUND_REQUIRED';
+  const refund = existingRefund?.status ? existingRefund : undefined;
+  const isPaid = moneyTaken && !refundCompleted && !isCancelledOrder && !refundPrepared;
   const quoteReview = snapshot?.quoteReview && typeof snapshot.quoteReview === 'object' && !isSupplierCancelled
     ? snapshot.quoteReview
     : undefined;
@@ -270,7 +284,9 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
   const poItems = (po?.items && Array.isArray(po.items)) ? po.items : [];
   const poItemMap = new Map<string, any>(poItems.map((it: any) => [String(it.productId || it.formulaId || ''), it]));
 
-  const rawLines = snapshot?.lineItems || snapshot?.items || [];
+  const rawLines = (Array.isArray(order.sqlLines) && order.sqlLines.length > 0)
+    ? order.sqlLines
+    : (snapshot?.lineItems || snapshot?.items || []);
   const parsedQuote = parsedPaidQuote(snapshot);
   const quoteByPackId = new Map((parsedQuote?.items || []).map(item => [item.packId, item]));
   const pricingQuote = parsedQuote
@@ -383,7 +399,7 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
         : hasCheckedInPacks && order.fulfilmentStatus === 'READY_FOR_COLLECTION' ? 'READY_FOR_COLLECTION'
         : hasCheckedInPacks && order.fulfilmentStatus === 'RECEIVED' ? 'RECEIVED'
         : hasCheckedInPacks && (order.fulfilmentStatus === 'PARTIALLY_RECEIVED' || computedFulfilment === 'PARTIALLY_RECEIVED') ? 'PARTIALLY_RECEIVED'
-        : isSupplierFlowActive ? 'PLACED'
+        : isSupplierFlowActive || hasPurchaseOrderRecord ? 'PLACED'
         : isPaid ? 'PENDING_PLACEMENT'
         : 'AWAITING_PAYMENT',
       lines,
@@ -433,7 +449,7 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     customerReference: order.orderNumber || order.id,
     purchaseOrderId: null,
     purchaseOrderState: null,
-  } : isPaid && hasPurchaseOrderRecord ? {
+  } : (isPaid || hasPurchaseOrderRecord) && !reviewBlocking && hasPurchaseOrderRecord ? {
     status: 'purchase_order_submitted' as const,
     prescriptionState,
     prescriptionId: prescriptionId ?? undefined,
@@ -483,7 +499,7 @@ export function toPortalOrder(order: OrderRecord & { curaleaf?: any }) {
     paymentRoute: lower(order.paymentRoute) === 'worldpay' ? 'worldpay' as const : 'manual' as const,
     paymentStatus: refundCompleted
       ? 'refunded'
-      : refundDue
+      : refundPrepared
         ? 'refund_required'
         : moneyTaken
           ? 'paid'

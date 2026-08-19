@@ -18,6 +18,7 @@ Pharmacy-token eligibility intake → Shaylen/HHH telephone review and programme
 | `Rocky_API_Technical_Requirements_v1.5.docx` | The Technical Requirements Document (TRD) — 52 functional requirements (F-01–F-52), API endpoints, expected payloads, non-functional requirements, and open items. |
 | `Rocky_API_Technical_Requirements_v1.6.docx` | Newer TRD recovered from the July `main` update; use with the Rocky API reference and confirm final sandbox behaviour. |
 | `Rocky-API-Reference.md` | Confirmed Rocky routes and schemas plus corrections to earlier endpoint/auth/courier assumptions. |
+| `sql-curaleaf-worldpay-efficiency.md` | Live Primary Pharmacy Rocky + Worldpay probe (2026-08-19): every route/state, SQL vs `quoteSnapshot` gap, and the SQL-first query redesign. |
 | `TRD-redline-Rx-suborder-flow.md`, `TRD-redline-patient-payment.md` | Requirement redlines pending merge into the TRD. |
 | `Master-Pharmacy-Order-Flow.md` | Implemented six-stage flow, authoritative Go-live gates, configuration and rollout procedure. |
 | `production-architecture.md` | Production architecture — hosting (frontend, backend, UK infra), security, hardened embed model, integrations, and the full pharmacy onboarding playbook (legal → go-live). |
