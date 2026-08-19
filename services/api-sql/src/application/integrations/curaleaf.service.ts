@@ -18,6 +18,7 @@ import {
   stampCuraleafRejectionOnSnapshot,
 } from './curaleaf-events.js';
 import {
+  applyPassedQuoteReview,
   curaleafCancellationBlocksPlacement,
   evaluateQuoteReview,
   isQuoteReviewBlocking,
@@ -355,7 +356,7 @@ export async function executeCuraleafOrderPlacement(
   }
 
   const customerReference = order.orderNumber || `HHH-${order.id}`;
-  const snapshot = (order.quoteSnapshot ?? {}) as Record<string, unknown>;
+  let snapshot = (order.quoteSnapshot ?? {}) as Record<string, unknown>;
   const priorCuraleaf = (snapshot.curaleaf && typeof snapshot.curaleaf === 'object'
     ? snapshot.curaleaf
     : null) as { prescriptionId?: string | null; prescriberId?: string | null } | null;
@@ -532,7 +533,7 @@ export async function executeCuraleafOrderPlacement(
 
   // Step 3: Stock and price re-check. Hold before creating a Rocky prescription.
   const blockingReview = readQuoteReview(snapshot);
-  if (blockingReview?.status === 'awaiting_top_up' || blockingReview?.status === 'awaiting_refund' || blockingReview?.status === 'required') {
+  if (blockingReview?.status === 'awaiting_top_up' || blockingReview?.status === 'awaiting_refund') {
     return { skipped: true, reason: 'Quote review required', quoteReview: blockingReview };
   }
   if (lineItems.length > 0) {
@@ -563,6 +564,19 @@ export async function executeCuraleafOrderPlacement(
           reason: 'Quote review required',
           quoteReview: decision.review,
         };
+      }
+      const passed = applyPassedQuoteReview(snapshot, {
+        latestRaw: latestQuote,
+        fingerprint: decision.fingerprint,
+      });
+      if (passed.changed) {
+        snapshot = passed.snapshot as Record<string, unknown>;
+        await new SqlOrderRepository().updateQuoteSnapshot({
+          id: order.id,
+          organisationId: connection.organisationId,
+          quoteSnapshot: snapshot,
+          fulfilmentStatus: 'SUPPLIER_PENDING',
+        });
       }
     } catch (quoteErr) {
       console.warn('[Curaleaf] Placement quote compare note:', quoteErr);

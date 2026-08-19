@@ -182,7 +182,7 @@ function recordStageMeta(record: OrderRecord) {
           ? 'Patient price increased after payment. Absorb the difference or cancel this order.'
           : delta < 0
             ? 'Patient price dropped after payment. Take the difference into the dispensing fee or cancel this order.'
-            : 'Curaleaf quote changed after payment. Absorb the supplier change or cancel this order.',
+            : 'The paid quote could not be compared. Refresh to continue placement, or cancel this order.',
       tone: 'warning',
       icon: AlertTriangle,
     };
@@ -1840,9 +1840,20 @@ function collapsedActionCopy(stage: OrderStage) {
 
 function formatQuoteReviewValue(value: string | boolean) {
   if (typeof value === 'boolean') return value ? 'In stock' : 'Out of stock';
+  if (value === 'missing') return 'Not stored';
+  if (value === 'present') return 'Available';
   const pence = Number(value);
   if (Number.isFinite(pence) && String(value).trim() !== '') return money(pence / 100);
   return String(value);
+}
+
+function quoteReviewFieldLabel(field: string) {
+  if (field === 'inStock') return 'Stock';
+  if (field === 'patientPackPrice') return 'Patient pack price';
+  if (field === 'wholesalePackPrice') return 'Wholesale pack price';
+  if (field === 'shippingPrice') return 'Shipping';
+  if (field === 'missingOriginalQuote') return 'Paid quote';
+  return field;
 }
 
 function QuoteReviewPanel({ order, busy, onResolve, onCancel }: {
@@ -1854,20 +1865,26 @@ function QuoteReviewPanel({ order, busy, onResolve, onCancel }: {
   const review = order.quoteReview;
   if (!review || !['required', 'awaiting_top_up', 'awaiting_refund'].includes(review.status)) return null;
   const delta = review.patientDeltaPence ?? 0;
+  const missingBaseline = review.differences?.some(difference => difference.field === 'missingOriginalQuote');
   const priceUp = review.type === 'patient_price_changed' && delta > 0;
   const priceDown = review.type === 'patient_price_changed' && delta < 0;
+  const continuePlacement = review.type === 'supplier_cost_changed' || (review.type === 'patient_price_changed' && delta === 0);
   const title = review.type === 'out_of_stock'
     ? 'Curaleaf reports a line out of stock'
-    : review.type === 'patient_price_changed'
-      ? delta > 0 ? 'Patient price increased after payment' : 'Patient price dropped after payment'
-      : 'Supplier cost changed after payment';
+    : missingBaseline || (review.type === 'patient_price_changed' && delta === 0)
+      ? 'Paid quote could not be compared'
+      : review.type === 'patient_price_changed'
+        ? delta > 0 ? 'Patient price increased after payment' : 'Patient price dropped after payment'
+        : 'Supplier cost changed after payment';
   const detail = review.type === 'out_of_stock'
     ? 'Placement is held. Refresh the quote after Curaleaf restocks, or cancel this order to refund or replace it.'
-    : priceUp
-      ? `Absorb ${money(delta / 100)} so placement can continue, or cancel this order to refund or replace it.`
-      : priceDown
-        ? `Take ${money(Math.abs(delta) / 100)} into the dispensing fee so placement can continue, or cancel this order to refund or replace it.`
-        : 'Wholesale-only change. Absorb to continue placement, or cancel this order to refund or replace it.';
+    : missingBaseline || (review.type === 'patient_price_changed' && delta === 0)
+      ? 'The paid Curaleaf quote was not stored, so this is not a patient-price change. Refresh to adopt the current quote and continue placement, or cancel this order to refund or replace it.'
+      : priceUp
+        ? `Absorb ${money(delta / 100)} so placement can continue, or cancel this order to refund or replace it.`
+        : priceDown
+          ? `Take ${money(Math.abs(delta) / 100)} into the dispensing fee so placement can continue, or cancel this order to refund or replace it.`
+          : 'Wholesale-only change. Absorb to continue placement, or cancel this order to refund or replace it.';
   return (
     <section className="quote-review-panel" aria-labelledby="quote-review-title">
       <header className="quote-review-panel__header">
@@ -1882,26 +1899,24 @@ function QuoteReviewPanel({ order, busy, onResolve, onCancel }: {
         <ul className="quote-review-panel__diffs">
           {review.differences.map((difference, index) => (
             <li key={`${difference.field}-${difference.packId ?? index}`}>
-              <strong>{difference.field === 'inStock' ? 'Stock' : difference.field === 'patientPackPrice' ? 'Patient pack price' : difference.field === 'wholesalePackPrice' ? 'Wholesale pack price' : difference.field === 'shippingPrice' ? 'Shipping' : difference.field}</strong>
+              <strong>{quoteReviewFieldLabel(difference.field)}</strong>
               <small>{formatQuoteReviewValue(difference.previous)} → {formatQuoteReviewValue(difference.latest)}</small>
             </li>
           ))}
         </ul>
       ) : null}
       <div className="quote-review-panel__actions">
-        {review.type === 'out_of_stock' ? (
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('refresh')}>
-            <RefreshCw size={13} /> {busy ? 'Checking…' : 'Refresh quote'}
-          </button>
-        ) : null}
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('refresh')}>
+          <RefreshCw size={13} /> {busy ? 'Checking…' : 'Refresh quote'}
+        </button>
         {priceUp ? (
           <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('absorb')}>Absorb {money(delta / 100)}</button>
         ) : null}
         {priceDown ? (
           <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('continue_as_fee')}>Take {money(Math.abs(delta) / 100)} into dispensing fee</button>
         ) : null}
-        {review.type === 'supplier_cost_changed' ? (
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('absorb')}>Absorb and place</button>
+        {continuePlacement ? (
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onResolve('absorb')}>Continue placement</button>
         ) : null}
         <button type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>
           <XCircle size={13} /> Cancel order

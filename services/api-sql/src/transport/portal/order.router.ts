@@ -685,7 +685,7 @@ export function createPortalOrderRouter(): Router {
 
       if (input.action === 'absorb') {
         if (review.type === 'out_of_stock') throw new HttpError(409, 'Out-of-stock lines cannot be absorbed.', 'STOCK_HOLD');
-        if (review.type === 'patient_price_changed' && review.patientDeltaPence <= 0) {
+        if (review.type === 'patient_price_changed' && review.patientDeltaPence < 0) {
           throw new HttpError(409, 'Absorb is only for a patient-price increase.', 'QUOTE_REVIEW_ACTION');
         }
         const approved = stampQuoteReviewOnSnapshot({

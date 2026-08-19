@@ -386,7 +386,7 @@ export default function CreateOrder() {
           dispensingFeePence,
           totalPence,
           pricingQuote,
-          quoteSnapshot: pricingQuote ? { quote: pricingQuote, lineItems, totalPence } : undefined,
+          quoteSnapshot: pricingQuote ? { quote: pricingQuote, pricingQuote, lineItems, totalPence } : undefined,
           lineItems,
           prescriptions: activeOrder.prescriptions.map(rx => ({
             fileId: rx.fileId!,

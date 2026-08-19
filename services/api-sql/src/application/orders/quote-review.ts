@@ -75,19 +75,28 @@ function stockStatus(inStock: boolean, status?: unknown): ParsedQuoteItem['stock
   return 'in_stock';
 }
 
-export function snapshotQuote(snapshot: unknown): unknown {
-  const root = asRecord(snapshot);
-  return root.pricingQuote ?? root.quote ?? null;
+function unwrapQuoteRecord(raw: unknown, depth = 0): Record<string, unknown> {
+  const record = asRecord(raw);
+  if (Array.isArray(record.items) && record.items.length) return record;
+  if (depth >= 3) return record;
+  for (const key of ['data', 'quote', 'pricingQuote']) {
+    const nested = record[key];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      const inner = unwrapQuoteRecord(nested, depth + 1);
+      if (Array.isArray(inner.items) && inner.items.length) return inner;
+    }
+  }
+  return record;
 }
 
 export function parseQuote(raw: unknown): ParsedQuote | null {
-  const record = asRecord(raw);
+  const record = unwrapQuoteRecord(raw);
   const items = Array.isArray(record.items) ? record.items : [];
   const parsedItems: ParsedQuoteItem[] = [];
   for (const entry of items) {
     const item = asRecord(entry);
-    const packId = String(item.packId || item.productId || '').trim();
-    const quantity = Number(item.quantity || item.qty || item.count || 0);
+    const packId = String(item.packId || item.productId || item.pack_id || item.id || '').trim();
+    const quantity = Number(item.quantity || item.qty || item.count || item.packsOrderedCount || 0);
     if (!packId || quantity <= 0) continue;
     const inStock = item.inStock !== false && stockStatus(true, item.stockStatus) !== 'out_of_stock';
     parsedItems.push({
@@ -105,6 +114,20 @@ export function parseQuote(raw: unknown): ParsedQuote | null {
     taxRate: String(record.taxRate ?? '0'),
     items: parsedItems,
   };
+}
+
+function firstParseableQuote(...candidates: unknown[]): unknown | null {
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    if (parseQuote(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function snapshotQuote(snapshot: unknown): unknown {
+  const root = asRecord(snapshot);
+  const review = asRecord(root.quoteReview);
+  return firstParseableQuote(root.pricingQuote, root.quote, review.latestQuote);
 }
 
 export function quoteFingerprint(quote: ParsedQuote) {
@@ -207,7 +230,7 @@ export function evaluateQuoteReview(input: {
   snapshot: unknown;
   latestRaw: unknown;
   now?: string;
-}): { hold: false; fingerprint: string; latest: ParsedQuote } | {
+}): { hold: false; fingerprint: string; latest: ParsedQuote; adoptedBaseline: boolean } | {
   hold: true;
   fingerprint: string;
   latest: ParsedQuote;
@@ -220,15 +243,16 @@ export function evaluateQuoteReview(input: {
   const fingerprint = quoteFingerprint(latest);
   const existing = readQuoteReview(input.snapshot);
   if (existing?.status === 'approved' && existing.approvedFingerprint === fingerprint) {
-    return { hold: false, fingerprint, latest };
+    return { hold: false, fingerprint, latest, adoptedBaseline: false };
   }
   const baseline = parseQuote(snapshotQuote(input.snapshot));
-  const differences = baseline
-    ? compareQuotes(baseline, latest)
-    : [{ category: 'patient_price' as const, field: 'missingOriginalQuote', previous: 'missing', latest: 'present' }];
+  if (!baseline) {
+    return { hold: false, fingerprint, latest, adoptedBaseline: true };
+  }
+  const differences = compareQuotes(baseline, latest);
   const type = quoteReviewType(latest, differences);
-  if (!type) return { hold: false, fingerprint, latest };
-  const patientDeltaPence = baseline ? patientQuoteTotalPence(latest) - patientQuoteTotalPence(baseline) : 0;
+  if (!type) return { hold: false, fingerprint, latest, adoptedBaseline: false };
+  const patientDeltaPence = patientQuoteTotalPence(latest) - patientQuoteTotalPence(baseline);
   return {
     hold: true,
     fingerprint,
@@ -245,26 +269,72 @@ export function evaluateQuoteReview(input: {
   };
 }
 
+export function applyPassedQuoteReview(snapshot: unknown, input: {
+  latestRaw: unknown;
+  fingerprint: string;
+  now?: string;
+}): { changed: boolean; snapshot: Record<string, unknown> } {
+  const root = asRecord(snapshot);
+  const existing = readQuoteReview(snapshot);
+  const storedQuote = firstParseableQuote(root.pricingQuote, root.quote);
+  const adoptedQuote = storedQuote
+    ?? firstParseableQuote(asRecord(root.quoteReview).latestQuote, input.latestRaw)
+    ?? input.latestRaw;
+  const needsBaseline = !storedQuote;
+  const needsRelease = existing?.status === 'required';
+  if (!needsBaseline && !needsRelease) {
+    return { changed: false, snapshot: root };
+  }
+  const now = input.now ?? new Date().toISOString();
+  return {
+    changed: true,
+    snapshot: stampQuoteReviewOnSnapshot({
+      ...root,
+      quote: adoptedQuote,
+      pricingQuote: adoptedQuote,
+    }, needsRelease && existing ? {
+      ...existing,
+      status: 'approved',
+      fingerprint: input.fingerprint,
+      latestQuote: input.latestRaw,
+      differences: [],
+      checkedAt: now,
+      approvedAt: now,
+      approvedFingerprint: input.fingerprint,
+    } : existing),
+  };
+}
+
 export function stampQuoteReviewOnSnapshot(snapshot: unknown, review: QuoteReviewRecord | null) {
   const root = asRecord(snapshot);
   const flow = asRecord(root.prescriptionFlow);
   const heldState = review?.type === 'out_of_stock' ? 'HELD_STOCK' : 'HELD_PRICE';
   const nextFlow: Record<string, unknown> = {};
-  const blocking = review && (review.status === 'required' || review.status === 'awaiting_top_up' || review.status === 'awaiting_refund');
+  const blocking = Boolean(review && (review.status === 'required' || review.status === 'awaiting_top_up' || review.status === 'awaiting_refund'));
   for (const [key, value] of Object.entries(flow)) {
     const prescription = asRecord(value);
-    nextFlow[key] = blocking ? { ...prescription, state: heldState } : prescription;
+    const state = String(prescription.state || '');
+    nextFlow[key] = blocking
+      ? { ...prescription, state: heldState }
+      : (state === 'HELD_PRICE' || state === 'HELD_STOCK')
+        ? { ...prescription, state: 'PENDING_PLACEMENT' }
+        : prescription;
   }
   const curaleaf = asRecord(root.curaleaf);
+  const adoptedQuote = firstParseableQuote(root.pricingQuote, root.quote, review?.latestQuote)
+    ?? review?.latestQuote
+    ?? root.pricingQuote
+    ?? root.quote
+    ?? null;
   return {
     ...root,
-    quote: root.quote ?? root.pricingQuote ?? review?.latestQuote ?? null,
-    pricingQuote: root.pricingQuote ?? root.quote ?? review?.latestQuote ?? null,
+    quote: adoptedQuote,
+    pricingQuote: adoptedQuote,
     quoteReview: review,
     prescriptionFlow: Object.keys(nextFlow).length ? nextFlow : root.prescriptionFlow,
     curaleaf: {
       ...curaleaf,
-      status: blocking ? 'quote_review_required' : curaleaf.status,
+      status: blocking ? 'quote_review_required' : (curaleaf.status === 'quote_review_required' ? undefined : curaleaf.status),
     },
   };
 }

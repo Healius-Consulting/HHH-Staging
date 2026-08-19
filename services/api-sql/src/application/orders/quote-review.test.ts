@@ -11,6 +11,7 @@ import {
 } from '../integrations/curaleaf-events.js';
 import { HttpError } from '../../domain/common/errors.js';
 import {
+  applyPassedQuoteReview,
   compareQuotes,
   curaleafCancellationBlocksPlacement,
   evaluateQuoteReview,
@@ -108,6 +109,55 @@ describe('quote review compare', () => {
     const result = evaluateQuoteReview({ snapshot, latestRaw: baseline });
     assert.equal(result.hold, false);
     assert.equal(quoteReviewAllowsPlacement(snapshot, fingerprint), true);
+  });
+
+  it('does not hold when the paid quote is missing and adopts the live quote instead', () => {
+    const result = evaluateQuoteReview({ snapshot: { lineItems: [{ packId: 'pack-a', quantity: 1 }] }, latestRaw: baseline });
+    assert.equal(result.hold, false);
+    if (!result.hold) assert.equal(result.adoptedBaseline, true);
+  });
+
+  it('parses nested Curaleaf quote wrappers and uses a stored review quote as baseline', () => {
+    const nested = parseQuote({ data: { items: [{ id: 'pack-a', packsOrderedCount: 1, inStock: true, wholesalePackPrice: '68.00', patientPackPrice: '85.00' }], shippingPrice: '5.00', taxRate: '0.2' } });
+    assert.equal(nested?.items[0]?.packId, 'pack-a');
+    assert.equal(nested?.items[0]?.patientPence, 8500);
+
+    const held = evaluateQuoteReview({
+      snapshot: {
+        quote: { lineItems: [{ packId: 'pack-a', quantity: 1 }] },
+        quoteReview: {
+          status: 'required',
+          type: 'patient_price_changed',
+          fingerprint: 'stale',
+          latestQuote: baseline,
+          differences: [{ category: 'patient_price', field: 'missingOriginalQuote', previous: 'missing', latest: 'present' }],
+          patientDeltaPence: 0,
+          checkedAt: '2026-08-18T20:00:00.000Z',
+        },
+      },
+      latestRaw: baseline,
+    });
+    assert.equal(held.hold, false);
+
+    const passed = applyPassedQuoteReview({
+      quote: { lineItems: [{ packId: 'pack-a', quantity: 1 }] },
+      quoteReview: {
+        status: 'required',
+        type: 'patient_price_changed',
+        fingerprint: 'stale',
+        latestQuote: baseline,
+        differences: [{ category: 'patient_price', field: 'missingOriginalQuote', previous: 'missing', latest: 'present' }],
+        patientDeltaPence: 0,
+        checkedAt: '2026-08-18T20:00:00.000Z',
+      },
+      prescriptionFlow: { rx1: { state: 'HELD_PRICE' } },
+      curaleaf: { status: 'quote_review_required' },
+    }, { latestRaw: baseline, fingerprint: quoteFingerprint(parseQuote(baseline)!), now: '2026-08-19T00:00:00.000Z' });
+    assert.equal(passed.changed, true);
+    const review = passed.snapshot.quoteReview as { status: string; approvedFingerprint: string };
+    assert.equal(review.status, 'approved');
+    assert.equal((passed.snapshot.prescriptionFlow as { rx1: { state: string } }).rx1.state, 'PENDING_PLACEMENT');
+    assert.equal(parseQuote(passed.snapshot.quote)?.items[0]?.packId, 'pack-a');
   });
 });
 
