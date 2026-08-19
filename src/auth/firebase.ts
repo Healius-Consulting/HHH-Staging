@@ -1,11 +1,6 @@
 import { getApp, getApps, initializeApp, type FirebaseApp, type FirebaseOptions } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-import {
-  getToken as getAppCheckToken,
-  initializeAppCheck,
-  ReCaptchaEnterpriseProvider,
-  type AppCheck,
-} from 'firebase/app-check';
+import { ensureAppCheck, readAppCheckToken } from './appCheck';
 
 const options: FirebaseOptions = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
@@ -38,22 +33,11 @@ export const mfaRequired = import.meta.env.VITE_REQUIRE_MFA === 'true' || server
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
-let appCheck: AppCheck | null = null;
 
 if (firebaseConfiguration.configured) {
   app = getApps().length ? getApp() : initializeApp(options);
   auth = getAuth(app);
-
-  if (appCheckSiteKey && typeof window !== 'undefined') {
-    try {
-      appCheck = initializeAppCheck(app, {
-        provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
-        isTokenAutoRefreshEnabled: true,
-      });
-    } catch (error) {
-      console.warn('Firebase App Check could not be initialised.', error);
-    }
-  }
+  ensureAppCheck(app);
 }
 
 export function requireFirebaseAuth(): Auth {
@@ -61,15 +45,4 @@ export function requireFirebaseAuth(): Auth {
   return auth;
 }
 
-export async function readAppCheckToken(): Promise<string | null> {
-  if (!appCheck) return null;
-  for (const forceRefresh of [false, true]) {
-    try {
-      return (await getAppCheckToken(appCheck, forceRefresh)).token;
-    } catch (error) {
-      console.warn('Firebase App Check token is currently unavailable.', error);
-      await new Promise(resolve => setTimeout(resolve, 400));
-    }
-  }
-  return null;
-}
+export { readAppCheckToken };

@@ -236,6 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     const sessionEnded = (event: Event) => {
       const code = (event as CustomEvent<{ code?: string }>).detail?.code;
+      if (code === 'APP_CHECK_REQUIRED') return;
       const notice = code === 'SESSION_IDLE_EXPIRED' ? 'Your session was locked after 15 minutes of inactivity.' : 'Your secure session ended. Sign in again to continue.';
       setApiCsrfToken(null);
       setState({ phase: 'anonymous', staff: null, error: null, notice });

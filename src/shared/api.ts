@@ -1,3 +1,4 @@
+import { shouldDispatchSessionEnded } from './sessionEnded';
 import type {
   CuraleafConnectionStatus,
   CuraleafActivationInput,
@@ -120,8 +121,11 @@ async function performApiRequest<T>(path: string, init?: RequestInit): Promise<T
     const rateMessage = response.status === 429
       ? `Too many requests. Try again${retryAfter ? ` in ${retryAfter} seconds` : ' shortly'}.`
       : null;
-    if (response.status === 401) window.dispatchEvent(new CustomEvent('hhh:session-ended', { detail: { code: body?.code ?? 'UNAUTHENTICATED' } }));
-    throw new ApiRequestError(response.status, body?.code ?? 'REQUEST_FAILED', body?.message || rateMessage || `Request failed with status ${response.status}.`);
+    const code = body?.code ?? 'REQUEST_FAILED';
+    if (shouldDispatchSessionEnded(response.status, code, typeof window === 'undefined' ? '' : window.location.pathname)) {
+      window.dispatchEvent(new CustomEvent('hhh:session-ended', { detail: { code } }));
+    }
+    throw new ApiRequestError(response.status, code, body?.message || rateMessage || `Request failed with status ${response.status}.`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

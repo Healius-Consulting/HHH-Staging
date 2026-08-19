@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isAppCheckExempt } from './app-check-policy.js';
+import { appCheckIsRequired, isAppCheckExempt } from './app-check-policy.js';
+
+describe('appCheckIsRequired', () => {
+  it('stays off unless REQUIRE_APP_CHECK is explicitly enabled', () => {
+    assert.equal(appCheckIsRequired('true'), true);
+    assert.equal(appCheckIsRequired('false'), false);
+    assert.equal(appCheckIsRequired(undefined), false);
+  });
+});
 
 describe('isAppCheckExempt', () => {
   it('skips CORS preflight, health, and the Worldpay webhook', () => {

@@ -1,4 +1,4 @@
-import { getApp, getApps, initializeApp, type FirebaseOptions } from 'firebase/app';
+import { getApp, getApps, initializeApp, type FirebaseApp, type FirebaseOptions } from 'firebase/app';
 import { getToken, initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from 'firebase/app-check';
 
 const options: FirebaseOptions = {
@@ -11,27 +11,45 @@ const options: FirebaseOptions = {
 };
 
 let appCheck: AppCheck | null = null;
-const configured = Boolean(options.apiKey && options.authDomain && options.projectId && options.appId);
-if (configured && typeof window !== 'undefined') {
-  const app = getApps().length ? getApp() : initializeApp(options);
-  const siteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY as string | undefined;
-  if (siteKey) {
-    try {
-      appCheck = initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(siteKey), isTokenAutoRefreshEnabled: true });
-    } catch {
-      appCheck = null;
-    }
-  }
+
+function firebaseApp(existing?: FirebaseApp): FirebaseApp | null {
+  if (existing) return existing;
+  if (getApps().length) return getApp();
+  if (!options.apiKey || !options.authDomain || !options.projectId || !options.appId) return null;
+  return initializeApp(options);
 }
 
-export async function readPublicAppCheckToken(): Promise<string | null> {
-  if (!appCheck) return null;
+export function ensureAppCheck(existing?: FirebaseApp): AppCheck | null {
+  if (appCheck) return appCheck;
+  if (typeof window === 'undefined') return null;
+  const siteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY as string | undefined;
+  const app = firebaseApp(existing);
+  if (!siteKey || !app) return null;
+  try {
+    appCheck = initializeAppCheck(app, {
+      provider: new ReCaptchaEnterpriseProvider(siteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } catch (error) {
+    console.warn('Firebase App Check could not be initialised.', error);
+  }
+  return appCheck;
+}
+
+export async function readAppCheckToken(): Promise<string | null> {
+  const instance = ensureAppCheck();
+  if (!instance) return null;
   for (const forceRefresh of [false, true]) {
     try {
-      return (await getToken(appCheck, forceRefresh)).token;
-    } catch {
+      return (await getToken(instance, forceRefresh)).token;
+    } catch (error) {
+      console.warn('Firebase App Check token is currently unavailable.', error);
       await new Promise(resolve => setTimeout(resolve, 400));
     }
   }
   return null;
 }
+
+export const readPublicAppCheckToken = readAppCheckToken;
+
+if (typeof window !== 'undefined') ensureAppCheck();
