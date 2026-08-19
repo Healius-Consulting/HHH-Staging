@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
-  Activity, ArrowRight, Brain, Check, ChevronDown, ChevronRight, Clock3, Flower2,
+  Activity, ArrowRight, Brain, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, Flower2,
   Globe2, HeartHandshake, HeartPulse, Leaf, Menu, MoonStar, Orbit, PackageCheck,
   ShieldCheck, ShieldPlus, Sparkles, Stethoscope, UserRoundCheck, Video, X,
 } from 'lucide-react';
@@ -22,7 +22,7 @@ const steps = [
     number: '01',
     kicker: 'Intake & Pre-Screening',
     title: 'Check eligibility',
-    copy: 'Complete a short, secure form so HHH can review whether you may benefit from CBPM therapy. Your application stays with Holistic Health Hub first, including when you arrive through a pharmacy-specific link.',
+    copy: 'Complete a short, secure form so Holistic Health Hub can review whether you may benefit from CBPM therapy. Your application stays with Holistic Health Hub first, including when you arrive through a pharmacy-specific link.',
     image: ELIGIBILITY_IMAGE,
     imageAlt: 'A patient privately completing a confidential eligibility pre-check at home',
     tag: 'Private intake review',
@@ -49,7 +49,7 @@ const steps = [
     number: '04',
     kicker: 'Continuous Support',
     title: 'Ongoing support',
-    copy: 'The quality of your care matters after the first appointment. Between HHH, your nominated pharmacy and the partnered clinic, support continues on your journey to health.',
+    copy: 'The quality of your care matters after the first appointment. Between Holistic Health Hub, your nominated pharmacy and the partnered clinic, support continues on your journey to health.',
     image: SUPPORT_IMAGE,
     imageAlt: 'A dedicated patient support specialist conducting an ongoing health follow-up',
     tag: 'Dedicated check-ins & reviews',
@@ -120,7 +120,7 @@ const faqs = [
   ['What does EU GMP medical cannabis mean?', 'EU GMP (Good Manufacturing Practice) refers to stringent European pharmaceutical manufacturing standards designed to guarantee consistent quality, purity, and controlled production without contaminants.'],
   ['What is a Summary Care Record (SCR)?', 'A Summary Care Record contains key information from your GP medical file (including current medications, allergies, and health history). With your explicit consent, it allows the assessing specialist clinician to review your treatment history safely.'],
   ['How do I get a prescription for CBPMs?', 'A specialist doctor must assess you through a clinical consultation. If treatment is appropriate and approved by the multi-disciplinary team (MDT), the prescription is transmitted to your nominated pharmacy for dispensing.'],
-  ['Am I eligible for CBPM therapy?', 'Eligibility generally requires that you have a diagnosed eligible condition and have previously tried at least two licensed therapies or medications that proved ineffective or caused intolerable side effects. Complete the secure HHH eligibility pre-check to start a review.'],
+  ['Am I eligible for CBPM therapy?', 'Eligibility generally requires that you have a diagnosed eligible condition and have previously tried at least two licensed therapies or medications that proved ineffective or caused intolerable side effects. Complete the secure Holistic Health Hub eligibility pre-check to start a review.'],
 ] as const;
 
 function PublicLink({ href, children, className = '', ...props }: { href: string; children: ReactNode; className?: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
@@ -187,6 +187,7 @@ function SiteFooter() {
           <PublicLink href="/conditions">Treatable conditions</PublicLink>
           <PublicLink href="/pricing">Pricing &amp; costs</PublicLink>
           <PublicLink href="/eligibility">Eligibility check</PublicLink>
+          <a href="https://portal.holistichealthhub.cc" rel="nofollow">Pharmacy portal</a>
         </div>
         <div>
           <strong>Company</strong>
@@ -341,28 +342,25 @@ function StickyStepNarrative() {
                 <h2>{step.number}. {step.title}</h2>
                 <p>{step.copy}</p>
 
-                <div className="hhh-sticky-chapter__step-footer">
-                  {idx === 0 && (
-                    <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-                      Begin eligibility check <ArrowRight aria-hidden="true" />
-                    </PublicLink>
-                  )}
-                  {idx === 1 && (
-                    <span className="hhh-inline-note">
-                      <Stethoscope aria-hidden="true" /> Dedicated GMC-registered specialist assessment
-                    </span>
-                  )}
-                  {idx === 2 && (
-                    <span className="hhh-inline-note">
-                      <PackageCheck aria-hidden="true" /> GPhC registered pharmacy dispensing
-                    </span>
-                  )}
-                  {idx === 3 && (
-                    <PublicLink href="/pricing" className="hhh-text-link">
-                      View care timeline &amp; transparent fees <ChevronRight aria-hidden="true" />
-                    </PublicLink>
-                  )}
-                </div>
+                {(idx === 1 || idx === 2 || idx === 3) && (
+                  <div className="hhh-sticky-chapter__step-footer">
+                    {idx === 1 && (
+                      <span className="hhh-inline-note">
+                        <Stethoscope aria-hidden="true" /> Dedicated GMC-registered specialist assessment
+                      </span>
+                    )}
+                    {idx === 2 && (
+                      <span className="hhh-inline-note">
+                        <PackageCheck aria-hidden="true" /> GPhC registered pharmacy dispensing
+                      </span>
+                    )}
+                    {idx === 3 && (
+                      <PublicLink href="/pricing" className="hhh-text-link">
+                        View care timeline &amp; transparent fees <ChevronRight aria-hidden="true" />
+                      </PublicLink>
+                    )}
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -464,7 +462,7 @@ function HomePage() {
           <div className="hhh-section-inner">
             <div className="hhh-network__intro">
               <p className="hhh-kicker">Who supports you</p>
-              <h2>HHH, a specialist clinic and your pharmacy, working together.</h2>
+              <h2>Holistic Health Hub, a specialist clinic and your pharmacy, working together.</h2>
               <p className="hhh-network__lede">
                 Care is delivered through distinct, regulated roles ensuring patient privacy, independent clinical assessment, and safe dispensing.
               </p>
@@ -571,32 +569,45 @@ function HomePage() {
           </div>
         </section>
 
-        {/* Key Benefits List */}
-        <section className="hhh-key-benefits hhh-section-inner hhh-reveal-block">
+        <section className="hhh-key-benefits hhh-section-inner hhh-reveal-block" aria-label="Why patients choose specialist referral">
           <div className="hhh-key-benefits__top">
-            <p className="hhh-kicker">Key benefits</p>
-            <h2>Why patients choose specialist referral</h2>
+            <p className="hhh-kicker">Why patients choose Holistic Health Hub</p>
+            <h2>Specialist care, without another generic appointment.</h2>
           </div>
           <div className="hhh-key-benefits__list">
             {[
-              { num: '01', title: 'Appointments with pain specialists', desc: 'Consult with GMC-registered consultants who specialise in your specific condition.' },
-              { num: '02', title: 'Alternative to opioids', desc: 'Explore plant-based options where conventional pain management has fallen short.' },
-              { num: '03', title: 'Anti-inflammatory properties', desc: 'Target inflammation pathways through guided cannabinoid therapies.' },
-            ].map(item => (
-              <article key={item.title}>
-                <span>{item.num}</span>
-                <div>
-                  <h3>{item.title}</h3>
-                  <p>{item.desc}</p>
+              {
+                number: '01',
+                role: 'Specialist assessment',
+                icon: <Stethoscope aria-hidden="true" />,
+                title: 'A specialist in your condition',
+                copy: 'You see a GMC-registered doctor who specialises in the condition you need help with, not a general appointment.',
+              },
+              {
+                number: '02',
+                role: 'Treatment history',
+                icon: <Leaf aria-hidden="true" />,
+                title: 'When standard treatment has not been enough',
+                copy: 'If two licensed therapies have not given sufficient relief, a specialist can consider whether a cannabis-based medicine is clinically appropriate.',
+              },
+              {
+                number: '03',
+                role: 'Clinical review',
+                icon: <ShieldCheck aria-hidden="true" />,
+                title: 'Reviewed by a clinical team',
+                copy: 'Treatment is never automatic. A multi-disciplinary team of doctors and pharmacists reviews whether a plan is right for you.',
+              },
+            ].map((item, index) => (
+              <article key={item.title} style={{ '--stagger-index': index } as CSSProperties}>
+                <div className="hhh-network__card-top">
+                  <span className="hhh-network__num">{item.number}</span>
+                  <span className="hhh-network__icon">{item.icon}</span>
                 </div>
-                <ChevronRight aria-hidden="true" />
+                <span className="hhh-network__role">{item.role}</span>
+                <h3>{item.title}</h3>
+                <p>{item.copy}</p>
               </article>
             ))}
-          </div>
-          <div className="hhh-key-benefits__cta">
-            <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-              Check your eligibility today <ArrowRight aria-hidden="true" />
-            </PublicLink>
           </div>
         </section>
 
@@ -645,7 +656,7 @@ function HomePage() {
               <h2>Private treatment should still feel personal.</h2>
               <p>Your eligibility check is only a starting point. A specialist clinician makes treatment decisions after an appropriate assessment, and your pharmacy remains part of the support around you.</p>
             </div>
-            <PublicLink href="/about" className="hhh-button hhh-button--pale">Meet HHH</PublicLink>
+            <PublicLink href="/about" className="hhh-button hhh-button--pale">Meet Holistic Health Hub</PublicLink>
           </div>
         </section>
 
@@ -654,7 +665,7 @@ function HomePage() {
           <div className="hhh-learn__header">
             <div>
               <p className="hhh-kicker">Learn &amp; Explore</p>
-              <h2>From the HHH Journal</h2>
+              <h2>From the Holistic Health Hub Journal</h2>
             </div>
             <PublicLink href="/blog" className="hhh-text-link">
               Read all articles <ArrowRight aria-hidden="true" />
@@ -718,9 +729,6 @@ function ConditionsPage() {
           title={<>Conditions that can be treated<br />with medical cannabis (CBPM)</>}
           copy="If you have tried two therapies or treatments for these conditions that have not provided sufficient benefit, you may be eligible for referral. A specialist clinician assesses you and decides whether treatment is appropriate."
         >
-          <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-            Check eligibility <ArrowRight aria-hidden="true" />
-          </PublicLink>
           <PublicLink href="/pricing" className="hhh-text-link">
             See pricing &amp; fees <ChevronRight aria-hidden="true" />
           </PublicLink>
@@ -737,7 +745,7 @@ function ConditionsPage() {
               />
               <figcaption>
                 <strong>Private eligibility review</strong>
-                <small>Your application stays with HHH first</small>
+                <small>Your application stays with Holistic Health Hub first</small>
               </figcaption>
             </figure>
             <div className="hhh-about-story__copy">
@@ -755,7 +763,7 @@ function ConditionsPage() {
               <div className="hhh-about-copy__actions">
                 <PublicLink href="/how-it-works" className="hhh-button hhh-button--outline">See how it works</PublicLink>
                 <PublicLink href="/about" className="hhh-text-link">
-                  Meet HHH <ChevronRight aria-hidden="true" />
+                  Meet Holistic Health Hub <ChevronRight aria-hidden="true" />
                 </PublicLink>
               </div>
             </div>
@@ -764,17 +772,48 @@ function ConditionsPage() {
 
         <section className="hhh-about-role" aria-label="How conditions are assessed">
           <div className="hhh-section-inner">
-            {[
-              { num: '01', title: 'Two treatments tried', copy: 'You may be eligible if two therapies or treatments for your condition have not provided sufficient benefit.' },
-              { num: '02', title: 'Specialist assessment', copy: 'A consultant physician on the GMC Specialist Register assesses you in relation to your specific condition.' },
-              { num: '03', title: 'MDT review', copy: 'A multi-disciplinary team of doctors and pharmacists reviews whether a CBPM is clinically appropriate for you.' },
-            ].map(item => (
-              <article key={item.title}>
-                <span>{item.num}</span>
-                <h2>{item.title}</h2>
-                <p>{item.copy}</p>
-              </article>
-            ))}
+            <div className="hhh-about-role__intro">
+              <p className="hhh-kicker">How you are assessed</p>
+              <h2>Three steps before a prescription can be considered.</h2>
+              <p>
+                These are the clinical gates. A referral is not automatic, and it is not a diagnosis. Every patient goes through the same review.
+              </p>
+            </div>
+            <div className="hhh-about-role__cards">
+              {[
+                {
+                  number: '01',
+                  role: 'Step one',
+                  icon: <ClipboardCheck aria-hidden="true" />,
+                  title: 'Two treatments tried',
+                  copy: 'You may be eligible if two therapies or treatments for your condition have not provided sufficient benefit.',
+                },
+                {
+                  number: '02',
+                  role: 'Step two',
+                  icon: <Stethoscope aria-hidden="true" />,
+                  title: 'Specialist assessment',
+                  copy: 'A consultant physician on the GMC Specialist Register assesses you in relation to your specific condition.',
+                },
+                {
+                  number: '03',
+                  role: 'Step three',
+                  icon: <ShieldCheck aria-hidden="true" />,
+                  title: 'MDT review',
+                  copy: 'A multi-disciplinary team of doctors and pharmacists reviews whether a CBPM is clinically appropriate for you.',
+                },
+              ].map((item, index) => (
+                <article key={item.title} style={{ '--stagger-index': index } as CSSProperties}>
+                  <div className="hhh-network__card-top">
+                    <span className="hhh-network__num">{item.number}</span>
+                    <span className="hhh-network__icon">{item.icon}</span>
+                  </div>
+                  <span className="hhh-network__role">{item.role}</span>
+                  <h3>{item.title}</h3>
+                  <p>{item.copy}</p>
+                </article>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -802,11 +841,6 @@ function ConditionsPage() {
                   </li>
                 ))}
               </ul>
-              <div className="hhh-condition-group__footer">
-                <PublicLink href="/eligibility" className="hhh-button hhh-button--outline">
-                  Check eligibility for {group.title.toLowerCase()} <ArrowRight aria-hidden="true" />
-                </PublicLink>
-              </div>
             </article>
           ))}
         </section>
@@ -899,9 +933,6 @@ function PricingPage() {
                 </div>
               ))}
             </div>
-            <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-              Start your journey today <ArrowRight aria-hidden="true" />
-            </PublicLink>
           </div>
         </section>
 
@@ -956,7 +987,7 @@ function AboutPage() {
               </figcaption>
             </figure>
             <div className="hhh-about-story__copy">
-              <p className="hhh-kicker">Why HHH exists</p>
+              <p className="hhh-kicker">Why Holistic Health Hub exists</p>
               <h2>Plant-based options, with the right people around you.</h2>
               <p>
                 Our mission is to provide holistic plant-based treatment options to those in need. Your team can include specialist <strong>doctors</strong>, clinical <strong>pharmacists</strong> and <strong>nurses</strong>, all committed to providing personalised care to each patient.
@@ -965,7 +996,7 @@ function AboutPage() {
                 They understand that every patient is unique, and will work closely with you to develop a medical cannabis treatment plan that is tailored to your specific needs, where that is clinically appropriate.
               </p>
               <p className="hhh-about-story__note">
-                HHH reviews eligibility and stays with you through intake. A specialist clinician makes treatment decisions. Your nominated pharmacy supports dispensing once the referral is ready.
+                Holistic Health Hub reviews eligibility and stays with you through intake. A specialist clinician makes treatment decisions. Your nominated pharmacy supports dispensing once the referral is ready.
               </p>
               <div className="hhh-about-copy__actions">
                 <PublicLink href="/conditions" className="hhh-button hhh-button--outline">Explore conditions</PublicLink>
@@ -977,17 +1008,48 @@ function AboutPage() {
 
         <section className="hhh-about-role" aria-label="How Holistic Health Hub fits">
           <div className="hhh-section-inner">
-            {[
-              { num: '01', title: 'Referral hub', copy: 'HHH is not the prescribing clinic. We review eligibility, answer pre-screening questions, and confirm where your referral should go.' },
-              { num: '02', title: 'Specialist clinic', copy: 'A GMC-registered doctor who specialises in your condition assesses you. Treatment decisions are clinical, made with an MDT, and never automatic.' },
-              { num: '03', title: 'Nominated pharmacy', copy: 'Your community pharmacy supports payment, dispensing, and delivery or collection once an appropriate prescription is issued.' },
-            ].map(item => (
-              <article key={item.title}>
-                <span>{item.num}</span>
-                <h2>{item.title}</h2>
-                <p>{item.copy}</p>
-              </article>
-            ))}
+            <div className="hhh-about-role__intro">
+              <p className="hhh-kicker">How we fit</p>
+              <h2>Three roles, each with a clear job.</h2>
+              <p>
+                Holistic Health Hub is the referral hub, not the prescribing clinic. Treatment decisions stay with the specialist and the clinical team.
+              </p>
+            </div>
+            <div className="hhh-about-role__cards">
+              {[
+                {
+                  number: '01',
+                  role: 'Intake & referral',
+                  icon: <ShieldCheck aria-hidden="true" />,
+                  title: 'Referral hub',
+                  copy: 'Holistic Health Hub is not the prescribing clinic. We review eligibility, answer pre-screening questions, and confirm where your referral should go.',
+                },
+                {
+                  number: '02',
+                  role: 'Clinical assessment',
+                  icon: <Stethoscope aria-hidden="true" />,
+                  title: 'Specialist clinic',
+                  copy: 'A GMC-registered doctor who specialises in your condition assesses you. Treatment decisions are clinical, made with an MDT, and never automatic.',
+                },
+                {
+                  number: '03',
+                  role: 'Dispensing & care',
+                  icon: <PackageCheck aria-hidden="true" />,
+                  title: 'Nominated pharmacy',
+                  copy: 'Your community pharmacy supports payment, dispensing, and delivery or collection once an appropriate prescription is issued.',
+                },
+              ].map((item, index) => (
+                <article key={item.title} style={{ '--stagger-index': index } as CSSProperties}>
+                  <div className="hhh-network__card-top">
+                    <span className="hhh-network__num">{item.number}</span>
+                    <span className="hhh-network__icon">{item.icon}</span>
+                  </div>
+                  <span className="hhh-network__role">{item.role}</span>
+                  <h3>{item.title}</h3>
+                  <p>{item.copy}</p>
+                </article>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -1044,9 +1106,6 @@ function AboutPage() {
               <p><strong>We believe it is our collective duty to preserve the planet and the various forms of life that live on it.</strong></p>
               <p>Future generations deserve a greener planet with better air quality.</p>
               <p>Cannabis itself is a carbon sequester, meaning it takes in more CO2 than it produces. That is not enough on its own, so for every CBPM prescription dispensed at a participating pharmacy, we support tree planting through Ecologi.</p>
-              <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-                Check your eligibility <ArrowRight aria-hidden="true" />
-              </PublicLink>
             </div>
           </div>
         </section>
@@ -1062,11 +1121,8 @@ function HowItWorksPage() {
         <InnerPageHero
           eyebrow="A supported route to care"
           title={<>From first questions<br />to ongoing support.</>}
-          copy="HHH stays at the centre of your intake and referral. A specialist clinic assesses you, and a pharmacy receives your record only when the referral is ready."
+          copy="Holistic Health Hub stays at the centre of your intake and referral. A specialist clinic assesses you, and a pharmacy receives your record only when the referral is ready."
         >
-          <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-            Check eligibility <ArrowRight aria-hidden="true" />
-          </PublicLink>
           <PublicLink href="/pricing" className="hhh-text-link">
             See pricing <ChevronRight aria-hidden="true" />
           </PublicLink>
@@ -1079,12 +1135,12 @@ function HowItWorksPage() {
         <section className="hhh-visibility-band hhh-reveal-block">
           <div className="hhh-section-inner">
             <div className="hhh-visibility-col">
-              <span className="hhh-kicker">Before HHH refers you</span>
-              <h2>Your application stays with HHH.</h2>
-              <p>HHH reviews your eligibility, checks your treatment history, and confirms the referral destination with you. A community pharmacy does not review unverified eligibility applications.</p>
+              <span className="hhh-kicker">Before Holistic Health Hub refers you</span>
+              <h2>Your application stays with Holistic Health Hub.</h2>
+              <p>Holistic Health Hub reviews your eligibility, checks your treatment history, and confirms the referral destination with you. A community pharmacy does not review unverified eligibility applications.</p>
             </div>
             <div className="hhh-visibility-col hhh-visibility-col--dark">
-              <span className="hhh-kicker">After HHH confirms</span>
+              <span className="hhh-kicker">After Holistic Health Hub confirms</span>
               <h2>Your pharmacy record is activated.</h2>
               <p>The confirmed pharmacy can then support the operational parts of your care, including prescription management, dispensing, payment, and delivery or collection.</p>
             </div>
@@ -1158,11 +1214,7 @@ function FaqPage() {
           eyebrow="Questions, clearly answered"
           title={<>Understand your options<br />before you begin.</>}
           copy="Straightforward information about eligibility, cannabis-based medicines, clinical assessment, and what to expect from specialist care."
-        >
-          <PublicLink href="/eligibility" className="hhh-button hhh-button--rust">
-            Check eligibility <ArrowRight aria-hidden="true" />
-          </PublicLink>
-        </InnerPageHero>
+        />
 
         <section className="hhh-faq hhh-section-inner">
           <aside className="hhh-faq__intro">
@@ -1170,9 +1222,6 @@ function FaqPage() {
             <p className="hhh-kicker">Frequently asked</p>
             <h2>Start with the essentials.</h2>
             <p>These answers are general information, not medical advice. A specialist clinician makes individual treatment decisions.</p>
-            <PublicLink href="/eligibility" className="hhh-text-link">
-              Still have a question? <ArrowRight aria-hidden="true" />
-            </PublicLink>
           </aside>
 
           <FaqAccordion />
@@ -1181,7 +1230,7 @@ function FaqPage() {
         <PageCta
           kicker="Ready when you are"
           title="Take the first step securely."
-          copy="Your eligibility application is reviewed by HHH before any patient record is activated for a pharmacy."
+          copy="Your eligibility application is reviewed by Holistic Health Hub before any patient record is activated for a pharmacy."
           href="/eligibility"
           label="Start eligibility check"
         />
@@ -1231,7 +1280,7 @@ function BlogPage() {
     <PageShell>
       <main id="main-content">
         <InnerPageHero
-          eyebrow="The HHH journal"
+          eyebrow="The Holistic Health Hub journal"
           title={<>Ideas for feeling<br />more like yourself.</>}
           copy="Clear, considered reading on sleep, pain management, mental wellbeing, and cannabis-based medicines."
         />
@@ -1388,13 +1437,13 @@ function ConsentPage() {
           <p className="hhh-kicker">Terms &amp; Consent</p>
           <h1>Consent and terms of use</h1>
           <p>
-            New eligibility applications are reviewed first by Holistic Health Hub. A community pharmacy does not receive the application while HHH is completing its intake and referral checks.
+            New eligibility applications are reviewed first by Holistic Health Hub. A community pharmacy does not receive the application while Holistic Health Hub is completing its intake and referral checks.
           </p>
           </div>
 
           <h2>Your information and consent</h2>
           <p>
-            Health information is sensitive and is collected only through the secure eligibility flow with explicit patient consent. A pharmacy selected on the main website is a preference until HHH confirms the final referral. A pharmacy-specific link has a fixed destination, but HHH still completes the intake review before activating the referral for that pharmacy.
+            Health information is sensitive and is collected only through the secure eligibility flow with explicit patient consent. A pharmacy selected on the main website is a preference until Holistic Health Hub confirms the final referral. A pharmacy-specific link has a fixed destination, but Holistic Health Hub still completes the intake review before activating the referral for that pharmacy.
           </p>
 
           <h2>Clinical decisions</h2>
@@ -1505,37 +1554,37 @@ export default function PublicSite() {
             is404: false,
           },
           '/how-it-works': {
-            title: 'How It Works | 4-Step Medical Cannabis Consultation & Pharmacy Care | HHH',
+            title: 'How It Works | 4-Step Medical Cannabis Consultation & Pharmacy Care | Holistic Health Hub',
             description: 'Discover the 4-step route to care: confidential pre-screening, specialist online doctor consultation, MDT review, and community pharmacy dispensing.',
             type: 'website',
             is404: false,
           },
           '/conditions': {
-            title: 'Treatable Conditions | Medical Cannabis & Chronic Pain Referral | HHH',
+            title: 'Treatable Conditions | Medical Cannabis & Chronic Pain Referral | Holistic Health Hub',
             description: 'Learn about chronic pain, neurological, and psychiatric conditions considered for cannabis-based medicinal products (CBPM) in the UK.',
             type: 'website',
             is404: false,
           },
           '/pricing': {
-            title: 'Transparent Pricing | £30 Specialist Consultations & Medication Costs | HHH',
+            title: 'Transparent Pricing | £30 Specialist Consultations & Medication Costs | Holistic Health Hub',
             description: 'Clear, transparent pricing: £30 initial and follow-up specialist consultations, with indicative pharmacy medication pricing.',
             type: 'website',
             is404: false,
           },
           '/about': {
-            title: 'About Us | Specialist Clinicians & Community Pharmacy Network | HHH',
+            title: 'About Us | Specialist Clinicians & Community Pharmacy Network | Holistic Health Hub',
             description: 'Meet Holistic Health Hub. Discover our personal, pharmacy-connected approach to specialist medical care and our commitment to the planet.',
             type: 'website',
             is404: false,
           },
           '/faq': {
-            title: 'Frequently Asked Questions | UK Medical Cannabis & CBPM Therapy | HHH',
+            title: 'Frequently Asked Questions | UK Medical Cannabis & CBPM Therapy | Holistic Health Hub',
             description: 'Clear, accurate answers to common questions about UK medical cannabis legality, eligibility, consultation process, and prescription costs.',
             type: 'website',
             is404: false,
           },
           '/blog': {
-            title: 'Journal & Educational Articles | Medical Cannabis & Wellbeing | HHH',
+            title: 'Journal & Educational Articles | Medical Cannabis & Wellbeing | Holistic Health Hub',
             description: 'Educational articles and clinical insights on sleep, chronic pain management, anxiety, the endocannabinoid system, and medical cannabis.',
             type: 'website',
             is404: false,
