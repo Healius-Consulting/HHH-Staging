@@ -123,6 +123,7 @@ describe('SQL order overlay', () => {
     });
     assert.equal(mapped.paymentStatus, 'paid');
     assert.equal(mapped.refund, undefined);
+    assert.equal(mapped.status, 'processing');
     assert.equal(mapped.curaleaf?.purchaseOrderState, 'CREATED');
   });
 });

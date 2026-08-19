@@ -116,8 +116,27 @@ export function curaleafRequiresSupplierCancel(snapshot: unknown) {
     return false;
   }
   const prescriptionState = String(curaleaf.prescriptionState || '').toUpperCase();
-  if (prescriptionState === 'ACTIVE' || prescriptionState === 'FULFILLED') return true;
+  if (prescriptionState === 'PENDING' || prescriptionState === 'ACTIVE' || prescriptionState === 'FULFILLED') return true;
+  if (String(curaleaf.prescriptionId || '').trim()) return true;
+  if (String(curaleaf.prescriberId || '').trim()) return true;
   return Boolean(String(curaleaf.purchaseOrderId || '').trim());
+}
+
+/** Pharmacy may cancel in HHH only before/during the second quote check. After Prescriber → Prescription → Purchase starts, Curaleaf owns cancel. */
+export function curaleafOwnsCancellation(snapshot: unknown) {
+  const review = String(asRecord(asRecord(snapshot).quoteReview).status || '');
+  if (review === 'required' || review === 'awaiting_top_up' || review === 'awaiting_refund') return false;
+  return curaleafRequiresSupplierCancel(snapshot);
+}
+
+export function stripPrematureHhhCancellation(snapshot: unknown) {
+  const root = asRecord(snapshot);
+  const refund = asRecord(root.refund);
+  const next = { ...root };
+  delete next.cancellation;
+  delete next.curaleafCancellation;
+  if (refund.kind !== 'quote_difference') delete next.refund;
+  return next;
 }
 
 export function supplierCancellationAlreadyConfirmed(snapshot: unknown) {

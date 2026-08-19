@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { curaleafApiRequest, executeCuraleafOrderPlacement, fetchCuraleafPurchaseOrders, fetchCuraleafShipments, fetchCuraleafQuote } from '../../application/integrations/curaleaf.service.js';
-import { curaleafRequiresSupplierCancel, stampCuraleafCancellationOnSnapshot } from '../../application/integrations/curaleaf-events.js';
+import { curaleafOwnsCancellation, curaleafRequiresSupplierCancel, stampCuraleafCancellationOnSnapshot, stripPrematureHhhCancellation } from '../../application/integrations/curaleaf-events.js';
 import {
   curaleafCancellationBlocksPlacement,
   evaluateQuoteReview,
@@ -190,10 +190,7 @@ async function attachCuraleafToOrder(
   });
   const liveCancelled = String(matchedPO?.state || matchedPO?.purchaseOrderState || '').toUpperCase() === 'CANCELLED';
   const snapshotCancelled = supplierOrderCancelled(snapshot);
-  if (snapshotCancelled && !liveCancelled) {
-    return toPortalOrder(order as any);
-  }
-  if (liveCancelled || snapshotCancelled) {
+  if (liveCancelled || (snapshotCancelled && liveCancelled)) {
     const nextSnapshot = stampCuraleafCancellationOnSnapshot(alignedSnapshot, {
       action: 'confirmed',
       purchaseOrderId: String(matchedPO?.id || prior.purchaseOrderId || prior.id || ''),
@@ -280,17 +277,42 @@ async function attachCuraleafToOrder(
       shipmentStates: curaleaf ? (prior.shipmentStates || {}) : {},
       lineItems: alignedSnapshot.lineItems || alignedSnapshot.items || [],
     });
-    if (previousKey !== nextKey) {
+    const liveSnapshot = curaleaf ? stripPrematureHhhCancellation(nextSnapshot) : nextSnapshot;
+    const snapshotRoot = order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot as Record<string, any> : {};
+    const hhhClosedPrematurely = Boolean(curaleaf) && (
+      order.status === 'CANCELLED'
+      || ['REFUNDED', 'REFUND_REQUIRED'].includes(String(order.paymentStatus || '').toUpperCase())
+      || Boolean(snapshotRoot.cancellation)
+      || (snapshotRoot.refund && snapshotRoot.refund.kind !== 'quote_difference')
+    );
+    if (previousKey !== nextKey || hhhClosedPrematurely) {
       await repos.orderRepo.updateQuoteSnapshot({
         id: order.id,
         organisationId: order.organisationId,
-        quoteSnapshot: nextSnapshot,
+        quoteSnapshot: liveSnapshot,
         fulfilmentStatus: curaleaf
           ? nextStatus as CreateOrderInput['fulfilmentStatus']
           : undefined,
       }).catch(err => console.warn('Curaleaf snapshot persist warning:', err));
+      if (hhhClosedPrematurely) {
+        await repos.orderRepo.updateOrderStatus({
+          id: order.id,
+          organisationId: order.organisationId,
+          paymentStatus: 'PAID',
+          paidAt: order.paidAt || new Date().toISOString(),
+        }).catch(err => console.warn('Live Curaleaf order restore warning:', err));
+        await repos.orderRepo.updateOrderStatus({
+          id: order.id,
+          organisationId: order.organisationId,
+          fulfilmentStatus: nextStatus as CreateOrderInput['fulfilmentStatus'],
+        }).catch(err => console.warn('Live Curaleaf fulfilment restore warning:', err));
+        order.status = 'PROCESSING';
+        order.paymentStatus = 'PAID';
+        if (!order.paidAt) order.paidAt = new Date().toISOString();
+        order.cancelledAt = null;
+      }
       order.fulfilmentStatus = nextStatus;
-      order.quoteSnapshot = nextSnapshot;
+      order.quoteSnapshot = liveSnapshot;
     }
     for (const shipment of liveShipments) {
       if (!shipment?.id || !matchedPO?.id) continue;
@@ -650,6 +672,9 @@ export function createPortalOrderRouter(): Router {
       }).parse(req.body);
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
+      if (curaleafOwnsCancellation(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot)) {
+        throw new HttpError(409, 'This order is already with Curaleaf. Cancellation is recorded when Curaleaf cancels the prescription or purchase order.', 'CURALEAF_CANCEL_REQUIRED');
+      }
       const requiresCuraleafCancel = curaleafRequiresSupplierCancel(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot);
       const snapshot = stampCuraleafCancellationOnSnapshot(order.quoteSnapshot, {
         action: supplierOrderCancelled(order.quoteSnapshot) || !requiresCuraleafCancel ? 'confirmed' : 'requested',
@@ -897,7 +922,7 @@ export function createPortalOrderRouter(): Router {
 
       const order = await orderRepo.findOrderById(orderId, scope.organisationId);
       if (!order) throw new HttpError(404, 'Order not found.', 'NOT_FOUND');
-      if (curaleafRequiresSupplierCancel(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot)) {
+      if ((curaleafOwnsCancellation(order.quoteSnapshot) || curaleafRequiresSupplierCancel(order.quoteSnapshot)) && !supplierOrderCancelled(order.quoteSnapshot)) {
         throw new HttpError(409, 'Confirm the Curaleaf cancellation before preparing a patient refund.', 'CURALEAF_CANCEL_REQUIRED');
       }
       if (!orderMoneyWasTaken(order)) {
@@ -982,7 +1007,7 @@ export function createPortalOrderRouter(): Router {
       const snapshot = (order.quoteSnapshot && typeof order.quoteSnapshot === 'object' ? order.quoteSnapshot : {}) as Record<string, any>;
       const priorRefund = refundRecord(snapshot);
       const quoteDifference = priorRefund.kind === 'quote_difference' || priorRefund.reason === 'replacement_price_changed';
-      if (!quoteDifference && curaleafRequiresSupplierCancel(order.quoteSnapshot) && !supplierOrderCancelled(order.quoteSnapshot)) {
+      if (!quoteDifference && (curaleafOwnsCancellation(order.quoteSnapshot) || curaleafRequiresSupplierCancel(order.quoteSnapshot)) && !supplierOrderCancelled(order.quoteSnapshot)) {
         throw new HttpError(409, 'Confirm the Curaleaf cancellation before recording a patient refund.', 'CURALEAF_CANCEL_REQUIRED');
       }
       const now = new Date().toISOString();

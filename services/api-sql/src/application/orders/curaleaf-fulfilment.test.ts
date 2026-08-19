@@ -226,6 +226,32 @@ describe('Curaleaf fulfilment mapping', () => {
     assert.equal(latestShipmentCreatedAt([tenPackShipment]), tenPackShipment.createdAt);
   });
 
+  it('keeps Curaleaf ordered pack count when the SQL requested quantity was wrongly shrunk', () => {
+    const lines = normalisedFulfilmentLines({
+      purchaseOrder: tenPackPo,
+      shipments: [],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 1 }],
+    });
+    assert.equal(lines[0]?.ordered, 10);
+    assert.equal(lines[0]?.requested, 1);
+    assert.equal(lines[0]?.allocated, 1);
+    assert.equal(lines[0]?.shipped, 0);
+    assert.equal(lines[0]?.quantityMismatch, true);
+  });
+
+  it('maps Beach Wedding 2-of-4 allocation without a shipment as remaining at Curaleaf', () => {
+    const lines = normalisedFulfilmentLines({
+      purchaseOrder: beachWeddingPo,
+      shipments: [],
+      requestedItems: [{ packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36', quantity: 4 }],
+    });
+    assert.equal(lines[0]?.ordered, 4);
+    assert.equal(lines[0]?.allocated, 2);
+    assert.equal(lines[0]?.shipped, 0);
+    assert.equal(lines[0]?.remaining, 4);
+    assert.equal(dispatchStatusFromLines([], lines), 'not_dispatched');
+  });
+
   it('records Beach Wedding 2-of-4 check-in and keeps it after a Curaleaf re-sync', () => {
     const before = normalisedFulfilmentLines({
       purchaseOrder: beachWeddingPo,

@@ -24,11 +24,13 @@ const COURIER_LABELS: Record<string, string> = {
 };
 
 const SHIPMENT_STATE_LABELS: Record<string, string> = {
-  partially_dispatched_to_pharmacy: 'Partially dispatched',
-  dispatched_to_pharmacy: 'In transit',
-  partially_received: 'Partially checked in',
-  received: 'Checked in',
-  ready_for_collection: 'Ready to collect',
+  partially_dispatched_to_pharmacy: 'Part In Transit',
+  dispatched_to_pharmacy: 'In Transit',
+  in_transit: 'In Transit',
+  dispatched: 'In Transit',
+  partially_received: 'Part Checked In',
+  received: 'Checked In',
+  ready_for_collection: 'Ready to Collect',
   collected: 'Collected',
 };
 
@@ -44,8 +46,8 @@ export function formatCourierLabel(courier: string | null | undefined) {
 
 export function consignmentStatusLabel(state: string | null | undefined, hasShipment: boolean) {
   if (state && SHIPMENT_STATE_LABELS[state]) return SHIPMENT_STATE_LABELS[state];
-  if (hasShipment) return 'In transit';
-  return 'Awaiting dispatch';
+  if (hasShipment) return 'In Transit';
+  return 'Awaiting Dispatch';
 }
 
 function shipmentPackCount(shipment: NonNullable<Prescription['shipments']>[number]) {

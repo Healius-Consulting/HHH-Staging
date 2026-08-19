@@ -55,25 +55,88 @@ export function orderPackTotals(order: PatientOrder) {
   }, { ordered: 0, shipped: 0, received: 0, collected: 0, remaining: 0 });
 }
 
+export function orderAllocatedPacks(order: PatientOrder) {
+  return order.prescriptions.reduce((sum, prescription) => {
+    const lines = prescription.fulfilmentLines ?? [];
+    if (lines.length) return sum + lines.reduce((lineSum, line) => lineSum + (line.allocated ?? 0), 0);
+    return sum + (prescription.supplierItems ?? []).reduce((itemSum, item) => itemSum + (item.packsAllocatedCount ?? 0), 0);
+  }, 0);
+}
+
 export function orderSplitPackSnapshot(order: PatientOrder) {
   const totals = orderPackTotals(order);
+  const allocated = orderAllocatedPacks(order);
+  const shipped = totals.shipped;
   return {
     total: totals.ordered,
     collected: totals.collected,
     atPharmacy: Math.max(0, totals.received - totals.collected),
-    inTransit: Math.max(0, totals.shipped - totals.received),
-    withCuraleaf: Math.max(0, totals.ordered - totals.shipped),
+    inTransit: Math.max(0, shipped - totals.received),
+    dispensedAtCuraleaf: Math.max(0, Math.min(allocated, totals.ordered) - shipped),
+    awaitingDispense: Math.max(0, totals.ordered - allocated),
+    withCuraleaf: Math.max(0, totals.ordered - shipped),
   };
+}
+
+export function orderHasPartialCuraleafDispense(order: PatientOrder) {
+  const snapshot = orderSplitPackSnapshot(order);
+  return snapshot.total > 0 && snapshot.dispensedAtCuraleaf > 0 && snapshot.awaitingDispense > 0;
 }
 
 export function orderIsSplitFulfilment(order: PatientOrder) {
   const snapshot = orderSplitPackSnapshot(order);
   if (snapshot.total <= 0) return false;
+  if (orderHasPartialCuraleafDispense(order)) return true;
   if (order.prescriptions.some(prescription => prescription.dispatchStatus === 'partial')) return true;
   if (snapshot.withCuraleaf > 0 && (snapshot.inTransit > 0 || snapshot.atPharmacy > 0 || snapshot.collected > 0)) return true;
   if (snapshot.collected > 0 && snapshot.collected < snapshot.total) return true;
   if (snapshot.atPharmacy > 0 && snapshot.atPharmacy + snapshot.collected < snapshot.total) return true;
   return snapshot.inTransit > 0 && snapshot.inTransit < snapshot.total;
+}
+
+export function fulfilmentPipelineSteps(line: {
+  orderedPacks: number;
+  allocatedPacks: number;
+  dispatchedPacks: number;
+  inTransitPacks: number;
+  receivedPacks: number;
+  awaitingDispatchPacks: number;
+  isSplit: boolean;
+}) {
+  const ordered = line.orderedPacks;
+  const allocated = line.allocatedPacks;
+  const dispatched = line.dispatchedPacks;
+  const inTransit = line.inTransitPacks;
+  const received = line.receivedPacks;
+  const consignmentDelivered = dispatched > 0 && inTransit === 0 && received >= dispatched;
+  const splitAwaitingNextShipment = line.isSplit && line.awaitingDispatchPacks > 0;
+  const transitIncomplete = splitAwaitingNextShipment
+    || (inTransit > 0 && received > 0)
+    || (dispatched > 0 && inTransit > 0 && inTransit < dispatched)
+    || (dispatched > 0 && inTransit === 0 && received > 0 && received < dispatched);
+
+  return {
+    ordered: {
+      complete: ordered > 0,
+      partial: false,
+      active: false,
+    },
+    dispensed: {
+      complete: allocated >= ordered && ordered > 0,
+      partial: allocated > 0 && allocated < ordered,
+      active: allocated === 0 && ordered > 0,
+    },
+    inTransit: {
+      complete: consignmentDelivered && !splitAwaitingNextShipment,
+      partial: transitIncomplete,
+      active: inTransit > 0 && !transitIncomplete,
+    },
+    checkedIn: {
+      complete: received >= ordered && ordered > 0,
+      partial: received > 0 && received < ordered,
+      active: false,
+    },
+  };
 }
 
 export function orderHasInTransitPacks(order: PatientOrder) {
@@ -118,7 +181,7 @@ export function orderInTransitProductNames(order: PatientOrder) {
 }
 
 export function prescriptionStatusLabel(prescription: OrderPrescription) {
-  if (prescriptionIsCancelled(prescription)) return 'Cancelled purchase order';
+  if (prescriptionIsCancelled(prescription)) return 'Cancelled Purchase Order';
   const totals = prescriptionPackTotals(prescription);
   const remainingOpen = (prescription.fulfilmentLines ?? []).some(line =>
     line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered,
@@ -127,25 +190,25 @@ export function prescriptionStatusLabel(prescription: OrderPrescription) {
     || ['received', 'partially-received', 'ready', 'collected'].includes(prescription.status);
 
   if (prescription.status === 'collected' && !remainingOpen) return 'Collected';
-  if (totals.collected > 0 && remainingOpen) return 'Part collected';
+  if (totals.collected > 0 && remainingOpen) return 'Part Collected';
   if (hasCheckedInPacks && totals.received >= totals.collected && totals.collected > 0 && remainingOpen) {
-    return 'Part collected';
+    return 'Part Collected';
   }
   if (prescription.status === 'partially-received' && !hasCheckedInPacks && totals.shipped > 0) {
-    return prescription.dispatchStatus === 'partial' ? 'Partially dispatched' : 'In transit';
+    return prescription.dispatchStatus === 'partial' ? 'Part In Transit' : 'In Transit';
   }
 
   return ({
     draft: 'Draft',
-    'awaiting-approval': 'Curaleaf review',
-    processing: 'Processing',
-    approved: 'Approved',
-    dispatched: prescription.dispatchStatus === 'partial' ? 'Partially dispatched' : 'Dispatched',
-    'partially-received': 'Part delivered',
-    received: 'Delivered',
-    ready: 'Ready to collect',
+    'awaiting-approval': 'Curaleaf Review',
+    processing: 'Curaleaf Dispensing',
+    approved: 'Curaleaf Dispensing',
+    dispatched: prescription.dispatchStatus === 'partial' ? 'Part In Transit' : 'In Transit',
+    'partially-received': 'Part Checked In',
+    received: 'Checked In',
+    ready: 'Ready to Collect',
     collected: 'Collected',
-    cancelled: 'Cancelled purchase order',
+    cancelled: 'Cancelled Purchase Order',
   } as const)[prescription.status];
 }
 
@@ -226,8 +289,8 @@ function orderAllOrderedPacksReceived(order: PatientOrder) {
 }
 
 /**
- * Pharmacy can auto-cancel in HHH until Curaleaf has accepted the prescription
- * or created a purchase order. After that, Curaleaf customer service must cancel.
+ * Pharmacy can cancel in HHH only before/during the second quote check.
+ * After Prescriber → Prescription → Purchase starts, Curaleaf owns cancellation.
  */
 export function orderRequiresCuraleafCancel(order: PatientOrder): boolean {
   if (order.curaleafCancellation?.status === 'confirmed') return false;
@@ -237,8 +300,10 @@ export function orderRequiresCuraleafCancel(order: PatientOrder): boolean {
     && prescription.purchaseOrderState !== 'REJECTED'
   );
   const livePrescription = order.prescriptions.some(prescription =>
-    prescription.curaleafPrescriptionState === 'ACTIVE'
+    prescription.curaleafPrescriptionState === 'PENDING'
+    || prescription.curaleafPrescriptionState === 'ACTIVE'
     || prescription.curaleafPrescriptionState === 'FULFILLED'
+    || Boolean(prescription.curaleafPrescriptionId)
   );
   if (livePurchaseOrder || livePrescription) return true;
   if (order.prescriptions.some(prescription =>

@@ -52,7 +52,9 @@ import {
   orderAwaitingSupplierShipmentProductNames,
   orderCancellationResolution,
   orderHasInTransitPacks,
+  fulfilmentPipelineSteps,
   orderHasPartialCollection,
+  orderHasPartialCuraleafDispense,
   orderHasPartialPharmacyReceipt,
   orderHasUncollectedReceivedPacks,
   orderIsSplitFulfilment,
@@ -71,6 +73,7 @@ import {
 import { buildOrderTimelineEvents } from '../utils/orderTimeline';
 import {
   collectOrderConsignments,
+  consignmentStatusLabel,
   orderCourierLabel,
   orderDeliveryDestination,
   shortConsignmentId,
@@ -88,27 +91,27 @@ interface OrderRecord {
 const DEFAULT_MANUAL_FORM: ManualPaymentForm = { tender: 'epos-card', reference: '', notes: '', confirmed: false };
 
 const STAGE_META: Record<OrderStage, { label: string; description: string; tone: string; icon: LucideIcon }> = {
-  'awaiting-payment': { label: 'Awaiting payment', description: 'Payment link active with patient', tone: 'warning', icon: Clock3 },
-  paid: { label: 'Paid · Queued', description: 'Payment cleared; ready for Curaleaf placement', tone: 'paid', icon: CreditCard },
-  'curaleaf-pending': { label: 'Curaleaf review', description: 'Prescription in pharmacist validation queue', tone: 'curaleaf-review', icon: CircleDot },
-  'curaleaf-approved': { label: 'Curaleaf dispensing', description: 'Order approved; Curaleaf dispensary technicians allocating packs', tone: 'curaleaf-picking', icon: Package },
-  dispatched: { label: 'In delivery', description: 'Dispatched with courier to the pharmacy', tone: 'dispatched', icon: Truck },
-  delivered: { label: 'Delivered', description: 'Received at pharmacy; ready for check-in', tone: 'delivered', icon: PackageCheck },
-  ready: { label: 'Ready to collect', description: 'Verified by pharmacy; patient notified', tone: 'ready', icon: Package },
-  collected: { label: 'Collected', description: 'Medication handed out to patient', tone: 'collected', icon: Check },
-  rejected: { label: 'Curaleaf exception', description: 'Order requires prescription or recipe fix', tone: 'danger', icon: ShieldAlert },
-  archived: { label: 'Archived cycle', description: 'Prescription 28-day window expired', tone: 'neutral', icon: Archive },
+  'awaiting-payment': { label: 'Awaiting Payment', description: 'Payment link active with patient', tone: 'warning', icon: Clock3 },
+  paid: { label: 'Awaiting Placement', description: 'Payment cleared; ready for Curaleaf placement', tone: 'paid', icon: CreditCard },
+  'curaleaf-pending': { label: 'Curaleaf Review', description: 'Prescription in pharmacist validation queue', tone: 'curaleaf-review', icon: CircleDot },
+  'curaleaf-approved': { label: 'Curaleaf Dispensing', description: 'Order approved; Curaleaf dispensary technicians allocating packs', tone: 'curaleaf-picking', icon: Package },
+  dispatched: { label: 'In Transit', description: 'Dispatched with courier to the pharmacy', tone: 'dispatched', icon: Truck },
+  delivered: { label: 'Checked In', description: 'Checked in at pharmacy; not yet ready to collect', tone: 'delivered', icon: PackageCheck },
+  ready: { label: 'Ready to Collect', description: 'Verified by pharmacy; patient notified', tone: 'ready', icon: Package },
+  collected: { label: 'Collected', description: 'Medication collected by the patient', tone: 'collected', icon: Check },
+  rejected: { label: 'Curaleaf Exception', description: 'Order requires prescription or recipe fix', tone: 'danger', icon: ShieldAlert },
+  archived: { label: 'Archived', description: 'Prescription 28-day window expired', tone: 'neutral', icon: Archive },
   cancelled: { label: 'Cancelled', description: 'Cancellation recorded for audit', tone: 'danger', icon: XCircle },
 };
 
 const FILTER_GROUPS: Array<{ label: string; filters: Array<{ key: StageFilter; label: string }> }> = [
   {
-    label: 'Live queue',
+    label: 'Live Queue',
     filters: [
       { key: 'current', label: 'Current' },
-      { key: 'awaiting-payment', label: 'Awaiting payment' },
-      { key: 'awaiting-fulfilment', label: 'Awaiting fulfilment' },
-      { key: 'ready', label: 'Ready to collect' },
+      { key: 'awaiting-payment', label: 'Awaiting Payment' },
+      { key: 'awaiting-fulfilment', label: 'Awaiting Fulfilment' },
+      { key: 'ready', label: 'Ready to Collect' },
     ],
   },
   {
@@ -123,7 +126,7 @@ const FILTER_GROUPS: Array<{ label: string; filters: Array<{ key: StageFilter; l
     filters: [
       { key: 'archived', label: 'Archived' },
       { key: 'completed', label: 'Completed' },
-      { key: 'all', label: 'All history' },
+      { key: 'all', label: 'All History' },
     ],
   },
 ];
@@ -185,7 +188,7 @@ function recordStageMeta(record: OrderRecord) {
     || ['curaleaf_contact_required', 'awaiting_curaleaf_confirmation'].includes(record.order.cancellation?.status ?? '');
   if (record.stage === 'cancelled' && record.order.prescriptions.some(prescription => prescription.purchaseOrderState === 'CANCELLED' || prescription.status === 'cancelled')) {
     return {
-      label: resolution === 'needs-action' && refundDue && !supplierActionOutstanding ? 'Refund due' : 'Cancelled purchase order',
+      label: resolution === 'needs-action' && refundDue && !supplierActionOutstanding ? 'Refund Due' : 'Cancelled Purchase Order',
       description: resolution === 'needs-action'
         ? refundDue && !supplierActionOutstanding
           ? 'Patient payment is still held. Refund in Worldpay or ePOS, then confirm the reference here. HHH does not move the money automatically.'
@@ -204,14 +207,14 @@ function recordStageMeta(record: OrderRecord) {
     };
   }
   if (resolution === 'needs-action' && refundDue && !supplierActionOutstanding) {
-    return { label: 'Refund due', description: 'Patient payment is still held. Refund in Worldpay or ePOS, then confirm the reference here.', tone: 'danger', icon: Banknote };
+    return { label: 'Refund Due', description: 'Patient payment is still held. Refund in Worldpay or ePOS, then confirm the reference here.', tone: 'danger', icon: Banknote };
   }
-  if (resolution === 'needs-action') return { label: 'Cancellation action', description: 'Cancellation requires supplier or refund follow-up', tone: 'danger', icon: AlertTriangle };
+  if (resolution === 'needs-action') return { label: 'Needs Action', description: 'Cancellation requires supplier or refund follow-up', tone: 'danger', icon: AlertTriangle };
   if (quoteReviewIsOpen(record.order)) {
     const review = record.order.quoteReview;
     const delta = review?.patientDeltaPence ?? 0;
     return {
-      label: review?.type === 'out_of_stock' ? 'Stock hold' : 'Quote review',
+      label: review?.type === 'out_of_stock' ? 'Stock Hold' : 'Quote Review',
       description: review?.type === 'out_of_stock'
         ? 'Curaleaf reports a line out of stock. Refresh the quote or cancel this order.'
         : delta > 0
@@ -230,19 +233,21 @@ function recordStageMeta(record: OrderRecord) {
   const splitFulfilment = isSplit && orderHasUncollectedReceivedPacks(record.order)
     ? `${split.atPharmacy} pack(s) checked in · ${split.withCuraleaf + split.inTransit} still in transit or awaiting dispatch`
     : orderHasPartialCollection(record.order) && !orderHasInTransitPacks(record.order) && !orderHasUncollectedReceivedPacks(record.order)
-      ? 'Arrived packs handed out; remainder awaiting dispatch'
+      ? 'Arrived packs collected; remainder awaiting dispatch'
       : orderHasPartialPharmacyReceipt(record.order) && !orderHasInTransitPacks(record.order)
         ? 'First consignment checked in; remainder awaiting dispatch'
         : isSplit && orderHasInTransitPacks(record.order)
           ? (split.withCuraleaf > 0
             ? `${split.inTransit} of ${split.total} packs in transit · ${split.withCuraleaf} awaiting dispatch`
             : `${split.inTransit} of ${split.total} packs with courier`)
-          : isSplit && split.withCuraleaf > 0 && !orderHasInTransitPacks(record.order)
-            ? `${split.withCuraleaf} pack(s) awaiting dispatch after the first consignment`
-            : null;
+          : isSplit && orderHasPartialCuraleafDispense(record.order)
+            ? `${split.dispensedAtCuraleaf} of ${split.total} packs dispensed at Curaleaf · ${split.awaitingDispense} awaiting dispense`
+            : isSplit && split.withCuraleaf > 0 && !orderHasInTransitPacks(record.order)
+              ? `${split.withCuraleaf} pack(s) awaiting dispatch after the first consignment`
+              : null;
   if (splitFulfilment) {
     return {
-      label: 'Split fulfilment',
+      label: 'Split Dispensed',
       description: splitFulfilment,
       tone: 'partial',
       icon: Layers2,
@@ -515,18 +520,16 @@ export default function Orders() {
     return isDeliveryOrPartial;
   }) : [];
 
-  const currentSplitDelivery = deliveryCandidate.filter(record =>
-    orderIsSplitFulfilment(record.order)
-    && (orderHasInTransitPacks(record.order)
-      || orderHasPartialPharmacyReceipt(record.order)
-      || orderHasUncollectedReceivedPacks(record.order)
-      || orderHasPartialCollection(record.order)),
-  );
+  const currentSplitDelivery = activeFilter === 'current' ? filtered.filter(record => {
+    if (currentNeedsAction.includes(record) || currentReady.includes(record)) return false;
+    return orderIsSplitFulfilment(record.order);
+  }) : [];
 
   const currentDelivery = deliveryCandidate.filter(record => !currentSplitDelivery.includes(record));
 
   const currentPicking = activeFilter === 'current' ? filtered.filter(record => {
     if (quoteReviewIsOpen(record.order)) return false;
+    if (currentSplitDelivery.includes(record)) return false;
     if (['ready', 'dispatched', 'delivered'].includes(record.stage)) return false;
     const isDeliveryOrPartial = record.order.prescriptions.some(rx =>
       rx.status === 'partially-received' || rx.dispatchStatus === 'partial' || rx.status === 'dispatched' || Boolean(rx.shipmentIds?.length)
@@ -540,6 +543,7 @@ export default function Orders() {
 
   const currentProcessing = activeFilter === 'current' ? filtered.filter(record => {
     if (quoteReviewIsOpen(record.order)) return false;
+    if (currentSplitDelivery.includes(record)) return false;
     if (['ready', 'dispatched', 'delivered', 'awaiting-payment'].includes(record.stage)) return false;
     const isDeliveryOrPartial = record.order.prescriptions.some(rx =>
       rx.status === 'partially-received' || rx.dispatchStatus === 'partial' || rx.status === 'dispatched' || Boolean(rx.shipmentIds?.length)
@@ -906,10 +910,10 @@ export default function Orders() {
   return (
     <div className="page-body order-crm">
       <section className="order-crm-summary" aria-label="Order pipeline summary">
-        <SummaryMetric label="Active orders" value={String(activeCount)} detail="Across payment, Curaleaf and fulfilment" icon={Package} tone="primary" />
-        <SummaryMetric label="Needs action" value={String(needsAction)} detail="Payment, submission or exception" icon={AlertTriangle} tone="warning" />
+        <SummaryMetric label="Active Orders" value={String(activeCount)} detail="Across payment, Curaleaf and fulfilment" icon={Package} tone="primary" />
+        <SummaryMetric label="Needs Action" value={String(needsAction)} detail="Payment, submission or exception" icon={AlertTriangle} tone="warning" />
         <SummaryMetric label="Outstanding" value={money(outstandingValue)} detail="Awaiting patient payment" icon={CreditCard} tone="warning" />
-        <SummaryMetric label="Ready to collect" value={String(readyCount)} detail="Patient collection queue" icon={PackageCheck} tone="success" />
+        <SummaryMetric label="Ready to Collect" value={String(readyCount)} detail="Patient collection queue" icon={PackageCheck} tone="success" />
       </section>
 
       <section className="order-crm-controls">
@@ -928,17 +932,17 @@ export default function Orders() {
             {filtered.length ? (
               activeFilter === 'cancelled' ? (
                 <>
-                  <OrderListGroup label="Needs action" detail="Supplier or refund follow-up" records={cancellationNeedsAction} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} />
-                  <OrderListGroup label="Resolved & refunded" detail="Closed order history" records={cancellationClosed} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} />
+                  <OrderListGroup label="Needs Action" detail="Supplier or refund follow-up" records={cancellationNeedsAction} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} />
+                  <OrderListGroup label="Resolved & Refunded" detail="Closed order history" records={cancellationClosed} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} />
                 </>
               ) : activeFilter === 'current' ? (
                 <>
-                  {currentNeedsAction.length ? <OrderListGroup label="Needs action" detail="Awaiting payment, exceptions and cancellations" records={currentNeedsAction} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
-                  {currentReady.length ? <OrderListGroup label="Ready to collect" detail="Medication ready for patient pickup" records={currentReady} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
-                  {currentSplitDelivery.length ? <OrderListGroup label="Split shipments" detail="Partial consignments in transit, at pharmacy, or awaiting the next dispatch" records={currentSplitDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
-                  {currentDelivery.length ? <OrderListGroup label="In delivery & arrived" detail="Full consignments in transit or arrived for check-in" records={currentDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
-                  {currentPicking.length ? <OrderListGroup label="Curaleaf dispensing" detail="Curaleaf allocating and packing medication" records={currentPicking} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
-                  {currentProcessing.length ? <OrderListGroup label="Processing" detail="Order confirmed; awaiting lab picking queue" records={currentProcessing} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentNeedsAction.length ? <OrderListGroup label="Needs Action" detail="Awaiting payment, exceptions and cancellations" records={currentNeedsAction} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentReady.length ? <OrderListGroup label="Ready to Collect" detail="Medication ready for patient pickup" records={currentReady} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentSplitDelivery.length ? <OrderListGroup label="Split Dispensed" detail="Some packs dispensed at Curaleaf, with the rest still to allocate, ship, or check in" records={currentSplitDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentDelivery.length ? <OrderListGroup label="In Transit & Arrived" detail="Full consignments in transit or arrived for check-in" records={currentDelivery} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentPicking.length ? <OrderListGroup label="Curaleaf Dispensing" detail="Curaleaf allocating and packing medication" records={currentPicking} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
+                  {currentProcessing.length ? <OrderListGroup label="Awaiting Placement" detail="Order confirmed; awaiting lab picking queue" records={currentProcessing} selectedOrderId={selected?.order.id ?? null} now={now} onSelect={setSelectedOrderId} /> : null}
                 </>
               ) : (
                 filtered.map(record => (
@@ -1401,9 +1405,8 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
   const canRedo = Boolean(record.unresolvedReason) && (stage === 'rejected' || stage === 'archived' || stage === 'cancelled');
   const paymentFormVisible = stage === 'awaiting-payment' && order.payment.route === 'pharmacy';
   const curaleafCancellationLocked = Boolean(order.curaleafCancellation && order.curaleafCancellation.status !== 'confirmed');
-  const mayCancel = !order.cancellation && !['collected', 'cancelled'].includes(stage);
+  const mayCancel = !order.cancellation && !['collected', 'cancelled'].includes(stage) && (quoteReviewIsOpen(order) || !orderRequiresCuraleafCancel(order));
   const hasCuraleafOrder = orderRequiresCuraleafCancel(order);
-  const mayCallCuraleaf = hasCuraleafOrder && order.curaleafCancellation?.status !== 'confirmed';
   const remainingOpen = order.prescriptions.some(prescription =>
     (prescription.fulfilmentLines ?? []).some(line => line.remaining > 0 || line.received < line.ordered || line.collected < line.ordered),
   );
@@ -1462,7 +1465,7 @@ function OrderDetail({ record, now, placementConfirmation, handoutBusy, onOpenHa
           </div>
           <div className="order-crm-record__actions" role="group" aria-label="Order actions">
             {canFullHandout ? <button type="button" className="btn btn-primary btn-sm" disabled={handoutBusy} onClick={() => onOpenHandout(false)}><Check size={13} /> Hand over</button> : null}
-            {mayCallCuraleaf ? <button type="button" className="btn btn-secondary btn-sm" onClick={onCallCuraleaf}><PhoneCall size={13} /> Call Curaleaf to cancel</button> : mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenCancellation}><XCircle size={13} /> Cancel order</button> : null}
+            {mayCancel ? <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenCancellation}><XCircle size={13} /> Cancel order</button> : null}
           </div>
         </div>
       </header>
@@ -1649,10 +1652,11 @@ function PrePlacementDeliveryGuidance({ now }: { now: Date }) {
 
 function splitPackStatItems(snapshot: ReturnType<typeof orderSplitPackSnapshot>) {
   return [
-    { value: snapshot.collected, label: 'Handed out' },
-    { value: snapshot.atPharmacy, label: 'Checked in' },
-    { value: snapshot.inTransit, label: 'In transit' },
-    { value: snapshot.withCuraleaf, label: 'Awaiting dispatch' },
+    { value: snapshot.collected, label: 'Collected' },
+    { value: snapshot.atPharmacy, label: 'Checked In' },
+    { value: snapshot.inTransit, label: 'In Transit' },
+    { value: snapshot.dispensedAtCuraleaf, label: 'Dispensed at Curaleaf' },
+    { value: snapshot.awaitingDispense, label: 'Awaiting Dispense' },
   ].filter(stat => stat.value > 0);
 }
 
@@ -1720,7 +1724,7 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
         <SplitOrderDeliveryBanner
           tone="partial"
           icon={PackageCheck}
-          eyebrow="Ready for handout"
+          eyebrow="Ready for Handout"
           title={`${packsWaiting} pack${packsWaiting === 1 ? '' : 's'} checked in — verify and hand out to the patient`}
           desc={splitSnapshot.withCuraleaf > 0 && splitSnapshot.inTransit > 0
             ? 'Other packs are still in transit or waiting to dispatch.'
@@ -1739,7 +1743,7 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
           </div>
           <div className="order-delivery-banner__content">
             <div className="order-delivery-banner__eyebrow">
-              <span>Ready for patient handout</span>
+              <span>Ready for Patient Handout</span>
             </div>
             <strong className="order-delivery-banner__title">
               {packsWaiting} pack{packsWaiting === 1 ? '' : 's'} checked in and awaiting collection
@@ -1759,8 +1763,8 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
       <SplitOrderDeliveryBanner
         tone="partial"
         icon={Layers2}
-        eyebrow="Part collected"
-        title={`${splitSnapshot.collected} of ${splitSnapshot.total} packs handed out`}
+        eyebrow="Part Collected"
+        title={`${splitSnapshot.collected} of ${splitSnapshot.total} packs collected`}
         desc={`${remaining} pack${remaining === 1 ? '' : 's'} still to dispatch. No pharmacy action until they ship.`}
         stats={splitStats}
       />
@@ -1775,7 +1779,7 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
       <SplitOrderDeliveryBanner
         tone={overdue ? 'overdue' : 'partial'}
         icon={overdue ? AlertTriangle : Truck}
-        eyebrow={overdue ? 'Delivery overdue' : 'Part in transit'}
+        eyebrow={overdue ? 'Delivery Overdue' : 'Part In Transit'}
         title={overdue
           ? `${inTransit} of ${splitSnapshot.total} packs overdue · expected by ${formatDeliveryDate(guidance.windowEnd)}`
           : `${inTransit} of ${splitSnapshot.total} packs in transit · expected ${range}`}
@@ -1787,13 +1791,26 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
     );
   }
 
+  if (isSplit && orderHasPartialCuraleafDispense(order) && !hasInTransit && !hasUncollected && !hasPartialCollection) {
+    return (
+      <SplitOrderDeliveryBanner
+        tone="partial"
+        icon={Layers2}
+        eyebrow="Split Dispensed"
+        title={`${splitSnapshot.dispensedAtCuraleaf} of ${splitSnapshot.total} packs dispensed at Curaleaf`}
+        desc={`${splitSnapshot.awaitingDispense} pack${splitSnapshot.awaitingDispense === 1 ? '' : 's'} still to dispense. They will ship separately once allocated.`}
+        stats={splitStats}
+      />
+    );
+  }
+
   if (isSplit && awaitingSupplier.length && !hasInTransit) {
     const remaining = splitSnapshot.withCuraleaf;
     return (
       <SplitOrderDeliveryBanner
         tone="partial"
         icon={Layers2}
-        eyebrow="Awaiting next shipment"
+        eyebrow="Awaiting Next Shipment"
         title={`${remaining} pack${remaining === 1 ? '' : 's'} still to dispatch`}
         desc="The first consignment is complete. Remaining packs will ship separately."
         stats={splitStats}
@@ -1833,7 +1850,7 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
           </div>
           <div className="order-delivery-banner__content">
             <div className="order-delivery-banner__eyebrow">
-              <span>{overdue ? 'Delivery overdue' : 'In transit with courier'}</span>
+              <span>{overdue ? 'Delivery Overdue' : 'In Transit with Courier'}</span>
             </div>
             <strong className="order-delivery-banner__title">{copy}</strong>
             <p className="order-delivery-banner__desc">
@@ -1854,7 +1871,7 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
           </div>
           <div className="order-delivery-banner__content">
             <div className="order-delivery-banner__eyebrow">
-              <span>Curaleaf dispensing complete</span>
+              <span>Curaleaf Dispensing Complete</span>
             </div>
             <strong className="order-delivery-banner__title">
               Expected delivery {range} (1–2 working days)
@@ -1877,7 +1894,7 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
           </div>
           <div className="order-delivery-banner__content">
             <div className="order-delivery-banner__eyebrow">
-              <span>Curaleaf dispensing in progress</span>
+              <span>Curaleaf Dispensing in Progress</span>
             </div>
             <strong className="order-delivery-banner__title">
               Expected delivery {range} · {totalAllocated} of {totalOrdered} packs dispensed
@@ -1900,7 +1917,7 @@ function FulfilmentDeliveryStatus({ order, now }: { order: PatientOrder; now: Da
         </div>
         <div className="order-delivery-banner__content">
           <div className="order-delivery-banner__eyebrow">
-            <span>Estimated delivery · Subject to change</span>
+            <span>Estimated Delivery · Subject to Change</span>
           </div>
           <strong className="order-delivery-banner__title">
             Expected delivery {range} (1–2 working days)
@@ -1977,7 +1994,7 @@ function QuoteReviewPanel({ order, busy, onResolve, onCancel }: {
       <header className="quote-review-panel__header">
         <AlertTriangle size={18} aria-hidden="true" />
         <span>
-          <small>Quote review required</small>
+          <small>Quote Review Required</small>
           <strong id="quote-review-title">{title}</strong>
           <em>{detail}</em>
         </span>
@@ -2143,22 +2160,22 @@ function JourneyRail({ stage, paymentPaid, order }: { stage: OrderStage; payment
   const partialCollection = orderHasPartialCollection(order);
   const hasUncollected = orderHasUncollectedReceivedPacks(order);
   const deliveryDetail = deliveryFullyComplete
-    ? 'Received'
+    ? 'Checked In'
     : deliveryPartial
-      ? 'Part delivered'
+      ? 'Part Checked In'
       : stage === 'dispatched'
-        ? 'In transit'
+        ? 'In Transit'
         : 'Pending';
   const collectionDetail = collectionFullyComplete
-    ? 'Handed out'
+    ? 'Collected'
     : partialCollection
-      ? 'Partial handout'
+      ? 'Part Collected'
       : hasUncollected || stage === 'ready'
         ? 'Ready'
         : 'Pending';
   const phases = [
     { label: 'Payment', detail: paymentPaid ? 'Cleared' : 'Awaiting', complete: paymentPaid, partial: false, active: stage === 'awaiting-payment' },
-    { label: 'Curaleaf', detail: curaleafComplete ? 'Approved' : stage === 'curaleaf-pending' ? 'In review' : 'Pending', complete: curaleafComplete, partial: false, active: stage === 'paid' || stage === 'curaleaf-pending' },
+    { label: 'Curaleaf', detail: curaleafComplete ? 'Approved' : stage === 'curaleaf-pending' ? 'In Review' : 'Pending', complete: curaleafComplete, partial: false, active: stage === 'paid' || stage === 'curaleaf-pending' },
     {
       label: 'Delivery',
       detail: deliveryDetail,
@@ -2167,7 +2184,7 @@ function JourneyRail({ stage, paymentPaid, order }: { stage: OrderStage; payment
       active: !deliveryFullyComplete && !deliveryPartial && (stage === 'curaleaf-approved' || stage === 'dispatched'),
     },
     {
-      label: 'Ready to collect',
+      label: 'Ready to Collect',
       detail: collectionDetail,
       complete: collectionFullyComplete,
       partial: partialCollection,
@@ -2198,49 +2215,6 @@ function pipelineStepClass(base: string, state: { complete: boolean; partial: bo
   else if (state.partial) classes.push('pipeline-step--partial');
   else if (state.active) classes.push('pipeline-step--active');
   return classes.join(' ');
-}
-
-function fulfilmentPipelineSteps(line: {
-  orderedPacks: number;
-  allocatedPacks: number;
-  dispatchedPacks: number;
-  inTransitPacks: number;
-  receivedPacks: number;
-  awaitingDispatchPacks: number;
-  isSplit: boolean;
-}) {
-  const ordered = line.orderedPacks;
-  const allocated = line.allocatedPacks;
-  const dispatched = line.dispatchedPacks;
-  const inTransit = line.inTransitPacks;
-  const received = line.receivedPacks;
-  const consignmentDelivered = dispatched > 0 && inTransit === 0 && received >= dispatched;
-  const splitAwaitingNextShipment = line.isSplit && line.awaitingDispatchPacks > 0;
-
-  return {
-    ordered: {
-      complete: ordered > 0,
-      partial: false,
-      active: false,
-    },
-    dispensed: {
-      complete: allocated >= ordered && ordered > 0,
-      partial: allocated > 0 && allocated < ordered,
-      active: allocated === 0 && ordered > 0,
-    },
-    inTransit: {
-      complete: consignmentDelivered && !splitAwaitingNextShipment,
-      partial: inTransit > 0
-        || (consignmentDelivered && splitAwaitingNextShipment)
-        || (dispatched > 0 && inTransit === 0 && received > 0 && received < dispatched),
-      active: inTransit > 0,
-    },
-    checkedIn: {
-      complete: received >= ordered && ordered > 0,
-      partial: received > 0 && received < ordered,
-      active: false,
-    },
-  };
 }
 
 type FulfilmentDisplayLine = {
@@ -2629,7 +2603,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                   {shipmentIds.map((id, shipmentIndex) => {
                     const state = prescription.shipmentStates?.[id];
                     const isSelected = id === selectedShipmentId;
-                    const formattedState = state ? state.replaceAll('_', ' ') : 'In Transit';
+                    const formattedState = consignmentStatusLabel(state, true);
                     return (
                       <button
                         key={id}
@@ -2734,11 +2708,11 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
 
                 <div className="order-goods-in__consignment-summary">
                   <div className="order-goods-in__consignment-stats">
-                    <span className="pill pill-blue"><PackageCheck size={11} /> {arrivingPacks} pack{arrivingPacks === 1 ? '' : 's'} arriving</span>
+                    <span className="pill pill-blue"><PackageCheck size={11} /> {arrivingPacks} pack{arrivingPacks === 1 ? '' : 's'} Arriving</span>
                     {totalAwaitingDispatchPacks > 0 ? (
-                      <span className="pill pill-amber">{totalAwaitingDispatchPacks} pack{totalAwaitingDispatchPacks === 1 ? '' : 's'} awaiting dispatch</span>
+                      <span className="pill pill-amber">{totalAwaitingDispatchPacks} pack{totalAwaitingDispatchPacks === 1 ? '' : 's'} Awaiting Dispatch</span>
                     ) : (
-                      <span className="pill pill-green"><Check size={11} /> Full quantity in consignment</span>
+                      <span className="pill pill-green"><Check size={11} /> Full Quantity in Consignment</span>
                     )}
                   </div>
                   <small>Verify the physical delivery matches the line items above, then accept to record pharmacy check-in.</small>
@@ -2747,7 +2721,7 @@ function PrescriptionCard({ prescription, index, receiptDraft, busy, onReceiptDr
                 <div className="order-goods-in__footer">
                   <div className="order-goods-in__summary-pill">
                     <span className="order-goods-in__status-badge order-goods-in__status-badge--ready">
-                      <CheckCircle2 size={14} /> Manifest verified ({arrivingPacks} pk)
+                      <CheckCircle2 size={14} /> Manifest Verified ({arrivingPacks} pk)
                     </span>
                   </div>
                   <div className="order-goods-in__actions">

@@ -458,6 +458,8 @@ describe('SQL pharmacy compatibility contracts', () => {
     });
     assert.equal(mapped.paymentStatus, 'paid');
     assert.equal(mapped.refund, undefined);
+    assert.equal(mapped.status, 'processing');
+    assert.equal(mapped.cancellation, undefined);
     assert.equal(mapped.curaleaf?.purchaseOrderState, 'CREATED');
     assert.equal(mapped.curaleaf?.purchaseOrderId, '2bf991a2-3bbf-43ea-ae5b-45654ae5bc4b');
     assert.equal(mapped.curaleaf?.status, 'purchase_order_submitted');
@@ -1043,5 +1045,37 @@ describe('SQL pharmacy compatibility contracts', () => {
     assert.equal(mapped.lineItems[0].packId, 'sql-pack');
     assert.equal(mapped.lineItems[0].quantity, 2);
     assert.equal(mapped.lineItems[0].unitPricePence, 8500);
+  });
+
+  it('does not shrink submitted pack quantity when SQL lines are 1 but Curaleaf ordered 10', () => {
+    const mapped = toPortalOrder({
+      ...order,
+      paymentStatus: 'PAID',
+      paidAt: '2026-08-13T09:24:00.000Z',
+      medicineTotalPence: 85000,
+      totalPence: 85000,
+      sqlLines: [{
+        packId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+        productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+        formulaId: 'f74f63de-dc89-4074-9d8c-be35f5398963',
+        name: '4C Labs BWD T30 Beach Wedding, 30% THC <1% CBD',
+        quantity: 1,
+        unitPricePence: 8500,
+      }],
+      curaleaf: {
+        id: '65ba3fdd-4507-4e39-a8ed-2d383b04e1d8',
+        state: 'PROCESSING',
+        items: [{
+          productId: '9f2d6958-2d76-4338-9e5f-6fd383dfff36',
+          packsOrderedCount: 10,
+          packsAllocatedCount: 1,
+          packsReturnedCount: 0,
+        }],
+      },
+    } as OrderRecord & { curaleaf: unknown });
+    assert.equal(mapped.lineItems[0]?.quantity, 10);
+    const flow = Object.values(mapped.prescriptionFlow ?? {})[0] as { lines?: Array<{ ordered?: number; allocated?: number }> } | undefined;
+    assert.equal(flow?.lines?.[0]?.ordered, 10);
+    assert.equal(flow?.lines?.[0]?.allocated, 1);
   });
 });

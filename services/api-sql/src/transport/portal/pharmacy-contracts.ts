@@ -258,11 +258,11 @@ export function toPortalOrder(order: PortalOrderSource) {
     || po?.purchaseOrderState === 'CANCELLED' || po?.purchaseOrderState === 'REJECTED'
     || po?.prescriptionState === 'CANCELLED' || po?.prescriptionState === 'REJECTED'
     || snapshot?.curaleafCancellation?.status === 'confirmed';
-  const isCancelledOrder = isHhhCancelled || isSupplierCancelled;
-  const moneyTaken = orderMoneyWasTaken(order);
   const supplierStillLive = !isSupplierCancelled
     && !supplierCancellationAlreadyConfirmed(snapshot)
     && curaleafRequiresSupplierCancel({ ...snapshot, curaleaf: po || persistedCuraleaf });
+  const isCancelledOrder = isSupplierCancelled || (!supplierStillLive && isHhhCancelled);
+  const moneyTaken = orderMoneyWasTaken(order);
   const existingRefund = supplierStillLive
     ? null
     : (order.sqlRefund && typeof order.sqlRefund === 'object' ? order.sqlRefund : null)
@@ -307,7 +307,9 @@ export function toPortalOrder(order: PortalOrderSource) {
     const packId = String(item.packId || item.productId || item.id || '');
     const quote = quoteByPackId.get(packId);
     const poItem = poItemMap.get(packId);
-    const itemQty = Number(item.quantity ?? item.qty ?? item.count ?? (poItem?.packsOrderedCount ? Number(poItem.packsOrderedCount) : 1));
+    const sqlQty = Number(item.quantity ?? item.qty ?? item.count ?? 0);
+    const rockyQty = Number(poItem?.packsOrderedCount || 0);
+    const itemQty = Math.max(sqlQty, rockyQty) || 1;
     const rawTotal = order.totalPence ? Math.max(0, order.totalPence - (order.dispensingFeePence || 0)) : 0;
     const unitPricePence = Number(
       item.unitPricePence ||
@@ -517,7 +519,7 @@ export function toPortalOrder(order: PortalOrderSource) {
             ? 'cancelled'
             : lower(order.paymentStatus),
     fulfilmentStatus: portalFulfilment,
-    status: isCancelledOrder ? 'cancelled' : isPaid && order.status === 'SUBMITTED' ? 'processing' : lower(order.status),
+    status: isCancelledOrder ? 'cancelled' : supplierStillLive || (isPaid && order.status === 'SUBMITTED') ? 'processing' : lower(order.status),
     paymentTransactionReference: order.orderNumber,
     paidAt: order.paidAt,
     curaleafApprovedAt: po?.createdAt || po?.issuedDate || undefined,
@@ -525,8 +527,8 @@ export function toPortalOrder(order: PortalOrderSource) {
     curaleaf,
     quoteReview,
     pharmacyContributionPence: Number(snapshot?.pharmacyContributionPence || quoteReview?.pharmacyContributionPence || 0) || undefined,
-    cancellation: snapshot?.cancellation ?? undefined,
-    curaleafCancellation: snapshot?.curaleafCancellation ?? undefined,
+    cancellation: supplierStillLive ? undefined : snapshot?.cancellation ?? undefined,
+    curaleafCancellation: supplierStillLive ? undefined : snapshot?.curaleafCancellation ?? undefined,
     refund,
     unresolvedReason: isSupplierCancelled ? 'cancelled' : undefined,
     createdAt: order.createdAt,

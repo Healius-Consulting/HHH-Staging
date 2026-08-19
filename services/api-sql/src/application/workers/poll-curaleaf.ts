@@ -1,3 +1,4 @@
+import { orderMoneyWasTaken } from '../orders/paid-refund.js';
 import {
   applyShipmentSnapshot,
   curaleafEntityRecord,
@@ -101,6 +102,13 @@ async function persistSupplierCancellation(
     organisationId: order.organisationId,
     quoteSnapshot: nextSnapshot,
     fulfilmentStatus: 'EXCEPTION',
+  });
+  await deps.orderRepo.updateOrderStatus({
+    id: order.id,
+    organisationId: order.organisationId,
+    status: 'CANCELLED',
+    paymentStatus: orderMoneyWasTaken(order) ? 'REFUND_REQUIRED' : 'CANCELLED',
+    cancelledAt: new Date().toISOString(),
   });
   const recipients = await listPharmacyRecipients(order.organisationId, deps);
   await queueEmailToRecipients(

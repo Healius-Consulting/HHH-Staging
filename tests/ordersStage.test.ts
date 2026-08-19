@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderAwaitingCuraleafCancel, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderRequiresCuraleafCancel, orderStage, prescriptionStatusChipTone, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
+import { fulfilmentPipelineSteps, hasDispatchedRemainder, orderAwaitingSupplierShipmentProductNames, orderAwaitingCuraleafCancel, orderCancellationResolution, orderHasInTransitPacks, orderHasPartialCollection, orderHasPartialCuraleafDispense, orderHasPartialPharmacyReceipt, orderHasUncollectedReceivedPacks, orderIsSplitFulfilment, orderRequiresCuraleafCancel, orderSplitPackSnapshot, orderStage, prescriptionStatusChipTone, prescriptionStatusLabel, stageMatchesFilter, type OrderStage, type StageFilter } from '../src/utils/orderStage.ts';
 import type { PatientOrder } from '../src/context/AppContext.tsx';
 
 const taxonomy: Array<[OrderStage, StageFilter]> = [
@@ -46,7 +46,7 @@ test('cancelled orders distinguish outstanding work from closed outcomes', () =>
   assert.equal(orderCancellationResolution({ ...base, payment: { status: 'paid' }, cancellation: { status: 'refund_required' }, refund: { status: 'completed' } } as PatientOrder), 'refunded');
 });
 
-test('pharmacy cancel is local until Curaleaf accepts the prescription or creates a purchase order', () => {
+test('pharmacy cancel is local only before Curaleaf prescriber, prescription, or purchase-order work starts', () => {
   const pending = {
     payment: { status: 'paid' },
     prescriptions: [{ curaleafPrescriptionId: 'rx-1', curaleafPrescriptionState: 'PENDING', placed: false, poRef: 'ORD-1', purchaseOrderState: null }],
@@ -59,7 +59,7 @@ test('pharmacy cancel is local until Curaleaf accepts the prescription or create
     payment: { status: 'paid' },
     prescriptions: [{ curaleafPrescriptionId: 'rx-1', curaleafPrescriptionState: 'ACTIVE', placed: true, poRef: 'ORD-1', purchaseOrderState: 'CREATED' }],
   } as PatientOrder;
-  assert.equal(orderRequiresCuraleafCancel(pending), false);
+  assert.equal(orderRequiresCuraleafCancel(pending), true);
   assert.equal(orderRequiresCuraleafCancel(accepted), true);
   assert.equal(orderRequiresCuraleafCancel(withPo), true);
   const refundedWithLivePo = {
@@ -264,7 +264,99 @@ test('partial collection with supplier remainder does not keep an in-transit del
   assert.equal(orderHasPartialCollection(order), true);
   assert.equal(orderHasUncollectedReceivedPacks(order), false);
   assert.equal(orderAwaitingSupplierShipmentProductNames(order).length, 1);
-  assert.equal(prescriptionStatusLabel(order.prescriptions[0]!), 'Part collected');
+  assert.equal(prescriptionStatusLabel(order.prescriptions[0]!), 'Part Collected');
+});
+
+test('partial Curaleaf allocation before courier is split dispensed', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{
+      status: 'processing',
+      purchaseOrderState: 'PROCESSING',
+      items: [{ productId: 'p1', name: 'Beach Wedding', qty: 4 }],
+      fulfilmentLines: [{
+        productId: 'p1',
+        ordered: 4,
+        shipped: 0,
+        received: 0,
+        remaining: 4,
+        collected: 0,
+        requested: 4,
+        sent: null,
+        supplierReportedOrdered: 4,
+        allocated: 2,
+        returned: 0,
+        backordered: false,
+        quantityMismatch: false,
+      }],
+    }],
+  } as PatientOrder;
+  assert.equal(orderHasPartialCuraleafDispense(order), true);
+  assert.equal(orderIsSplitFulfilment(order), true);
+  assert.equal(orderHasInTransitPacks(order), false);
+  const snapshot = orderSplitPackSnapshot(order);
+  assert.equal(snapshot.dispensedAtCuraleaf, 2);
+  assert.equal(snapshot.awaitingDispense, 2);
+});
+
+test('full Curaleaf allocation without a shipment is not split dispensed', () => {
+  const order = {
+    date: new Date(),
+    payment: { status: 'paid' },
+    prescriptions: [{
+      status: 'processing',
+      purchaseOrderState: 'FULLY_ALLOCATED',
+      fulfilmentLines: [{
+        productId: 'p1',
+        ordered: 4,
+        shipped: 0,
+        received: 0,
+        remaining: 4,
+        collected: 0,
+        requested: 4,
+        sent: null,
+        supplierReportedOrdered: 4,
+        allocated: 4,
+        returned: 0,
+        backordered: false,
+        quantityMismatch: false,
+      }],
+    }],
+  } as PatientOrder;
+  assert.equal(orderHasPartialCuraleafDispense(order), false);
+  assert.equal(orderIsSplitFulfilment(order), false);
+});
+
+test('a fully allocated consignment in transit is the active purple step, not a partial yellow step', () => {
+  const steps = fulfilmentPipelineSteps({
+    orderedPacks: 2,
+    allocatedPacks: 2,
+    dispatchedPacks: 2,
+    inTransitPacks: 2,
+    receivedPacks: 0,
+    awaitingDispatchPacks: 0,
+    isSplit: false,
+  });
+  assert.equal(steps.dispensed.complete, true);
+  assert.equal(steps.inTransit.active, true);
+  assert.equal(steps.inTransit.partial, false);
+  assert.equal(steps.inTransit.complete, false);
+  assert.equal(steps.checkedIn.complete, false);
+});
+
+test('split remainder keeps in-transit as a partial step', () => {
+  const steps = fulfilmentPipelineSteps({
+    orderedPacks: 4,
+    allocatedPacks: 2,
+    dispatchedPacks: 2,
+    inTransitPacks: 2,
+    receivedPacks: 0,
+    awaitingDispatchPacks: 2,
+    isSplit: true,
+  });
+  assert.equal(steps.inTransit.partial, true);
+  assert.equal(steps.inTransit.active, false);
 });
 
 test('quote review required stays paid and is not treated as a Curaleaf rejection', () => {
@@ -344,7 +436,30 @@ test('Curaleaf cancel wins over an expired or archived flag on the same paid ord
 
 test('a CANCELLED purchase order is labelled cancelled even if rx status lagged', () => {
   const prescription = { status: 'processing', purchaseOrderState: 'CANCELLED', items: [], fulfilmentLines: [] } as PatientOrder['prescriptions'][number];
-  assert.equal(prescriptionStatusLabel(prescription), 'Cancelled purchase order');
+  assert.equal(prescriptionStatusLabel(prescription), 'Cancelled Purchase Order');
   assert.equal(prescriptionStatusChipTone(prescription), 'cancelled');
+});
+
+test('prescription chips use the same In Transit and Checked In language as the order pills', () => {
+  const inTransit = {
+    status: 'dispatched',
+    dispatchStatus: 'complete',
+    items: [],
+    fulfilmentLines: [],
+  } as PatientOrder['prescriptions'][number];
+  const partInTransit = {
+    status: 'dispatched',
+    dispatchStatus: 'partial',
+    items: [],
+    fulfilmentLines: [],
+  } as PatientOrder['prescriptions'][number];
+  const checkedIn = {
+    status: 'received',
+    items: [],
+    fulfilmentLines: [],
+  } as PatientOrder['prescriptions'][number];
+  assert.equal(prescriptionStatusLabel(inTransit), 'In Transit');
+  assert.equal(prescriptionStatusLabel(partInTransit), 'Part In Transit');
+  assert.equal(prescriptionStatusLabel(checkedIn), 'Checked In');
 });
 

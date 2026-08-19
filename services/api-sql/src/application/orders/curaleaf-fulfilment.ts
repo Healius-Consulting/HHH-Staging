@@ -380,7 +380,7 @@ export function normalisedFulfilmentLines(input: {
     if (!productId) return [];
     const supplierReportedOrdered = count(raw.packsOrderedCount ?? raw.count);
     const requested = count(requestedByProduct.get(productId));
-    const ordered = requested || supplierReportedOrdered;
+    const ordered = Math.max(requested, supplierReportedOrdered);
     const allocated = count(raw.packsAllocatedCount);
     const returnedByPo = count(raw.packsReturnedCount);
     const shipped = shipments.reduce((total, shipment) => total + (shipment.items ?? [])

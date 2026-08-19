@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   applyCancelledPurchaseOrderSnapshot,
+  curaleafOwnsCancellation,
   curaleafRequiresSupplierCancel,
   isCuraleafRejectedRequest,
   orderMatchesCancelledPrescription,
@@ -226,12 +227,17 @@ describe('Curaleaf cancelled purchase orders', () => {
     assert.equal(curaleafCancellationBlocksPlacement({ quote: baseline }), false);
   });
 
-  it('requires Curaleaf to cancel only after an accepted prescription or purchase order', () => {
-    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriptionId: 'rx-1', prescriptionState: 'PENDING' } }), false);
-    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriberId: 'pr-1' } }), false);
+  it('requires Curaleaf to cancel once the 3-phase placement rail has started', () => {
+    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriptionId: 'rx-1', prescriptionState: 'PENDING' } }), true);
+    assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriberId: 'pr-1' } }), true);
     assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriptionId: 'rx-1', prescriptionState: 'ACTIVE' } }), true);
     assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { purchaseOrderId: 'po-1', purchaseOrderState: 'CREATED' } }), true);
     assert.equal(curaleafRequiresSupplierCancel({ curaleaf: { prescriptionState: 'CANCELLED', prescriptionId: 'rx-1' } }), false);
+    assert.equal(curaleafOwnsCancellation({ curaleaf: { purchaseOrderId: 'po-1', purchaseOrderState: 'CREATED' } }), true);
+    assert.equal(curaleafOwnsCancellation({
+      quoteReview: { status: 'required' },
+      curaleaf: { purchaseOrderId: 'po-1', purchaseOrderState: 'CREATED' },
+    }), false);
   });
 
   it('auto-closes the HHH order when Curaleaf rejects the prescriber, prescription, or purchase order', () => {
