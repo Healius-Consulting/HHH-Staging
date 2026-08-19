@@ -299,13 +299,9 @@ function PageShell({ children }: { children: ReactNode }) {
     window.scrollTo(0, 0);
 
     const blocks = document.querySelectorAll('.hhh-reveal-block');
-    const unlock = () => {
-      document.documentElement.classList.remove('hhh-public-active');
-      document.body.classList.remove('hhh-public-active');
-    };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       blocks.forEach(block => block.classList.add('is-visible'));
-      return unlock;
+      return;
     }
 
     const observer = new IntersectionObserver(
@@ -317,13 +313,12 @@ function PageShell({ children }: { children: ReactNode }) {
           }
         });
       },
-      { threshold: 0.12, rootMargin: '0px 0px -40px 0px' }
+      { threshold: 0.05, rootMargin: '0px 0px 80px 0px' }
     );
 
     blocks.forEach(block => observer.observe(block));
     return () => {
       observer.disconnect();
-      unlock();
     };
   }, []);
 
@@ -359,7 +354,7 @@ function StickyStepNarrative() {
           }
         });
       },
-      { rootMargin: '-25% 0px -45% 0px', threshold: 0.2 }
+      { rootMargin: '-15% 0px -25% 0px', threshold: [0.15, 0.5] }
     );
 
     stepRefs.current.forEach(ref => {

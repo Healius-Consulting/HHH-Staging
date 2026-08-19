@@ -40,23 +40,25 @@
   box-sizing: border-box;
 }
 
-/* The public bundle also loads src/index.css, which locks the pharmacy shell to
-   100vh + overflow:hidden. Unlock document scroll for marketing pages. */
-html:has(body.hhh-public-active),
-html.hhh-public-active {
-  height: auto;
-  min-height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
+/* ==========================================================================
+   Document Scroll Unlock (Overrides portal 100vh lock)
+   ========================================================================== */
+
+html {
+  height: auto !important;
+  min-height: 100% !important;
+  overflow-x: clip !important;
+  overflow-y: auto !important;
+  scroll-behavior: smooth;
 }
 
-body.hhh-public-active {
+body {
   margin: 0;
   padding: 0;
-  height: auto;
-  min-height: 100%;
-  width: auto;
-  max-width: 100%;
+  height: auto !important;
+  min-height: 100vh !important;
+  width: 100% !important;
+  max-width: 100% !important;
   color: var(--text-body);
   background-color: var(--cream);
   font-family: var(--sans);
@@ -64,20 +66,22 @@ body.hhh-public-active {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow-x: clip !important;
+  overflow-y: visible !important;
+  position: relative !important;
 }
 
-body.hhh-public-active #root {
-  height: auto;
-  min-height: 100%;
-  width: auto;
-  max-width: 100%;
-  overflow: visible;
+#root {
+  height: auto !important;
+  min-height: 100% !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  position: relative !important;
 }
 
 /* Subtle organic film grain texture */
-body.hhh-public-active::before {
+body::before {
   content: '';
   position: fixed;
   inset: 0;
@@ -93,7 +97,9 @@ body.hhh-public-active::before {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  width: 100%;
   position: relative;
+  overflow: visible;
 }
 
 .hhh-skip {
@@ -131,7 +137,7 @@ body.hhh-public-active::before {
 }
 
 /* ==========================================================================
-   Typography & Kickers
+   Typography & Headings
    ========================================================================== */
 
 h1, h2, h3, h4 {
@@ -288,11 +294,10 @@ p {
   position: sticky;
   top: 0;
   z-index: 1000;
-  background: rgba(247, 245, 240, 0.88);
+  background: rgba(247, 245, 240, 0.9);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(219, 229, 224, 0.6);
-  transition: background 0.3s ease;
+  border-bottom: 1px solid rgba(219, 229, 224, 0.65);
 }
 
 .hhh-header__inner {
@@ -566,11 +571,12 @@ p {
 }
 
 /* ==========================================================================
-   Sticky Chapter Scroller (/how-it-works & HomePage)
+   Sticky Chapter Scroller (/how-it-works)
    ========================================================================== */
 
 .hhh-sticky-chapter {
   position: relative;
+  overflow: visible;
   padding: 80px 0 100px;
 }
 
@@ -584,7 +590,8 @@ p {
 .hhh-sticky-chapter__pinned {
   position: sticky;
   top: 120px;
-  height: auto;
+  z-index: 10;
+  height: fit-content;
 }
 
 .hhh-sticky-chapter__frame {
@@ -605,8 +612,8 @@ p {
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transform: scale(1.05);
-  transition: opacity 0.7s var(--ease-out-expo), transform 0.8s var(--ease-out-expo);
+  transform: scale(1.04);
+  transition: opacity 0.6s var(--ease-out-expo), transform 0.7s var(--ease-out-expo);
 }
 
 .hhh-sticky-chapter__image.is-active {
@@ -681,13 +688,14 @@ p {
   width: 100%;
   background: var(--rust);
   border-radius: var(--radius-pill);
-  transition: height 0.4s var(--ease-out-expo);
+  transition: height 0.35s var(--ease-out-expo);
 }
 
 .hhh-sticky-chapter__steps {
   display: flex;
   flex-direction: column;
   gap: 70px;
+  width: 100%;
 }
 
 .hhh-sticky-chapter__step {
@@ -1752,6 +1760,7 @@ p {
 .hhh-faq__intro {
   position: sticky;
   top: 110px;
+  z-index: 10;
   padding: 36px 30px;
   background: var(--white);
   border: 1px solid var(--border-card);
@@ -2714,11 +2723,28 @@ p {
    Animations & Responsive Breakpoints
    ========================================================================== */
 
+/* Hero Entrance */
+.hhh-reveal {
+  animation: hhhHeroFade 0.65s var(--ease-out-expo) forwards;
+}
+
+@keyframes hhhHeroFade {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Below-the-fold Reveal Blocks */
 .hhh-reveal-block {
   opacity: 0;
-  transform: translateY(24px);
-  transition: opacity 0.7s var(--ease-out-expo), transform 0.7s var(--ease-out-expo);
-  transition-delay: calc(var(--stagger-index, 0) * 80ms);
+  transform: translateY(20px);
+  transition: opacity 0.65s var(--ease-out-expo), transform 0.65s var(--ease-out-expo);
+  transition-delay: calc(var(--stagger-index, 0) * 70ms);
 }
 
 .hhh-reveal-block.is-visible {
@@ -2889,6 +2915,7 @@ p {
     scroll-behavior: auto !important;
   }
 
+  .hhh-reveal,
   .hhh-reveal-block {
     opacity: 1 !important;
     transform: none !important;
