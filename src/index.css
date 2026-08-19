@@ -386,22 +386,22 @@ body{
   width: 100vw;
 }
 
+html{
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*,
+*::before,
+*::after{
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
 ::-webkit-scrollbar{
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track{
-  background: rgba(0, 0, 0, 0.15);
-}
-
-::-webkit-scrollbar-thumb{
-  background: var(--border);
-  border-radius: var(--radius-sm);
-}
-
-::-webkit-scrollbar-thumb:hover{
-  background: var(--text-tertiary);
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .app-shell{
@@ -3675,7 +3675,7 @@ html[data-theme='dark'] .accessibility-panel{
 
 .rx-draft-bar__title strong{ color: var(--text-primary); font-size: 12px; font-weight: 650; }
 
-.rx-draft-tabs{ display: flex; min-width: 0; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.rx-draft-tabs{ display: flex; min-width: 0; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 
 .rx-draft-tab{
   display: inline-grid;
@@ -6578,7 +6578,7 @@ html.modal-open .page-container{ overflow: hidden; }
 
 .page-body{ margin-inline: auto; }
 
-.table-wrap{ position: relative; scrollbar-color: var(--border-strong) transparent; }
+.table-wrap{ position: relative; }
 
 .table-wrap table :is(th, td):first-child{ background: var(--bg-surface); }
 
