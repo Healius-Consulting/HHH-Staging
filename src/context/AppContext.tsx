@@ -477,6 +477,59 @@ export const ORGANISATIONS: PharmacyTenant[] = [
   },
 ];
 
+const PREVIEW_CRM_PATIENTS: CRMPatient[] = [
+  {
+    id: 'local-preview-patient-hale',
+    organisationId: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126',
+    name: 'Jordan Hale',
+    email: 'jordan.hale@example.test',
+    mobile: '07700 900 001',
+    dob: '1988-03-14',
+    postcode: 'LS1 1BA',
+    status: 'HHH approved',
+  },
+  {
+    id: 'local-preview-patient-munroe',
+    organisationId: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126',
+    name: 'Ororo Munroe',
+    email: 'ororo.munroe@example.test',
+    mobile: '07700 900 002',
+    dob: '1992-11-02',
+    postcode: 'LS6 2AA',
+    status: 'Referred',
+  },
+  {
+    id: 'local-preview-patient-reid',
+    organisationId: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126',
+    name: 'Sam Reid',
+    email: 'sam.reid@example.test',
+    mobile: '07700 900 003',
+    dob: '1979-07-26',
+    postcode: 'LS2 8HD',
+    status: 'HHH approved',
+  },
+];
+
+function previewPatientsForOrganisation(organisationId: string): CRMPatient[] {
+  const tenantId = organisationId || PREVIEW_CRM_PATIENTS[0].organisationId;
+  return PREVIEW_CRM_PATIENTS.map(patient => ({ ...patient, organisationId: tenantId }));
+}
+
+function withLocalPreviewCrm(crm: CRMPatient[], organisationId: string): CRMPatient[] {
+  const seeded = previewPatientsForOrganisation(organisationId);
+  const seededIds = new Set(seeded.map(patient => patient.id));
+  const byId = new Map(
+    crm
+      .filter(patient => !patient.id.startsWith('local-preview-patient-') || seededIds.has(patient.id))
+      .map(patient => [patient.id, patient]),
+  );
+  seeded.forEach(patient => {
+    const existing = byId.get(patient.id);
+    byId.set(patient.id, existing ? { ...existing, ...patient } : patient);
+  });
+  return [...byId.values()];
+}
+
 
 
 
@@ -1111,6 +1164,11 @@ const initialPortalMode: PortalMode = localPortalPreview === 'admin' ? 'admin' :
 const initialToken = urlParams?.get('token');
 const initialCachedCatalogue = loadCachedCatalogue(storedStaffSession?.organisationId);
 
+const previewOrganisationId = previewStaffSession?.organisationId ?? (isLocalPortalPreview ? ORGANISATIONS[0]?.id ?? '' : '');
+const previewDraft = isLocalPortalPreview && previewOrganisationId
+  ? blankOrder(1, null, previewOrganisationId, 'worldpay')
+  : null;
+
 const initialState: AppState = {
   screen: urlParams?.has('patient') ? 'patients' : 'home',
   screenHistory: [],
@@ -1120,13 +1178,13 @@ const initialState: AppState = {
   catalogueLoading: initialCachedCatalogue.items.length ? false : isApiConfigured,
   catalogueError: null,
   catalogueUpdatedAt: initialCachedCatalogue.updatedAt,
-  crm: [],
+  crm: isLocalPortalPreview ? previewPatientsForOrganisation(previewOrganisationId) : [],
   submissions: [],
   enquiries: [],
-  orders: [],
-  activeOrderId: null,
+  orders: previewDraft ? [previewDraft] : [],
+  activeOrderId: previewDraft ? 1 : null,
   toasts: [],
-  nextIds: { patient: 2000, rx: 1, order: 7, submission: 5, invoice: 4072 },
+  nextIds: { patient: 2000, rx: previewDraft ? 2 : 1, order: previewDraft ? 2 : 7, submission: 5, invoice: 4072 },
   portalMode: initialPortalMode,
   workspaceMode: 'training',
   organisations: isLocalPortalPreview ? ORGANISATIONS : [],
@@ -1344,6 +1402,16 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_PORTAL_MODE':
       return { ...state, portalMode: action.mode, screenHistory: [], navigationTarget: null };
     case 'SET_WORKSPACE_MODE': {
+      if (isLocalPortalPreview) {
+        const organisationId = action.organisationId ?? state.currentOrganisationId;
+        return {
+          ...state,
+          workspaceMode: action.mode,
+          currentOrganisationId: organisationId || state.currentOrganisationId,
+          navigationTarget: null,
+          crm: withLocalPreviewCrm(state.crm, organisationId || state.currentOrganisationId),
+        };
+      }
       if (action.mode === 'training') {
         const organisationId = action.organisationId ?? state.currentOrganisationId;
         if (state.workspaceMode === 'training' && state.orders.length > 0 && state.orders.every(order => order.organisationId === organisationId)) return state;
@@ -1384,6 +1452,9 @@ function reducer(state: AppState, action: Action): AppState {
         staffSession: action.session,
         currentOrganisationId: action.session.organisationId ?? state.currentOrganisationId,
         portalMode: action.session.role === 'admin' ? 'admin' : 'clinician',
+        crm: isLocalPortalPreview
+          ? withLocalPreviewCrm(state.crm, action.session.organisationId ?? state.currentOrganisationId)
+          : state.crm,
       };
     case 'SIGN_OUT_STAFF': {
       return {
@@ -2103,6 +2174,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (state.staffSession) sessionStorage.setItem('hhh_staff_session', JSON.stringify(state.staffSession));
     else sessionStorage.removeItem('hhh_staff_session');
   }, [state.staffSession]);
+
+  useEffect(() => {
+    if (!isLocalPortalPreview || localPortalPreview !== 'pharmacy') return;
+    const organisationId = state.currentOrganisationId || PREVIEW_CRM_PATIENTS[0].organisationId;
+    const seeded = previewPatientsForOrganisation(organisationId);
+    const missing = seeded.some(patient => {
+      const existing = state.crm.find(candidate => candidate.id === patient.id);
+      return !existing || existing.organisationId !== patient.organisationId;
+    });
+    if (!missing) return;
+    dispatch({
+      type: 'SYNC_PATIENT_DIRECTORY',
+      organisationId,
+      patients: seeded,
+      enquiries: [],
+    });
+  }, [state.crm, state.currentOrganisationId]);
 
   useEffect(() => {
     const useLocalSandbox = isLocalPortalPreview && isApiConfigured;

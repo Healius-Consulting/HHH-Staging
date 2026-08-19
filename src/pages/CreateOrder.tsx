@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
-import { AlertTriangle, ArrowRight, Banknote, CheckCircle, CreditCard, ChevronRight, FileScan, FileText, LockKeyhole, Pencil, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Banknote, CheckCircle, ChevronDown, ChevronUp, CreditCard, FileScan, FileText, LockKeyhole, Pencil, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
 import {
@@ -24,6 +25,11 @@ import { formatPatientDob } from '../utils/patientDob';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 
+type GuidedRxPhase = 'route' | 'upload' | 'details';
+
+const rxPhaseRank = (phase: GuidedRxPhase) => (phase === 'route' ? 1 : phase === 'upload' ? 2 : 3);
+const maxRxPhase = (current: GuidedRxPhase, next: GuidedRxPhase) => (rxPhaseRank(next) > rxPhaseRank(current) ? next : current);
+
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
   const organisationPatients = state.crm.filter(candidate => candidate.organisationId === state.currentOrganisationId);
@@ -40,7 +46,7 @@ export default function CreateOrder() {
   const [selectedRxId, setSelectedRxId] = useState<number | null>(null);
   const [changingPatient, setChangingPatient] = useState(false);
   const [patientQuery, setPatientQuery] = useState('');
-  const [patientSearchOpen, setPatientSearchOpen] = useState(false);
+  const [patientSearchOpen, setPatientSearchOpen] = useState(true);
   const [patientActiveIndex, setPatientActiveIndex] = useState(0);
   const [confirmingDraftDeleteId, setConfirmingDraftDeleteId] = useState<number | null>(null);
   const [confirmingRxDeleteId, setConfirmingRxDeleteId] = useState<number | null>(null);
@@ -64,6 +70,11 @@ export default function CreateOrder() {
   const [guidedStep, setGuidedStep] = useState<1 | 2 | 3 | 4>(1);
   const [guidedReveal, setGuidedReveal] = useState<1 | 2 | 3 | 4>(1);
   const [guidedRouteChosen, setGuidedRouteChosen] = useState(false);
+  const [guidedRxPhase, setGuidedRxPhase] = useState<GuidedRxPhase>('route');
+  const [guidedRxReveal, setGuidedRxReveal] = useState<GuidedRxPhase>('route');
+  const [confirmingRouteSwitch, setConfirmingRouteSwitch] = useState<'clinic' | 'manual' | null>(null);
+  const [basketOpen, setBasketOpen] = useState(false);
+  const [basketHost, setBasketHost] = useState<HTMLElement | null>(null);
   const [guidedLockNotice, setGuidedLockNotice] = useState<string | null>(null);
   const guidedStageHeadingRef = useRef<HTMLHeadingElement>(null);
   const skipGuidedFocus = useRef(true);
@@ -96,6 +107,12 @@ export default function CreateOrder() {
     draftCreationInFlight.current.set(order.id, creation);
     return creation;
   }, [dispatch, state.currentOrganisationId]);
+
+  useEffect(() => {
+    if (!isLocalPortalPreview || !state.currentOrganisationId) return;
+    if (state.orders.some(order => order.organisationId === state.currentOrganisationId && order.payment.status === 'none')) return;
+    dispatch({ type: 'NEW_ORDER' });
+  }, [dispatch, state.currentOrganisationId, state.orders]);
 
   useEffect(() => {
     if (activeOrder?.payment.status === 'none' && activeOrder.paymentRoute === 'worldpay' && !canUseWorldpay) {
@@ -131,7 +148,7 @@ export default function CreateOrder() {
     quoteRequestVersion.current += 1;
     setChangingPatient(false);
     setPatientQuery('');
-    setPatientSearchOpen(false);
+    setPatientSearchOpen(!activeOrder?.patientId);
     setPatientActiveIndex(0);
     setConfirmingDraftDeleteId(null);
     setConfirmingRxDeleteId(null);
@@ -253,6 +270,17 @@ export default function CreateOrder() {
   const prescriptionEvidenceStarted = Boolean(activeOrder?.prescriptions.some(rx => (
     Boolean(rx.copyFileName || rx.clinicScanId || rx.serialNumber?.trim() || (rx.entryMode === 'manual' && rx.prescriber.trim()))
   )));
+  const prescriptionUploaded = Boolean(selectedRx && (selectedRx.copyFileName || selectedRx.clinicScanId));
+  const readyForProducts = selectedRx?.entryMode === 'clinic'
+    ? Boolean(selectedRx.clinicScanId)
+    : Boolean(selectedRx?.copyFileName && selectedRx.prescriber.trim() && selectedRx.serialNumber?.trim());
+  const draftBasketItems = activeOrder
+    ? activeOrder.prescriptions.flatMap(rx => rx.items.map(item => ({ ...item, rxId: rx.id })))
+    : [];
+  const draftBasketCount = draftBasketItems.length;
+  const draftBasketTotal = activeOrder ? orderRevenue(activeOrder) : 0;
+  const canEditBasketItems = Boolean(selectedRx && (selectedRx.entryMode === 'manual' || editingClinicFormularyRxId === selectedRx.id));
+  const guidedRxPhaseForProgress = !guidedRouteChosen ? 'route' as const : !prescriptionUploaded ? 'upload' as const : 'details' as const;
   const guidedSteps = workflowSteps.map((step, index) => {
     const id = (index + 1) as 1 | 2 | 3 | 4;
     const available = id === 1
@@ -276,15 +304,67 @@ export default function CreateOrder() {
     setGuidedLockNotice(null);
     setGuidedStep(id);
     setGuidedReveal(current => (id > current ? id : current));
+    if (id === 2) setGuidedRxPhase(guidedRxPhaseForProgress);
+    const cardId = id === 1
+      ? 'rx-guided-card-1'
+      : id === 2
+        ? rxPhaseRank(guidedRxReveal) >= 3
+          ? 'rx-guided-card-2-details'
+          : rxPhaseRank(guidedRxReveal) >= 2
+            ? 'rx-guided-card-2-upload'
+            : 'rx-guided-card-2-route'
+        : id === 3
+          ? 'rx-guided-card-3'
+          : 'rx-guided-card-4';
+    window.setTimeout(() => {
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      document.getElementById(cardId)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    }, 0);
+  };
+  const applyGuidedRoute = (mode: 'clinic' | 'manual') => {
+    if (!activeOrder || !selectedRx) return;
+    setEditingClinicFormularyRxId(null);
+    dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode });
+    setGuidedRouteChosen(true);
+    setGuidedRxPhase('upload');
+    setGuidedRxReveal('upload');
+    setConfirmingRouteSwitch(null);
+    setGuidedLockNotice(null);
+  };
+  const chooseGuidedRoute = (mode: 'clinic' | 'manual') => {
+    if (!activeOrder || !selectedRx) return;
+    setEditingClinicFormularyRxId(null);
+    if (selectedRx.entryMode === mode) {
+      setGuidedRouteChosen(true);
+      setGuidedRxPhase('upload');
+      setGuidedRxReveal(current => maxRxPhase(current, 'upload'));
+      setConfirmingRouteSwitch(null);
+      setGuidedLockNotice(null);
+      return;
+    }
+    const hasWork = Boolean(
+      selectedRx.clinicScanId
+      || selectedRx.copyFileName
+      || selectedRx.serialNumber?.trim()
+      || selectedRx.prescriber.trim()
+      || selectedRx.items.length,
+    );
+    if (hasWork) {
+      setConfirmingRouteSwitch(mode);
+      return;
+    }
+    applyGuidedRoute(mode);
   };
   const guidedStageTitle = guidedStep === 1
     ? 'Link an approved patient'
     : guidedStep === 2
-      ? !guidedRouteChosen
-        ? 'Choose the prescription route'
-        : selectedRx?.entryMode === 'manual'
-          ? 'Enter the signed prescription'
-          : 'Scan the Curaleaf QR'
+      ? guidedRxPhaseForProgress === 'route'
+        ? 'Scan the Curaleaf QR or enter it manually'
+        : guidedRxPhaseForProgress === 'upload'
+          ? 'Upload the prescription'
+          : selectedRx?.entryMode === 'manual'
+            ? 'Enter the signed prescription'
+            : 'Confirm the Curaleaf scan'
       : guidedStep === 3
         ? selectedRx?.entryMode === 'manual'
           ? 'Select the prescribed medicines'
@@ -292,32 +372,30 @@ export default function CreateOrder() {
         : paidRedo
           ? 'Review and carry over payment'
           : 'Review and request payment';
-  const guidedContinueLabel = guidedStep === 1
-    ? 'Continue to prescription'
-    : guidedStep === 2
-      ? 'Continue to products'
-      : 'Continue to payment';
-  const guidedContinueLocked = guidedStep === 1
-    ? !patientReady
-    : guidedStep === 2
-      ? !guidedRouteChosen || !prescriptionEvidenceStarted
-      : false;
-  const guidedContinueLockReason = guidedStep === 1
+  const guidedNextHint = !patientReady
     ? patientLinked && !patientReady
       ? 'This patient cannot start an order until they are approved.'
       : 'Link an approved patient to continue.'
-    : guidedStep === 2
-      ? !guidedRouteChosen
-        ? 'Choose Curaleaf QR or manual entry first. That choice opens the matching input.'
-        : selectedRx?.entryMode === 'manual'
-          ? 'Attach the signed copy and enter the prescription details before reviewing medicines.'
-          : 'Scan the Curaleaf QR / barcode before reviewing medicines.'
-      : '';
+    : !guidedRouteChosen
+      ? 'Choose Scan Curaleaf QR or Enter details manually.'
+      : !prescriptionUploaded
+        ? 'Upload the prescription copy to continue.'
+        : !readyForProducts
+          ? selectedRx?.entryMode === 'manual'
+            ? 'Enter the signed prescription details to review medicines.'
+            : 'Wait until Curaleaf verifies the barcode, or try the scan again.'
+          : draftBasketCount === 0
+            ? 'Add a prescribed medicine to review payment.'
+            : '';
 
   useEffect(() => {
     if (!guidedLayout) return;
     setGuidedStep(1);
     setGuidedReveal(1);
+    setGuidedRxPhase('route');
+    setGuidedRxReveal('route');
+    setConfirmingRouteSwitch(null);
+    setBasketOpen(false);
     setGuidedLockNotice(null);
     skipGuidedFocus.current = true;
     previousPatientReady.current = patientReady;
@@ -332,9 +410,22 @@ export default function CreateOrder() {
   }, [activeOrder?.id, guidedLayout, selectedRxId]);
 
   useEffect(() => {
+    if (!guidedLayout || !guidedRouteChosen) return;
+    setGuidedRxPhase(current => (current === 'route' ? 'upload' : current));
+    setGuidedRxReveal(current => maxRxPhase(current, 'upload'));
+  }, [guidedLayout, guidedRouteChosen]);
+
+  useEffect(() => {
+    if (!guidedLayout || !prescriptionUploaded) return;
+    setGuidedRxPhase(current => (current === 'upload' ? 'details' : current));
+    setGuidedRxReveal(current => maxRxPhase(current, 'details'));
+  }, [guidedLayout, prescriptionUploaded]);
+
+  useEffect(() => {
     if (!guidedLayout) return;
     if (patientReady && !previousPatientReady.current && !changingPatient) {
-      setGuidedStep(2);
+      skipGuidedFocus.current = true;
+      setGuidedStep(current => (current === 1 ? 2 : current));
       setGuidedReveal(current => (current < 2 ? 2 : current));
       setGuidedLockNotice(null);
     }
@@ -342,10 +433,31 @@ export default function CreateOrder() {
   }, [changingPatient, guidedLayout, patientReady]);
 
   useEffect(() => {
-    if (!guidedLayout || !prescriptionEvidenceStarted) return;
-    setGuidedStep(current => (current < 3 ? 3 : current));
+    if (!guidedLayout || !patientReady || !readyForProducts) return;
+    skipGuidedFocus.current = true;
     setGuidedReveal(current => (current < 3 ? 3 : current));
-  }, [guidedLayout, prescriptionEvidenceStarted]);
+    setGuidedStep(current => (current === 2 ? 3 : current));
+  }, [guidedLayout, patientReady, readyForProducts]);
+
+  useEffect(() => {
+    if (!guidedLayout || !patientReady || !readyForProducts || draftBasketCount < 1) return;
+    skipGuidedFocus.current = true;
+    setGuidedReveal(current => (current < 4 ? 4 : current));
+    setGuidedStep(current => (current === 3 ? 4 : current));
+  }, [draftBasketCount, guidedLayout, patientReady, readyForProducts]);
+
+  useEffect(() => {
+    if (!basketOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setBasketOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [basketOpen]);
+
+  useEffect(() => {
+    setBasketHost(document.querySelector('.app-main'));
+  }, []);
 
   useEffect(() => {
     if (!guidedLayout) return;
@@ -354,7 +466,7 @@ export default function CreateOrder() {
       return;
     }
     guidedStageHeadingRef.current?.focus();
-  }, [guidedLayout, guidedStep]);
+  }, [guidedLayout, guidedStep, guidedRxPhase]);
 
   const activeOrderRef = activeOrder ? orderReference(activeOrder) : '';
   const confirmingDraft = confirmingDraftDeleteId === null ? null : draftOrders.find(order => order.id === confirmingDraftDeleteId) ?? null;
@@ -785,7 +897,7 @@ export default function CreateOrder() {
     if (!linkedPatient) return;
     const replacingPatient = Boolean(activeOrder.patientId);
     dispatch({ type: 'SET_ORDER_PATIENT', orderId: activeOrder.id, patientId });
-    dispatch({ type: 'ADD_TOAST', message: replacingPatient ? 'Draft reassigned to the selected patient.' : 'Patient linked to this draft.', toastType: 'success' });
+    dispatch({ type: 'ADD_TOAST', message: replacingPatient ? 'Draft reassigned. The prescription already entered was kept.' : 'Patient linked to this draft.', toastType: 'success' });
     setChangingPatient(false);
     setPatientQuery('');
     setPatientSearchOpen(false);
@@ -844,14 +956,16 @@ export default function CreateOrder() {
         <label className="rx-patient-change__heading" htmlFor={`rx-patient-${activeOrder.id}`}>
           <small>{mode === 'change' ? 'Change linked patient' : 'Link patient'}</small>
           <strong>{mode === 'change' ? 'Search approved patients' : 'Find an approved patient'}</strong>
-          <span>Type a name, email address or mobile number.</span>
+          <span>{mode === 'change' ? 'The prescription already on this draft is kept. Payment stays locked if the new patient does not match it.' : 'Type a patient name or mobile number.'}</span>
         </label>
-        <div className="rx-patient-combobox" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPatientSearchOpen(false); }}>
+        <div className="rx-patient-combobox" onBlur={event => { if (guidedLayout && mode === 'link') return; if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPatientSearchOpen(false); }}>
           <div className="rx-patient-combobox__field">
             <Search size={15} aria-hidden="true" />
             <input
               id={`rx-patient-${activeOrder.id}`}
               className="input"
+              type="search"
+              name="approved-patient-directory"
               value={patientQuery}
               role="combobox"
               aria-autocomplete="list"
@@ -860,6 +974,12 @@ export default function CreateOrder() {
               aria-activedescendant={patientSearchOpen && matchingPatients[patientActiveIndex] ? `rx-patient-option-${matchingPatients[patientActiveIndex].id}` : undefined}
               placeholder="Search approved patients…"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               onFocus={() => setPatientSearchOpen(true)}
               onChange={event => { setPatientQuery(event.target.value); setPatientActiveIndex(0); setPatientSearchOpen(true); }}
               onKeyDown={event => {
@@ -870,8 +990,8 @@ export default function CreateOrder() {
               }}
             />
           </div>
-          {patientSearchOpen && (
-            <div id={`rx-patient-results-${activeOrder.id}`} className="rx-patient-results" role="listbox" aria-label="Matching approved patients">
+          {patientSearchOpen || (guidedLayout && mode === 'link') ? (
+            <div id={`rx-patient-results-${activeOrder.id}`} className={`rx-patient-results${guidedLayout && mode === 'link' ? ' rx-patient-results--inline' : ''}`} role="listbox" aria-label="Matching approved patients">
               {matchingPatients.length ? matchingPatients.map((candidate, index) => (
                 <button
                   id={`rx-patient-option-${candidate.id}`}
@@ -887,9 +1007,9 @@ export default function CreateOrder() {
                   <span><strong>{candidate.name}</strong><small className="rx-patient-result__dob">DOB {formatPatientDob(candidate.dob)}</small><small>{candidate.email} · {candidate.mobile}</small></span>
                   {candidate.id === patient?.id ? <em>Current</em> : null}
                 </button>
-              )) : <span className="rx-patient-results__empty">No approved patients match “{patientQuery.trim()}”.</span>}
+              )) : <span className="rx-patient-results__empty">{orderablePatients.length ? `No approved patients match “${patientQuery.trim()}”.` : isLocalPortalPreview ? 'Training patients did not load. Keep ?devPortal=pharmacy in the address bar and refresh.' : 'No approved patients are available to link in this pharmacy.'}</span>}
             </div>
-          )}
+          ) : null}
         </div>
         {mode === 'change' ? <button type="button" className="btn btn-sm rx-patient-change__cancel" onClick={cancelPatientChange}>Cancel</button> : null}
       </div>
@@ -919,6 +1039,7 @@ export default function CreateOrder() {
     return (
       <ManualPrescriptionEditor
         view="formulary"
+        hideSelectedList={guidedLayout}
         prescription={selectedRx}
         catalogue={state.catalogue}
         onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
@@ -932,6 +1053,7 @@ export default function CreateOrder() {
   };
 
   return (
+    <>
     <div className={`page-body rx-workbench${guidedLayout ? ' rx-workbench--guided' : ''}`}>
       {isLocalPortalPreview ? (
         <p className="rx-guided-preview-banner" role="status">
@@ -1022,7 +1144,7 @@ export default function CreateOrder() {
             ) : null}
             {guidedLockNotice ? <p className="rx-guided__lock-notice" role="status">{guidedLockNotice}</p> : null}
 
-          <section hidden={guidedLayout && guidedReveal < 1} className={`rx-patient-band rx-builder-context card${changingPatient || !patient ? ' is-changing-patient' : ''}${guidedLayout && guidedReveal >= 1 ? ' rx-guided-reveal is-in' : ''}`}>
+          <section id="rx-guided-card-1" className={`rx-patient-band rx-builder-context card${changingPatient || !patient ? ' is-changing-patient' : ''}${guidedLayout ? ` rx-guided-reveal is-in${guidedStep === 1 ? ' is-current' : ''}` : ''}`}>
             <div className="rx-patient-band__identity rx-builder-patient">
               {patient ? (
                 changingPatient ? (
@@ -1064,11 +1186,11 @@ export default function CreateOrder() {
             )}
           </section>
 
-          {patient && !canCreateOrderForPatient(patient) && (!guidedLayout || guidedReveal >= 1) ? (
+          {patient && !canCreateOrderForPatient(patient) ? (
             <ProviderStatusNotice title="This patient cannot start an order" detail="The linked patient is no longer approved or referred. Change the patient, or wait until their record is eligible again." />
           ) : null}
 
-          {(!guidedLayout || guidedReveal >= 1) && patient && activeOrder.redoContext ? (
+          {patient && activeOrder.redoContext ? (
             <section className="rx-replacement-context card" aria-label={`Replacement order ${activeOrderRef}`}>
               <span className="rx-replacement-context__mark">{activeOrderRef.replace(/^#\d+/, '')}</span>
               <span className="rx-replacement-context__identity">
@@ -1085,7 +1207,7 @@ export default function CreateOrder() {
               </span>
               <span className="rx-replacement-context__next"><ShieldCheck size={15} /><span><strong>New prescription required</strong><small>Authenticate the replacement below.</small></span></span>
             </section>
-          ) : (!guidedLayout || guidedReveal >= 1) && patient && unresolvedOrdersForPatient.length > 0 ? (
+          ) : patient && unresolvedOrdersForPatient.length > 0 ? (
             <details className="rx-unresolved-panel rx-unresolved-drawer card" aria-label="Unresolved archived and rejected orders">
               <summary className="rx-unresolved-panel__header">
                 <span>
@@ -1159,16 +1281,140 @@ export default function CreateOrder() {
 
           <div hidden={guidedLayout && guidedReveal < 2} className={guidedLayout ? 'rx-guided__work' : 'rx-workbench-layout'}>
             <main hidden={guidedLayout && guidedReveal < 2} className="rx-workbench-main">
-              <section hidden={guidedLayout && guidedReveal < 2} className={`rx-surface card rx-record-editor${guidedLayout && guidedReveal >= 2 ? ' rx-guided-reveal is-in' : ''}`}>
+              {guidedLayout && selectedRx ? (
+                <>
+                  <section id="rx-guided-card-2-route" className={`rx-surface card rx-guided-card rx-guided-reveal is-in${guidedStep === 2 && guidedRxPhaseForProgress === 'route' ? ' is-current' : ''}`}>
+                      <header className="rx-surface__header">
+                        <div className="section-heading" style={{ margin: 0 }}>
+                          <div>
+                            <p className="section-label">Step 2 · Choose a route</p>
+                            <h3><FileText size={17} /> Scan Curaleaf QR or enter details manually</h3>
+                          </div>
+                        </div>
+                      </header>
+                      <div className="rx-guided-card__body">
+                        <p className="rx-guided__route-lead">Choose one route for this draft. Next you will upload the prescription copy.</p>
+                        <div className="rx-entry-mode rx-entry-mode--choose" role="group" aria-label="Prescription entry route">
+                          <button type="button" aria-pressed={guidedRouteChosen && selectedRx.entryMode === 'clinic'} onClick={() => chooseGuidedRoute('clinic')}>
+                            <FileScan size={15} /><span><strong>Scan Curaleaf QR</strong><small>Then upload the prescription with a clear barcode</small></span>
+                          </button>
+                          <button type="button" aria-pressed={guidedRouteChosen && selectedRx.entryMode === 'manual'} onClick={() => chooseGuidedRoute('manual')}>
+                            <Pencil size={15} /><span><strong>Enter details manually</strong><small>Then upload the signed copy and type the fields</small></span>
+                          </button>
+                        </div>
+                        {confirmingRouteSwitch ? (
+                          <div className="rx-prescription-cancel-confirm" role="alertdialog" aria-modal="true" aria-label="Switch prescription entry route">
+                            <AlertTriangle size={16} />
+                            <span>
+                              <strong>Switch to {confirmingRouteSwitch === 'clinic' ? 'Curaleaf QR' : 'manual entry'}?</strong>
+                              <small>This clears the current upload and prescription details. Medicines already chosen will also be removed.</small>
+                            </span>
+                            <div>
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingRouteSwitch(null)}>Keep current route</button>
+                              <button type="button" className="btn btn-danger btn-sm" onClick={() => applyGuidedRoute(confirmingRouteSwitch)}>Switch route</button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </section>
+
+                  {rxPhaseRank(guidedRxReveal) >= 2 ? (
+                    <section id="rx-guided-card-2-upload" className={`rx-surface card rx-guided-card rx-guided-reveal is-in${guidedStep === 2 && guidedRxPhaseForProgress === 'upload' ? ' is-current' : ''}`}>
+                      <header className="rx-surface__header">
+                        <div className="section-heading" style={{ margin: 0 }}>
+                          <div>
+                            <p className="section-label">Step 2 · Upload</p>
+                            <h3><Upload size={17} /> {selectedRx.entryMode === 'clinic' ? 'Upload the prescription and scan the QR' : 'Upload the signed prescription copy'}</h3>
+                          </div>
+                        </div>
+                      </header>
+                      <div className="rx-guided-card__body">
+                        <div className="rx-clinic-note">
+                          <Upload size={18} aria-hidden="true" />
+                          <span>
+                            <strong>{selectedRx.entryMode === 'clinic' ? 'Clear barcode required' : 'All other details must stay visible'}</strong>
+                            <span>{selectedRx.entryMode === 'clinic' ? 'Attach a redacted copy (redact patient details) of the prescription with a clear barcode. (TIP: Apply a blank dispensing label to cover confidential patient details).' : 'Attach a redacted copy (redact patient details) of the prescription with all other prescription details clearly visible. (TIP: Apply a blank dispensing label to cover confidential patient details).'}</span>
+                          </span>
+                        </div>
+                        {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
+                          {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
+                        </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
+                          <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
+                          {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading its barcode…' : selectedRx.copyFileName ?? (selectedRx.entryMode === 'manual' ? 'Attach signed prescription' : 'Attach barcode prescription')}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded and server-verified' : 'PDF, JPG or PNG · maximum 16 MB'}</small></span>
+                        </label>}
+                        {selectedRx.entryMode === 'clinic' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
+                        {selectedRx.copyFileName ? (
+                          <div className="rx-document-actions">
+                            <span>Choose the upload control above to replace this copy.</span>
+                            <button type="button" className="btn btn-sm btn-danger" disabled={fileRemovalBusyRxId === selectedRx.id} onClick={() => setConfirmingFileRemoveRxId(selectedRx.id)}><Trash2 size={13} /> Remove copy</button>
+                          </div>
+                        ) : null}
+                        {confirmingFileRemoveRxId === selectedRx.id ? (
+                          <div className="rx-prescription-cancel-confirm" role="alertdialog" aria-modal="true" aria-label={`Remove ${selectedRx.copyFileName}`}>
+                            <AlertTriangle size={16} />
+                            <span><strong>Remove {selectedRx.copyFileName}?</strong><small>The encrypted copy will be removed from this draft. You can then upload a replacement.</small></span>
+                            <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirmingFileRemoveRxId(null)}>Keep copy</button><button type="button" className="btn btn-danger btn-sm" disabled={fileRemovalBusyRxId === selectedRx.id} onClick={() => void removePrescriptionFile(selectedRx.id)}>{fileRemovalBusyRxId === selectedRx.id ? 'Removing…' : 'Remove copy'}</button></div>
+                          </div>
+                        ) : null}
+                        {selectedRx.entryMode === 'clinic' && scanError ? <ProviderStatusNotice title="Barcode not verified" detail={`${scanError} Check that the full Curaleaf Clinic barcode is sharp and visible. If it still fails, use the manual route or contact your HHH administrator.`} /> : null}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {rxPhaseRank(guidedRxReveal) >= 3 ? (
+                    <section id="rx-guided-card-2-details" className={`rx-surface card rx-guided-card rx-guided-reveal is-in${guidedStep === 2 && guidedRxPhaseForProgress === 'details' ? ' is-current' : ''}`}>
+                      <header className="rx-surface__header">
+                        <div className="section-heading" style={{ margin: 0 }}>
+                          <div>
+                            <p className="section-label">Step 2 · {selectedRx.entryMode === 'manual' ? 'Manual details' : 'Scan result'}</p>
+                            <h3><FileText size={17} /> {selectedRx.entryMode === 'manual' ? 'Enter the signed prescription' : 'Confirm the Curaleaf scan'}</h3>
+                          </div>
+                        </div>
+                      </header>
+                      <div className="rx-guided-card__body">
+                        {selectedRx.entryMode === 'manual' ? (
+                          <ManualPrescriptionEditor
+                            view="details"
+                            prescription={selectedRx}
+                            catalogue={state.catalogue}
+                            onPrescriberChange={value => dispatch({ type: 'SET_RX_PRESCRIBER', orderId: activeOrder.id, rxId: selectedRx.id, prescriber: value })}
+                            onMetadataChange={(field, value) => dispatch({ type: 'SET_RX_METADATA', orderId: activeOrder.id, rxId: selectedRx.id, updates: { [field]: value } })}
+                            onAddItem={item => dispatch({ type: 'ADD_ITEM_TO_RX', orderId: activeOrder.id, rxId: selectedRx.id, item })}
+                            onRemoveItem={productId => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: selectedRx.id, productId })}
+                            onUpdateQuantity={(productId, qty) => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: selectedRx.id, productId, qty })}
+                            onUpdateUnits={(productId, unitsNeededCount) => dispatch({ type: 'UPDATE_ITEM_UNITS', orderId: activeOrder.id, rxId: selectedRx.id, productId, unitsNeededCount })}
+                          />
+                        ) : selectedRx.clinicScanId ? (
+                          <div className="rx-clinic-result" aria-label="Curaleaf verified prescription details">
+                            <div className="rx-clinic-result__status"><ShieldCheck size={18} /><span><strong>{isLocalPortalPreview ? 'Synthetic Curaleaf response' : 'Verified by Curaleaf'}</strong><small>{isLocalPortalPreview ? 'Read-only local training fixture' : 'Read-only supplier record'} · {selectedRx.curaleafPrescriptionState}</small></span></div>
+                            <dl>
+                              <div><dt>Prescription serial</dt><dd>{selectedRx.serialNumber}</dd></div>
+                              <div><dt>Prescriber</dt><dd>{selectedRx.prescriber}</dd></div>
+                              <div><dt>Issued</dt><dd>{selectedRx.issueDate ? new Date(`${selectedRx.issueDate}T00:00:00`).toLocaleDateString('en-GB') : '—'}</dd></div>
+                              <div><dt>Expires</dt><dd>{selectedRx.expiryDate ? new Date(`${selectedRx.expiryDate}T00:00:00`).toLocaleDateString('en-GB') : '—'}</dd></div>
+                              <div><dt>Registration</dt><dd>{selectedRx.prescriberGmcNumber ? `GMC ${selectedRx.prescriberGmcNumber}` : selectedRx.prescriberGphcNumber ? `GPhC ${selectedRx.prescriberGphcNumber}` : 'Held by Curaleaf'}</dd></div>
+                            </dl>
+                          </div>
+                        ) : <p className="rx-scan-waiting">No prescription fields need completing. They appear here after Curaleaf verifies the barcode.</p>}
+                        {identityCheck && (selectedRx.clinicScanId || selectedRx.entryMode === 'manual' && (selectedRx.curaleafPatientName || selectedRx.curaleafPatientDob)) && identityCheck.status !== 'match' ? <ProviderStatusNotice title={identityCheck.status === 'mismatch' ? 'Patient details do not match' : 'Patient details unavailable'} detail={`${identityCheck.reason} Payment and Curaleaf submission remain blocked until the prescription and patient record match.`} /> : null}
+                      </div>
+                    </section>
+                  ) : null}
+                </>
+              ) : (
+              <section hidden={guidedLayout} className="rx-surface card rx-record-editor">
                 <header className="rx-surface__header">
                   <div className="section-heading" style={{ margin: 0 }}>
                     <div>
-                      <p className="section-label">Step 2 · Prescription evidence</p>
-                      <h3><FileText size={17} /> Authenticate each prescription record</h3>
+                      <p className="section-label">Step 2 · Prescription</p>
+                      <h3><FileText size={17} /> {guidedLayout ? 'One prescription for this draft' : 'Authenticate each prescription record'}</h3>
                     </div>
                   </div>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}>+Add Rx</button>
+                  {guidedLayout ? null : (
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => dispatch({ type: 'ADD_RX', orderId: activeOrder.id })}>+Add Rx</button>
+                  )}
                 </header>
+                {guidedLayout && activeOrder.prescriptions.length <= 1 ? null : (
                 <div className="rx-record-tabs" role="tablist" aria-label="Prescription records">
                   {activeOrder.prescriptions.map((rx, index) => {
                     const active = rx.id === selectedRxId;
@@ -1181,10 +1427,12 @@ export default function CreateOrder() {
                     );
                   })}
                 </div>
+                )}
 
                 {selectedRx && (
                   <div className="rx-record-body">
                     <div className="rx-record-evidence">
+                      {guidedLayout ? null : (
                       <div className="rx-record-evidence__heading">
                         <div>
                           <p className="section-label">Editing</p>
@@ -1196,6 +1444,7 @@ export default function CreateOrder() {
                           </button>
                         )}
                       </div>
+                      )}
                       {confirmingRxDeleteId === selectedRx.id ? (
                         <div className="rx-prescription-cancel-confirm" role="alert">
                           <AlertTriangle size={16} />
@@ -1205,21 +1454,21 @@ export default function CreateOrder() {
                       ) : null}
                       <div className={`rx-entry-mode${guidedLayout && !guidedRouteChosen ? ' rx-entry-mode--choose' : ''}`} role="group" aria-label="Prescription entry route">
                         <button type="button" aria-pressed={(!guidedLayout || guidedRouteChosen) && selectedRx.entryMode === 'clinic'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'clinic' }); if (guidedLayout) { setGuidedRouteChosen(true); setGuidedLockNotice(null); } }}>
-                          <FileScan size={15} /><span><strong>{guidedLayout ? 'Scan Curaleaf QR' : 'Scan Rx barcode'}</strong><small>{guidedLayout ? 'Verified prescription and pack match' : 'Preferred automatic route'}</small></span>
+                          <FileScan size={15} /><span><strong>Scan Curaleaf QR</strong><small>{guidedLayout ? 'Then upload the prescription with a clear barcode' : 'Preferred automatic route'}</small></span>
                         </button>
                         <button type="button" aria-pressed={(!guidedLayout || guidedRouteChosen) && selectedRx.entryMode === 'manual'} onClick={() => { setEditingClinicFormularyRxId(null); dispatch({ type: 'SET_RX_ENTRY_MODE', orderId: activeOrder.id, rxId: selectedRx.id, mode: 'manual' }); if (guidedLayout) { setGuidedRouteChosen(true); setGuidedLockNotice(null); } }}>
-                          <Pencil size={15} /><span><strong>{guidedLayout ? 'Enter details manually' : 'Manually enter Rx details'}</strong><small>{guidedLayout ? 'Attach the copy and type the signed prescription' : 'Copy from the signed document'}</small></span>
+                          <Pencil size={15} /><span><strong>Enter details manually</strong><small>{guidedLayout ? 'Then upload the signed copy and type the fields' : 'Copy from the signed document'}</small></span>
                         </button>
                       </div>
                       {guidedLayout && !guidedRouteChosen ? (
-                        <p className="rx-guided__route-lead">Choose a route to open the matching input. Curaleaf QR reads the barcode; manual entry is for a signed copy without a usable barcode.</p>
+                        <p className="rx-guided__route-lead">Choose one route for this draft. Next you will upload the prescription copy.</p>
                       ) : (
                       <>
                       <div className="rx-clinic-note">
-                        <FileScan size={18} aria-hidden="true" />
+                        <Upload size={18} aria-hidden="true" />
                         <span>
-                          <strong>{selectedRx.entryMode === 'clinic' ? 'Scan the prescription barcode' : 'Attach the prescription copy'}</strong>
-                          <span>{selectedRx.entryMode === 'clinic' ? 'Attach a redacted copy (redact patient details) of the prescription with a clear barcode. (TIP: Apply a blank dispensing label to cover confidential patient details).' : 'Attach a redacted copy (redact patient details) of the prescription with all other prescriptions details clearly visible. (TIP: Apply a blank dispensing label to cover confidential patient details).'}</span>
+                          <strong>{selectedRx.entryMode === 'clinic' ? 'Upload the prescription and scan the QR' : 'Upload the signed prescription copy'}</strong>
+                          <span>{selectedRx.entryMode === 'clinic' ? 'Attach a redacted copy (redact patient details) of the prescription with a clear barcode. (TIP: Apply a blank dispensing label to cover confidential patient details).' : 'Attach a redacted copy (redact patient details) of the prescription with all other prescription details clearly visible. (TIP: Apply a blank dispensing label to cover confidential patient details).'}</span>
                         </span>
                       </div>
                       {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
@@ -1247,10 +1496,9 @@ export default function CreateOrder() {
                       )}
                     </div>
 
+                    {(!guidedLayout || prescriptionUploaded) ? (
                     <div className="rx-line-editor rx-prescription-details">
-                      {guidedLayout && !guidedRouteChosen ? (
-                        <p className="rx-scan-waiting">The matching fields appear after you choose Curaleaf QR or manual entry.</p>
-                      ) : selectedRx.entryMode === 'manual' ? (
+                      {selectedRx.entryMode === 'manual' ? (
                         <ManualPrescriptionEditor
                           view="details"
                           prescription={selectedRx}
@@ -1276,15 +1524,17 @@ export default function CreateOrder() {
                       ) : <p className="rx-scan-waiting">No prescription fields need completing. They appear here after Curaleaf verifies the barcode.</p>}
                       {identityCheck && (selectedRx.clinicScanId || selectedRx.entryMode === 'manual' && (selectedRx.curaleafPatientName || selectedRx.curaleafPatientDob)) && identityCheck.status !== 'match' ? <ProviderStatusNotice title={identityCheck.status === 'mismatch' ? 'Patient details do not match' : 'Patient details unavailable'} detail={`${identityCheck.reason} Payment and Curaleaf submission remain blocked until the prescription and patient record match.`} /> : null}
                     </div>
+                    ) : null}
                   </div>
                 )}
               </section>
+              )}
 
-              <section hidden={guidedLayout && guidedReveal < 3} className={`rx-surface card rx-formulary-stage${guidedLayout && guidedReveal >= 3 ? ' rx-guided-reveal is-in' : ''}`}>
+              <section id="rx-guided-card-3" hidden={guidedLayout && guidedReveal < 3} className={`rx-surface card rx-formulary-stage${guidedLayout && guidedReveal >= 3 ? ` rx-guided-reveal is-in${guidedStep === 3 ? ' is-current' : ''}` : ''}`}>
                 <header className="rx-surface__header">
                   <div className="section-heading" style={{ margin: 0 }}>
                     <div>
-                      <p className="section-label">Step 3. products and pricing</p>
+                      <p className="section-label">Step 3 · Products</p>
                       <h3>
                         <ShieldCheck size={17} />
                         {selectedRx?.entryMode === 'manual'
@@ -1311,11 +1561,9 @@ export default function CreateOrder() {
                 {!selectedRx ? <div className="rx-inline-empty"><FileText size={20} /><span><strong>Select a prescription record</strong><small>Its prescribed medicines will appear here.</small></span></div> : selectedRx.entryMode === 'manual' || editingClinicFormularyRxId === selectedRx.id ? renderFormularyEditor() : (
                   <div className="rx-line-editor">
                     <div className="rx-line-editor__heading"><span><small>Curaleaf formulary result</small><strong>{selectedRx.items.length} prescribed product{selectedRx.items.length === 1 ? '' : 's'}</strong></span><span>Matched automatically · read-only</span></div>
-                    {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileScan size={20} /><span><strong>Medicines appear after the barcode scan</strong><small>Curaleaf supplies the formula, prescribed quantity and matching pack automatically.</small></span></div> : (
+                    {selectedRx.items.length === 0 ? <div className="rx-inline-empty"><FileScan size={20} /><span><strong>Medicines appear after the barcode scan</strong><small>Curaleaf supplies the formula, prescribed quantity and matching pack automatically. Open the basket drawer to see prices.</small></span></div> : (
                       <div className="rx-item-stack">
                         {selectedRx.items.map((item, index) => {
-                          const margin = lineMargin(item);
-                          const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
                           const product = state.catalogue.find(candidate => candidate.id === item.productId);
                           const stockLabel = product?.availability === 'out' ? 'Out of stock' : product?.availability === 'low' ? 'Low stock' : product?.availability === 'in' ? 'In stock' : 'Stock check required';
                           const stockPill = product?.availability === 'out' ? 'pill-red' : product?.availability === 'in' ? 'pill-green' : 'pill-amber';
@@ -1323,18 +1571,9 @@ export default function CreateOrder() {
                             <article className="rx-prescribed-item" key={item.productId}>
                               <header className="rx-prescribed-item__header">
                                 <span className="rx-prescribed-item__index">Medicine {String(index + 1).padStart(2, '0')}</span>
-                                <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Matched from the Curaleaf prescription</small></span>
+                                <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Matched from the Curaleaf prescription · {item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {item.unitsNeededCount ?? '—'} {product?.unit ?? 'units'}</small></span>
                                 <span className={`pill ${stockPill}`}>{stockLabel}</span>
                               </header>
-                              <div className="rx-prescribed-item__pricing">
-                                <div className="rx-prescribed-item__quantity rx-prescribed-item__quantity--readonly"><small>Curaleaf pack match</small><strong>{item.qty} {item.qty === 1 ? 'pack' : 'packs'}</strong><em>Read-only</em></div>
-                                <div className="rx-prescribed-units"><small>Prescribed quantity</small><strong>{item.unitsNeededCount ?? '—'} {state.catalogue.find(product => product.id === item.productId)?.unit ?? 'units'}</strong><em>From barcode</em></div>
-                                <div className="rx-price-flow rx-price-flow--readonly" aria-label={`Pricing for ${item.name}`}>
-                                  <span className="rx-price-node rx-price-node--px"><small>RRP</small><strong>{money(item.retail)}</strong><em>{money(lineRevenue(item))} line</em></span>
-                                  <span className="rx-price-node rx-price-node--wx"><small>Wholesale cost</small><strong>{item.cost === null ? 'Quote required' : money(item.cost)}</strong><em>{item.cost === null ? 'Order-specific' : `${money(lineCost(item))} line`}</em></span>
-                                </div>
-                                <span className={`rx-prescribed-item__contribution${margin !== null && margin < 25 ? ' low' : ''}`}><small>Gross margin</small><strong>{contribution === null || margin === null ? 'Pending' : `${contribution >= 0 ? '+' : '−'}${money(Math.abs(contribution))} · ${margin}%`}</strong></span>
-                              </div>
                             </article>
                           );
                         })}
@@ -1345,7 +1584,7 @@ export default function CreateOrder() {
               </section>
             </main>
 
-            <aside hidden={guidedLayout && guidedReveal < 4} className={guidedLayout ? 'rx-guided__payment' : 'rx-checkout-rail'}>
+            <aside id="rx-guided-card-4" hidden={guidedLayout && guidedReveal < 4} className={`${guidedLayout ? 'rx-guided__payment' : 'rx-checkout-rail'}${guidedLayout && guidedReveal >= 4 ? ` rx-guided-reveal is-in${guidedStep === 4 ? ' is-current' : ''}` : ''}`}>
               <section className="rx-checkout-panel card" id="rx-order-review">
                 <header>
                   <p className="section-label">Step 4 · Order {activeOrderRef}</p>
@@ -1421,34 +1660,67 @@ export default function CreateOrder() {
             </aside>
           </div>
 
-            {guidedLayout ? (
-              <footer className="rx-guided__footer">
-                {guidedStep > 1 ? (
-                  <button type="button" className="btn btn-secondary" onClick={() => openGuidedStep((guidedStep - 1) as 1 | 2 | 3, true, '')}>
-                    Back
-                  </button>
-                ) : <span />}
-                {guidedStep < 4 ? (
-                  <span className="rx-guided__continue">
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      aria-disabled={guidedContinueLocked}
-                      aria-describedby={guidedContinueLocked ? 'rx-guided-continue-reason' : undefined}
-                      onClick={() => openGuidedStep((guidedStep + 1) as 2 | 3 | 4, !guidedContinueLocked, guidedContinueLockReason)}
-                    >
-                      {guidedContinueLabel} <ChevronRight size={16} />
-                    </button>
-                    {guidedContinueLocked ? (
-                      <small id="rx-guided-continue-reason">{guidedContinueLockReason}</small>
-                    ) : null}
-                  </span>
-                ) : null}
-              </footer>
+            {guidedLayout && guidedNextHint ? (
+              <p className="rx-guided__next-hint" role="status">{guidedNextHint}</p>
             ) : null}
           </div>
         </div>
       )}
     </div>
+    {guidedLayout && activeOrder && basketHost ? createPortal(
+      <aside className={`rx-basket-drawer${basketOpen ? ' is-open' : ''}`} aria-label="Draft medicines and cost">
+        <button
+          type="button"
+          className="rx-basket-drawer__toggle"
+          aria-expanded={basketOpen}
+          aria-controls="rx-basket-drawer-panel"
+          onClick={() => setBasketOpen(open => !open)}
+        >
+          <span>
+            <small>Draft basket</small>
+            <strong>{draftBasketCount} medicine{draftBasketCount === 1 ? '' : 's'} · {money(draftBasketTotal)}</strong>
+          </span>
+          <span className="rx-basket-drawer__hint">{basketOpen ? 'Hide choices' : 'Show choices'}{basketOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</span>
+        </button>
+        <div hidden={!basketOpen} id="rx-basket-drawer-panel" className="rx-basket-drawer__panel">
+          {draftBasketCount === 0 ? (
+            <p className="rx-basket-drawer__empty">No medicines in this draft yet. Add them in step 3. Prices appear here.</p>
+          ) : (
+            <ul className="rx-basket-drawer__list">
+              {draftBasketItems.map(item => {
+                const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
+                const margin = lineMargin(item);
+                return (
+                  <li key={`${item.rxId}-${item.productId}`}>
+                    <span>
+                      <strong>{item.name}</strong>
+                      <small>{item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each</small>
+                    </span>
+                    <span className="rx-basket-drawer__line">
+                      <strong>{money(lineRevenue(item))}</strong>
+                      <small>{contribution === null || margin === null ? 'Quote pending' : `${margin}% margin`}</small>
+                    </span>
+                    {canEditBasketItems && item.rxId === selectedRx?.id ? (
+                      <span className="rx-basket-drawer__edit">
+                        <button type="button" className="icon-button" aria-label={`Reduce packs of ${item.name}`} disabled={item.qty <= 1} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty - 1 })}>−</button>
+                        <button type="button" className="icon-button" aria-label={`Add pack of ${item.name}`} disabled={item.qty >= 100} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty + 1 })}>+</button>
+                        <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId })}><Trash2 size={13} /></button>
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <dl className="rx-basket-drawer__totals">
+            <div><dt>Products</dt><dd>{money(draftBasketTotal - (activeOrder.dispensingFee || 0))}</dd></div>
+            <div><dt>Dispensing</dt><dd>{money(activeOrder.dispensingFee || 0)}</dd></div>
+            <div><dt>Patient total</dt><dd>{money(draftBasketTotal)}</dd></div>
+          </dl>
+        </div>
+      </aside>,
+      basketHost,
+    ) : null}
+    </>
   );
 }

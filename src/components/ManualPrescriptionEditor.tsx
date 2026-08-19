@@ -118,6 +118,7 @@ export default function ManualPrescriptionEditor({
   prescription,
   catalogue,
   view = 'all',
+  hideSelectedList = false,
   onPrescriberChange,
   onMetadataChange,
   onAddItem,
@@ -128,6 +129,7 @@ export default function ManualPrescriptionEditor({
   prescription: Prescription;
   catalogue: CatalogueItem[];
   view?: ManualPrescriptionEditorView;
+  hideSelectedList?: boolean;
   onPrescriberChange: (value: string) => void;
   onMetadataChange: (field: MetadataField, value: string) => void;
   onAddItem: (item: LineItem) => void;
@@ -272,7 +274,7 @@ export default function ManualPrescriptionEditor({
       ) : null}
 
       {view !== 'details' ? <section className="manual-rx-medicines">
-        <section className="manual-rx-selected">
+        {hideSelectedList ? null : <section className="manual-rx-selected">
           <header className="manual-rx-section-heading">
             <span><small>Section 3</small><strong>Selected medicines</strong><em>Set pack quantities for every medicine printed on the prescription.</em></span>
             <span className="manual-rx-section-count">{prescription.items.length} selected</span>
@@ -329,11 +331,11 @@ export default function ManualPrescriptionEditor({
               <div className="manual-rx-selected__empty"><Package size={18} /><span><strong>No medicines selected yet</strong><small>Add every prescribed pack from the live catalogue below.</small></span></div>
             )}
           </div>
-        </section>
+        </section>}
 
         <section className="manual-rx-picker">
           <div className="manual-rx-picker__heading">
-            <span><small>Section 4</small><strong>Add medicines from the live Curaleaf catalogue</strong><em>Results stay open so you can add several prescribed products quickly.</em></span>
+            <span><small>{hideSelectedList ? 'Catalogue' : 'Section 4'}</small><strong>Add medicines from the live Curaleaf catalogue</strong><em>{hideSelectedList ? 'Selected packs and prices stay in the basket drawer at the bottom of the screen.' : 'Results stay open so you can add several prescribed products quickly.'}</em></span>
             <small>{filteredProducts.length} matching active pack{filteredProducts.length === 1 ? '' : 's'}</small>
           </div>
           <div className="manual-rx-picker__field">
