@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
-import { AlertTriangle, ArrowRight, Banknote, CheckCircle, ChevronDown, ChevronUp, CreditCard, FileScan, FileText, LockKeyhole, Pencil, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Banknote, CheckCircle, ChevronDown, ChevronUp, CreditCard, FileScan, FileText, Pencil, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
 import {
@@ -267,9 +267,6 @@ export default function CreateOrder() {
   ] : [];
   const patientLinked = Boolean(patient);
   const patientReady = patientLinked && canCreateOrderForPatient(patient);
-  const prescriptionEvidenceStarted = Boolean(activeOrder?.prescriptions.some(rx => (
-    Boolean(rx.copyFileName || rx.clinicScanId || rx.serialNumber?.trim() || (rx.entryMode === 'manual' && rx.prescriber.trim()))
-  )));
   const prescriptionUploaded = Boolean(selectedRx && (selectedRx.copyFileName || selectedRx.clinicScanId));
   const readyForProducts = selectedRx?.entryMode === 'clinic'
     ? Boolean(selectedRx.clinicScanId)
@@ -281,45 +278,9 @@ export default function CreateOrder() {
   const draftBasketTotal = activeOrder ? orderRevenue(activeOrder) : 0;
   const canEditBasketItems = Boolean(selectedRx && (selectedRx.entryMode === 'manual' || editingClinicFormularyRxId === selectedRx.id));
   const guidedRxPhaseForProgress = !guidedRouteChosen ? 'route' as const : !prescriptionUploaded ? 'upload' as const : 'details' as const;
-  const guidedSteps = workflowSteps.map((step, index) => {
-    const id = (index + 1) as 1 | 2 | 3 | 4;
-    const available = id === 1
-      || (id === 2 ? patientReady : patientReady && prescriptionEvidenceStarted);
-    const lockReason = id === 2
-      ? patientLinked && !patientReady
-        ? 'This patient cannot start an order until they are approved.'
-        : 'Link an approved patient before adding a prescription.'
-      : id === 3
-        ? 'Choose Curaleaf QR or manual entry, then authenticate the prescription.'
-        : id === 4
-          ? 'Authenticate a prescription before reviewing payment.'
-          : '';
-    return { id, ...step, available, lockReason };
-  });
-  const openGuidedStep = (id: 1 | 2 | 3 | 4, available: boolean, lockReason: string) => {
-    if (!available) {
-      setGuidedLockNotice(lockReason);
-      return;
-    }
-    setGuidedLockNotice(null);
-    setGuidedStep(id);
-    setGuidedReveal(current => (id > current ? id : current));
-    if (id === 2) setGuidedRxPhase(guidedRxPhaseForProgress);
-    const cardId = id === 1
-      ? 'rx-guided-card-1'
-      : id === 2
-        ? rxPhaseRank(guidedRxReveal) >= 3
-          ? 'rx-guided-card-2-details'
-          : rxPhaseRank(guidedRxReveal) >= 2
-            ? 'rx-guided-card-2-upload'
-            : 'rx-guided-card-2-route'
-        : id === 3
-          ? 'rx-guided-card-3'
-          : 'rx-guided-card-4';
-    window.setTimeout(() => {
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      document.getElementById(cardId)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
-    }, 0);
+  const returnToTop = () => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.getElementById('pharmacy-main-content')?.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
   };
   const applyGuidedRoute = (mode: 'clinic' | 'manual') => {
     if (!activeOrder || !selectedRx) return;
@@ -1258,7 +1219,7 @@ export default function CreateOrder() {
                       <header className="rx-surface__header">
                         <div className="section-heading" style={{ margin: 0 }}>
                           <div>
-                            <p className="section-label">Step 2 · Choose a route</p>
+                            <p className="section-label">Step 2A · Choose a route</p>
                             <h3><FileText size={17} /> Scan Curaleaf QR or enter details manually</h3>
                           </div>
                         </div>
@@ -1294,7 +1255,7 @@ export default function CreateOrder() {
                       <header className="rx-surface__header">
                         <div className="section-heading" style={{ margin: 0 }}>
                           <div>
-                            <p className="section-label">Step 2 · Upload</p>
+                            <p className="section-label">Step 2B · Upload</p>
                             <h3><Upload size={17} /> {selectedRx.entryMode === 'clinic' ? 'Upload the prescription and scan the QR' : 'Upload the signed prescription copy'}</h3>
                           </div>
                         </div>
@@ -1337,7 +1298,7 @@ export default function CreateOrder() {
                       <header className="rx-surface__header">
                         <div className="section-heading" style={{ margin: 0 }}>
                           <div>
-                            <p className="section-label">Step 2 · {selectedRx.entryMode === 'manual' ? 'Manual details' : 'Scan result'}</p>
+                            <p className="section-label">Step 2C · {selectedRx.entryMode === 'manual' ? 'Manual details' : 'Scan result'}</p>
                             <h3><FileText size={17} /> {selectedRx.entryMode === 'manual' ? 'Enter the signed prescription' : 'Confirm the Curaleaf scan'}</h3>
                           </div>
                         </div>
@@ -1562,7 +1523,6 @@ export default function CreateOrder() {
                   <strong>{paidRedo ? 'Review and carry over payment' : 'Review and request payment'}</strong>
                   <small>{patient?.name ?? 'Patient not linked'} · {activeOrder.prescriptions.length} prescription record{activeOrder.prescriptions.length === 1 ? '' : 's'}</small>
                 </header>
-                <div className="rx-checkout-panel__review">
                 <dl className="rx-order-totals">
                   <div><dt>Prescription records</dt><dd>{activeOrder.prescriptions.length}</dd></div>
                   <div><dt>Wholesale total (excl VAT)</dt><dd>{wholesaleKnown ? money(orderCost(activeOrder)) : state.workspaceMode === 'training' ? 'Not supplied' : 'Quote required'}</dd></div>
@@ -1579,12 +1539,15 @@ export default function CreateOrder() {
                     <button type="button" className="btn btn-secondary btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Retrying quote…' : 'Retry quote now'}</button>
                   </> : null}
                 </div>
+                <div className="rx-checkout-panel__settle">
+                <div className="rx-checkout-panel__review">
                 <div className="rx-dispensing-charge">
-                  <span><strong>Dispensing charge</strong><small>{activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? 'Includes the patient-price drop so the original payment can be carried over.' : 'optional dispensing fee may be added. please ensure you remain competitive.'}</small></span>
+                  <span>
+                    <strong>Dispensing charge</strong>
+                    {activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? <small>Includes the patient-price drop so the original payment can be carried over.</small> : null}
+                  </span>
                   <div className="rx-dispensing-presets" role="group" aria-label="Set dispensing charge">{[5, 10, 15].map(amount => <button type="button" key={amount} aria-pressed={activeOrder.dispensingFee === amount} disabled={activeOrder.redoContext?.priceResolution === 'continue_as_fee'} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount })}>{money(amount)}</button>)}<button type="button" aria-pressed={activeOrder.dispensingFee === 0} disabled={activeOrder.redoContext?.priceResolution === 'continue_as_fee'} onClick={() => dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: 0 })}>No charge</button></div>
                   <label className="rx-dispensing-custom"><span>Custom</span><span className="money-input"><span>£</span><input type="number" min="5" max={activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? undefined : 15} step="0.01" value={activeOrder.dispensingFee || ''} disabled={activeOrder.redoContext?.priceResolution === 'continue_as_fee'} onFocus={event => event.currentTarget.select()} onChange={event => { const amount = Number(event.target.value); dispatch({ type: 'SET_ORDER_DISPENSING_FEE', orderId: activeOrder.id, amount: event.target.value === '' ? 0 : activeOrder.redoContext?.priceResolution === 'continue_as_fee' ? Math.max(0, amount) : Math.max(5, Math.min(15, amount)) }); }} aria-label="Custom dispensing charge" /></span></label>
-                </div>
-                <div className="rx-patient-total"><span><small>Patient total</small><em>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)} products + {money(activeOrder.dispensingFee)} dispensing</em></span><strong>{money(orderRevenue(activeOrder))}</strong></div>
                 {activeOrder.redoContext?.isPaidRedo && redoSourceOrder ? (
                   <div className={`rx-redo-balance${paidRedoAmountMatches ? ' is-matched' : ' is-different'}`}>
                     <span><small>Verified payment carried by order {orderReference(redoSourceOrder)}</small><strong>{money(redoSourceOrder.payment.amount)}</strong></span>
@@ -1605,17 +1568,10 @@ export default function CreateOrder() {
                     </div> : null}
                   </div>
                 ) : null}
+                <div className="rx-patient-total"><span><small>Patient total</small><em>{money(orderRevenue(activeOrder) - activeOrder.dispensingFee)} products + {money(activeOrder.dispensingFee)} dispensing</em></span><strong>{money(orderRevenue(activeOrder))}</strong></div>
+                </div>
                 </div>
                 <div className="rx-checkout-panel__pay">
-                <details className="rx-payment-gate" open={!readyForPayment}>
-                  <summary>
-                    <span><small>Payment gate</small><strong>{readyForPayment ? 'All required checks passed' : `${outstandingPaymentGates.length} requirement${outstandingPaymentGates.length === 1 ? '' : 's'} outstanding`}</strong></span>
-                    <span className={readyForPayment ? 'complete' : ''}>{paymentGate.filter(item => item.complete).length}/{paymentGate.length}</span>
-                  </summary>
-                  <div className="rx-payment-gate__checks">
-                    {paymentGate.map(item => <span key={item.label} className={item.complete ? 'complete' : ''}>{item.complete ? <CheckCircle size={13} /> : <span className="rx-readiness-dot" />}{item.label}</span>)}
-                  </div>
-                </details>
                 <div className="rx-payment-actions">
                   <span className="section-label">Payment route</span>
                   {paidRedo ? (
@@ -1626,13 +1582,13 @@ export default function CreateOrder() {
                       <button type="button" role="radio" aria-checked={selectedPaymentRoute === 'manual'} className={selectedPaymentRoute === 'manual' ? 'is-selected' : ''} onClick={() => dispatch({ type: 'SET_ORDER_PAYMENT_ROUTE', orderId: activeOrder.id, paymentRoute: 'manual' })}><Banknote size={17} /><span><strong>Manual payment</strong><small>EPOS, cash or transfer</small></span>{selectedPaymentRoute === 'manual' ? <CheckCircle size={14} /> : null}</button>
                     </div>
                   )}
-                  <p className="rx-payment-route-note">{paidRedo ? 'The original payment remains linked only after the replacement prescription passes every gate.' : 'The selected route becomes immutable when the order enters payment.'}</p>
-                </div>
-                </div>
                 <footer className="rx-checkout-panel__submit">
                   <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : paidRedo ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? 'send payment link' : 'Continue with manual payment'}</button>
                   {!readyForPayment ? <p className="rx-checkout-blocker"><AlertTriangle size={13} /><span><strong>Payment remains locked</strong>{outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}{outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}</span></p> : null}
                 </footer>
+                </div>
+                </div>
+                </div>
               </section>
             </aside>
           </div>
@@ -1646,32 +1602,10 @@ export default function CreateOrder() {
     </div>
     {guidedLayout && activeOrder && basketHost ? createPortal(
       <div className="rx-guided__chrome">
-        <nav className="rx-guided__steps" aria-label="Create order steps">
-          <ol>
-            {guidedSteps.map(step => {
-              const current = guidedStep === step.id;
-              return (
-                <li key={step.id}>
-                  <button
-                    type="button"
-                    className={`rx-guided__step${current ? ' is-current' : ''}${step.complete ? ' is-complete' : ''}${step.available ? '' : ' is-locked'}`}
-                    aria-current={current ? 'step' : undefined}
-                    aria-disabled={!step.available}
-                    onClick={() => openGuidedStep(step.id, step.available, step.lockReason)}
-                  >
-                    <span className="rx-guided__step-index" aria-hidden="true">
-                      {!step.available ? <LockKeyhole size={14} /> : step.complete ? <CheckCircle size={16} /> : step.id}
-                    </span>
-                    <span className="rx-guided__step-copy">
-                      <strong>{step.label}</strong>
-                      <small>{step.available ? step.detail : step.lockReason}</small>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </nav>
+        <button type="button" className="rx-guided__top" onClick={returnToTop}>
+          <ChevronUp size={16} aria-hidden="true" />
+          Return to top
+        </button>
         <aside className={`rx-basket-drawer${basketOpen ? ' is-open' : ''}`} aria-label="Draft medicines and cost">
           <button
             type="button"
@@ -1692,7 +1626,6 @@ export default function CreateOrder() {
             ) : (
               <ul className="rx-basket-drawer__list">
                 {draftBasketItems.map(item => {
-                  const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
                   const margin = lineMargin(item);
                   return (
                     <li key={`${item.rxId}-${item.productId}`}>
@@ -1702,7 +1635,7 @@ export default function CreateOrder() {
                       </span>
                       <span className="rx-basket-drawer__line">
                         <strong>{money(lineRevenue(item))}</strong>
-                        <small>{contribution === null || margin === null ? 'Quote pending' : `${margin}% margin`}</small>
+                        <small>{item.cost === null || margin === null ? 'Quote pending' : `${margin}% · ${money(lineCost(item))}`}</small>
                       </span>
                       {canEditBasketItems && item.rxId === selectedRx?.id ? (
                         <span className="rx-basket-drawer__edit">
