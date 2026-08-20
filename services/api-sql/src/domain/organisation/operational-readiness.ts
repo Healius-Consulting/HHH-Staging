@@ -9,6 +9,7 @@ const SETUP_TASK_IDS = [
   'payment_route',
   'pricing',
   'notifications',
+  'intake_call',
   'operational_readiness',
 ] as const;
 
@@ -18,8 +19,9 @@ export interface PharmacyOperationalStatus {
   intake: { live: boolean; label: 'Live' | 'Off' };
   workspace: { mode: 'training' | 'live' | 'paused'; label: 'Training' | 'Live' | 'Paused' };
   staff: { activeCount: number; invitedCount: number; passed: boolean; label: string };
-  curaleaf: { connected: boolean; label: 'Waiting' | 'Connected' };
+  curaleaf: { connected: boolean; production: boolean; label: 'Waiting' | 'Test' | 'Production' };
   payment: { route: 'manual' | 'worldpay'; worldpayConnected: boolean; passed: boolean; label: string };
+  intakeCall: { completed: boolean; label: 'Not logged' | 'Logged'; evidence: string | null };
   walkthrough: { completed: boolean; label: 'Not started' | 'Complete'; evidence: string | null };
   charges: { saved: boolean; label: 'Saved' | 'Missing'; evidence: string | null };
   premises: { confirmed: boolean };
@@ -95,6 +97,7 @@ export function buildOperationalStatus(input: {
 }): PharmacyOperationalStatus {
   const byCode = taskByCode(input.tasks);
   const premises = byCode.get('pharmacy_profile')?.completed === true;
+  const intakeCall = byCode.get('intake_call')?.completed === true;
   const walkthrough = byCode.get('operational_readiness')?.completed === true;
   const charges = byCode.get('pricing')?.completed === true;
   const websitePack = byCode.get('notifications')?.completed === true;
@@ -102,6 +105,7 @@ export function buildOperationalStatus(input: {
   const worldpayConnected = connectionActive(input.worldpay);
   const paymentPassed = route === 'manual' || worldpayConnected;
   const curaleafConnected = connectionActive(input.curaleaf);
+  const curaleafProduction = curaleafConnected && input.curaleaf?.environment === 'PRODUCTION';
   const activeStaff = input.staff.filter(member => member.status === 'ACTIVE' && !member.disabled);
   const invitedStaff = input.staff.filter(member => member.status === 'INVITED');
   const activeCount = activeStaff.length;
@@ -112,6 +116,9 @@ export function buildOperationalStatus(input: {
   const missingGates: string[] = [];
   if (workspaceMode === 'paused') missingGates.push('paused');
   if (input.organisation.classification === 'TRAINING') missingGates.push('training_tenant');
+  if (!intakeCall) missingGates.push('intake_call');
+  if (!walkthrough) missingGates.push('walkthrough');
+  if (!curaleafProduction) missingGates.push('curaleaf_production');
 
   return {
     intake: { live: intakeLive, label: intakeLive ? 'Live' : 'Off' },
@@ -122,7 +129,11 @@ export function buildOperationalStatus(input: {
       passed: staffPassed,
       label: activeCount === 0 ? 'No active staff' : `${activeCount} active`,
     },
-    curaleaf: { connected: curaleafConnected, label: curaleafConnected ? 'Connected' : 'Waiting' },
+    curaleaf: {
+      connected: curaleafConnected,
+      production: curaleafProduction,
+      label: curaleafProduction ? 'Production' : curaleafConnected ? 'Test' : 'Waiting',
+    },
     payment: {
       route,
       worldpayConnected,
@@ -130,6 +141,11 @@ export function buildOperationalStatus(input: {
       label: route === 'worldpay'
         ? (worldpayConnected ? 'Worldpay connected' : 'Worldpay not connected')
         : 'Pharmacy-managed',
+    },
+    intakeCall: {
+      completed: intakeCall,
+      label: intakeCall ? 'Logged' : 'Not logged',
+      evidence: byCode.get('intake_call')?.evidence ?? null,
     },
     walkthrough: {
       completed: walkthrough,
@@ -198,13 +214,11 @@ export function buildGoLiveReadinessView(input: {
   const allocationHolding = input.organisation.classification === 'ALLOCATION_HOLDING';
   const secretStored = Boolean(input.curaleaf?.secretResourceName);
   const environment = input.curaleaf?.environment === 'TEST' ? 'test' as const : 'production' as const;
-  const status = input.organisation.status === 'INTAKE_LIVE'
-    ? 'intake_live' as const
-    : input.organisation.status === 'LIVE'
-      ? 'live' as const
-      : input.organisation.status === 'PAUSED'
-        ? 'paused' as const
-        : 'onboarding' as const;
+  const status = input.organisation.status === 'LIVE'
+    ? 'live' as const
+    : input.organisation.status === 'PAUSED'
+      ? 'paused' as const
+      : 'onboarding' as const;
 
   return {
     organisationId: input.organisation.id,
@@ -223,7 +237,7 @@ export function buildGoLiveReadinessView(input: {
         receivedAt: null,
       },
       curaleafLive: {
-        passed: input.operational.curaleaf.connected,
+        passed: input.operational.curaleaf.production,
         environment,
         validatedAt: input.curaleaf?.validatedAt ?? null,
         secretStored,
@@ -239,6 +253,15 @@ export function goLiveBlockedMessage(operational: PharmacyOperationalStatus): st
   }
   if (operational.missingGates.includes('paused')) {
     return 'Unpause this pharmacy before flipping the workspace to live.';
+  }
+  if (operational.missingGates.includes('intake_call')) {
+    return 'Log the intake call before flipping this workspace live.';
+  }
+  if (operational.missingGates.includes('walkthrough')) {
+    return 'Log the platform walkthrough before flipping this workspace live.';
+  }
+  if (operational.missingGates.includes('curaleaf_production')) {
+    return 'Activate Curaleaf production for this pharmacy before flipping the workspace live.';
   }
   return 'This pharmacy cannot be flipped to live yet.';
 }

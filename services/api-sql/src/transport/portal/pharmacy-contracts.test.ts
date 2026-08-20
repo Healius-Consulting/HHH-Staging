@@ -103,6 +103,8 @@ describe('SQL pharmacy compatibility contracts', () => {
   it('maps SQL organisation enums to the portal contract', () => {
     const mapped = toPortalOrganisation(organisation);
     assert.equal(mapped.status, 'live');
+    assert.equal(mapped.intakeEnabled, true);
+    assert.equal(toPortalOrganisation({ ...organisation, status: 'INTAKE_LIVE' }).status, 'onboarding');
     assert.equal(mapped.workspaceClassification, 'standard');
     assert.equal(mapped.defaultPaymentRoute, 'manual');
     assert.equal('platformFeeMonthly' in mapped, false);

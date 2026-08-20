@@ -40,6 +40,7 @@ import type {
   AdminReferralFinanceReport,
   PatientRegisterExportResult,
   GoLiveReadiness,
+  SetupTaskId,
   AuthenticatedSession,
   PharmacyOverview,
   PharmacyPrescriptionFinanceReport,
@@ -589,6 +590,25 @@ export function approveCuraleafPharmacy(organisationId: string) {
 
 export function goLiveOrganisation(organisationId: string) {
   return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export function getGoLiveReadiness(organisationId: string) {
+  return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live-readiness`);
+}
+
+export function updateAdminPharmacySetupTask(
+  organisationId: string,
+  taskId: SetupTaskId,
+  input: { completed: boolean; evidence?: string | null },
+) {
+  return apiRequest<import('./contracts').PharmacySetupStatus>(
+    `/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/setup/${encodeURIComponent(taskId)}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+}
+
+export function revertLiveOrganisation(organisationId: string) {
+  return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/revert-live`, { method: 'POST', body: JSON.stringify({}) });
 }
 
 export function recordPharmacyGdprEvidenceReceived(organisationId: string) {

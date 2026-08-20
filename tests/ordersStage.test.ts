@@ -44,6 +44,12 @@ test('cancelled orders distinguish outstanding work from closed outcomes', () =>
   assert.equal(orderCancellationResolution({ ...base, cancellation: { status: 'cancelled' } } as PatientOrder), 'resolved');
   assert.equal(orderCancellationResolution({ ...base, payment: { status: 'paid' }, cancellation: { status: 'refund_required' } } as PatientOrder), 'needs-action');
   assert.equal(orderCancellationResolution({ ...base, payment: { status: 'paid' }, cancellation: { status: 'refund_required' }, refund: { status: 'completed' } } as PatientOrder), 'refunded');
+  assert.equal(orderCancellationResolution({
+    ...base,
+    payment: { status: 'paid' },
+    cancellation: { status: 'cancelled' },
+    redoneByOrderId: 'training-order-136',
+  } as PatientOrder), 'resolved');
 });
 
 test('pharmacy cancel is local only before Curaleaf prescriber, prescription, or purchase-order work starts', () => {

@@ -325,6 +325,7 @@ export interface PharmacyTenant {
   testAccount?: boolean;
   gdprExempt?: boolean;
   workspaceClassification?: 'standard' | 'training' | 'allocation_holding';
+  intakeEnabled?: boolean;
   staffCount: number;
   defaultPaymentRoute: 'manual' | 'worldpay';
   brand: {

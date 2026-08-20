@@ -6,7 +6,6 @@ import { HttpError } from '../../domain/common/errors.js';
 import { canAcceptPublicIntake } from '../../domain/organisation/access.js';
 import {
   buildGoLiveReadinessView,
-  buildOperationalStatus,
   buildSetupStatusView,
   goLiveBlockedMessage,
   type PharmacySetupStatusView,
@@ -26,6 +25,7 @@ const setupDefinitions = [
   { id: 'payment_route', required: true },
   { id: 'pricing', required: true },
   { id: 'notifications', required: true },
+  { id: 'intake_call', required: true },
   { id: 'operational_readiness', required: true },
 ] as const;
 
@@ -120,8 +120,11 @@ function assertPharmacyTaskEvidence(
   if (taskId === 'notifications' && !/published/i.test(evidence)) {
     throw new HttpError(400, 'Download the content pack, then mark the eligibility link as published.', 'WEBSITE_PACK_REQUIRED');
   }
-  if (taskId === 'operational_readiness' && evidence.length < 20) {
-    throw new HttpError(400, 'Record the named staff who completed the sandbox walkthrough.', 'WALKTHROUGH_EVIDENCE_REQUIRED');
+  if (taskId === 'intake_call' && evidence.length < 8) {
+    throw new HttpError(400, 'Log that HHH completed the intake call.', 'INTAKE_CALL_REQUIRED');
+  }
+  if (taskId === 'operational_readiness' && evidence.length < 8) {
+    throw new HttpError(400, 'Log that HHH completed the platform walkthrough.', 'WALKTHROUGH_EVIDENCE_REQUIRED');
   }
   if (taskId === 'payment_route' && organisation.defaultPaymentRoute === 'WORLDPAY' && !worldpayConnected) {
     throw new HttpError(409, 'Verify the Worldpay merchant connection before making it the default payment route.', 'WORLDPAY_VERIFICATION_REQUIRED');
@@ -153,21 +156,11 @@ export function createPortalSetupRouter(): Router {
   }
 
   async function goLiveSnapshot(organisation: OrganisationRecord) {
-    const [staff, curaleaf, worldpay] = await Promise.all([
-      identityRepo.listPharmacyStaffByOrganisationId(organisation.id),
-      integrationRepo.findConnection(organisation.id, 'CURALEAF'),
-      integrationRepo.findConnection(organisation.id, 'WORLDPAY'),
-    ]);
+    const setup = await setupSnapshot(organisation);
     return buildGoLiveReadinessView({
       organisation,
-      operational: buildOperationalStatus({
-        organisation,
-        tasks: [],
-        staff,
-        curaleaf,
-        worldpay,
-      }),
-      curaleaf,
+      operational: setup.operational,
+      curaleaf: await integrationRepo.findConnection(organisation.id, 'CURALEAF'),
     });
   }
 
@@ -241,8 +234,8 @@ export function createPortalSetupRouter(): Router {
     try {
       const scope = assertTenantScope(req.context!);
       const taskId = setupTaskIdSchema.parse(req.params.taskId);
-      if (taskId === 'curaleaf_account') {
-        throw new HttpError(403, 'Curaleaf activation is managed only by HHH administrators.', 'FORBIDDEN');
+      if (taskId === 'curaleaf_account' || taskId === 'intake_call' || taskId === 'operational_readiness') {
+        throw new HttpError(403, 'HHH administrators log the intake call and platform walkthrough.', 'FORBIDDEN');
       }
       const input = z.object({
         completed: z.boolean(),
@@ -291,8 +284,8 @@ export function createPortalSetupRouter(): Router {
       const scope = assertTenantScope(req.context!);
       const input = setupTaskInputSchema.parse(req.body);
       const taskId = setupTaskIdSchema.parse(input.taskId);
-      if (taskId === 'curaleaf_account') {
-        throw new HttpError(403, 'Curaleaf activation is managed only by HHH administrators.', 'FORBIDDEN');
+      if (taskId === 'curaleaf_account' || taskId === 'intake_call' || taskId === 'operational_readiness') {
+        throw new HttpError(403, 'HHH administrators log the intake call and platform walkthrough.', 'FORBIDDEN');
       }
       const [organisation, worldpay] = await Promise.all([
         organisationRepo.findOrganisationById(scope.organisationId),
@@ -480,6 +473,36 @@ export function createPortalSetupRouter(): Router {
         sessionHashPrefix: scope.sessionHash.slice(0, 12),
         surface: scope.surface,
         details: { missingGates: readiness.operational.missingGates },
+      });
+      const updated = await organisationRepo.findOrganisationById(organisationId);
+      if (!updated) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      res.status(200).json(await goLiveSnapshot(updated));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/portal/admin/organisations/:id/revert-live', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const organisationId = organisationIdSchema.parse(req.params.id);
+      const organisation = await organisationRepo.findOrganisationById(organisationId);
+      if (!organisation) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      if (organisation.status !== 'LIVE') {
+        res.status(200).json(await goLiveSnapshot(organisation));
+        return;
+      }
+      await organisationRepo.updateOrganisationStatus(organisationId, 'ONBOARDING');
+      await identityRepo.appendAudit({
+        organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'organisation.reverted_from_live',
+        recordType: 'Organisation',
+        recordId: organisationId,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
       });
       const updated = await organisationRepo.findOrganisationById(organisationId);
       if (!updated) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');

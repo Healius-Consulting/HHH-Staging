@@ -43,7 +43,7 @@ import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { useAuth } from '../auth/useAuth';
 import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminReferralFinance, getPharmacyStaff, getPlatformAdmins, getReferralLink, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, resetPharmacyStaffMfa, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
-import { type AdminReferralFinanceReport, type PatientRegisterExportResult, type PatientRegisterExportRow, type PharmacyStaffAccount, type PharmacyStaffInvitation, type PlatformAdminAccount, type PlatformAdminInvitation, type UpdateOrganisationInput } from '../shared/contracts';
+import { isTrainingDirectoryPharmacy, type AdminReferralFinanceReport, type PatientRegisterExportResult, type PatientRegisterExportRow, type PharmacyStaffAccount, type PharmacyStaffInvitation, type PlatformAdminAccount, type PlatformAdminInvitation, type UpdateOrganisationInput } from '../shared/contracts';
 import { AdminGoLivePanel } from '../onboarding/AdminGoLivePanel';
 import { isLocalPortalPreview, withLocationSearch } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -337,7 +337,7 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
               </div>
             </section>
 
-            <div className="onboarding-callout"><ShieldCheck size={17} /><span>The pharmacy starts in onboarding status. Its six setup steps must be completed before live processing begins.</span></div>
+            <div className="onboarding-callout"><ShieldCheck size={17} /><span>The eligibility link is on from day one. The pharmacy workspace stays in training until HHH flips it live.</span></div>
             {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
           </div>
           <div className="drawer-actions">
@@ -466,7 +466,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
               <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
               <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
               <label>Approved website domains<textarea className="input" value={domains} onChange={event => setDomains(event.target.value)} placeholder={'pharmacy.cc\nanother-domain.cc'} /><small>Enter one domain per line. Protocols and page paths are removed automatically.</small></label>
-              <div className="form-grid-two"><label>Account status<select className="input" value={status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option>{status === 'intake_live' && <option value="intake_live">Intake live</option>}{status === 'live' && <option value="live">Live</option>}<option value="paused">Paused</option></select><small>Use the audited readiness controls to enable intake or full live access.</small></label></div>
+              <div className="form-grid-two"><label>Account status<select className="input" value={status === 'intake_live' ? 'onboarding' : status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option>{status === 'live' && <option value="live">Live</option>}<option value="paused">Paused</option></select><small>Onboarding means the workspace is still training. Public intake is already on. Use Go live to unlock the live pharmacy workspace.</small></label></div>
             </section>
 
             <section className="admin-onboard-section">
@@ -874,7 +874,7 @@ export default function AdminPortal() {
   const [overviewPharmacyId, setOverviewPharmacyId] = useState<string | null>(organisationIdFromPath);
   const [overviewManagePanel, setOverviewManagePanel] = useState<OverviewManagePanel>('summary');
   const [overviewManageOpen, setOverviewManageOpen] = useState(false);
-  const [overviewFilter, setOverviewFilter] = useState<'all' | 'live' | 'training'>('all');
+  const [overviewFilter, setOverviewFilter] = useState<'all' | 'registered' | 'training'>('all');
   const overviewManageRef = useRef<HTMLDivElement>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -1395,8 +1395,8 @@ export default function AdminPortal() {
     }
   };
 
-  const liveCount = state.organisations.filter(org => org.status === 'live').length;
-  const trainingCount = state.organisations.filter(org => org.status === 'onboarding' || org.status === 'intake_live').length;
+  const registeredCount = state.organisations.filter(org => !isTrainingDirectoryPharmacy(org)).length;
+  const trainingCount = state.organisations.filter(org => isTrainingDirectoryPharmacy(org)).length;
   const pendingAdminDecisions = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review').length;
   const adminCommands = useMemo<CommandDefinition[]>(() => [
     { label: 'Pharmacies', detail: 'Manage pharmacy organisations', group: 'Navigate', icon: <LayoutDashboard size={16} />, run: () => { setView('overview'); } },
@@ -1432,10 +1432,12 @@ export default function AdminPortal() {
   const overviewPharmacies = state.organisations.filter(org => {
     const matchesQuery = `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase());
     if (!matchesQuery) return false;
-    if (overviewFilter === 'live') return org.status === 'live';
-    if (overviewFilter === 'training') return org.status === 'onboarding' || org.status === 'intake_live';
+    if (overviewFilter === 'registered') return !isTrainingDirectoryPharmacy(org);
+    if (overviewFilter === 'training') return isTrainingDirectoryPharmacy(org);
     return true;
   });
+  const registeredPharmacies = overviewPharmacies.filter(org => !isTrainingDirectoryPharmacy(org));
+  const trainingPharmacies = overviewPharmacies.filter(org => isTrainingDirectoryPharmacy(org));
 
   useEffect(() => {
     if (view !== 'overview') return;
@@ -1443,14 +1445,23 @@ export default function AdminPortal() {
       if (!state.organisations.length) return;
       if (state.organisations.some(organisation => organisation.id === overviewPharmacyId)) return;
     }
-    setOverviewPharmacyId(overviewPharmacies[0]?.id ?? null);
+    setOverviewPharmacyId((registeredPharmacies[0] ?? trainingPharmacies[0])?.id ?? null);
     setOverviewManagePanel('summary');
     setOverviewManageOpen(false);
   }, [overviewPharmacies, overviewPharmacyId, state.organisations, view]);
 
-  const statusLabel = (status: PharmacyTenant['status']) => status.replace('_', ' ');
-  const statusPill = (status: PharmacyTenant['status']) => status === 'live' ? 'pill-green' : status === 'intake_live' ? 'pill-info' : status === 'paused' ? 'pill-red' : 'pill-amber';
-  const pharmacyTone = (status: PharmacyTenant['status']) => status === 'live' ? 'paid' : status === 'intake_live' ? 'info' : status === 'paused' ? 'danger' : 'warning';
+  const statusLabel = (status: PharmacyTenant['status']) => {
+    if (status === 'live') return 'Live';
+    if (status === 'paused') return 'Paused';
+    return 'Onboarding';
+  };
+  const pharmacyTone = (status: PharmacyTenant['status']) => status === 'live' ? 'paid' : status === 'paused' ? 'danger' : 'warning';
+  const intakeIsLive = (organisation: PharmacyTenant) => {
+    if (organisation.status === 'paused') return false;
+    if (isTrainingDirectoryPharmacy(organisation)) return false;
+    if (organisation.intakeEnabled === false) return false;
+    return true;
+  };
 
   const renderOverview = () => {
     const portfolioAccrued = referralFeeEvents.reduce((total, event) => total + event.amount, 0);
@@ -1462,8 +1473,6 @@ export default function AdminPortal() {
       ...(crmByOrganisation.get(selectedPharmacy.id) ?? []).map(patient => patient.email),
       ...(submissionsByOrganisation.get(selectedPharmacy.id) ?? []).map(submission => submission.email),
     ]).size : 0;
-    const liveFilterCount = state.organisations.filter(organisation => organisation.status === 'live').length;
-    const trainingFilterCount = state.organisations.filter(organisation => organisation.status === 'onboarding' || organisation.status === 'intake_live').length;
     const workspaceLabel = selectedPharmacy?.status === 'live'
       ? 'Live'
       : selectedPharmacy?.status === 'paused'
@@ -1472,13 +1481,46 @@ export default function AdminPortal() {
     const managePanelLabel = OVERVIEW_MANAGE_PANELS.find(panel => panel.id === overviewManagePanel)?.label ?? 'Summary';
     const tenantTheme = selectedPharmacy ? deriveTenantTheme(selectedPharmacy.brand.primary) : null;
     const formUrl = referralLink;
+    const selectedIntakeLive = selectedPharmacy ? intakeIsLive(selectedPharmacy) : false;
+
+    const renderPharmacyRow = (organisation: PharmacyTenant) => {
+      const tone = pharmacyTone(organisation.status);
+      const fees = feesByOrganisation.get(organisation.id);
+      return (
+        <button
+          type="button"
+          key={organisation.id}
+          className={`order-crm-row order-crm-row--${tone}${overviewPharmacyId === organisation.id ? ' selected' : ''}`}
+          aria-pressed={overviewPharmacyId === organisation.id}
+          aria-label={`${organisation.tradingName}, ${statusLabel(organisation.status)}`}
+          onClick={() => {
+            if (organisation.id !== overviewPharmacyId) {
+              setOverviewManagePanel('summary');
+              setShowPharmacyEditor(false);
+            }
+            setOverviewPharmacyId(organisation.id);
+            setOverviewManageOpen(false);
+          }}
+        >
+          <span className={`order-crm-row__stage order-tone--${tone}`} aria-hidden="true">{organisation.logoText}</span>
+          <span className="order-crm-row__identity">
+            <strong title={organisation.tradingName}>{organisation.tradingName}</strong>
+            <span className={`order-stage-pill order-tone--${tone}`}>{statusLabel(organisation.status)}</span>
+          </span>
+          <span className="order-crm-row__position">
+            <strong>{financeReady ? referralFeeFormatter.format(fees?.total ?? 0) : '—'}</strong>
+            <small>GPhC {organisation.gphcNumber}</small>
+          </span>
+        </button>
+      );
+    };
 
     return (
       <div className="page-body order-crm patient-crm admin-overview-crm">
         <section className="order-crm-summary" aria-label="Pharmacy portfolio summary">
           <article className="order-crm-metric">
             <span className="order-crm-metric__icon"><Building2 size={16} /></span>
-            <span><small>Pharmacies</small><strong>{state.organisations.length}</strong><em>{liveCount} live · {trainingCount} training</em></span>
+            <span><small>Pharmacies</small><strong>{state.organisations.length}</strong><em>{registeredCount} registered · {trainingCount} training</em></span>
           </article>
           <article className="order-crm-metric">
             <span className="order-crm-metric__icon"><Users size={16} /></span>
@@ -1512,8 +1554,8 @@ export default function AdminPortal() {
           <div className="order-crm-filters" role="group" aria-label="Filter pharmacies">
             {([
               { key: 'all' as const, label: 'All', count: state.organisations.length },
-              { key: 'live' as const, label: 'Live', count: liveFilterCount },
-              { key: 'training' as const, label: 'Training', count: trainingFilterCount },
+              { key: 'registered' as const, label: 'Registered', count: registeredCount },
+              { key: 'training' as const, label: 'Training', count: trainingCount },
             ]).map(filter => (
               <button
                 type="button"
@@ -1552,37 +1594,34 @@ export default function AdminPortal() {
                     <strong>{state.organisations.length === 0 ? 'No pharmacies onboarded' : 'No pharmacies match'}</strong>
                     <span>{state.organisations.length === 0 ? 'Onboard a pharmacy to start the portfolio.' : 'Try another filter or search term.'}</span>
                   </div>
-                ) : overviewPharmacies.map(organisation => {
-                  const tone = pharmacyTone(organisation.status);
-                  const fees = feesByOrganisation.get(organisation.id);
-                  return (
-                    <button
-                      type="button"
-                      key={organisation.id}
-                      className={`order-crm-row order-crm-row--${tone}${overviewPharmacyId === organisation.id ? ' selected' : ''}`}
-                      aria-pressed={overviewPharmacyId === organisation.id}
-                      aria-label={`${organisation.tradingName}, ${statusLabel(organisation.status)}`}
-                      onClick={() => {
-                        if (organisation.id !== overviewPharmacyId) {
-                          setOverviewManagePanel('summary');
-                          setShowPharmacyEditor(false);
-                        }
-                        setOverviewPharmacyId(organisation.id);
-                        setOverviewManageOpen(false);
-                      }}
-                    >
-                      <span className={`order-crm-row__stage order-tone--${tone}`} aria-hidden="true">{organisation.logoText}</span>
-                      <span className="order-crm-row__identity">
-                        <strong title={organisation.tradingName}>{organisation.tradingName}</strong>
-                        <span className={`order-stage-pill order-tone--${tone}`}>{statusLabel(organisation.status)}</span>
-                      </span>
-                      <span className="order-crm-row__position">
-                        <strong>{financeReady ? referralFeeFormatter.format(fees?.total ?? 0) : '—'}</strong>
-                        <small>GPhC {organisation.gphcNumber}</small>
-                      </span>
-                    </button>
-                  );
-                })}
+                ) : (
+                  <>
+                    {registeredPharmacies.length ? (
+                      <section className="order-crm-list-group" aria-label="Registered pharmacies">
+                        <header>
+                          <span>
+                            <strong>Registered pharmacies</strong>
+                            <small>Onboarded pharmacies</small>
+                          </span>
+                          <b>{registeredPharmacies.length}</b>
+                        </header>
+                        {registeredPharmacies.map(organisation => renderPharmacyRow(organisation))}
+                      </section>
+                    ) : null}
+                    {trainingPharmacies.length ? (
+                      <section className="order-crm-list-group" aria-label="Training pharmacies">
+                        <header>
+                          <span>
+                            <strong>Training pharmacies</strong>
+                            <small>Primary and Alternate sandbox</small>
+                          </span>
+                          <b>{trainingPharmacies.length}</b>
+                        </header>
+                        {trainingPharmacies.map(organisation => renderPharmacyRow(organisation))}
+                      </section>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           </aside>
@@ -1672,6 +1711,11 @@ export default function AdminPortal() {
                           <em>{selectedPharmacy.status === 'live' ? 'Referred patients and orders' : 'Training examples until go-live'}</em>
                         </article>
                         <article>
+                          <small>Intake</small>
+                          <strong>{selectedIntakeLive ? 'Live' : 'Off'}</strong>
+                          <em>{selectedIntakeLive ? 'Eligibility link and HHH queue' : 'No public intake'}</em>
+                        </article>
+                        <article>
                           <small>First dispenses</small>
                           <strong>{financeReady ? referralFeeFormatter.format(selectedFees?.firstAmount ?? 0) : '—'}</strong>
                           <em>{selectedFees?.firstCount ?? 0} × £50</em>
@@ -1755,6 +1799,7 @@ export default function AdminPortal() {
                         goLiveError={goLiveError}
                         goLiveBusy={goLiveBusy}
                         onFlipLive={() => void flipPharmacyLive(selectedPharmacy.id)}
+                        onReverted={status => dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedPharmacy.id, updates: { status } })}
                       />
                     </div>
                   ) : null}

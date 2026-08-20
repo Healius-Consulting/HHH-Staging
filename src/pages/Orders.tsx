@@ -638,7 +638,32 @@ export default function Orders() {
   };
 
   const handleQuoteReviewResolve = async (order: PatientOrder, action: 'absorb' | 'continue_as_fee' | 'refresh') => {
-    if (isLocalPortalPreview || state.workspaceMode !== 'live' || !order.backendId || quoteReviewBusyOrderId) return;
+    if (quoteReviewBusyOrderId) return;
+    const trainingLocal = isLocalPortalPreview || state.workspaceMode !== 'live' || !order.backendId;
+    if (trainingLocal) {
+      const review = order.quoteReview;
+      const delta = Math.abs(review?.patientDeltaPence ?? 0) / 100;
+      if (action === 'refresh') {
+        dispatch({ type: 'ADD_TOAST', message: `Quote still needs review for ${orderReference(order)}.`, toastType: 'warning' });
+        return;
+      }
+      dispatch({
+        type: 'SET_QUOTE_REVIEW',
+        orderId: order.id,
+        quoteReview: review
+          ? { ...review, status: 'approved', approvedAt: new Date().toISOString(), approvalNote: action === 'absorb' ? 'Pharmacy absorbed the difference.' : 'Price drop taken into the dispensing charge.' }
+          : undefined,
+        dispensingFee: action === 'continue_as_fee' ? order.dispensingFee + delta : order.dispensingFee,
+      });
+      dispatch({
+        type: 'ADD_TOAST',
+        message: action === 'absorb'
+          ? `Price change absorbed for ${orderReference(order)}. Placement will continue.`
+          : `Price drop recorded as dispensing fee for ${orderReference(order)}. Placement will continue.`,
+        toastType: 'success',
+      });
+      return;
+    }
     setQuoteReviewBusyOrderId(order.id);
     try {
       const result = await resolvePortalQuoteReview(order.backendId, {
@@ -1322,7 +1347,7 @@ function ReplacementLineage({ order, allOrders }: { order: PatientOrder; allOrde
   const { dispatch } = useApp();
 
   const childOrder = order.redoneByOrderId
-    ? allOrders.find(o => o.backendId === order.redoneByOrderId || o.redoContext?.originalBackendId === order.backendId)
+    ? allOrders.find(o => o.backendId === order.redoneByOrderId || String(o.id) === String(order.redoneByOrderId) || o.redoContext?.originalBackendId === order.backendId)
     : allOrders.find(o => o.redoContext?.originalOrderId === order.id);
 
   const parentOrder = order.redoContext

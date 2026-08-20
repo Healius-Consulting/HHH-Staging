@@ -711,8 +711,9 @@ export interface PharmacyOperationalStatus {
   intake: { live: boolean; label: 'Live' | 'Off' };
   workspace: { mode: 'training' | 'live' | 'paused'; label: 'Training' | 'Live' | 'Paused' };
   staff: { activeCount: number; invitedCount: number; passed: boolean; label: string };
-  curaleaf: { connected: boolean; label: 'Waiting' | 'Connected' };
+  curaleaf: { connected: boolean; production: boolean; label: 'Waiting' | 'Test' | 'Production' };
   payment: { route: 'manual' | 'worldpay'; worldpayConnected: boolean; passed: boolean; label: string };
+  intakeCall: { completed: boolean; label: 'Not logged' | 'Logged'; evidence: string | null };
   walkthrough: { completed: boolean; label: 'Not started' | 'Complete'; evidence: string | null };
   charges: { saved: boolean; label: 'Saved' | 'Missing'; evidence: string | null };
   premises: { confirmed: boolean };
@@ -982,6 +983,7 @@ export type SetupTaskId =
   | 'payment_route'
   | 'pricing'
   | 'notifications'
+  | 'intake_call'
   | 'operational_readiness';
 
 export interface PharmacySetupTask {
@@ -1292,9 +1294,30 @@ export interface PortalOrganisation {
   testAccount?: boolean;
   gdprExempt?: boolean;
   workspaceClassification?: 'standard' | 'training' | 'allocation_holding';
+  intakeEnabled?: boolean;
 }
 
 export const HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL = 'Holistic Health Hub Allocation';
+
+const TRAINING_DIRECTORY_PHARMACY_IDS = new Set([
+  '70913a3071c34a41952ed532927af58c', // Primary Branch / Primary Pharmacy
+  'f486a221223644a5b072f06de399ab0e', // Alternate Branch / Alternate Pharmacy
+]);
+const TRAINING_DIRECTORY_PHARMACY_NAMES = /^(primary|alternate)\s+(pharmacy|branch)$/i;
+
+export function isTrainingDirectoryPharmacy(organisation: {
+  id: string;
+  name?: string | null;
+  tradingName?: string | null;
+  testAccount?: boolean;
+  workspaceClassification?: string | null;
+}) {
+  if (organisation.workspaceClassification === 'training' || organisation.testAccount) return true;
+  if (TRAINING_DIRECTORY_PHARMACY_IDS.has(organisation.id.replaceAll('-', '').toLowerCase())) return true;
+  return [organisation.name, organisation.tradingName]
+    .map(value => String(value || '').trim())
+    .some(name => TRAINING_DIRECTORY_PHARMACY_NAMES.test(name));
+}
 
 export function workspaceClassificationLabel(classification?: string | null) {
   if (classification === 'allocation_holding') return HOLISTIC_HEALTH_HUB_ALLOCATION_LABEL;

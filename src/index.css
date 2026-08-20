@@ -2245,6 +2245,47 @@ td.font-semibold{
   font-size: 0.75rem;
 }
 
+.admin-golive-actions{
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-golive-actions li{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.admin-golive-actions li > div{
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-golive-actions strong{
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.admin-golive-actions span{
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.admin-golive-actions .btn{
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
 .admin-golive-panel__hint,
 .admin-golive-panel__empty{
   margin: 12px 0 0;
@@ -2260,6 +2301,13 @@ td.font-semibold{
   .admin-golive-panel__head .btn{
     width: 100%;
     min-height: 44px;
+  }
+  .admin-golive-actions li{
+    display: grid;
+    align-items: stretch;
+  }
+  .admin-golive-actions .btn{
+    width: 100%;
   }
 }
 
@@ -11451,7 +11499,7 @@ a.eligibility-brand__identity:focus-visible strong{ color: var(--green); }
 
 .admin-overview-crm__facts{
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
 

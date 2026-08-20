@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import type { IntegrationConnectionRecord } from '../../repositories/ports/integration.port.js';
 import type { OrganisationRecord, SetupTaskRecord } from '../../repositories/ports/organisation.port.js';
 import type { StaffUserRecord } from '../../repositories/ports/identity.port.js';
-import { buildGoLiveReadinessView, buildOperationalStatus, buildSetupStatusView } from './operational-readiness.js';
+import { buildGoLiveReadinessView, buildOperationalStatus, buildSetupStatusView, goLiveBlockedMessage } from './operational-readiness.js';
 
 const organisation: OrganisationRecord = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', companyId: null, name: 'Eligible Pharmacy',
@@ -20,7 +20,7 @@ const organisation: OrganisationRecord = {
 function task(taskCode: string, completed: boolean): SetupTaskRecord {
   return {
     id: taskCode, organisationId: organisation.id, taskCode, required: true, completed,
-    evidence: completed ? 'Recorded' : null, completedByUid: completed ? 'staff' : null,
+    evidence: completed ? 'Recorded by HHH' : null, completedByUid: completed ? 'staff' : null,
     completedAt: completed ? '2026-08-20T00:00:00.000Z' : null,
     createdAt: '2026-08-20T00:00:00.000Z', updatedAt: '2026-08-20T00:00:00.000Z',
   };
@@ -33,9 +33,13 @@ function staff(status: StaffUserRecord['status'], uid: string): StaffUserRecord 
   };
 }
 
-function connection(integration: 'CURALEAF' | 'WORLDPAY', status: IntegrationConnectionRecord['status']): IntegrationConnectionRecord {
+function connection(
+  integration: 'CURALEAF' | 'WORLDPAY',
+  status: IntegrationConnectionRecord['status'],
+  environment: IntegrationConnectionRecord['environment'] = 'PRODUCTION',
+): IntegrationConnectionRecord {
   return {
-    id: `${integration}-1`, organisationId: organisation.id, integration, environment: 'PRODUCTION',
+    id: `${integration}-1`, organisationId: organisation.id, integration, environment,
     status, secretResourceName: status === 'ACTIVE' ? 'secret' : null, externalCustomerId: 'PHAR1',
     maskedCredential: '••••1234', validatedAt: status === 'ACTIVE' ? '2026-08-20T00:00:00.000Z' : null,
     lastSuccessfulAt: null, lastErrorCode: null, version: 1, createdAt: '2026-08-20T00:00:00.000Z',
@@ -43,8 +47,12 @@ function connection(integration: 'CURALEAF' | 'WORLDPAY', status: IntegrationCon
   };
 }
 
+function loggedGoLiveTasks() {
+  return [task('intake_call', true), task('operational_readiness', true)];
+}
+
 describe('operational readiness', () => {
-  it('keeps intake live during training and lets HHH flip live without UAT task records', () => {
+  it('keeps intake live during training and blocks go-live until the three HHH gates pass', () => {
     const operational = buildOperationalStatus({
       organisation,
       tasks: [task('pharmacy_profile', true), task('payment_route', true), task('pricing', true)],
@@ -56,25 +64,25 @@ describe('operational readiness', () => {
     assert.equal(operational.workspace.mode, 'training');
     assert.equal(operational.curaleaf.label, 'Waiting');
     assert.equal(operational.payment.label, 'Pharmacy-managed');
-    assert.equal(operational.goLiveReady, true);
-    assert.equal(operational.missingGates.includes('curaleaf'), false);
-    assert.equal(operational.missingGates.includes('walkthrough'), false);
+    assert.equal(operational.goLiveReady, false);
+    assert.deepEqual(operational.missingGates, ['intake_call', 'walkthrough', 'curaleaf_production']);
   });
 
   it('blocks go-live while paused or classified as a training tenant', () => {
     const paused = buildOperationalStatus({
       organisation: { ...organisation, status: 'PAUSED' },
-      tasks: [],
+      tasks: loggedGoLiveTasks(),
       staff: [staff('ACTIVE', 'owner')],
       curaleaf: connection('CURALEAF', 'ACTIVE'),
       worldpay: null,
     });
     assert.equal(paused.goLiveReady, false);
     assert.ok(paused.missingGates.includes('paused'));
+    assert.equal(goLiveBlockedMessage(paused), 'Unpause this pharmacy before flipping the workspace to live.');
 
     const training = buildOperationalStatus({
       organisation: { ...organisation, classification: 'TRAINING' },
-      tasks: [],
+      tasks: loggedGoLiveTasks(),
       staff: [staff('ACTIVE', 'owner')],
       curaleaf: connection('CURALEAF', 'ACTIVE'),
       worldpay: null,
@@ -83,10 +91,10 @@ describe('operational readiness', () => {
     assert.ok(training.missingGates.includes('training_tenant'));
   });
 
-  it('treats Worldpay as incomplete until the merchant is connected', () => {
+  it('does not treat Worldpay as a go-live blocker', () => {
     const operational = buildOperationalStatus({
       organisation: { ...organisation, defaultPaymentRoute: 'WORLDPAY' },
-      tasks: [task('payment_route', true)],
+      tasks: [...loggedGoLiveTasks(), task('payment_route', true)],
       staff: [staff('ACTIVE', 'owner'), staff('ACTIVE', 'dispenser')],
       curaleaf: connection('CURALEAF', 'ACTIVE'),
       worldpay: connection('WORLDPAY', 'PENDING_VALIDATION'),
@@ -96,11 +104,31 @@ describe('operational readiness', () => {
     assert.equal(operational.goLiveReady, true);
   });
 
-  it('marks go-live ready from server-backed fields and derives Curaleaf from the connection', () => {
+  it('rejects a test Curaleaf connection as production', () => {
+    const operational = buildOperationalStatus({
+      organisation,
+      tasks: loggedGoLiveTasks(),
+      staff: [staff('ACTIVE', 'owner')],
+      curaleaf: connection('CURALEAF', 'ACTIVE', 'TEST'),
+      worldpay: null,
+    });
+    assert.equal(operational.curaleaf.connected, true);
+    assert.equal(operational.curaleaf.production, false);
+    assert.equal(operational.curaleaf.label, 'Test');
+    assert.equal(operational.goLiveReady, false);
+    assert.ok(operational.missingGates.includes('curaleaf_production'));
+    assert.equal(
+      goLiveBlockedMessage(operational),
+      'Activate Curaleaf production for this pharmacy before flipping the workspace live.',
+    );
+  });
+
+  it('marks go-live ready only after intake call, walkthrough, and Curaleaf production', () => {
     const tasks = [
       task('pharmacy_profile', true),
       task('payment_route', true),
       task('pricing', true),
+      task('intake_call', true),
       task('operational_readiness', true),
     ];
     const curaleaf = connection('CURALEAF', 'ACTIVE');
@@ -117,6 +145,7 @@ describe('operational readiness', () => {
     assert.equal(readiness.intakeReady, true);
     assert.equal(readiness.ready, true);
     assert.equal(readiness.status, 'onboarding');
+    assert.equal(readiness.gates.curaleafLive.passed, true);
     assert.equal(readiness.gates.curaleafLive.secretStored, true);
   });
 });

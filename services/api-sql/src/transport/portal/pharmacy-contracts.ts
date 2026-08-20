@@ -27,6 +27,12 @@ function lower(value: string) {
   return value.toLowerCase();
 }
 
+/** Workspace lifecycle shown to staff. Intake is a separate flag from day 0. */
+function portalAccountStatus(status: OrganisationRecord['status']) {
+  if (status === 'INTAKE_LIVE') return 'onboarding' as const;
+  return lower(status) as 'onboarding' | 'live' | 'paused';
+}
+
 function snapshotRecord(snapshot: unknown): Record<string, unknown> {
   return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
     ? snapshot as Record<string, unknown>
@@ -151,11 +157,12 @@ export function toPortalOrganisation(organisation: OrganisationRecord) {
     county: organisation.county ?? undefined,
     postcode: organisation.postcode ?? undefined,
     primaryColour: organisation.primaryColour,
-    status: lower(organisation.status),
+    status: portalAccountStatus(organisation.status),
     portalName: organisation.portalName,
     worldpayEnabled: organisation.worldpayEnabled,
     defaultPaymentRoute: lower(organisation.defaultPaymentRoute),
     autoPlacementEnabled: organisation.autoPlacementEnabled,
+    intakeEnabled: organisation.intakeEnabled,
     testAccount: organisation.classification === 'TRAINING',
     gdprExempt: !organisation.gdprComplianceFlag,
     workspaceClassification: lower(organisation.classification),
@@ -750,7 +757,7 @@ export function buildSqlPharmacyOverview(params: {
     organisation: {
       id: organisation.id,
       tradingName: organisation.tradingName,
-      status: lower(organisation.status),
+      status: portalAccountStatus(organisation.status),
       trainingMode: organisation.classification === 'TRAINING',
       allocationHoldingMode: organisation.classification === 'ALLOCATION_HOLDING',
     },

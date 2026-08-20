@@ -341,6 +341,7 @@ function supplierCancelled(order: PatientOrder) {
 export function orderCancellationResolution(order: PatientOrder): CancellationResolution {
   if (!order.cancellation && order.lifecycleStatus !== 'cancelled' && !supplierCancelled(order)) return 'none';
   if (orderRequiresCuraleafCancel(order)) return 'needs-action';
+  if (order.redoneByOrderId) return order.refund?.status === 'completed' ? 'refunded' : 'resolved';
   if (order.refund?.status === 'completed') return 'refunded';
 
   const supplierActionOutstanding = ['contact_required', 'awaiting_confirmation'].includes(order.curaleafCancellation?.status ?? '')
