@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   Building2,
+  CheckCircle2,
   ClipboardCheck,
   Copy,
   Download,
@@ -51,6 +53,7 @@ import CommandPalette, { type CommandDefinition } from '../components/CommandPal
 import SummaryTiles from '../components/SummaryTiles';
 import CompactPatientCell from '../components/CompactPatientCell';
 import { formatPatientDob } from '../utils/patientDob';
+import { compactPatientName } from '../utils/patientName';
 import ConditionList from '../components/ConditionList';
 import { EMAIL_LOGO_SPEC, normalisePharmacyLogo } from '../utils/pharmacyLogo';
 import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeEligibilityStatus, pharmacyDecisionReason } from '../utils/eligibilityPresentation';
@@ -134,6 +137,48 @@ function londonDateKey(value: Date | string | null) {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
+function registerPatientKey(patient: { organisationId: string; email: string }) {
+  return `${patient.organisationId}:${patient.email.trim().toLowerCase()}`;
+}
+
+function stageTone(status: string) {
+  if (status === 'Approved' || status === 'HHH approved') return 'paid';
+  if (status === 'Declined' || status === 'Rejected' || status === 'Suspended') return 'danger';
+  if (status === 'Under HHH review') return 'warning';
+  return 'info';
+}
+
+function patientInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'P';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts.at(-1)![0]}`.toUpperCase();
+}
+
+function londonDayLabel(value: Date) {
+  return value.toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
+}
+
+function patientOrderActivity(
+  orders: { organisationId: string; patientId: string | null; date: Date | string; payment: { status: string } }[],
+  organisationId: string,
+  patientId: string | null | undefined,
+) {
+  if (!patientId) return { count: 0, dates: [] as Date[] };
+  const placed = orders.filter(order => (
+    order.organisationId === organisationId
+    && order.patientId === patientId
+    && order.payment.status !== 'none'
+    && order.payment.status !== 'cancelled'
+  ));
+  const dates = placed
+    .map(order => (order.date instanceof Date ? order.date : new Date(order.date)))
+    .filter(date => !Number.isNaN(date.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime());
+  const uniqueDays = [...new Set(dates.map(londonDayLabel))];
+  return { count: placed.length, dates, uniqueDays };
+}
+
 function csvCell(value: unknown) {
   const raw = String(value ?? '');
   const text = /^[\t\r ]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
@@ -150,7 +195,7 @@ function AdminHeader({ view, setView, pending = 0, readiness = 0 }: { view: Admi
   const staffName = state.staffSession?.name || 'HHH Administrator';
   const groups: WorkspaceNavGroup<AdminView>[] = [
     { label: 'Administration', items: [
-      { key: 'overview', label: 'Pharmacies', icon: <LayoutDashboard size={17} /> },
+      { key: 'overview', label: 'Overview', icon: <LayoutDashboard size={17} /> },
       { key: 'referrals', label: 'Patient intake', icon: <UserCheck size={17} />, count: pending },
       { key: 'patients', label: 'Patients', icon: <Users size={17} /> },
       { key: 'finance', label: 'Finance', icon: <PoundSterling size={17} /> },
@@ -222,30 +267,70 @@ function OnboardPharmacy({ onClose, onCreated }: { onClose: () => void; onCreate
   return (
     <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
       <aside ref={onboardingDialogRef} className="drawer admin-onboarding-drawer" role="dialog" aria-modal="true" aria-labelledby="onboard-title" tabIndex={-1}>
-        <div className="drawer-header"><div><p className="section-label">New pharmacy</p><h2 id="onboard-title">Onboard a pharmacy</h2></div><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
-        <form className="drawer-body onboarding-form" onSubmit={submit}>
-          <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Legal and GPhC identity used for compliance evidence.</small></div></div>
-          <label>Registered pharmacy name<input className="input" value={name} onChange={event => setName(event.target.value)} required /></label>
-          <label>Company name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
-          <div className="form-grid-two"><label>GPhC number<input className="input" value={gphcNumber} onChange={event => setGphcNumber(event.target.value)} required /></label><label>Superintendent pharmacist<input className="input" value={superintendent} onChange={event => setSuperintendent(event.target.value)} required /></label></div>
-          <label>Company registration number<input className="input" value={companyNumber} onChange={event => setCompanyNumber(event.target.value)} required /></label>
-          <div className="form-section-heading onboarding-address-heading"><span>02</span><div><strong>Registered address</strong><small>Stored in a consistent, matchable format for the public eligibility journey.</small></div></div>
-          <div className="onboarding-address-grid">
-            <label>Address line 1<input className="input" value={addressLine1} onChange={event => setAddressLine1(event.target.value)} autoComplete="address-line1" required /></label>
-            <label>Address line 2<input className="input" value={addressLine2} onChange={event => setAddressLine2(event.target.value)} autoComplete="address-line2" /></label>
-            <label>Town or city<input className="input" value={addressLocality} onChange={event => setAddressLocality(event.target.value)} autoComplete="address-level2" required /></label>
-            <label>Postcode<input className="input" value={addressPostcode} onChange={event => setAddressPostcode(event.target.value.toUpperCase())} autoComplete="postal-code" required /></label>
+        <div className="drawer-header">
+          <div>
+            <p className="section-label">HHH operations</p>
+            <h2 id="onboard-title">Onboard a pharmacy</h2>
           </div>
-          <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
-          <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
-          <label>Approved website domain<input className="input" type="text" value={domain} onChange={event => setDomain(event.target.value)} placeholder="pharmacy.cc" /></label>
+          <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+        <form className="admin-onboard-form" onSubmit={submit}>
+          <div className="drawer-body onboarding-form">
+            <section className="admin-onboard-section">
+              <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Legal and GPhC identity used for compliance evidence.</small></div></div>
+              <label>Registered pharmacy name<input className="input" value={name} onChange={event => setName(event.target.value)} required /></label>
+              <label>Company name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
+              <div className="form-grid-two"><label>GPhC number<input className="input" value={gphcNumber} onChange={event => setGphcNumber(event.target.value)} required /></label><label>Superintendent pharmacist<input className="input" value={superintendent} onChange={event => setSuperintendent(event.target.value)} required /></label></div>
+              <label>Company registration number<input className="input" value={companyNumber} onChange={event => setCompanyNumber(event.target.value)} required /></label>
+            </section>
 
-          <div className="form-section-heading"><span>03</span><div><strong>Workspace identity</strong><small>The colour is applied consistently across that pharmacy’s workspace.</small></div></div>
-          <div className="brand-colour-field"><input type="color" value={primary} onChange={event => setPrimary(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primary.toUpperCase()} · secondary generated automatically</small></div><div className="onboarding-palette"><i style={{ background: onboardingTheme.primary }} /><i style={{ background: onboardingTheme.secondary }} /><i style={{ background: onboardingTheme.primarySoft }} /></div><div className="brand-preview-button" style={{ background: onboardingTheme.primary, color: onboardingTheme.onPrimary }}>Action</div></div>
+            <section className="admin-onboard-section">
+              <div className="form-section-heading onboarding-address-heading"><span>02</span><div><strong>Registered address</strong><small>Stored in a consistent, matchable format for the public eligibility journey.</small></div></div>
+              <div className="onboarding-address-grid">
+                <label>Address line 1<input className="input" value={addressLine1} onChange={event => setAddressLine1(event.target.value)} autoComplete="address-line1" required /></label>
+                <label>Address line 2<input className="input" value={addressLine2} onChange={event => setAddressLine2(event.target.value)} autoComplete="address-line2" /></label>
+                <label>Town or city<input className="input" value={addressLocality} onChange={event => setAddressLocality(event.target.value)} autoComplete="address-level2" required /></label>
+                <label>Postcode<input className="input" value={addressPostcode} onChange={event => setAddressPostcode(event.target.value.toUpperCase())} autoComplete="postal-code" required /></label>
+              </div>
+              <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
+              <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
+              <label>Approved website domain<input className="input" type="text" value={domain} onChange={event => setDomain(event.target.value)} placeholder="pharmacy.cc" /></label>
+            </section>
 
-          <div className="onboarding-callout"><ShieldCheck size={17} /><span>The pharmacy starts in onboarding status. Its six setup steps must be completed before live processing begins.</span></div>
-          {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
-          <div className="drawer-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={busy}><Plus size={14} /> {busy ? 'Creating securely…' : 'Create onboarding record'}</button></div>
+            <section className="admin-onboard-section">
+              <div className="form-section-heading"><span>03</span><div><strong>Pharmacy workspace colour</strong><small>Used only in that pharmacy’s staff portal. HHH admin keeps the Holistic Health Hub palette.</small></div></div>
+              <div className="admin-workspace-preview">
+                <div className="brand-colour-field">
+                  <input type="color" value={primary} onChange={event => setPrimary(event.target.value)} aria-label="Pharmacy workspace primary colour" />
+                  <div>
+                    <strong>Primary brand colour</strong>
+                    <small>{primary.toUpperCase()} · secondary generated for their workspace</small>
+                  </div>
+                  <div className="onboarding-palette" aria-hidden="true">
+                    <i style={{ background: onboardingTheme.primary }} />
+                    <i style={{ background: onboardingTheme.secondary }} />
+                    <i style={{ background: onboardingTheme.primarySoft }} />
+                  </div>
+                </div>
+                <div className="tenant-brand-preview" aria-hidden="true" style={{ borderTopColor: onboardingTheme.primary, background: onboardingTheme.surfaceTint }}>
+                  <div className="tenant-mark" style={brandSwatchStyle(primary)}>{(tradingName || name).split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'PH'}</div>
+                  <span>
+                    <strong>{tradingName || name || 'Pharmacy workspace'}</strong>
+                    <small>Preview of their staff portal only</small>
+                  </span>
+                  <span className="brand-preview-button" style={{ background: onboardingTheme.primary, color: onboardingTheme.onPrimary }}>Primary action</span>
+                  <span className="preview-secondary" style={{ background: onboardingTheme.secondary, color: onboardingTheme.onSecondary }}>Secondary</span>
+                </div>
+              </div>
+            </section>
+
+            <div className="onboarding-callout"><ShieldCheck size={17} /><span>The pharmacy starts in onboarding status. Its six setup steps must be completed before live processing begins.</span></div>
+            {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
+          </div>
+          <div className="drawer-actions">
+            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={busy}><Plus size={14} /> {busy ? 'Creating securely…' : 'Create onboarding record'}</button>
+          </div>
         </form>
       </aside>
     </div>
@@ -349,45 +434,82 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
   return (
     <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
       <aside ref={editDialogRef} className="drawer admin-onboarding-drawer" role="dialog" aria-modal="true" aria-labelledby="edit-pharmacy-title" tabIndex={-1}>
-        <div className="drawer-header"><div><p className="section-label">HHH administrator</p><h2 id="edit-pharmacy-title">Edit pharmacy details</h2></div><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
-        <form className="drawer-body onboarding-form" onSubmit={submit}>
-          <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Corrections are saved to Firebase and added to the audit trail.</small></div></div>
-          <label>Registered pharmacy name<input className="input" value={name} onChange={event => setName(event.target.value)} required /></label>
-          <label>Company name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
-          <div className="form-grid-two"><label>GPhC number<input className="input" value={gphcNumber} onChange={event => setGphcNumber(event.target.value)} required /></label><label>Superintendent pharmacist<input className="input" value={superintendent} onChange={event => setSuperintendent(event.target.value)} required /></label></div>
-          <label>Company registration number<input className="input" value={companyNumber} onChange={event => setCompanyNumber(event.target.value)} required /></label>
-          <label>Registered office address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
-          <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
-          <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
-          <label>Approved website domains<textarea className="input" value={domains} onChange={event => setDomains(event.target.value)} placeholder={'pharmacy.cc\nanother-domain.cc'} /><small>Enter one domain per line. Protocols and page paths are removed automatically.</small></label>
-          <div className="form-grid-two"><label>Account status<select className="input" value={status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option>{status === 'intake_live' && <option value="intake_live">Intake live</option>}{status === 'live' && <option value="live">Live</option>}<option value="paused">Paused</option></select><small>Use the audited readiness controls to enable intake or full live access.</small></label></div>
+        <div className="drawer-header">
+          <div>
+            <p className="section-label">HHH administrator</p>
+            <h2 id="edit-pharmacy-title">Edit pharmacy details</h2>
+          </div>
+          <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+        <form className="admin-onboard-form" onSubmit={submit}>
+          <div className="drawer-body onboarding-form">
+            <section className="admin-onboard-section">
+              <div className="form-section-heading"><span>01</span><div><strong>Registered organisation</strong><small>Corrections are saved to Firebase and added to the audit trail.</small></div></div>
+              <label>Registered pharmacy name<input className="input" value={name} onChange={event => setName(event.target.value)} required /></label>
+              <label>Company name<input className="input" value={tradingName} onChange={event => setTradingName(event.target.value)} required /></label>
+              <div className="form-grid-two"><label>GPhC number<input className="input" value={gphcNumber} onChange={event => setGphcNumber(event.target.value)} required /></label><label>Superintendent pharmacist<input className="input" value={superintendent} onChange={event => setSuperintendent(event.target.value)} required /></label></div>
+              <label>Company registration number<input className="input" value={companyNumber} onChange={event => setCompanyNumber(event.target.value)} required /></label>
+              <label>Registered office address<textarea className="input" value={address} onChange={event => setAddress(event.target.value)} required /></label>
+              <div className="form-grid-two"><label>Main contact name<input className="input" value={mainContactName} onChange={event => setMainContactName(event.target.value)} required /></label><label>Main contact number<input className="input" type="tel" value={mainContactPhone} onChange={event => setMainContactPhone(event.target.value)} required /></label></div>
+              <label>Main contact email<input className="input" type="email" value={mainContactEmail} onChange={event => setMainContactEmail(event.target.value)} required /></label>
+              <label>Approved website domains<textarea className="input" value={domains} onChange={event => setDomains(event.target.value)} placeholder={'pharmacy.cc\nanother-domain.cc'} /><small>Enter one domain per line. Protocols and page paths are removed automatically.</small></label>
+              <div className="form-grid-two"><label>Account status<select className="input" value={status} onChange={event => setStatus(event.target.value as PharmacyTenant['status'])}><option value="onboarding">Onboarding</option>{status === 'intake_live' && <option value="intake_live">Intake live</option>}{status === 'live' && <option value="live">Live</option>}<option value="paused">Paused</option></select><small>Use the audited readiness controls to enable intake or full live access.</small></label></div>
+            </section>
 
-          <div className="form-section-heading"><span>02</span><div><strong>Brand Customisation</strong><small>The portal name follows the pharmacy name automatically.</small></div></div>
-          <label>Pharmacy name<input className="input" value={name} readOnly /><small>Also used as the portal name.</small></label>
-          <section className="pharmacy-logo-editor" aria-labelledby="pharmacy-logo-heading">
-            <div className={`pharmacy-logo-preview${logoPreviewUrl ? ' has-image' : ''}`}>
-              {logoPreviewUrl
-                ? <img src={logoPreviewUrl} alt={`${name} email logo preview`} />
-                : <span aria-hidden="true">{logoText}</span>}
-            </div>
-            <div className="pharmacy-logo-editor__copy">
-              <small>Email identity</small>
-              <strong id="pharmacy-logo-heading">Pharmacy logo</strong>
-              <p>PNG, JPEG or WebP. It is automatically centred on a transparent {EMAIL_LOGO_SPEC.assetWidth} × {EMAIL_LOGO_SPEC.assetHeight}px canvas for a consistent {EMAIL_LOGO_SPEC.displayWidth} × {EMAIL_LOGO_SPEC.displayHeight}px email header.</p>
-              <div className="pharmacy-logo-editor__actions">
-                <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={selectLogo} hidden />
-                <button className="btn" type="button" onClick={() => logoInputRef.current?.click()} disabled={busy}><ImagePlus size={14} /> {logoPreviewUrl ? 'Replace logo' : 'Choose logo'}</button>
-                {logoPreviewUrl && <button className="btn btn-danger" type="button" onClick={clearLogo} disabled={busy}><Trash2 size={14} /> Remove</button>}
+            <section className="admin-onboard-section">
+              <div className="form-section-heading"><span>02</span><div><strong>Pharmacy workspace identity</strong><small>Logo and colour apply to their staff portal only. HHH admin does not change colour.</small></div></div>
+              <label>Pharmacy name<input className="input" value={name} readOnly /><small>Also used as the portal name.</small></label>
+              <section className="pharmacy-logo-editor" aria-labelledby="pharmacy-logo-heading">
+                <div className={`pharmacy-logo-preview${logoPreviewUrl ? ' has-image' : ''}`}>
+                  {logoPreviewUrl
+                    ? <img src={logoPreviewUrl} alt={`${name} email logo preview`} />
+                    : <span aria-hidden="true">{logoText}</span>}
+                </div>
+                <div className="pharmacy-logo-editor__copy">
+                  <small>Email identity</small>
+                  <strong id="pharmacy-logo-heading">Pharmacy logo</strong>
+                  <p>PNG, JPEG or WebP. It is automatically centred on a transparent {EMAIL_LOGO_SPEC.assetWidth} × {EMAIL_LOGO_SPEC.assetHeight}px canvas for a consistent {EMAIL_LOGO_SPEC.displayWidth} × {EMAIL_LOGO_SPEC.displayHeight}px email header.</p>
+                  <div className="pharmacy-logo-editor__actions">
+                    <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={selectLogo} hidden />
+                    <button className="btn" type="button" onClick={() => logoInputRef.current?.click()} disabled={busy}><ImagePlus size={14} /> {logoPreviewUrl ? 'Replace logo' : 'Choose logo'}</button>
+                    {logoPreviewUrl && <button className="btn btn-danger" type="button" onClick={clearLogo} disabled={busy}><Trash2 size={14} /> Remove</button>}
+                  </div>
+                  {pendingLogo && <em>{pendingLogo.name} · ready to save</em>}
+                  {removeLogo && <em>Logo will be removed when changes are saved.</em>}
+                </div>
+              </section>
+              <div className="admin-workspace-preview">
+                <div className="brand-colour-field">
+                  <input type="color" value={primaryColour} onChange={event => setPrimaryColour(event.target.value)} aria-label="Pharmacy workspace primary colour" />
+                  <div>
+                    <strong>Primary brand colour</strong>
+                    <small>{primaryColour.toUpperCase()} · accessible palette generated for their workspace</small>
+                  </div>
+                  <div className="onboarding-palette" aria-hidden="true">
+                    <i style={{ background: editTheme.primary }} />
+                    <i style={{ background: editTheme.secondary }} />
+                    <i style={{ background: editTheme.primarySoft }} />
+                  </div>
+                </div>
+                <div className="tenant-brand-preview" aria-hidden="true" style={{ borderTopColor: editTheme.primary, background: editTheme.surfaceTint }}>
+                  <div className="tenant-mark" style={brandSwatchStyle(primaryColour)}>{logoText}</div>
+                  <span>
+                    <strong>{name || 'Pharmacy workspace'}</strong>
+                    <small>Preview of their staff portal only</small>
+                  </span>
+                  <span className="brand-preview-button" style={{ background: editTheme.primary, color: editTheme.onPrimary }}>Primary action</span>
+                  <span className="preview-secondary" style={{ background: editTheme.secondary, color: editTheme.onSecondary }}>Secondary</span>
+                </div>
               </div>
-              {pendingLogo && <em>{pendingLogo.name} · ready to save</em>}
-              {removeLogo && <em>Logo will be removed when changes are saved.</em>}
-            </div>
-          </section>
-          <div className="brand-colour-field"><input type="color" value={primaryColour} onChange={event => setPrimaryColour(event.target.value)} /><div><strong>Primary brand colour</strong><small>{primaryColour.toUpperCase()} · accessible palette generated automatically</small></div><div className="onboarding-palette"><i style={{ background: editTheme.primary }} /><i style={{ background: editTheme.secondary }} /><i style={{ background: editTheme.primarySoft }} /></div></div>
+            </section>
 
-          <div className="setup-security-note"><ShieldCheck size={16} /><span>Curaleaf customer IDs and integration credentials are not changed here. Use the secure Integrations workflow to update those values.</span></div>
-          {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
-          <div className="drawer-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="submit" className="btn btn-primary" disabled={busy}><Pencil size={14} /> {busy ? 'Saving securely…' : 'Save all changes'}</button></div>
+            <div className="setup-security-note"><ShieldCheck size={16} /><span>Curaleaf customer IDs and integration credentials are not changed here. Use the secure Integrations workflow to update those values.</span></div>
+            {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
+          </div>
+          <div className="drawer-actions">
+            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={busy}><Pencil size={14} /> {busy ? 'Saving securely…' : 'Save all changes'}</button>
+          </div>
         </form>
       </aside>
     </div>
@@ -681,12 +803,14 @@ export default function AdminPortal() {
   const [serverPatientRegister, setServerPatientRegister] = useState<PatientRegisterExportResult | null>(null);
   const [patientRegisterLoading, setPatientRegisterLoading] = useState(false);
   const [selectedRegisterPatient, setSelectedRegisterPatient] = useState<PatientRegisterExportRow | null>(null);
+  const [pendingRegisterKey, setPendingRegisterKey] = useState<string | null>(null);
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(organisationIdFromPath);
   const [referralLink, setReferralLink] = useState('');
   const [referralLinkLoading, setReferralLinkLoading] = useState(false);
   const [referralLinkError, setReferralLinkError] = useState<string | null>(null);
   const [referralLinkRefresh, setReferralLinkRefresh] = useState(0);
-  const [directoryMode, setDirectoryMode] = useState<'flat' | 'by-company'>('flat');
+  const [overviewPharmacyId, setOverviewPharmacyId] = useState<string | null>(null);
+  const [overviewFilter, setOverviewFilter] = useState<'all' | 'live' | 'setup'>('all');
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
@@ -978,18 +1102,21 @@ export default function AdminPortal() {
   }, [state.crm, state.organisations, state.submissions]);
 
   useEffect(() => {
-    if (view !== 'finance' || isLocalPortalPreview) {
+    if (isLocalPortalPreview) {
       setAdminFinanceError(null);
       setAdminFinanceLoading(false);
+      return;
+    }
+    if (view !== 'finance' && view !== 'overview' && view !== 'patients') {
       return;
     }
     let cancelled = false;
     setAdminFinanceLoading(true);
     setAdminFinanceError(null);
-    const range = referralFinanceDateRange(financePeriod, financeMonth, financeYear);
+    const range = view === 'finance' ? referralFinanceDateRange(financePeriod, financeMonth, financeYear) : {};
     void getAdminReferralFinance({
       ...range,
-      organisationId: financeOrganisationId === 'all' ? undefined : financeOrganisationId,
+      organisationId: view === 'overview' || view === 'patients' || financeOrganisationId === 'all' ? undefined : financeOrganisationId,
     })
       .then(report => {
         if (!cancelled) setAdminFinanceReport(report);
@@ -1027,30 +1154,68 @@ export default function AdminPortal() {
     }).sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
   }, [adminFinanceReport, previewReferralFeeEvents, state.crm]);
 
-  const financePatients = useMemo(() => {
-    const patients = new Map<string, { key: string; name: string; email: string }>();
-    referralFeeEvents
-      .filter(event => financeOrganisationId === 'all' || event.organisationId === financeOrganisationId)
-      .forEach(event => patients.set(event.patientKey, { key: event.patientKey, name: event.patientName, email: event.patientEmail }));
-    return [...patients.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [financeOrganisationId, referralFeeEvents]);
-
   const filteredReferralFeeEvents = useMemo(() => referralFeeEvents.filter(event => {
     if (financeOrganisationId !== 'all' && event.organisationId !== financeOrganisationId) return false;
-    if (financePatientKey !== 'all' && event.patientKey !== financePatientKey) return false;
     if (financePeriod === 'month') {
       const eventMonth = `${event.occurredAt.getFullYear()}-${String(event.occurredAt.getMonth() + 1).padStart(2, '0')}`;
       return eventMonth === financeMonth;
     }
     if (financePeriod === 'year') return String(event.occurredAt.getFullYear()) === financeYear;
     return true;
-  }), [financeMonth, financeOrganisationId, financePatientKey, financePeriod, financeYear, referralFeeEvents]);
+  }), [financeMonth, financeOrganisationId, financePeriod, financeYear, referralFeeEvents]);
+
+  const financePatients = useMemo(() => {
+    const patients = new Map<string, { key: string; name: string; email: string; organisationId: string; pharmacyName: string; total: number }>();
+    filteredReferralFeeEvents.forEach(event => {
+      const current = patients.get(event.patientKey) ?? {
+        key: event.patientKey,
+        name: event.patientName,
+        email: event.patientEmail,
+        organisationId: event.organisationId,
+        pharmacyName: event.pharmacyName,
+        total: 0,
+      };
+      current.total += event.amount;
+      patients.set(event.patientKey, current);
+    });
+    return [...patients.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  }, [filteredReferralFeeEvents]);
+
+  const visibleFinancePatients = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return financePatients;
+    return financePatients.filter(patient => `${patient.name} ${patient.email} ${patient.pharmacyName}`.toLowerCase().includes(term));
+  }, [financePatients, query]);
+
+  const feesByOrganisation = useMemo(() => {
+    const positions = new Map<string, { total: number; firstAmount: number; annualAmount: number; firstCount: number; annualCount: number; patients: number }>();
+    const patients = new Map<string, Set<string>>();
+    for (const event of referralFeeEvents) {
+      const current = positions.get(event.organisationId) ?? { total: 0, firstAmount: 0, annualAmount: 0, firstCount: 0, annualCount: 0, patients: 0 };
+      current.total += event.amount;
+      if (event.kind === 'new-referral') {
+        current.firstAmount += event.amount;
+        current.firstCount += 1;
+      } else {
+        current.annualAmount += event.amount;
+        current.annualCount += 1;
+      }
+      positions.set(event.organisationId, current);
+      const keys = patients.get(event.organisationId) ?? new Set<string>();
+      keys.add(event.patientKey);
+      patients.set(event.organisationId, keys);
+    }
+    for (const [organisationId, position] of positions) {
+      position.patients = patients.get(organisationId)?.size ?? 0;
+    }
+    return positions;
+  }, [referralFeeEvents]);
 
   useEffect(() => {
-    if (financePatientKey !== 'all' && !financePatients.some(patient => patient.key === financePatientKey)) {
-      setFinancePatientKey('all');
-    }
-  }, [financePatientKey, financePatients]);
+    if (view !== 'finance') return;
+    if (financePatientKey !== 'all' && visibleFinancePatients.some(patient => patient.key === financePatientKey)) return;
+    setFinancePatientKey(visibleFinancePatients[0]?.key ?? 'all');
+  }, [financePatientKey, visibleFinancePatients, view]);
 
   useEffect(() => {
     if (isLocalPortalPreview || view !== 'patients') {
@@ -1078,9 +1243,8 @@ export default function AdminPortal() {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [patientFrom, patientOrganisationId, patientStatus, patientTo, query, view]);
 
-  const filteredOrganisations = state.organisations.filter(org => `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase()));
   const patientStatuses = [...new Set(allPatients.map(patient => patient.stage))].sort((a, b) => onboardingStatusLabel(a).localeCompare(onboardingStatusLabel(b)));
-  const filteredPatients = allPatients.filter(patient => {
+  const filteredPatients = useMemo(() => allPatients.filter(patient => {
     const org = state.organisations.find(item => item.id === patient.organisationId);
     const searchMatches = `${patient.name} ${patient.email} ${patient.mobile} ${patient.dob} ${formatPatientDob(patient.dob)} ${org?.name ?? ''} ${org?.tradingName ?? ''}`.toLowerCase().includes(query.trim().toLowerCase());
     if (!searchMatches) return false;
@@ -1090,8 +1254,48 @@ export default function AdminPortal() {
     if (patientFrom && (!date || date < patientFrom)) return false;
     if (patientTo && (!date || date > patientTo)) return false;
     return true;
-  });
-  const displayedPatients = isLocalPortalPreview ? filteredPatients : serverPatientRegister?.rows ?? [];
+  }), [allPatients, patientFrom, patientOrganisationId, patientStatus, patientTo, query, state.organisations]);
+  const displayedPatients = useMemo(
+    () => (isLocalPortalPreview ? filteredPatients : serverPatientRegister?.rows ?? []),
+    [filteredPatients, serverPatientRegister],
+  );
+
+  const toRegisterRow = useCallback((patient: typeof displayedPatients[number]): PatientRegisterExportRow => {
+    const organisation = state.organisations.find(item => item.id === patient.organisationId);
+    const pharmacyName = 'pharmacyName' in patient ? patient.pharmacyName : organisation?.tradingName;
+    const gphcNumber = 'gphcNumber' in patient ? patient.gphcNumber : organisation?.gphcNumber;
+    return {
+      id: patient.id,
+      name: patient.name,
+      email: patient.email,
+      mobile: patient.mobile,
+      dob: patient.dob,
+      organisationId: patient.organisationId,
+      pharmacyName: pharmacyName ?? 'Unknown pharmacy',
+      gphcNumber: gphcNumber ?? '',
+      stage: patient.stage,
+      date: patient.date ? (typeof patient.date === 'string' ? patient.date : new Date(patient.date).toISOString()) : null,
+    };
+  }, [state.organisations]);
+
+  useEffect(() => {
+    if (view !== 'patients') return;
+    if (pendingRegisterKey) {
+      const pending = displayedPatients.find(patient => registerPatientKey(patient) === pendingRegisterKey);
+      if (pending) {
+        setSelectedRegisterPatient(toRegisterRow(pending));
+        setPendingRegisterKey(null);
+        return;
+      }
+      if (patientRegisterLoading) return;
+      setPendingRegisterKey(null);
+    }
+    if (selectedRegisterPatient && displayedPatients.some(patient => registerPatientKey(patient) === registerPatientKey(selectedRegisterPatient))) {
+      return;
+    }
+    const first = displayedPatients[0];
+    setSelectedRegisterPatient(first ? toRegisterRow(first) : null);
+  }, [displayedPatients, patientRegisterLoading, pendingRegisterKey, selectedRegisterPatient, toRegisterRow, view]);
 
   const exportPatients = async () => {
     setPatientExportBusy(true);
@@ -1168,8 +1372,23 @@ export default function AdminPortal() {
     return { ready, total, percent: total ? Math.round(ready / total * 100) : 0 };
   };
 
+  const overviewPharmacies = state.organisations.filter(org => {
+    const matchesQuery = `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase());
+    if (!matchesQuery) return false;
+    if (overviewFilter === 'live') return org.status === 'live' || org.status === 'intake_live';
+    if (overviewFilter === 'setup') return tenantReadiness(org.id).ready < tenantReadiness(org.id).total;
+    return true;
+  });
+
+  useEffect(() => {
+    if (view !== 'overview') return;
+    if (overviewPharmacyId && overviewPharmacies.some(organisation => organisation.id === overviewPharmacyId)) return;
+    setOverviewPharmacyId(overviewPharmacies[0]?.id ?? null);
+  }, [overviewPharmacies, overviewPharmacyId, view]);
+
   const statusLabel = (status: PharmacyTenant['status']) => status.replace('_', ' ');
   const statusPill = (status: PharmacyTenant['status']) => status === 'live' ? 'pill-green' : status === 'intake_live' ? 'pill-info' : status === 'paused' ? 'pill-red' : 'pill-amber';
+  const pharmacyTone = (status: PharmacyTenant['status']) => status === 'live' ? 'paid' : status === 'intake_live' ? 'info' : status === 'paused' ? 'danger' : 'warning';
   useEffect(() => {
     if (!showCuraleafDrawer || !curaleafOrganisationId) return;
     let cancelled = false;
@@ -1256,7 +1475,7 @@ export default function AdminPortal() {
                     <label>Automatic secondary<span className="derived-colour"><i style={{ background: tenantTheme.secondary }} /><code>{tenantTheme.secondary}</code><small>Derived from primary</small></span></label>
                   </div>
                   <div className="generated-palette" aria-label="Automatically generated pharmacy palette"><span style={{ background: tenantTheme.primary }} title="Primary" /><span style={{ background: tenantTheme.secondary }} title="Secondary" /><span style={{ background: tenantTheme.primaryMuted }} title="Muted brand" /><span style={{ background: tenantTheme.primarySoft }} title="Soft surface" /><span style={{ background: tenantTheme.sidebar }} title="Navigation" /></div>
-                  <p className="theme-help">Secondary, soft surfaces, navigation and readable text colours update automatically. Success, warning and error colours remain consistent across every pharmacy.</p>
+                  <p className="theme-help">This palette is applied in the pharmacy staff portal only. HHH admin keeps the Holistic Health Hub forest, cream and rust colours while you scroll this account.</p>
                   <div className="tenant-brand-preview" style={{ borderTopColor: tenantTheme.primary, background: tenantTheme.surfaceTint }}><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><span><strong>{selectedOrganisation.brand.portalName}</strong><small>Patient and pharmacy workspace preview</small></span><button style={{ background: tenantTheme.primary, color: tenantTheme.onPrimary }}>Primary action</button><button className="preview-secondary" style={{ background: tenantTheme.secondary, color: tenantTheme.onSecondary }}>Secondary</button></div>
                 </section>
               </div>
@@ -1299,142 +1518,209 @@ export default function AdminPortal() {
     );
   }
 
-  const renderOverview = () => (
-    <>
-      <div className="admin-page-actions">
-        <button className="btn btn-primary" onClick={() => setShowOnboarding(true)}><Plus size={15} /> Onboard pharmacy</button>
-      </div>
-      <SummaryTiles className="admin-overview-summary" label="Portfolio summary" items={[
-        { label: 'Portfolio', value: state.organisations.length, detail: 'pharmacies' },
-        { label: 'Operating', value: liveCount, detail: `${intakeLiveCount} intake-only · ${liveCount} fully live` },
-        { label: 'Patient reach', value: allPatients.length, detail: 'attributed records' },
-        { label: 'Readiness', value: remainingSetupSteps, detail: 'steps outstanding' },
-      ]} />
+  const renderOverview = () => {
+    const portfolioAccrued = referralFeeEvents.reduce((total, event) => total + event.amount, 0);
+    const firstDispenseCount = referralFeeEvents.filter(event => event.kind === 'new-referral').length;
+    const financeReady = isLocalPortalPreview || Boolean(adminFinanceReport) || !adminFinanceLoading;
+    const selectedPharmacy = state.organisations.find(organisation => organisation.id === overviewPharmacyId) ?? null;
+    const selectedFees = selectedPharmacy ? feesByOrganisation.get(selectedPharmacy.id) : null;
+    const selectedPatients = selectedPharmacy ? new Set([
+      ...(crmByOrganisation.get(selectedPharmacy.id) ?? []).map(patient => patient.email),
+      ...(submissionsByOrganisation.get(selectedPharmacy.id) ?? []).map(submission => submission.email),
+    ]).size : 0;
+    const selectedReadiness = selectedPharmacy ? tenantReadiness(selectedPharmacy.id) : null;
+    const selectedGoLive = selectedPharmacy ? goLiveByOrganisation[selectedPharmacy.id] : null;
+    const liveFilterCount = state.organisations.filter(organisation => organisation.status === 'live' || organisation.status === 'intake_live').length;
+    const setupFilterCount = state.organisations.filter(organisation => tenantReadiness(organisation.id).ready < tenantReadiness(organisation.id).total).length;
+    const workspaceLabel = selectedGoLive?.allocationHolding
+      ? 'Holistic Health Hub Allocation'
+      : selectedGoLive?.testAccount
+        ? 'Test workspace'
+        : 'Standard workspace';
 
-      {remainingSetupSteps > 0 && <section className="card admin-attention-strip">
-        <div><AlertCircle size={18} /><span><strong>Some pharmacy setup is still incomplete</strong><small>{remainingSetupSteps} step{remainingSetupSteps === 1 ? '' : 's'} remain across the current pharmacies.</small></span></div>
-        <button className="btn btn-sm" onClick={() => { setView('platform'); setPlatformTab('setup'); }}>Open platform</button>
-      </section>}
+    return (
+      <div className="page-body order-crm patient-crm admin-overview-crm">
+        <section className="order-crm-summary" aria-label="Pharmacy portfolio summary">
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><Building2 size={16} /></span>
+            <span><small>Pharmacies</small><strong>{state.organisations.length}</strong><em>{liveCount} live · {intakeLiveCount} intake-only</em></span>
+          </article>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><Users size={16} /></span>
+            <span><small>Patient reach</small><strong>{allPatients.length}</strong><em>Attributed records across the portfolio</em></span>
+          </article>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><PoundSterling size={16} /></span>
+            <span>
+              <small>Accrued fees</small>
+              <strong>{financeReady ? referralFeeFormatter.format(portfolioAccrued) : 'Loading'}</strong>
+              <em>{adminFinanceError ? 'Ledger unavailable' : `${firstDispenseCount} first dispenses · £50 + £40 annual`}</em>
+            </span>
+          </article>
+          <article className={`order-crm-metric${remainingSetupSteps ? ' order-crm-metric--warning' : ' order-crm-metric--success'}`}>
+            <span className="order-crm-metric__icon">{remainingSetupSteps ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}</span>
+            <span><small>Readiness</small><strong>{remainingSetupSteps}</strong><em>{remainingSetupSteps ? 'Setup steps still outstanding' : 'All recorded setup steps complete'}</em></span>
+          </article>
+        </section>
 
-      <section className="card admin-directory">
-        <div className="admin-directory-head">
-          <div>
-            <p className="section-label">Directory</p>
-            <h2>Pharmacy directory</h2>
-            <p>Account records, legal companies, workspace configuration and patient attribution.</p>
-          </div>
-          <div className="directory-view-toggle" role="group" aria-label="Directory layout">
-            <button type="button" className={`filter-card${directoryMode === 'flat' ? ' active' : ''}`} onClick={() => setDirectoryMode('flat')}>
-              <div className="filter-card__head"><span>Flat</span></div>
-              <span className="filter-card__value">{filteredOrganisations.length}</span>
-            </button>
-            <button type="button" className={`filter-card${directoryMode === 'by-company' ? ' active' : ''}`} onClick={() => setDirectoryMode('by-company')}>
-              <div className="filter-card__head"><span>By company</span></div>
-              <span className="filter-card__value">{filteredOrganisations.length}</span>
-            </button>
-          </div>
-          <label className="search-box admin-search">
+        <section className="order-crm-controls">
+          <div className="order-crm-search">
             <Search size={15} />
-            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or GPhC number" />
-          </label>
-        </div>
+            <input
+              type="search"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Search pharmacy name or GPhC number"
+              aria-label="Search pharmacies"
+            />
+          </div>
+          <div className="order-crm-filters" role="group" aria-label="Filter pharmacies">
+            {([
+              { key: 'all' as const, label: 'All', count: state.organisations.length },
+              { key: 'live' as const, label: 'Live', count: liveFilterCount },
+              { key: 'setup' as const, label: 'Needs setup', count: setupFilterCount },
+            ]).map(filter => (
+              <button
+                type="button"
+                key={filter.key}
+                className={overviewFilter === filter.key ? 'active' : ''}
+                aria-pressed={overviewFilter === filter.key}
+                onClick={() => setOverviewFilter(filter.key)}
+              >
+                <span>{filter.label}</span><strong>{filter.count}</strong>
+              </button>
+            ))}
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowOnboarding(true)}>
+              <Plus size={14} /> Onboard pharmacy
+            </button>
+          </div>
+        </section>
 
-        <div className="admin-org-list">
-          {filteredOrganisations.length === 0 && (
-            <div className="empty-state">
-              {state.organisations.length === 0 ? 'No pharmacies have been onboarded yet.' : 'No pharmacies match this search.'}
+        {adminFinanceError ? (
+          <div className="banner banner-amber" role="alert">
+            <AlertCircle size={16} />
+            <span><strong>Referral finance is temporarily unavailable</strong><small>{adminFinanceError}</small></span>
+            <button className="btn btn-sm" type="button" onClick={() => setAdminFinanceRefresh(value => value + 1)}>Try again</button>
+          </div>
+        ) : null}
+
+        {remainingSetupSteps > 0 ? (
+          <section className="order-crm-alert order-crm-alert--warning admin-overview-crm__alert" role="status">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>
+              <strong>Some pharmacy setup is still incomplete</strong>
+              <small>{remainingSetupSteps} step{remainingSetupSteps === 1 ? '' : 's'} remain. Setup does not block live intake on its own.</small>
+            </span>
+            <button type="button" className="btn btn-sm" onClick={() => { setView('platform'); setPlatformTab('setup'); }}>Open platform</button>
+          </section>
+        ) : null}
+
+        <div className="order-crm-workspace">
+          <aside className="order-crm-list" aria-label="Pharmacies">
+            <header>
+              <span><small>Directory</small><strong>{overviewPharmacies.length} result{overviewPharmacies.length === 1 ? '' : 's'}</strong></span>
+            </header>
+            <div className="order-crm-list__scroller">
+              <div className="order-crm-list__rows">
+                {overviewPharmacies.length === 0 ? (
+                  <div className="order-crm-empty">
+                    <Building2 size={26} />
+                    <strong>{state.organisations.length === 0 ? 'No pharmacies onboarded' : 'No pharmacies match'}</strong>
+                    <span>{state.organisations.length === 0 ? 'Onboard a pharmacy to start the portfolio.' : 'Try another filter or search term.'}</span>
+                  </div>
+                ) : overviewPharmacies.map(organisation => {
+                  const tone = pharmacyTone(organisation.status);
+                  const fees = feesByOrganisation.get(organisation.id);
+                  return (
+                    <button
+                      type="button"
+                      key={organisation.id}
+                      className={`order-crm-row order-crm-row--${tone}${overviewPharmacyId === organisation.id ? ' selected' : ''}`}
+                      aria-pressed={overviewPharmacyId === organisation.id}
+                      aria-label={`${organisation.tradingName}, ${statusLabel(organisation.status)}`}
+                      onClick={() => setOverviewPharmacyId(organisation.id)}
+                    >
+                      <span className={`order-crm-row__stage order-tone--${tone}`} aria-hidden="true">{organisation.logoText}</span>
+                      <span className="order-crm-row__identity">
+                        <strong title={organisation.tradingName}>{organisation.tradingName}</strong>
+                        <span className={`order-stage-pill order-tone--${tone}`}>{statusLabel(organisation.status)}</span>
+                      </span>
+                      <span className="order-crm-row__position">
+                        <strong>{financeReady ? referralFeeFormatter.format(fees?.total ?? 0) : '—'}</strong>
+                        <small>GPhC {organisation.gphcNumber}</small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          )}
+          </aside>
 
-          {directoryMode === 'flat' ? (
-            filteredOrganisations.map(org => {
-              const submissions = submissionsByOrganisation.get(org.id) ?? [];
-              const patients = crmByOrganisation.get(org.id) ?? [];
-              const readiness = tenantReadiness(org.id);
-              const goLive = goLiveByOrganisation[org.id];
-              return (
-                <article className="admin-org-row" key={org.id}>
-                  <div className="admin-org-brand">
-                    <div className="tenant-mark" style={brandSwatchStyle(org.brand.primary)}>{org.logoText}</div>
-                    <div>
-                      <strong>{org.name}</strong>
-                      <span>GPhC {org.gphcNumber} · {org.websiteDomains.join(', ') || 'domain pending'}</span>
+          <main className="order-crm-detail">
+            {!selectedPharmacy || !selectedReadiness ? (
+              <div className="order-crm-empty order-crm-empty--detail">
+                <Building2 size={38} />
+                <strong>Select a pharmacy</strong>
+                <span>Account status, setup and referral fees appear here. Open the full account to edit staff, branding or Curaleaf.</span>
+              </div>
+            ) : (
+              <article className={`order-crm-record order-crm-record--${pharmacyTone(selectedPharmacy.status)}`}>
+                <header className="order-crm-record__header">
+                  <div className="order-crm-record__hero">
+                    <div className="order-crm-record__identity">
+                      <span className={`order-crm-record__stage order-tone--${pharmacyTone(selectedPharmacy.status)}`} aria-hidden="true">{selectedPharmacy.logoText}</span>
+                      <div className="order-crm-record__titles">
+                        <strong>{selectedPharmacy.tradingName}</strong>
+                        <span className="order-crm-record__ref">{selectedPharmacy.name} · GPhC {selectedPharmacy.gphcNumber}</span>
+                        <em>{workspaceLabel}</em>
+                      </div>
+                    </div>
+                    <span className={`order-stage-pill order-tone--${pharmacyTone(selectedPharmacy.status)}`}>{statusLabel(selectedPharmacy.status)}</span>
+                  </div>
+                  <div className="order-crm-record__toolbar">
+                    <div className="order-crm-record__value">
+                      <small>Accrued fees</small>
+                      <strong>{financeReady ? referralFeeFormatter.format(selectedFees?.total ?? 0) : 'Loading'}</strong>
+                      <span className="order-crm-record__opened">{selectedFees ? `${selectedFees.patients} earning patient${selectedFees.patients === 1 ? '' : 's'}` : 'No fee events yet'}</span>
+                    </div>
+                    <div className="order-crm-record__actions" role="group" aria-label="Pharmacy actions">
+                      <button type="button" className="btn btn-sm" onClick={() => { setFinanceOrganisationId(selectedPharmacy.id); setSelectedOrganisationId(null); setView('finance'); }}>Open ledger</button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setSelectedOrganisationId(selectedPharmacy.id)}>Manage pharmacy</button>
                     </div>
                   </div>
-                  <div className="admin-org-metric">
-                    <strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong>
-                    <span>Patients</span>
-                  </div>
-                  <div className="readiness-cell">
-                    <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
-                    <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
-                    <div className="go-live-gate-pills"><span className="pill pill-info">{goLive?.allocationHolding ? 'Holistic Health Hub Allocation' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span></div>
-                  </div>
-                  <div className="admin-org-actions">
-                    <span className={`pill ${statusPill(org.status)}`}>{statusLabel(org.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Holistic Health Hub Allocation</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
-                    <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage pharmacy</button>
-                  </div>
-                </article>
-              );
-            })
-          ) : (
-            // By Company View Grouping
-            <div className="company-directory-groups">
-              {filteredOrganisations.map(org => {
-                const submissions = submissionsByOrganisation.get(org.id) ?? [];
-                const patients = crmByOrganisation.get(org.id) ?? [];
-                const readiness = tenantReadiness(org.id);
-                const goLive = goLiveByOrganisation[org.id];
-                // Rollups: earning patients = unique patients with >=1 referral-fee event
-                const earningPatientsCount = new Set([...patients.map(p => p.email)]).size;
-                const accruedCommission = earningPatientsCount * 50;
+                </header>
 
-                return (
-                  <div className="company-group-card card" key={org.id}>
-                    <header className="company-group-card__header">
-                      <div>
-                        <span className="pill pill-info">Legal company</span>
-                        <h3>{org.tradingName || org.name}</h3>
-                        <small>Company Reg: {org.companyNumber || 'N/A'} · Superintendent: {org.superintendent}</small>
-                      </div>
-                      <div className="company-group-card__meta">
-                        <span className="pill pill-info">{goLive?.allocationHolding ? 'Holistic Health Hub Allocation' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span>
-                        <div>
-                          <strong>{earningPatientsCount}</strong> earning patients · <strong>£{accruedCommission}</strong> accrued
-                        </div>
-                      </div>
-                    </header>
-                    <article className="admin-org-row admin-org-row--nested">
-                      <div className="admin-org-brand">
-                        <div className="tenant-mark" style={brandSwatchStyle(org.brand.primary)}>{org.logoText}</div>
-                        <div>
-                          <strong>{org.name} (Branch)</strong>
-                          <span>GPhC {org.gphcNumber} · {org.address}</span>
-                        </div>
-                      </div>
-                      <div className="admin-org-metric">
-                        <strong>{new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size}</strong>
-                        <span>Attributed patients</span>
-                      </div>
-                      <div className="readiness-cell">
-                        <div><strong>{readiness.percent}%</strong><span>{readiness.ready}/{readiness.total} UAT checks</span></div>
-                        <div className="mini-progress"><span style={{ width: `${readiness.percent}%` }} /></div>
-                        <div className="go-live-gate-pills"><span className="pill pill-info">{goLive?.allocationHolding ? 'Holistic Health Hub Allocation' : goLive?.testAccount ? 'Test workspace' : 'Standard workspace'}</span></div>
-                      </div>
-                      <div className="admin-org-actions">
-                        <span className={`pill ${statusPill(org.status)}`}>{statusLabel(org.status)}</span>{goLive?.allocationHolding ? <span className="pill pill-info">Holistic Health Hub Allocation</span> : goLive?.testAccount && <span className="pill pill-info">TEST only</span>}
-                        <button className="btn btn-sm" onClick={() => setSelectedOrganisationId(org.id)}>Manage branch</button>
-                      </div>
+                <div className="patient-crm-detail__body">
+                  <div className="admin-overview-crm__facts">
+                    <article>
+                      <small>Attributed patients</small>
+                      <strong>{selectedPatients}</strong>
+                    </article>
+                    <article>
+                      <small>Setup</small>
+                      <strong>{selectedReadiness.percent}%</strong>
+                      <em>{selectedReadiness.ready}/{selectedReadiness.total} UAT checks</em>
+                    </article>
+                    <article>
+                      <small>First dispenses</small>
+                      <strong>{financeReady ? referralFeeFormatter.format(selectedFees?.firstAmount ?? 0) : '—'}</strong>
+                      <em>{selectedFees?.firstCount ?? 0} × £50</em>
+                    </article>
+                    <article>
+                      <small>Annual fees</small>
+                      <strong>{financeReady ? referralFeeFormatter.format(selectedFees?.annualAmount ?? 0) : '—'}</strong>
+                      <em>{selectedFees?.annualCount ?? 0} × £40</em>
                     </article>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  <p className="admin-overview-crm__note">Referral fees accrue on the first collected dispense (£50) and each active anniversary (£40). This is an operational ledger, not an invoice register.</p>
+                </div>
+              </article>
+            )}
+          </main>
         </div>
-      </section>
-    </>
-  );
+      </div>
+    );
+  };
 
 
   const renderLegacyReferrals = () => {
@@ -1512,129 +1798,580 @@ export default function AdminPortal() {
   // readable through the SQL admin intake projection.
   void renderLegacyReferrals;
 
-  const renderReferrals = () => (
-    <>
-      <AdminIntakeV2 />
-      <section className="integration-boundary card"><ShieldCheck size={20} /><div><strong>HHH referral boundary</strong><p>Admin staff review every eligibility enquiry. The current assigned pharmacy can already see the person as an enquiry. Completing referral marks them referred for that pharmacy.</p></div></section>
-    </>
-  );
+  const renderReferrals = () => <AdminIntakeV2 />;
 
-  const renderPatients = () => (
-    <>
-      <div className="admin-page-actions">
-        <span className="pill pill-info"><Users size={13} /> {displayedPatients.length}{isLocalPortalPreview ? ` of ${allPatients.length}` : ''} records</span>
-        <button className="btn btn-sm" type="button" onClick={() => void exportPatients()} disabled={patientExportBusy || patientRegisterLoading || (!isLocalPortalPreview && !serverPatientRegister)}><Download size={14} /> {patientExportBusy ? 'Preparing CSV…' : patientRegisterLoading ? 'Loading scope…' : 'Export filtered CSV'}</button>
-      </div>
-      <section className="card admin-patient-table admin-master-patients">
-        <div className="admin-directory-head"><div><p className="section-label">Register</p><h2>Patient register</h2></div><label className="search-box admin-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search patient, DOB or pharmacy" /></label></div>
-        <div className="admin-patient-filters filter-toolbar" aria-label="Patient register filters">
-          <label>Pharmacy<select className="input" value={patientOrganisationId} onChange={event => setPatientOrganisationId(event.target.value)}><option value="all">All pharmacies</option>{state.organisations.map(organisation => <option key={organisation.id} value={organisation.id}>{organisation.tradingName}</option>)}</select></label>
-          <label>Eligibility status<select className="input" value={patientStatus} onChange={event => setPatientStatus(event.target.value)}><option value="all">All statuses</option>{patientStatuses.map(status => <option key={status} value={status}>{onboardingStatusLabel(status)}</option>)}</select></label>
-          <label>From date<input className="input" type="date" value={patientFrom} max={patientTo || undefined} onChange={event => setPatientFrom(event.target.value)} /></label>
-          <label>To date<input className="input" type="date" value={patientTo} min={patientFrom || undefined} onChange={event => setPatientTo(event.target.value)} /></label>
-          <button className="btn btn-sm" type="button" onClick={() => { setQuery(''); setPatientOrganisationId('all'); setPatientStatus('all'); setPatientFrom(''); setPatientTo(''); }}>Clear filters</button>
+  const renderPatients = () => {
+    const registerStatuses = [...new Set([...patientStatuses, ...displayedPatients.map(patient => patient.stage)])].sort((a, b) => onboardingStatusLabel(a).localeCompare(onboardingStatusLabel(b)));
+    const activeCount = allPatients.filter(patient => patient.stage === 'HHH approved').length;
+    const referredCount = allPatients.filter(patient => patient.stage === 'Approved').length;
+    const financeReady = isLocalPortalPreview || Boolean(adminFinanceReport) || !adminFinanceLoading;
+    const registerAccrued = referralFeeEvents.reduce((total, event) => total + event.amount, 0);
+    const selectedKey = selectedRegisterPatient ? registerPatientKey(selectedRegisterPatient) : null;
+    const selectedFees = selectedRegisterPatient
+      ? referralFeeEvents.filter(event => event.organisationId === selectedRegisterPatient.organisationId && event.patientEmail.trim().toLowerCase() === selectedRegisterPatient.email.trim().toLowerCase())
+      : [];
+    const selectedFeeTotal = selectedFees.reduce((total, event) => total + event.amount, 0);
+    const selectedIntake = selectedRegisterPatient
+      ? state.submissions.find(submission => submission.organisationId === selectedRegisterPatient.organisationId && submission.email.trim().toLowerCase() === selectedRegisterPatient.email.trim().toLowerCase())
+      : null;
+    const selectedCrm = selectedRegisterPatient
+      ? state.crm.find(patient => patient.organisationId === selectedRegisterPatient.organisationId && patient.email.trim().toLowerCase() === selectedRegisterPatient.email.trim().toLowerCase())
+      : null;
+    const orderPatientId = selectedCrm?.id ?? (selectedRegisterPatient && !selectedRegisterPatient.id.startsWith('sub-') ? selectedRegisterPatient.id : null);
+    const orderActivity = selectedRegisterPatient
+      ? patientOrderActivity(state.orders, selectedRegisterPatient.organisationId, orderPatientId)
+      : { count: 0, dates: [], uniqueDays: [] };
+    const selectedTone = selectedRegisterPatient ? stageTone(selectedRegisterPatient.stage) : 'info';
+    const filtersActive = Boolean(query.trim() || patientOrganisationId !== 'all' || patientStatus !== 'all' || patientFrom || patientTo);
+
+    return (
+      <div className="page-body order-crm patient-crm admin-register-crm">
+        <section className="order-crm-summary" aria-label="Patient register summary">
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><Users size={16} /></span>
+            <span><small>Register</small><strong>{isLocalPortalPreview ? allPatients.length : (serverPatientRegister?.resultCount ?? displayedPatients.length)}</strong><em>{isLocalPortalPreview ? 'Attributed records in this preview' : 'Records in the current server scope'}</em></span>
+          </article>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><UserCheck size={16} /></span>
+            <span><small>Active</small><strong>{activeCount}</strong><em>HHH-approved patient records</em></span>
+          </article>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><ClipboardCheck size={16} /></span>
+            <span><small>Referred</small><strong>{referredCount}</strong><em>Approved for a destination pharmacy</em></span>
+          </article>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><PoundSterling size={16} /></span>
+            <span>
+              <small>Accrued fees</small>
+              <strong>{financeReady ? referralFeeFormatter.format(registerAccrued) : 'Loading'}</strong>
+              <em>{adminFinanceError ? 'Ledger unavailable' : 'First dispense £50 · annual £40'}</em>
+            </span>
+          </article>
+        </section>
+
+        <section className="order-crm-controls">
+          <div className="order-crm-search">
+            <Search size={15} />
+            <input
+              type="search"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Search patient, date of birth or pharmacy"
+              aria-label="Search the patient register"
+            />
+          </div>
+          <div className="order-crm-filters" role="group" aria-label="Filter the patient register">
+            <button type="button" className={patientStatus === 'all' ? 'active' : ''} aria-pressed={patientStatus === 'all'} onClick={() => setPatientStatus('all')}>
+              <span>All</span>
+            </button>
+            {registerStatuses.map(status => (
+              <button type="button" key={status} className={patientStatus === status ? 'active' : ''} aria-pressed={patientStatus === status} onClick={() => setPatientStatus(status)}>
+                <span>{onboardingStatusLabel(status)}</span>
+              </button>
+            ))}
+            <label className="admin-register-crm__select">
+              <span className="sr-only">Pharmacy</span>
+              <select value={patientOrganisationId} onChange={event => setPatientOrganisationId(event.target.value)} aria-label="Filter by pharmacy">
+                <option value="all">All pharmacies</option>
+                {state.organisations.map(organisation => <option key={organisation.id} value={organisation.id}>{organisation.tradingName}</option>)}
+              </select>
+            </label>
+            <label className="admin-register-crm__date">
+              <span className="sr-only">From date</span>
+              <input type="date" value={patientFrom} max={patientTo || undefined} onChange={event => setPatientFrom(event.target.value)} aria-label="From date" />
+            </label>
+            <label className="admin-register-crm__date">
+              <span className="sr-only">To date</span>
+              <input type="date" value={patientTo} min={patientFrom || undefined} onChange={event => setPatientTo(event.target.value)} aria-label="To date" />
+            </label>
+            {filtersActive ? (
+              <button type="button" onClick={() => { setQuery(''); setPatientOrganisationId('all'); setPatientStatus('all'); setPatientFrom(''); setPatientTo(''); }}>
+                Clear
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => void exportPatients()}
+              disabled={patientExportBusy || patientRegisterLoading || (!isLocalPortalPreview && !serverPatientRegister)}
+            >
+              <Download size={14} /> {patientExportBusy ? 'Preparing CSV…' : patientRegisterLoading ? 'Loading scope…' : 'Export CSV'}
+            </button>
+          </div>
+        </section>
+
+        {patientExportError ? <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {patientExportError}</div> : null}
+        {adminFinanceError ? (
+          <div className="banner banner-amber" role="alert">
+            <AlertCircle size={16} />
+            <span><strong>Referral finance is temporarily unavailable</strong><small>{adminFinanceError}</small></span>
+            <button className="btn btn-sm" type="button" onClick={() => setAdminFinanceRefresh(value => value + 1)}>Try again</button>
+          </div>
+        ) : null}
+
+        <div className="order-crm-workspace">
+          <aside className="order-crm-list" aria-label="Patient register">
+            <header>
+              <span><small>Register</small><strong>{patientRegisterLoading && !isLocalPortalPreview ? 'Loading' : `${displayedPatients.length} result${displayedPatients.length === 1 ? '' : 's'}`}</strong></span>
+            </header>
+            <div className="order-crm-list__scroller">
+              <div className="order-crm-list__rows">
+                {patientRegisterLoading && !isLocalPortalPreview && displayedPatients.length === 0 ? (
+                  <div className="order-crm-empty">
+                    <Users size={26} />
+                    <strong>Loading register</strong>
+                    <span>The protected patient register is being loaded for this scope.</span>
+                  </div>
+                ) : displayedPatients.length === 0 ? (
+                  <div className="order-crm-empty">
+                    <Users size={26} />
+                    <strong>No matching records</strong>
+                    <span>Try another search, pharmacy, stage or date range.</span>
+                  </div>
+                ) : displayedPatients.map(patient => {
+                  const row = toRegisterRow(patient);
+                  const tone = stageTone(row.stage);
+                  const selected = selectedKey === registerPatientKey(row);
+                  return (
+                    <button
+                      type="button"
+                      key={registerPatientKey(row)}
+                      className={`order-crm-row order-crm-row--${tone}${selected ? ' selected' : ''}`}
+                      aria-pressed={selected}
+                      aria-label={`${row.name}, ${onboardingStatusLabel(row.stage)}, ${row.pharmacyName}`}
+                      onClick={() => setSelectedRegisterPatient(row)}
+                    >
+                      <span className={`order-crm-row__stage order-tone--${tone}`} aria-hidden="true">{patientInitials(row.name)}</span>
+                      <span className="order-crm-row__identity">
+                        <strong title={row.name}>{compactPatientName(row.name)}</strong>
+                        <span className={`order-stage-pill order-tone--${tone}`}>{onboardingStatusLabel(row.stage)}</span>
+                      </span>
+                      <span className="order-crm-row__position">
+                        <strong>{row.pharmacyName}</strong>
+                        <small>{row.date ? new Date(row.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : 'No date'}</small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+
+          <main className="order-crm-detail">
+            {!selectedRegisterPatient ? (
+              <div className="order-crm-empty order-crm-empty--detail">
+                <Users size={38} />
+                <strong>Select a patient</strong>
+                <span>Identity, attribution and fee history appear here. Contact details stay on the selected record only.</span>
+              </div>
+            ) : (
+              <article className={`order-crm-record order-crm-record--${selectedTone}`}>
+                <header className="order-crm-record__header">
+                  <div className="order-crm-record__hero">
+                    <div className="order-crm-record__identity">
+                      <span className={`order-crm-record__stage order-tone--${selectedTone}`} aria-hidden="true">{patientInitials(selectedRegisterPatient.name)}</span>
+                      <div className="order-crm-record__titles">
+                        <strong>{selectedRegisterPatient.name}</strong>
+                        <span className="order-crm-record__ref">DOB {formatPatientDob(selectedRegisterPatient.dob)}</span>
+                        <em>{selectedRegisterPatient.pharmacyName}{selectedRegisterPatient.gphcNumber ? ` · GPhC ${selectedRegisterPatient.gphcNumber}` : ''}</em>
+                      </div>
+                    </div>
+                    <span className={`order-stage-pill order-tone--${selectedTone}`}>{onboardingStatusLabel(selectedRegisterPatient.stage)}</span>
+                  </div>
+                  <div className="order-crm-record__toolbar">
+                    <div className="order-crm-record__value">
+                      <small>Accrued fees</small>
+                      <strong>{financeReady ? referralFeeFormatter.format(selectedFeeTotal) : 'Loading'}</strong>
+                      <span className="order-crm-record__opened">{selectedFees.length ? `${selectedFees.length} fee event${selectedFees.length === 1 ? '' : 's'}` : 'No fee events yet'}</span>
+                    </div>
+                    <div className="order-crm-record__actions" role="group" aria-label="Patient record actions">
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => {
+                          const feeMatch = selectedFees[0];
+                          setFinanceOrganisationId(selectedRegisterPatient.organisationId);
+                          setFinancePatientKey(feeMatch?.patientKey ?? 'all');
+                          setFinancePeriod('all');
+                          setSelectedOrganisationId(null);
+                          setView('finance');
+                        }}
+                      >
+                        Open ledger
+                      </button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setSelectedOrganisationId(selectedRegisterPatient.organisationId)}>Manage pharmacy</button>
+                    </div>
+                  </div>
+                </header>
+
+                <div className="patient-crm-detail__body">
+                  <div className="admin-overview-crm__facts">
+                    <article>
+                      <small>Last recorded</small>
+                      <strong>{selectedRegisterPatient.date ? new Date(selectedRegisterPatient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—'}</strong>
+                    </article>
+                    <article>
+                      <small>First dispenses</small>
+                      <strong>{financeReady ? referralFeeFormatter.format(selectedFees.filter(event => event.kind === 'new-referral').reduce((sum, event) => sum + event.amount, 0)) : '—'}</strong>
+                      <em>{selectedFees.filter(event => event.kind === 'new-referral').length} × £50</em>
+                    </article>
+                    <article>
+                      <small>Annual fees</small>
+                      <strong>{financeReady ? referralFeeFormatter.format(selectedFees.filter(event => event.kind === 'annual-patient').reduce((sum, event) => sum + event.amount, 0)) : '—'}</strong>
+                      <em>{selectedFees.filter(event => event.kind === 'annual-patient').length} × £40</em>
+                    </article>
+                    <article>
+                      <small>Intake</small>
+                      <strong>{selectedIntake?.source ?? (selectedCrm ? 'Record' : 'Register')}</strong>
+                      <em>{selectedIntake ? onboardingStatusLabel(selectedIntake.status) : selectedCrm ? onboardingStatusLabel(selectedCrm.status) : 'Not in queue'}</em>
+                    </article>
+                  </div>
+
+                  <section className="admin-register-crm__panel">
+                    <h3>Attribution and intake</h3>
+                    <dl className="admin-register-crm__facts-list">
+                      <div>
+                        <dt>Date of birth</dt>
+                        <dd>{formatPatientDob(selectedRegisterPatient.dob)}</dd>
+                      </div>
+                      <div>
+                        <dt>Email</dt>
+                        <dd>{selectedRegisterPatient.email || 'Not recorded'}</dd>
+                      </div>
+                      <div>
+                        <dt>Mobile</dt>
+                        <dd>{selectedRegisterPatient.mobile || 'Not recorded'}</dd>
+                      </div>
+                      <div>
+                        <dt>Current pharmacy</dt>
+                        <dd>{selectedRegisterPatient.pharmacyName}</dd>
+                      </div>
+                      <div>
+                        <dt>GPhC</dt>
+                        <dd>{selectedRegisterPatient.gphcNumber || 'Not recorded'}</dd>
+                      </div>
+                      <div>
+                        <dt>Current outcome</dt>
+                        <dd>{onboardingStatusLabel(selectedRegisterPatient.stage)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section className="admin-register-crm__panel">
+                    <h3>Fee history</h3>
+                    {selectedFees.length === 0 ? (
+                      <p>No first-dispense or annual fees are recorded for this patient.</p>
+                    ) : (
+                      <ol className="admin-register-crm__events">
+                        {selectedFees.map(event => (
+                          <li key={event.id}>
+                            <span>
+                              <strong>{event.kind === 'new-referral' ? 'First collected dispense' : event.anniversary ? `Annual fee · year ${event.anniversary}` : 'Annual patient fee'}</strong>
+                              <small>{event.occurredAt.toLocaleDateString('en-GB', { timeZone: 'Europe/London' })} · {event.pharmacyName}</small>
+                            </span>
+                            <b>{referralFeeFormatter.format(event.amount)}</b>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </section>
+
+                  <section className="admin-register-crm__panel">
+                    <h3>Order activity</h3>
+                    {orderActivity.count === 0 ? (
+                      <p>No placed orders recorded for this patient.</p>
+                    ) : (
+                      <>
+                        <dl className="admin-register-crm__facts-list">
+                          <div>
+                            <dt>Orders placed</dt>
+                            <dd>{orderActivity.count}</dd>
+                          </div>
+                          <div>
+                            <dt>Last ordered</dt>
+                            <dd>{londonDayLabel(orderActivity.dates[0])}</dd>
+                          </div>
+                        </dl>
+                        <p className="admin-register-crm__order-dates">
+                          {orderActivity.uniqueDays.slice(0, 8).join(' · ')}
+                          {orderActivity.uniqueDays.length > 8 ? ` · ${orderActivity.uniqueDays.length - 8} earlier` : ''}
+                        </p>
+                      </>
+                    )}
+                    <p className="admin-overview-crm__note">HHH admin does not show what was ordered.</p>
+                  </section>
+                </div>
+              </article>
+            )}
+          </main>
         </div>
-        {patientExportError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {patientExportError}</div>}
-        {patientRegisterLoading && !isLocalPortalPreview ? <div className="empty-state">Loading the protected patient register…</div> : displayedPatients.length === 0 ? <div className="empty-state">No patient records match the current search and filters.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Attributed pharmacy</th><th>Current stage</th><th>Last recorded</th></tr></thead><tbody>{displayedPatients.map(patient => { const org = state.organisations.find(item => item.id === patient.organisationId); const pharmacyName = 'pharmacyName' in patient ? patient.pharmacyName : org?.tradingName; const gphcNumber = 'gphcNumber' in patient ? patient.gphcNumber : org?.gphcNumber; const patientDetail: PatientRegisterExportRow = { id: patient.id, name: patient.name, email: patient.email, mobile: patient.mobile, dob: patient.dob, organisationId: patient.organisationId, pharmacyName: pharmacyName ?? 'Unknown pharmacy', gphcNumber: gphcNumber ?? '', stage: patient.stage, date: patient.date ? new Date(patient.date).toISOString() : null }; return <tr key={`${patient.organisationId}-${patient.email}`}><td><button type="button" className="patient-register-open" onClick={() => setSelectedRegisterPatient(patientDetail)} aria-label={`Open details for ${patient.name}`}><CompactPatientCell name={patient.name} email={patient.email} mobile={patient.mobile} dob={patient.dob} /></button></td><td><button className="table-link" onClick={() => setSelectedOrganisationId(patient.organisationId)}>{pharmacyName ?? 'Unknown pharmacy'}</button><small>{gphcNumber}</small></td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(patient.stage)}`}>{onboardingStatusLabel(patient.stage)}</span></td><td>{patient.date ? new Date(patient.date).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : '—'}</td></tr>; })}</tbody></table></div>}
-      </section>
-      {selectedRegisterPatient && <section className="card admin-patient-detail" aria-label="Patient and intake audit detail">
-        <div className="admin-directory-head"><div><p className="section-label">Patient profile</p><h2>{selectedRegisterPatient.name}</h2><p>The same core patient fields available to the attributed pharmacy, plus the protected HHH intake audit.</p></div><button className="icon-btn" type="button" onClick={() => setSelectedRegisterPatient(null)} aria-label="Close patient detail"><X size={18} /></button></div>
-        <div className="admin-patient-detail__grid"><section><h3>Patient details</h3><dl><div><dt>Date of birth</dt><dd>{formatPatientDob(selectedRegisterPatient.dob)}</dd></div><div><dt>Email</dt><dd>{selectedRegisterPatient.email}</dd></div><div><dt>Mobile</dt><dd>{selectedRegisterPatient.mobile || 'Not recorded'}</dd></div><div><dt>Current pharmacy</dt><dd>{selectedRegisterPatient.pharmacyName}</dd></div></dl></section><section><h3>HHH intake audit</h3><ol><li><strong>Attribution confirmed</strong><span>{selectedRegisterPatient.pharmacyName} · GPhC {selectedRegisterPatient.gphcNumber || 'not recorded'}</span></li><li><strong>Current outcome</strong><span>{onboardingStatusLabel(selectedRegisterPatient.stage)}</span></li><li><strong>Last recorded</strong><span>{selectedRegisterPatient.date ? new Date(selectedRegisterPatient.date).toLocaleString('en-GB') : 'Not recorded'}</span></li></ol></section></div>
-      </section>}
-    </>
-  );
+      </div>
+    );
+  };
 
   const renderFinance = () => {
     const newReferralEvents = filteredReferralFeeEvents.filter(event => event.kind === 'new-referral');
     const annualEvents = filteredReferralFeeEvents.filter(event => event.kind === 'annual-patient');
     const totalAccrued = filteredReferralFeeEvents.reduce((total, event) => total + event.amount, 0);
     const patientsWithFees = new Set(filteredReferralFeeEvents.map(event => event.patientKey)).size;
-    const pharmacyPositions = state.organisations
-      .map(organisation => {
-        const events = filteredReferralFeeEvents.filter(event => event.organisationId === organisation.id);
-        return {
-          organisation,
-          newReferrals: events.filter(event => event.kind === 'new-referral').length,
-          annualFees: events.filter(event => event.kind === 'annual-patient').length,
-          newReferralAmount: events.filter(event => event.kind === 'new-referral').reduce((sum, event) => sum + event.amount, 0),
-          annualFeeAmount: events.filter(event => event.kind === 'annual-patient').reduce((sum, event) => sum + event.amount, 0),
-          patients: new Set(events.map(event => event.patientKey)).size,
-          total: events.reduce((sum, event) => sum + event.amount, 0),
-        };
-      })
-      .filter(position => financeOrganisationId === 'all' ? position.total > 0 : position.organisation.id === financeOrganisationId);
+    const financeReady = isLocalPortalPreview || Boolean(adminFinanceReport) || !adminFinanceLoading;
+    const selectedFinancePatient = visibleFinancePatients.find(patient => patient.key === financePatientKey) ?? null;
+    const selectedFinanceEvents = selectedFinancePatient
+      ? filteredReferralFeeEvents.filter(event => event.patientKey === selectedFinancePatient.key)
+      : [];
+    const selectedFirst = selectedFinanceEvents.filter(event => event.kind === 'new-referral');
+    const selectedAnnual = selectedFinanceEvents.filter(event => event.kind === 'annual-patient');
+    const selectedPharmacy = selectedFinancePatient
+      ? state.organisations.find(organisation => organisation.id === selectedFinancePatient.organisationId)
+      : null;
+    const periodLabel = financePeriod === 'month' ? financeMonth : financePeriod === 'year' ? financeYear : 'All time';
 
     return (
-      <>
-        <div className="admin-page-actions">
-          <span className="pill pill-info"><PoundSterling size={13} /> £50 first dispense + £40 annual</span>
-          <button type="button" className="btn btn-sm" onClick={() => setAdminFinanceRefresh(value => value + 1)} disabled={adminFinanceLoading}><RefreshCw size={13} className={adminFinanceLoading ? 'spin' : ''} /> Refresh</button>
-        </div>
+      <div className="page-body order-crm patient-crm admin-finance-crm">
+        <section className="order-crm-summary" aria-label="Referral finance summary">
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><PoundSterling size={16} /></span>
+            <span>
+              <small>Total accrued</small>
+              <strong>{financeReady ? referralFeeFormatter.format(totalAccrued) : 'Loading'}</strong>
+              <em>{filteredReferralFeeEvents.length} fee event{filteredReferralFeeEvents.length === 1 ? '' : 's'} · {periodLabel}</em>
+            </span>
+          </article>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><TrendingUp size={16} /></span>
+            <span>
+              <small>First dispenses</small>
+              <strong>{financeReady ? referralFeeFormatter.format(newReferralEvents.reduce((sum, event) => sum + event.amount, 0)) : 'Loading'}</strong>
+              <em>{newReferralEvents.length} × £50</em>
+            </span>
+          </article>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><CheckCircle2 size={16} /></span>
+            <span>
+              <small>Annual fees</small>
+              <strong>{financeReady ? referralFeeFormatter.format(annualEvents.reduce((sum, event) => sum + event.amount, 0)) : 'Loading'}</strong>
+              <em>{annualEvents.length} × £40</em>
+            </span>
+          </article>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><Users size={16} /></span>
+            <span>
+              <small>Earning patients</small>
+              <strong>{patientsWithFees}</strong>
+              <em>Patients with accrued fees in this period</em>
+            </span>
+          </article>
+        </section>
 
-        <div className="filter-grid admin-finance-period-grid admin-segment-tabs" role="group" aria-label="Finance period">
-          {([
-            { id: 'all' as const, label: 'All time', value: String(filteredReferralFeeEvents.length) },
-            { id: 'month' as const, label: 'Month', value: financeMonth || '—' },
-            { id: 'year' as const, label: 'Year', value: financeYear || '—' },
-          ]).map(period => (
-            <button
-              key={period.id}
-              type="button"
-              className={`filter-card${financePeriod === period.id ? ' active' : ''}`}
-              aria-pressed={financePeriod === period.id}
-              onClick={() => setFinancePeriod(period.id)}
-            >
-              <div className="filter-card__head"><span>{period.label}</span></div>
-              <span className="filter-card__value">{period.value}</span>
+        <section className="order-crm-controls">
+          <div className="order-crm-search">
+            <Search size={15} />
+            <input
+              type="search"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Search earning patient or pharmacy"
+              aria-label="Search earning patients"
+            />
+          </div>
+          <div className="order-crm-filters" role="group" aria-label="Filter referral finance">
+            {([
+              { id: 'all' as const, label: 'All time' },
+              { id: 'month' as const, label: 'Month' },
+              { id: 'year' as const, label: 'Year' },
+            ]).map(period => (
+              <button
+                type="button"
+                key={period.id}
+                className={financePeriod === period.id ? 'active' : ''}
+                aria-pressed={financePeriod === period.id}
+                onClick={() => setFinancePeriod(period.id)}
+              >
+                <span>{period.label}</span>
+              </button>
+            ))}
+            <label className="admin-register-crm__select">
+              <span className="sr-only">Pharmacy</span>
+              <select id="finance-pharmacy" value={financeOrganisationId} onChange={event => setFinanceOrganisationId(event.target.value)} aria-label="Filter by pharmacy">
+                <option value="all">All pharmacies</option>
+                {state.organisations.map(organisation => <option value={organisation.id} key={organisation.id}>{organisation.tradingName}</option>)}
+              </select>
+            </label>
+            {financePeriod === 'month' ? (
+              <label className="admin-register-crm__date">
+                <span className="sr-only">Month</span>
+                <input id="finance-month" type="month" value={financeMonth} onChange={event => setFinanceMonth(event.target.value)} aria-label="Reporting month" />
+              </label>
+            ) : null}
+            {financePeriod === 'year' ? (
+              <label className="admin-register-crm__date">
+                <span className="sr-only">Year</span>
+                <input id="finance-year" type="number" min="2000" max="2200" step="1" value={financeYear} onChange={event => setFinanceYear(event.target.value)} aria-label="Reporting year" />
+              </label>
+            ) : null}
+            <button type="button" className="btn btn-sm" onClick={() => setAdminFinanceRefresh(value => value + 1)} disabled={adminFinanceLoading}>
+              <RefreshCw size={13} className={adminFinanceLoading ? 'spin' : ''} /> Refresh
             </button>
-          ))}
+          </div>
+        </section>
+
+        {adminFinanceError ? (
+          <div className="banner banner-amber" role="alert">
+            <AlertCircle size={16} />
+            <span><strong>Referral finance is temporarily unavailable</strong><small>{adminFinanceError}</small></span>
+            <button className="btn btn-sm" type="button" onClick={() => setAdminFinanceRefresh(value => value + 1)}>Try again</button>
+          </div>
+        ) : null}
+
+        <div className="order-crm-workspace">
+          <aside className="order-crm-list" aria-label="Earning patients">
+            <header>
+              <span><small>Ledger</small><strong>{adminFinanceLoading && !financeReady ? 'Loading' : `${visibleFinancePatients.length} patient${visibleFinancePatients.length === 1 ? '' : 's'}`}</strong></span>
+            </header>
+            <div className="order-crm-list__scroller">
+              <div className="order-crm-list__rows">
+                {adminFinanceLoading && !adminFinanceReport && !isLocalPortalPreview && visibleFinancePatients.length === 0 ? (
+                  <div className="order-crm-empty">
+                    <PoundSterling size={26} />
+                    <strong>Loading ledger</strong>
+                    <span>Referral fee events are being loaded for this period.</span>
+                  </div>
+                ) : visibleFinancePatients.length === 0 ? (
+                  <div className="order-crm-empty">
+                    <Users size={26} />
+                    <strong>No earning patients</strong>
+                    <span>No first-dispense or annual fees match the current period and pharmacy filter.</span>
+                  </div>
+                ) : visibleFinancePatients.map(patient => {
+                  const selected = financePatientKey === patient.key;
+                  return (
+                    <button
+                      type="button"
+                      key={patient.key}
+                      className={`order-crm-row order-crm-row--paid${selected ? ' selected' : ''}`}
+                      aria-pressed={selected}
+                      aria-label={`${patient.name}, ${patient.pharmacyName}, ${referralFeeFormatter.format(patient.total)} accrued`}
+                      onClick={() => setFinancePatientKey(patient.key)}
+                    >
+                      <span className="order-crm-row__stage order-tone--paid" aria-hidden="true">{patientInitials(patient.name)}</span>
+                      <span className="order-crm-row__identity">
+                        <strong title={patient.name}>{compactPatientName(patient.name)}</strong>
+                        <span className="order-stage-pill order-tone--paid">Earning</span>
+                      </span>
+                      <span className="order-crm-row__position">
+                        <strong>{referralFeeFormatter.format(patient.total)}</strong>
+                        <small>{patient.pharmacyName}</small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+
+          <main className="order-crm-detail">
+            {!selectedFinancePatient ? (
+              <div className="order-crm-empty order-crm-empty--detail">
+                <PoundSterling size={38} />
+                <strong>Select an earning patient</strong>
+                <span>Fee events, pharmacy attribution and a path into the register appear here. This is an operational ledger, not an invoice register.</span>
+              </div>
+            ) : (
+              <article className="order-crm-record order-crm-record--paid">
+                <header className="order-crm-record__header">
+                  <div className="order-crm-record__hero">
+                    <div className="order-crm-record__identity">
+                      <span className="order-crm-record__stage order-tone--paid" aria-hidden="true">{patientInitials(selectedFinancePatient.name)}</span>
+                      <div className="order-crm-record__titles">
+                        <strong>{selectedFinancePatient.name}</strong>
+                        <span className="order-crm-record__ref">{selectedFinancePatient.email}</span>
+                        <em>{selectedFinancePatient.pharmacyName}{selectedPharmacy?.gphcNumber ? ` · GPhC ${selectedPharmacy.gphcNumber}` : ''}</em>
+                      </div>
+                    </div>
+                    <span className="order-stage-pill order-tone--paid">Earning</span>
+                  </div>
+                  <div className="order-crm-record__toolbar">
+                    <div className="order-crm-record__value">
+                      <small>Accrued this period</small>
+                      <strong>{referralFeeFormatter.format(selectedFinancePatient.total)}</strong>
+                      <span className="order-crm-record__opened">{selectedFinanceEvents.length} event{selectedFinanceEvents.length === 1 ? '' : 's'} · {periodLabel}</span>
+                    </div>
+                    <div className="order-crm-record__actions" role="group" aria-label="Finance record actions">
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => {
+                          setQuery('');
+                          setPatientOrganisationId('all');
+                          setPatientStatus('all');
+                          setPatientFrom('');
+                          setPatientTo('');
+                          setPendingRegisterKey(registerPatientKey(selectedFinancePatient));
+                          setSelectedOrganisationId(null);
+                          setView('patients');
+                        }}
+                      >
+                        Open register
+                      </button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setSelectedOrganisationId(selectedFinancePatient.organisationId)}>Manage pharmacy</button>
+                    </div>
+                  </div>
+                </header>
+
+                <div className="patient-crm-detail__body">
+                  <div className="admin-overview-crm__facts">
+                    <article>
+                      <small>First dispenses</small>
+                      <strong>{referralFeeFormatter.format(selectedFirst.reduce((sum, event) => sum + event.amount, 0))}</strong>
+                      <em>{selectedFirst.length} × £50</em>
+                    </article>
+                    <article>
+                      <small>Annual fees</small>
+                      <strong>{referralFeeFormatter.format(selectedAnnual.reduce((sum, event) => sum + event.amount, 0))}</strong>
+                      <em>{selectedAnnual.length} × £40</em>
+                    </article>
+                    <article>
+                      <small>Events</small>
+                      <strong>{selectedFinanceEvents.length}</strong>
+                      <em>{periodLabel}</em>
+                    </article>
+                    <article>
+                      <small>Pharmacy</small>
+                      <strong>{selectedFinancePatient.pharmacyName}</strong>
+                    </article>
+                  </div>
+
+                  <section className="admin-register-crm__panel">
+                    <h3>Fee events</h3>
+                    {selectedFinanceEvents.length === 0 ? (
+                      <p>No fee events remain for this patient after the current filters.</p>
+                    ) : (
+                      <ol className="admin-register-crm__events">
+                        {selectedFinanceEvents.map(event => (
+                          <li key={event.id}>
+                            <span>
+                              <strong>{event.kind === 'new-referral' ? 'First collected dispense' : event.anniversary ? `Annual fee · year ${event.anniversary}` : 'Annual patient fee'}</strong>
+                              <small>{event.occurredAt.toLocaleDateString('en-GB', { timeZone: 'Europe/London' })} · {event.pharmacyName}</small>
+                            </span>
+                            <b>{referralFeeFormatter.format(event.amount)}</b>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </section>
+
+                  <p className="admin-overview-crm__note">Referral fees accrue on the first collected dispense (£50) and each active anniversary (£40). This is an operational ledger, not an invoice or payment-receipt register.</p>
+
+                  <section className="admin-register-crm__panel admin-register-crm__later">
+                    <h3>Invoices and settlements</h3>
+                    <p>Not in the current finance contract. When the server returns invoice, settlement or payout fields, they will appear in this pane.</p>
+                  </section>
+                </div>
+              </article>
+            )}
+          </main>
         </div>
-
-        <section className="card admin-finance-filters filter-toolbar" aria-label="Referral finance filters">
-          <div className="admin-finance-filter">
-            <label htmlFor="finance-pharmacy">Pharmacy</label>
-            <select id="finance-pharmacy" className="input" value={financeOrganisationId} onChange={event => setFinanceOrganisationId(event.target.value)}>
-              <option value="all">All pharmacies</option>
-              {state.organisations.map(organisation => <option value={organisation.id} key={organisation.id}>{organisation.tradingName}</option>)}
-            </select>
-          </div>
-          <div className="admin-finance-filter">
-            <label htmlFor="finance-patient">Patient</label>
-            <select id="finance-patient" className="input" value={financePatientKey} onChange={event => setFinancePatientKey(event.target.value)}>
-              <option value="all">All patients</option>
-              {financePatients.map(patient => <option value={patient.key} key={patient.key}>{patient.name} · {patient.email}</option>)}
-            </select>
-          </div>
-          {financePeriod === 'month' && <div className="admin-finance-filter">
-            <label htmlFor="finance-month">Month</label>
-            <input id="finance-month" className="input" type="month" value={financeMonth} onChange={event => setFinanceMonth(event.target.value)} />
-          </div>}
-          {financePeriod === 'year' && <div className="admin-finance-filter">
-            <label htmlFor="finance-year">Year</label>
-            <input id="finance-year" className="input" type="number" min="2000" max="2200" step="1" value={financeYear} onChange={event => setFinanceYear(event.target.value)} />
-          </div>}
-        </section>
-
-        {adminFinanceError && <div className="banner banner-amber" role="alert"><AlertCircle size={16} /><span><strong>Referral finance is temporarily unavailable</strong><small>{adminFinanceError}</small></span><button className="btn btn-sm" type="button" onClick={() => setAdminFinanceRefresh(value => value + 1)}>Try again</button></div>}
-        {adminFinanceLoading && !adminFinanceReport && !isLocalPortalPreview && <div className="empty-state admin-finance-loading">Loading the referral fee ledger…</div>}
-
-        <SummaryTiles className="admin-finance-summary" label="Referral finance summary" items={[
-          { label: 'Total accrued', value: referralFeeFormatter.format(totalAccrued), detail: `${filteredReferralFeeEvents.length} fee event${filteredReferralFeeEvents.length === 1 ? '' : 's'}` },
-          { label: 'First dispenses', value: referralFeeFormatter.format(newReferralEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${newReferralEvents.length} × £50` },
-          { label: 'Annual fees', value: referralFeeFormatter.format(annualEvents.reduce((sum, event) => sum + event.amount, 0)), detail: `${annualEvents.length} × £40` },
-          { label: 'Patients', value: patientsWithFees, detail: 'with accrued fees' },
-        ]} />
-
-        <section className="card admin-patient-table admin-finance-position">
-          <div className="admin-directory-head"><div><h2>Pharmacy fee position</h2><p>Referral fees attributed to each pharmacy for the selected reporting period.</p></div><TrendingUp size={20} /></div>
-          {pharmacyPositions.length === 0 ? <div className="empty-state">No referral fees match the selected filters.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Patients</th><th>First dispenses</th><th>Annual fees</th><th>Total accrued</th></tr></thead><tbody>{pharmacyPositions.map(position => <tr key={position.organisation.id}><td><button className="table-link" onClick={() => setFinanceOrganisationId(position.organisation.id)}>{position.organisation.tradingName}</button><small>GPhC {position.organisation.gphcNumber}</small></td><td>{position.patients}</td><td><strong>{referralFeeFormatter.format(position.newReferralAmount)}</strong><small>{position.newReferrals} × £50</small></td><td><strong>{referralFeeFormatter.format(position.annualFeeAmount)}</strong><small>{position.annualFees} × £40</small></td><td><strong>{referralFeeFormatter.format(position.total)}</strong></td></tr>)}</tbody></table></div>}
-        </section>
-
-        <section className="card admin-patient-table admin-finance-ledger">
-          <div className="admin-directory-head"><div><h2>Fee event register</h2><p>Patient-level accrual history. This is an operational ledger, not an invoice or payment-receipt register.</p></div></div>
-          {filteredReferralFeeEvents.length === 0 ? <div className="empty-state">No fee events match the selected filters.</div> : <div className="table-wrap"><table><thead><tr><th>Accrued</th><th>Patient</th><th>Pharmacy</th><th>Fee event</th><th>Amount</th></tr></thead><tbody>{filteredReferralFeeEvents.map(event => <tr key={event.id}><td><strong>{event.occurredAt.toLocaleDateString('en-GB')}</strong><small>{event.occurredAt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</small></td><td><CompactPatientCell name={event.patientName} email={event.patientEmail} /></td><td>{event.pharmacyName}</td><td><span className={`pill ${event.kind === 'new-referral' ? 'pill-green' : 'pill-info'}`}>{event.kind === 'new-referral' ? 'First collected dispense' : event.anniversary ? `Annual fee · year ${event.anniversary}` : 'Annual patient fee'}</span></td><td><strong>{referralFeeFormatter.format(event.amount)}</strong></td></tr>)}</tbody></table></div>}
-        </section>
-      </>
+      </div>
     );
   };
 
@@ -1740,7 +2477,7 @@ export default function AdminPortal() {
   );
 
   const pageMeta: Record<AdminView, { title: string }> = {
-    overview: { title: 'Pharmacy administration' },
+    overview: { title: 'Portfolio overview' },
     referrals: { title: 'HHH patient intake and referral' },
     patients: { title: 'Patients and pharmacy attribution' },
     finance: { title: 'HHH referral finance' },

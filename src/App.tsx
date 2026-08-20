@@ -198,7 +198,9 @@ function AuthSessionBridge() {
 function StaffWorkspace() {
   const { state: authState } = useAuth();
   const { state, dispatch } = useApp();
-  const organisation = state.organisations.find(org => org.id === state.currentOrganisationId) ?? (state.portalMode === 'admin' ? state.organisations[0] : undefined);
+  const organisation = state.portalMode === 'admin'
+    ? undefined
+    : state.organisations.find(org => org.id === state.currentOrganisationId);
   const tenantStyle = tenantThemeVariables(organisation?.brand.primary ?? '#0f766e') as React.CSSProperties;
   const setup = usePharmacySetup(state.portalMode === 'admin' ? undefined : authState.staff?.organisationId);
   const curaleafActivated = Boolean(setup.status?.tasks.find(task => task.id === 'curaleaf_account')?.completed);
