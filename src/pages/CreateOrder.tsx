@@ -1106,35 +1106,6 @@ export default function CreateOrder() {
         </div>
       ) : (
         <div className={guidedLayout ? 'rx-guided' : 'rx-workbench-stack'}>
-          {guidedLayout ? (
-            <nav className="rx-guided__steps" aria-label="Create order steps">
-              <ol>
-                {guidedSteps.map(step => {
-                  const current = guidedStep === step.id;
-                  return (
-                    <li key={step.id}>
-                      <button
-                        type="button"
-                        className={`rx-guided__step${current ? ' is-current' : ''}${step.complete ? ' is-complete' : ''}${step.available ? '' : ' is-locked'}`}
-                        aria-current={current ? 'step' : undefined}
-                        aria-disabled={!step.available}
-                        onClick={() => openGuidedStep(step.id, step.available, step.lockReason)}
-                      >
-                        <span className="rx-guided__step-index" aria-hidden="true">
-                          {!step.available ? <LockKeyhole size={14} /> : step.complete ? <CheckCircle size={16} /> : step.id}
-                        </span>
-                        <span className="rx-guided__step-copy">
-                          <strong>{step.label}</strong>
-                          <small>{step.available ? step.detail : step.lockReason}</small>
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-            </nav>
-          ) : null}
-
           <div className={guidedLayout ? 'rx-guided__stage' : 'rx-workbench-stack'}>
             {guidedLayout ? (
               <header className="rx-guided__stage-head">
@@ -1674,57 +1645,85 @@ export default function CreateOrder() {
       )}
     </div>
     {guidedLayout && activeOrder && basketHost ? createPortal(
-      <aside className={`rx-basket-drawer${basketOpen ? ' is-open' : ''}`} aria-label="Draft medicines and cost">
-        <button
-          type="button"
-          className="rx-basket-drawer__toggle"
-          aria-expanded={basketOpen}
-          aria-controls="rx-basket-drawer-panel"
-          onClick={() => setBasketOpen(open => !open)}
-        >
-          <span>
-            <small>Draft basket</small>
-            <strong>{draftBasketCount} medicine{draftBasketCount === 1 ? '' : 's'} · {money(draftBasketTotal)}</strong>
-          </span>
-          <span className="rx-basket-drawer__hint">{basketOpen ? 'Hide choices' : 'Show choices'}{basketOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</span>
-        </button>
-        <div hidden={!basketOpen} id="rx-basket-drawer-panel" className="rx-basket-drawer__panel">
-          {draftBasketCount === 0 ? (
-            <p className="rx-basket-drawer__empty">No medicines in this draft yet. Add them in step 3. Prices appear here.</p>
-          ) : (
-            <ul className="rx-basket-drawer__list">
-              {draftBasketItems.map(item => {
-                const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
-                const margin = lineMargin(item);
-                return (
-                  <li key={`${item.rxId}-${item.productId}`}>
-                    <span>
-                      <strong>{item.name}</strong>
-                      <small>{item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each</small>
+      <div className="rx-guided__chrome">
+        <nav className="rx-guided__steps" aria-label="Create order steps">
+          <ol>
+            {guidedSteps.map(step => {
+              const current = guidedStep === step.id;
+              return (
+                <li key={step.id}>
+                  <button
+                    type="button"
+                    className={`rx-guided__step${current ? ' is-current' : ''}${step.complete ? ' is-complete' : ''}${step.available ? '' : ' is-locked'}`}
+                    aria-current={current ? 'step' : undefined}
+                    aria-disabled={!step.available}
+                    onClick={() => openGuidedStep(step.id, step.available, step.lockReason)}
+                  >
+                    <span className="rx-guided__step-index" aria-hidden="true">
+                      {!step.available ? <LockKeyhole size={14} /> : step.complete ? <CheckCircle size={16} /> : step.id}
                     </span>
-                    <span className="rx-basket-drawer__line">
-                      <strong>{money(lineRevenue(item))}</strong>
-                      <small>{contribution === null || margin === null ? 'Quote pending' : `${margin}% margin`}</small>
+                    <span className="rx-guided__step-copy">
+                      <strong>{step.label}</strong>
+                      <small>{step.available ? step.detail : step.lockReason}</small>
                     </span>
-                    {canEditBasketItems && item.rxId === selectedRx?.id ? (
-                      <span className="rx-basket-drawer__edit">
-                        <button type="button" className="icon-button" aria-label={`Reduce packs of ${item.name}`} disabled={item.qty <= 1} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty - 1 })}>−</button>
-                        <button type="button" className="icon-button" aria-label={`Add pack of ${item.name}`} disabled={item.qty >= 100} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty + 1 })}>+</button>
-                        <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId })}><Trash2 size={13} /></button>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+        <aside className={`rx-basket-drawer${basketOpen ? ' is-open' : ''}`} aria-label="Draft medicines and cost">
+          <button
+            type="button"
+            className="rx-basket-drawer__toggle"
+            aria-expanded={basketOpen}
+            aria-controls="rx-basket-drawer-panel"
+            onClick={() => setBasketOpen(open => !open)}
+          >
+            <span>
+              <small>Draft basket</small>
+              <strong>{draftBasketCount} medicine{draftBasketCount === 1 ? '' : 's'} · {money(draftBasketTotal)}</strong>
+            </span>
+            <span className="rx-basket-drawer__hint">{basketOpen ? 'Hide choices' : 'Show choices'}{basketOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</span>
+          </button>
+          <div hidden={!basketOpen} id="rx-basket-drawer-panel" className="rx-basket-drawer__panel">
+            {draftBasketCount === 0 ? (
+              <p className="rx-basket-drawer__empty">No medicines in this draft yet. Add them in step 3. Prices appear here.</p>
+            ) : (
+              <ul className="rx-basket-drawer__list">
+                {draftBasketItems.map(item => {
+                  const contribution = item.cost === null ? null : lineRevenue(item) - lineCost(item);
+                  const margin = lineMargin(item);
+                  return (
+                    <li key={`${item.rxId}-${item.productId}`}>
+                      <span>
+                        <strong>{item.name}</strong>
+                        <small>{item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each</small>
                       </span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <dl className="rx-basket-drawer__totals">
-            <div><dt>Products</dt><dd>{money(draftBasketTotal - (activeOrder.dispensingFee || 0))}</dd></div>
-            <div><dt>Dispensing</dt><dd>{money(activeOrder.dispensingFee || 0)}</dd></div>
-            <div><dt>Patient total</dt><dd>{money(draftBasketTotal)}</dd></div>
-          </dl>
-        </div>
-      </aside>,
+                      <span className="rx-basket-drawer__line">
+                        <strong>{money(lineRevenue(item))}</strong>
+                        <small>{contribution === null || margin === null ? 'Quote pending' : `${margin}% margin`}</small>
+                      </span>
+                      {canEditBasketItems && item.rxId === selectedRx?.id ? (
+                        <span className="rx-basket-drawer__edit">
+                          <button type="button" className="icon-button" aria-label={`Reduce packs of ${item.name}`} disabled={item.qty <= 1} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty - 1 })}>−</button>
+                          <button type="button" className="icon-button" aria-label={`Add pack of ${item.name}`} disabled={item.qty >= 100} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty + 1 })}>+</button>
+                          <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId })}><Trash2 size={13} /></button>
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <dl className="rx-basket-drawer__totals">
+              <div><dt>Products</dt><dd>{money(draftBasketTotal - (activeOrder.dispensingFee || 0))}</dd></div>
+              <div><dt>Dispensing</dt><dd>{money(activeOrder.dispensingFee || 0)}</dd></div>
+              <div><dt>Patient total</dt><dd>{money(draftBasketTotal)}</dd></div>
+            </dl>
+          </div>
+        </aside>
+      </div>,
       basketHost,
     ) : null}
     </>

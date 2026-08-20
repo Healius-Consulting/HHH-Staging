@@ -14663,10 +14663,43 @@ html[data-theme='dark'] .auth-loading-page{
   gap: 16px;
 }
 
+.rx-guided__chrome{
+  position: absolute;
+  z-index: 45;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  width: min(520px, calc(100% - 32px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-surface);
+  box-shadow: 0 16px 40px rgba(13, 29, 26, .16);
+}
+
 .rx-guided__steps{
-  position: sticky;
-  z-index: 2;
-  top: 8px;
+  position: static;
+}
+
+.rx-guided__chrome .rx-guided__steps ol{
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 4px;
+}
+
+.rx-guided__chrome .rx-guided__step{
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+}
+
+.rx-guided__chrome .rx-guided__step-copy{
+  padding-top: 0;
+}
+
+.rx-guided__chrome .rx-guided__step-copy small{
+  display: none;
 }
 
 .rx-guided__steps ol{
@@ -15176,24 +15209,18 @@ html[data-theme='dark'] .auth-loading-page{
 }
 
 .rx-workbench--guided{
-  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  padding-bottom: calc(180px + env(safe-area-inset-bottom));
 }
 
 .rx-basket-drawer{
-  position: absolute;
-  z-index: 45;
-  right: 16px;
-  bottom: 16px;
-  left: auto;
-  width: min(520px, calc(100% - 32px));
+  width: 100%;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border: 0;
+  border-radius: 0;
   background: var(--bg-surface);
-  box-shadow: 0 16px 40px rgba(13, 29, 26, .16);
 }
 
-body:has(.local-preview-switcher) .rx-basket-drawer{
+body:has(.local-preview-switcher) .rx-guided__chrome{
   bottom: 56px;
 }
 
@@ -15347,19 +15374,18 @@ body:has(.local-preview-switcher) .rx-basket-drawer{
 }
 
 @media (max-width: 760px){
-  .rx-basket-drawer{
+  .rx-guided__chrome{
     right: 12px;
     bottom: calc(88px + env(safe-area-inset-bottom));
-    left: auto;
     width: min(520px, calc(100vw - 24px));
   }
 
-  body:has(.local-preview-switcher) .rx-basket-drawer{
+  body:has(.local-preview-switcher) .rx-guided__chrome{
     bottom: calc(132px + env(safe-area-inset-bottom));
   }
 
   .rx-workbench--guided{
-    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+    padding-bottom: calc(180px + env(safe-area-inset-bottom));
   }
 
   .rx-basket-drawer__list > li{
@@ -15377,7 +15403,7 @@ body:has(.local-preview-switcher) .rx-basket-drawer{
 }
 
 @media (prefers-reduced-motion: reduce){
-  .rx-basket-drawer{
+  .rx-guided__chrome{
     box-shadow: 0 1px 0 var(--border);
   }
 }
