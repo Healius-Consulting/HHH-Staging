@@ -44,7 +44,7 @@ function connection(integration: 'CURALEAF' | 'WORLDPAY', status: IntegrationCon
 }
 
 describe('operational readiness', () => {
-  it('keeps intake live during training and withholds go-live until the walkthrough and Curaleaf are proven', () => {
+  it('keeps intake live during training and lets HHH flip live without UAT task records', () => {
     const operational = buildOperationalStatus({
       organisation,
       tasks: [task('pharmacy_profile', true), task('payment_route', true), task('pricing', true)],
@@ -56,9 +56,31 @@ describe('operational readiness', () => {
     assert.equal(operational.workspace.mode, 'training');
     assert.equal(operational.curaleaf.label, 'Waiting');
     assert.equal(operational.payment.label, 'Pharmacy-managed');
-    assert.equal(operational.goLiveReady, false);
-    assert.ok(operational.missingGates.includes('curaleaf'));
-    assert.ok(operational.missingGates.includes('walkthrough'));
+    assert.equal(operational.goLiveReady, true);
+    assert.equal(operational.missingGates.includes('curaleaf'), false);
+    assert.equal(operational.missingGates.includes('walkthrough'), false);
+  });
+
+  it('blocks go-live while paused or classified as a training tenant', () => {
+    const paused = buildOperationalStatus({
+      organisation: { ...organisation, status: 'PAUSED' },
+      tasks: [],
+      staff: [staff('ACTIVE', 'owner')],
+      curaleaf: connection('CURALEAF', 'ACTIVE'),
+      worldpay: null,
+    });
+    assert.equal(paused.goLiveReady, false);
+    assert.ok(paused.missingGates.includes('paused'));
+
+    const training = buildOperationalStatus({
+      organisation: { ...organisation, classification: 'TRAINING' },
+      tasks: [],
+      staff: [staff('ACTIVE', 'owner')],
+      curaleaf: connection('CURALEAF', 'ACTIVE'),
+      worldpay: null,
+    });
+    assert.equal(training.goLiveReady, false);
+    assert.ok(training.missingGates.includes('training_tenant'));
   });
 
   it('treats Worldpay as incomplete until the merchant is connected', () => {
@@ -71,6 +93,7 @@ describe('operational readiness', () => {
     });
     assert.equal(operational.payment.passed, false);
     assert.equal(operational.payment.label, 'Worldpay not connected');
+    assert.equal(operational.goLiveReady, true);
   });
 
   it('marks go-live ready from server-backed fields and derives Curaleaf from the connection', () => {

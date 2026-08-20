@@ -48,7 +48,7 @@ export default function Navigation() {
       mobilePrimaryKeys={['home', 'create', 'orders', 'patients']}
       onNavigate={screen => dispatch({ type: 'SET_SCREEN', screen })}
       brand={{ title: 'Holistic Health Hub', subtitle: 'Pharmacy operations', partner: organisation.tradingName, logo: <HhhBrandMark /> }}
-      user={{ initials: staffInitials, name: staffName, role: isAdminViewingClient ? 'HHH administrator' : `Pharmacy staff · ${organisation.status}` }}
+      user={{ initials: staffInitials, name: staffName, role: isAdminViewingClient ? 'HHH administrator' : `Pharmacy staff · ${state.workspaceMode === 'live' ? 'Live' : 'Training'}` }}
       exitAction={{
         label: isAdminViewingClient ? 'Return to administration' : 'Sign out',
         icon: isAdminViewingClient ? <ArrowUpRight size={14} /> : <LogOut size={14} />,

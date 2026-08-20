@@ -47,6 +47,7 @@ import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 import { toPortalOrder, toPortalOrderDraft } from './pharmacy-contracts.js';
+import { requirePharmacyOperationalWrites } from './require-operational-writes.js';
 import {
   loadOrderChildren,
   loadOrganisationOrderChildren,
@@ -335,6 +336,7 @@ async function attachCuraleafToOrder(
 
 export function createPortalOrderRouter(): Router {
   const router = Router();
+  router.use(requirePharmacyOperationalWrites);
   const orderRepo = new SqlOrderRepository();
   const orderLineRepo = new SqlOrderLineRepository();
   const paymentRepo = new SqlPaymentRepository();

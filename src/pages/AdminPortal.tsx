@@ -42,9 +42,8 @@ import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources'
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { useAuth } from '../auth/useAuth';
-import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getPharmacyStaff, getPlatformAdmins, getReferralLink, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, resetPharmacyStaffMfa, updateAdminPharmacySetupTask, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
-import { type AdminReferralFinanceReport, type PatientRegisterExportResult, type PatientRegisterExportRow, type PharmacySetupStatus, type PharmacyStaffAccount, type PharmacyStaffInvitation, type PlatformAdminAccount, type PlatformAdminInvitation, type SetupTaskId, type UpdateOrganisationInput } from '../shared/contracts';
-import { SETUP_TASKS, adminSandboxEvidence, deriveOperationalStatus } from '../onboarding/setup';
+import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminReferralFinance, getPharmacyStaff, getPlatformAdmins, getReferralLink, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, resetPharmacyStaffMfa, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import { type AdminReferralFinanceReport, type PatientRegisterExportResult, type PatientRegisterExportRow, type PharmacyStaffAccount, type PharmacyStaffInvitation, type PlatformAdminAccount, type PlatformAdminInvitation, type UpdateOrganisationInput } from '../shared/contracts';
 import { AdminGoLivePanel } from '../onboarding/AdminGoLivePanel';
 import { isLocalPortalPreview, withLocationSearch } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
@@ -875,19 +874,15 @@ export default function AdminPortal() {
   const [overviewPharmacyId, setOverviewPharmacyId] = useState<string | null>(organisationIdFromPath);
   const [overviewManagePanel, setOverviewManagePanel] = useState<OverviewManagePanel>('summary');
   const [overviewManageOpen, setOverviewManageOpen] = useState(false);
-  const [overviewFilter, setOverviewFilter] = useState<'all' | 'live' | 'setup'>('all');
+  const [overviewFilter, setOverviewFilter] = useState<'all' | 'live' | 'training'>('all');
   const overviewManageRef = useRef<HTMLDivElement>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
   const [showAdminDialog, setShowAdminDialog] = useState(false);
   const [adminDialogFocus, setAdminDialogFocus] = useState<AdminDialogFocus>('list');
-  const [setupByOrganisation, setSetupByOrganisation] = useState<Record<string, PharmacySetupStatus>>({});
-  const [setupError, setSetupError] = useState<string | null>(null);
-  const [setupRefresh, setSetupRefresh] = useState(0);
   const [goLiveBusy, setGoLiveBusy] = useState(false);
   const [goLiveError, setGoLiveError] = useState<string | null>(null);
-  const [recordingTask, setRecordingTask] = useState<SetupTaskId | null>(null);
   const [financeOrganisationId, setFinanceOrganisationId] = useState('all');
   const [financePatientKey, setFinancePatientKey] = useState('all');
   const [financePeriod, setFinancePeriod] = useState<'all' | 'month' | 'year'>('all');
@@ -905,13 +900,6 @@ export default function AdminPortal() {
   const [referralPharmacyReason, setReferralPharmacyReason] = useState('');
   const [referralBusy, setReferralBusy] = useState(false);
   const [referralError, setReferralError] = useState<string | null>(null);
-
-  // Operational state is read from the SQL-backed setup and integration APIs.
-  // GDPR evidence is intentionally not represented as a platform gate.
-  const goLiveByOrganisation = useMemo(() => Object.fromEntries(state.organisations.map(organisation => [organisation.id, {
-    allocationHolding: organisation.workspaceClassification === 'allocation_holding',
-    testAccount: organisation.testAccount === true,
-  }])), [state.organisations]);
 
   const overviewPharmacy = state.organisations.find(org => org.id === overviewPharmacyId) ?? null;
 
@@ -1071,56 +1059,6 @@ export default function AdminPortal() {
       setShowPharmacyEditor(false);
     }
   }, [view]);
-
-  useEffect(() => {
-    if (!state.organisations.length) {
-      setSetupByOrganisation({});
-      return;
-    }
-    let cancelled = false;
-    setSetupError(null);
-    if (isLocalPortalPreview) {
-      const statuses = state.organisations.map((organisation, organisationIndex): PharmacySetupStatus => {
-        const completedCount = organisationIndex === 0 ? 4 : 2;
-        const tasks = SETUP_TASKS.map((task, taskIndex) => ({
-          id: task.id,
-          completed: taskIndex < completedCount,
-          completedAt: taskIndex < completedCount ? new Date().toISOString() : null,
-          completedBy: taskIndex < completedCount ? 'Preview admin' : null,
-          evidence: taskIndex < completedCount ? (task.id === 'pharmacy_profile' ? `Confirmed GPhC ${organisation.gphcNumber}` : 'Recorded') : null,
-        }));
-        return {
-          organisationId: organisation.id,
-          completed: completedCount === SETUP_TASKS.length,
-          completedCount,
-          requiredCount: SETUP_TASKS.length,
-          updatedAt: new Date().toISOString(),
-          tasks,
-          operational: deriveOperationalStatus({
-            workspaceMode: organisation.status === 'live' ? 'live' : organisation.status === 'paused' ? 'paused' : 'training',
-            paused: organisation.status === 'paused',
-            staffCount: organisation.staffCount,
-            defaultPaymentRoute: organisation.defaultPaymentRoute,
-            worldpayConnected: organisation.worldpay.status === 'connected',
-            curaleafConnected: Boolean(organisation.curaleafPharmacyCode),
-            tasks,
-          }),
-        };
-      });
-      setSetupByOrganisation(Object.fromEntries(statuses.map(status => [status.organisationId, status])));
-      return;
-    }
-    void getAdminPharmacySetupStatuses()
-      .then(result => {
-        if (!cancelled) {
-          setSetupByOrganisation(Object.fromEntries(result.records.map(status => [status.organisationId, status])));
-        }
-      })
-      .catch(error => {
-        if (!cancelled) setSetupError(error instanceof Error ? error.message : 'Pharmacy readiness could not be loaded.');
-      });
-    return () => { cancelled = true; };
-  }, [state.organisations, setupRefresh]);
 
   const submissionsByOrganisation = useMemo(
     () => new Map(state.organisations.map(org => [org.id, state.submissions.filter(sub => sub.organisationId === org.id)])),
@@ -1444,13 +1382,11 @@ export default function AdminPortal() {
     try {
       if (isLocalPortalPreview) {
         dispatch({ type: 'UPDATE_ORGANISATION', organisationId, updates: { status: 'live' } });
-        setSetupRefresh(value => value + 1);
         dispatch({ type: 'ADD_TOAST', message: 'Preview workspace marked live.', toastType: 'success' });
         return;
       }
       const readiness = await goLiveOrganisation(organisationId);
       dispatch({ type: 'UPDATE_ORGANISATION', organisationId, updates: { status: readiness.status } });
-      setSetupRefresh(value => value + 1);
       dispatch({ type: 'ADD_TOAST', message: 'Pharmacy workspace is live.', toastType: 'success' });
     } catch (error) {
       setGoLiveError(error instanceof Error ? error.message : 'The pharmacy could not be flipped to live.');
@@ -1459,55 +1395,8 @@ export default function AdminPortal() {
     }
   };
 
-  const recordSandboxTask = async (organisation: PharmacyTenant, taskId: SetupTaskId, completed: boolean) => {
-    setRecordingTask(taskId);
-    setGoLiveError(null);
-    const evidence = completed ? adminSandboxEvidence(taskId, organisation) : '';
-    try {
-      if (isLocalPortalPreview) {
-        setSetupByOrganisation(current => {
-          const status = current[organisation.id];
-          if (!status) return current;
-          const tasks = status.tasks.map(task => task.id === taskId ? {
-            ...task,
-            completed,
-            evidence: completed ? evidence : null,
-            completedAt: completed ? new Date().toISOString() : null,
-            completedBy: completed ? 'Preview admin' : null,
-          } : task);
-          const completedCount = tasks.filter(task => task.completed).length;
-          return {
-            ...current,
-            [organisation.id]: {
-              ...status,
-              tasks,
-              completedCount,
-              completed: completedCount === tasks.length,
-              operational: deriveOperationalStatus({
-                workspaceMode: organisation.status === 'live' ? 'live' : organisation.status === 'paused' ? 'paused' : 'training',
-                paused: organisation.status === 'paused',
-                staffCount: organisation.staffCount,
-                defaultPaymentRoute: organisation.defaultPaymentRoute,
-                worldpayConnected: organisation.worldpay.status === 'connected',
-                curaleafConnected: Boolean(organisation.curaleafPharmacyCode || status.operational?.curaleaf.connected),
-                tasks,
-              }),
-            },
-          };
-        });
-        return;
-      }
-      const next = await updateAdminPharmacySetupTask(organisation.id, taskId, { completed, evidence });
-      setSetupByOrganisation(current => ({ ...current, [organisation.id]: next }));
-    } catch (error) {
-      setGoLiveError(error instanceof Error ? error.message : 'The sandbox note could not be saved.');
-    } finally {
-      setRecordingTask(null);
-    }
-  };
   const liveCount = state.organisations.filter(org => org.status === 'live').length;
   const trainingCount = state.organisations.filter(org => org.status === 'onboarding' || org.status === 'intake_live').length;
-  const remainingSetupSteps = Object.values(setupByOrganisation).reduce((total, status) => total + status.requiredCount - status.completedCount, 0);
   const pendingAdminDecisions = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review').length;
   const adminCommands = useMemo<CommandDefinition[]>(() => [
     { label: 'Pharmacies', detail: 'Manage pharmacy organisations', group: 'Navigate', icon: <LayoutDashboard size={16} />, run: () => { setView('overview'); } },
@@ -1540,18 +1429,11 @@ export default function AdminPortal() {
     }),
   ], [allPatients, openPharmacyOnOverview, state.organisations]);
 
-  const tenantReadiness = (organisationId: string) => {
-    const status = setupByOrganisation[organisationId];
-    const ready = status?.completedCount ?? 0;
-    const total = status?.requiredCount ?? SETUP_TASKS.length;
-    return { ready, total, percent: total ? Math.round(ready / total * 100) : 0 };
-  };
-
   const overviewPharmacies = state.organisations.filter(org => {
     const matchesQuery = `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase());
     if (!matchesQuery) return false;
     if (overviewFilter === 'live') return org.status === 'live';
-    if (overviewFilter === 'setup') return tenantReadiness(org.id).ready < tenantReadiness(org.id).total;
+    if (overviewFilter === 'training') return org.status === 'onboarding' || org.status === 'intake_live';
     return true;
   });
 
@@ -1580,20 +1462,13 @@ export default function AdminPortal() {
       ...(crmByOrganisation.get(selectedPharmacy.id) ?? []).map(patient => patient.email),
       ...(submissionsByOrganisation.get(selectedPharmacy.id) ?? []).map(submission => submission.email),
     ]).size : 0;
-    const selectedReadiness = selectedPharmacy ? tenantReadiness(selectedPharmacy.id) : null;
-    const selectedGoLive = selectedPharmacy ? goLiveByOrganisation[selectedPharmacy.id] : null;
-    const setupStatus = selectedPharmacy ? setupByOrganisation[selectedPharmacy.id] : undefined;
     const liveFilterCount = state.organisations.filter(organisation => organisation.status === 'live').length;
-    const setupFilterCount = state.organisations.filter(organisation => tenantReadiness(organisation.id).ready < tenantReadiness(organisation.id).total).length;
-    const workspaceLabel = selectedGoLive?.allocationHolding
-      ? 'Holistic Health Hub Allocation'
-      : selectedGoLive?.testAccount
-        ? 'Test workspace'
-        : setupStatus?.operational?.workspace.label === 'Live'
-          ? 'Standard workspace · live'
-          : setupStatus?.operational?.workspace.label === 'Paused'
-            ? 'Standard workspace · paused'
-            : 'Standard workspace · training';
+    const trainingFilterCount = state.organisations.filter(organisation => organisation.status === 'onboarding' || organisation.status === 'intake_live').length;
+    const workspaceLabel = selectedPharmacy?.status === 'live'
+      ? 'Live'
+      : selectedPharmacy?.status === 'paused'
+        ? 'Paused'
+        : 'Training';
     const managePanelLabel = OVERVIEW_MANAGE_PANELS.find(panel => panel.id === overviewManagePanel)?.label ?? 'Summary';
     const tenantTheme = selectedPharmacy ? deriveTenantTheme(selectedPharmacy.brand.primary) : null;
     const formUrl = referralLink;
@@ -1618,8 +1493,8 @@ export default function AdminPortal() {
             </span>
           </article>
           <article className="order-crm-metric">
-            <span className="order-crm-metric__icon"><ClipboardCheck size={16} /></span>
-            <span><small>Sandbox notes</small><strong>{remainingSetupSteps}</strong><em>{remainingSetupSteps ? 'HHH call notes still to record' : 'Call notes recorded'}</em></span>
+            <span className="order-crm-metric__icon"><UserCheck size={16} /></span>
+            <span><small>Intake queue</small><strong>{pendingAdminDecisions}</strong><em>{pendingAdminDecisions ? 'Decisions waiting on HHH' : 'No pending decisions'}</em></span>
           </article>
         </section>
 
@@ -1638,7 +1513,7 @@ export default function AdminPortal() {
             {([
               { key: 'all' as const, label: 'All', count: state.organisations.length },
               { key: 'live' as const, label: 'Live', count: liveFilterCount },
-              { key: 'setup' as const, label: 'Sandbox pending', count: setupFilterCount },
+              { key: 'training' as const, label: 'Training', count: trainingFilterCount },
             ]).map(filter => (
               <button
                 type="button"
@@ -1662,21 +1537,6 @@ export default function AdminPortal() {
             <span><strong>Referral finance is temporarily unavailable</strong><small>{adminFinanceError}</small></span>
             <button className="btn btn-sm" type="button" onClick={() => setAdminFinanceRefresh(value => value + 1)}>Try again</button>
           </div>
-        ) : null}
-
-        {remainingSetupSteps > 0 ? (
-          <section className="order-crm-alert admin-overview-crm__alert" role="status">
-            <ClipboardCheck size={16} aria-hidden="true" />
-            <span>
-              <strong>Sandbox call notes are still open</strong>
-              <small>{remainingSetupSteps} note{remainingSetupSteps === 1 ? '' : 's'} for HHH to record. This does not turn intake off.</small>
-            </span>
-            <button type="button" className="btn btn-sm" onClick={() => {
-              const incomplete = state.organisations.find(organisation => tenantReadiness(organisation.id).ready < tenantReadiness(organisation.id).total);
-              const target = incomplete ?? state.organisations[0];
-              if (target) openPharmacyOnOverview(target.id, 'setup');
-            }}>Open go live</button>
-          </section>
         ) : null}
 
         <div className="order-crm-workspace">
@@ -1728,11 +1588,11 @@ export default function AdminPortal() {
           </aside>
 
           <main className="order-crm-detail">
-            {!selectedPharmacy || !selectedReadiness ? (
+            {!selectedPharmacy ? (
               <div className="order-crm-empty order-crm-empty--detail">
                 <Building2 size={38} />
                 <strong>Select a pharmacy</strong>
-                <span>Account status, setup and referral fees appear here. Use Manage on a selected pharmacy to review identity, staff, setup or Curaleaf.</span>
+                <span>Account status and referral fees appear here. Use Manage on a selected pharmacy to review identity, staff, go live or Curaleaf.</span>
               </div>
             ) : (
               <article className={`order-crm-record order-crm-record--${pharmacyTone(selectedPharmacy.status)}`}>
@@ -1807,9 +1667,9 @@ export default function AdminPortal() {
                           <strong>{selectedPatients}</strong>
                         </article>
                         <article>
-                          <small>Setup</small>
-                          <strong>{selectedReadiness.percent}%</strong>
-                          <em>{selectedReadiness.ready}/{selectedReadiness.total} UAT checks</em>
+                          <small>Workspace</small>
+                          <strong>{selectedPharmacy.status === 'live' ? 'Live' : selectedPharmacy.status === 'paused' ? 'Paused' : 'Training'}</strong>
+                          <em>{selectedPharmacy.status === 'live' ? 'Referred patients and orders' : 'Training examples until go-live'}</em>
                         </article>
                         <article>
                           <small>First dispenses</small>
@@ -1837,7 +1697,7 @@ export default function AdminPortal() {
                           </div>
                           <div className="admin-detail-list">
                             <div><span>Pharmacy name</span><strong>{selectedPharmacy.name}</strong></div>
-                            <div><span>Curaleaf ID (PHAR code)</span><strong>{selectedPharmacy.curaleafPharmacyCode ?? (setupStatus?.tasks.find(task => task.id === 'curaleaf_account')?.completed ? 'Connected securely' : 'Not connected')}</strong></div>
+                            <div><span>Curaleaf ID (PHAR code)</span><strong>{selectedPharmacy.curaleafPharmacyCode ?? 'Not connected'}</strong></div>
                             <div><span>Company name</span><strong>{selectedPharmacy.tradingName}</strong></div>
                             <div><span>Company registration number</span><strong>{selectedPharmacy.companyNumber || 'Not supplied'}</strong></div>
                             <div><span>GPhC number</span><strong>{selectedPharmacy.gphcNumber}</strong></div>
@@ -1891,14 +1751,9 @@ export default function AdminPortal() {
                   {overviewManagePanel === 'setup' ? (
                     <div className="admin-overview-manage-panel">
                       <AdminGoLivePanel
-                        pharmacyName={selectedPharmacy.tradingName}
-                        liveWorkspace={selectedPharmacy.status === 'live'}
-                        setupStatus={setupStatus}
-                        setupError={setupError}
+                        organisation={selectedPharmacy}
                         goLiveError={goLiveError}
                         goLiveBusy={goLiveBusy}
-                        recordingTask={recordingTask}
-                        onRecordTask={(taskId, completed) => void recordSandboxTask(selectedPharmacy, taskId, completed)}
                         onFlipLive={() => void flipPharmacyLive(selectedPharmacy.id)}
                       />
                     </div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, BadgePoundSterling, PackageCheck, PoundSterling, ReceiptText, RefreshCw, TrendingUp } from 'lucide-react';
-import { money } from '../context/AppContext';
+import { money, useApp } from '../context/AppContext';
 import { getPharmacyPrescriptionFinance } from '../shared/api';
 import type { PharmacyPrescriptionFinanceReport } from '../shared/contracts';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
@@ -20,6 +20,23 @@ const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
 function periodStart(period: Period) {
   if (period === 'all') return undefined;
   return new Date(Date.now() - Number(period) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function emptyFinanceReport(period: Period, organisationId: string): PharmacyPrescriptionFinanceReport {
+  return {
+    organisationId,
+    currency: 'GBP',
+    range: { from: periodStart(period) ?? null, to: null },
+    periodCounts: { '30': 0, '90': 0, '365': 0, all: 0 },
+    totals: {
+      prescriptionCount: 0, paidPrescriptionCount: 0, pendingPrescriptionCount: 0,
+      refundedPrescriptionCount: 0, refundedPatientPence: 0, refundPendingCount: 0, refundPendingPatientPence: 0,
+      patientRevenuePence: 0, productRevenuePence: 0, dispensingFeesPence: 0,
+      wholesaleKnownForCount: 0, wholesalePendingForCount: 0, wholesaleProductPence: 0,
+      shippingPence: 0, wholesalePence: 0, productMarginPence: 0, totalContributionPence: 0,
+    },
+    rows: [],
+  };
 }
 
 function localPreviewFinanceReport(period: Period): PharmacyPrescriptionFinanceReport {
@@ -66,6 +83,8 @@ function recognisedDate(row: FinanceRow) {
 }
 
 export default function PharmacyFinance() {
+  const { state } = useApp();
+  const liveWorkspace = state.workspaceMode === 'live';
   const [period, setPeriod] = useState<Period>('90');
   const [report, setReport] = useState<PharmacyPrescriptionFinanceReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,14 +99,16 @@ export default function PharmacyFinance() {
     try {
       const nextReport = isLocalPortalPreview
         ? localPreviewFinanceReport(period)
-        : await getPharmacyPrescriptionFinance({ from: periodStart(period) });
+        : liveWorkspace
+          ? await getPharmacyPrescriptionFinance({ from: periodStart(period) })
+          : emptyFinanceReport(period, state.currentOrganisationId);
       if (requestVersion.current === version) setReport(nextReport);
     } catch (loadError) {
       if (requestVersion.current === version) setError(loadError instanceof Error ? loadError.message : 'The finance report is unavailable.');
     } finally {
       if (requestVersion.current === version) setLoading(false);
     }
-  }, [period]);
+  }, [liveWorkspace, period, state.currentOrganisationId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -209,8 +230,10 @@ export default function PharmacyFinance() {
             {financialOrders.length === 0 ? (
               <div className="empty-state">
                 <BadgePoundSterling size={32} aria-hidden="true" />
-                <h3>No retained paid prescriptions in this period</h3>
-                <p>Results appear here after payment is confirmed and remain excluded after a refund is opened.</p>
+                <h3>{liveWorkspace ? 'No retained paid prescriptions in this period' : 'Training examples are not paid prescriptions'}</h3>
+                <p>{liveWorkspace
+                  ? 'Results appear here after payment is confirmed and remain excluded after a refund is opened.'
+                  : 'Live paid-order totals appear here after HHH flips this workspace live.'}</p>
               </div>
             ) : (
               <div className="pharmacy-finance__table-wrap">

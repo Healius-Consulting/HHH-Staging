@@ -8,6 +8,7 @@ import { SqlPrescriptionRepository } from '../../repositories/sql/prescription.s
 import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
+import { requirePharmacyOperationalWrites } from './require-operational-writes.js';
 
 const uuidLikeSchema = z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
 
@@ -56,6 +57,7 @@ const uploadTargetSchema = z.object({
 
 export function createPortalPrescriptionRouter(): Router {
   const router = Router();
+  router.use(requirePharmacyOperationalWrites);
   const prescriptionRepo = new SqlPrescriptionRepository();
   const storageProvider = new StorageProvider();
 

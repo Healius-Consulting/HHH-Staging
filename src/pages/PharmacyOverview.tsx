@@ -133,11 +133,12 @@ export default function PharmacyOverview() {
           <p className="section-label">Authenticated pharmacy workspace</p>
           <h1>{overview.organisation.tradingName}</h1>
           <div className="secure-overview__identity">
-            <span className={`status-badge status-badge--${overview.organisation.status}`}>
-              {overview.organisation.status.replace('_', ' ')}
+            <span className={`status-badge status-badge--${state.workspaceMode === 'live' ? 'live' : 'training'}`}>
+              {state.workspaceMode === 'live' ? 'Live' : 'Training'}
             </span>
-            {overview.organisation.trainingMode && <span className="status-badge status-badge--training">Training data</span>}
-            {overview.organisation.allocationHoldingMode && <span className="status-badge status-badge--intake_live">Holistic Health Hub Allocation</span>}
+            {state.organisations.find(org => org.id === state.currentOrganisationId)?.status === 'paused' ? (
+              <span className="status-badge status-badge--paused">Paused</span>
+            ) : null}
             <span>As of {formatAsOf(overview.asOf)}</span>
           </div>
         </div>

@@ -1,5 +1,7 @@
-# Server-only SQL Connect mutations for HHH Platform.
-# Fail-closed boundary: client operations default to NO_ACCESS.
+# Server-only Data Connect mutations. Auth is fail-closed (NO_ACCESS).
+# Runtime SQL API executes matching inline GraphQL in services/api-sql repositories.
+# Patient activation is ActivateSubmission in intake.sql (patient + identity in one transaction).
+# Do not add Direct/seed mutations.
 
 mutation CreateStaffSession(
   $sessionHash: String!
@@ -81,7 +83,7 @@ mutation AppendAuditLog(
   })
 }
 
-mutation InsertSetupTask(
+mutation UpsertSetupTask(
   $organisationId: UUID!
   $taskCode: String!
   $completed: Boolean!
@@ -89,7 +91,7 @@ mutation InsertSetupTask(
   $completedByUid: String
   $completedAt: Timestamp
 ) @auth(level: NO_ACCESS) {
-  setupTask_insert(data: {
+  setupTask_upsert(data: {
     organisationId: $organisationId
     taskCode: $taskCode
     completed: $completed
@@ -186,34 +188,7 @@ mutation ReassignSubmission(
     reasonCode: $reasonCode
     previousAssignmentVersion: $expectedAssignmentVersion
     newAssignmentVersion: $newAssignmentVersion
-  })
-}
-
-mutation CreatePatientWithIdentity(
-  $organisationId: UUID!
-  $sourceSubmissionId: UUID
-  $firstName: String!
-  $surname: String!
-  $dob: Date!
-  $email: String!
-  $emailHash: String!
-  $mobile: String!
-  $address: String
-  $postcode: String!
-) @auth(level: NO_ACCESS) {
-  patient_insert(data: {
-    organisationId: $organisationId
-    sourceSubmissionId: $sourceSubmissionId
-    firstName: $firstName
-    surname: $surname
-    dob: $dob
-    email: $email
-    mobile: $mobile
-    address: $address
-    postcode: $postcode
-    status: ACTIVE
-    activatedAt_expr: "request.time"
-  })
+  }  )
 }
 
 mutation CreatePrescriptionFile(
@@ -515,106 +490,6 @@ mutation CreateReferralToken(
     tokenHash: $tokenHash
     intakeVersion: $intakeVersion
   })
-}
-
-mutation CreateStaffUserDirect(
-  $uid: String!
-  $organisationId: UUID
-  $email: String!
-  $displayName: String!
-  $role: StaffRole!
-  $status: StaffStatus!
-  $disabled: Boolean!
-) @auth(level: NO_ACCESS) {
-  staffUser_insert(data: {
-    uid: $uid
-    organisationId: $organisationId
-    email: $email
-    displayName: $displayName
-    role: $role
-    status: $status
-    disabled: $disabled
-  })
-}
-
-mutation CreatePatientDirect(
-  $id: UUID!
-  $organisationId: UUID!
-  $firstName: String!
-  $surname: String!
-  $dob: Date!
-  $email: String!
-  $mobile: String!
-  $address: String
-  $postcode: String!
-  $status: PatientStatus!
-) @auth(level: NO_ACCESS) {
-  patient_insert(data: {
-    id: $id
-    organisationId: $organisationId
-    firstName: $firstName
-    surname: $surname
-    dob: $dob
-    email: $email
-    mobile: $mobile
-    address: $address
-    postcode: $postcode
-    status: $status
-    activatedAt_expr: "request.time"
-  })
-}
-
-mutation CreateOrderDirect(
-  $id: UUID!
-  $organisationId: UUID!
-  $patientId: UUID!
-  $orderNumber: String
-  $status: OrderStatus!
-  $paymentStatus: PaymentStatus!
-  $fulfilmentStatus: FulfilmentStatus!
-  $paymentRoute: PaymentRoute!
-  $currency: String!
-  $medicineTotalPence: Int64!
-  $dispensingFeePence: Int64!
-  $deliveryPence: Int64!
-  $taxPence: Int64!
-  $totalPence: Int64!
-  $quoteSnapshot: Any
-  $createdByUid: String!
-) @auth(level: NO_ACCESS) {
-  order_insert(data: {
-    id: $id
-    organisationId: $organisationId
-    patientId: $patientId
-    orderNumber: $orderNumber
-    status: $status
-    paymentStatus: $paymentStatus
-    fulfilmentStatus: $fulfilmentStatus
-    paymentRoute: $paymentRoute
-    currency: $currency
-    medicineTotalPence: $medicineTotalPence
-    dispensingFeePence: $dispensingFeePence
-    deliveryPence: $deliveryPence
-    taxPence: $taxPence
-    totalPence: $totalPence
-    quoteSnapshot: $quoteSnapshot
-    createdByUid: $createdByUid
-    submittedAt_expr: "request.time"
-  })
-}
-
-mutation UpdateStaffUserRole(
-  $uid: String!
-  $role: StaffRole!
-  $organisationId: UUID
-) @auth(level: NO_ACCESS) {
-  staffUser_update(
-    key: { uid: $uid }
-    data: {
-      role: $role
-      organisationId: $organisationId
-    }
-  )
 }
 
 

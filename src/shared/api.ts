@@ -6,7 +6,6 @@ import type {
   CreatedOrganisation,
   EligibilitySubmissionInput,
   EligibilitySubmissionReceipt,
-  PharmacySetupStatus,
   PharmacyStaffAccount,
   PharmacyStaffInvitation,
   CreatePharmacyStaffInput,
@@ -15,10 +14,8 @@ import type {
   CreatePlatformAdminInput,
   PortalOrganisation,
   PublicPharmacy,
-  SetupTaskId,
   StaffAccessibilityPreferences,
   PortalSession,
-  UpdatePharmacySetupTaskInput,
   UpdateOrganisationInput,
   UpdatePharmacyProfileInput,
   PaymentSettings,
@@ -28,8 +25,6 @@ import type {
   CuraleafQuoteRequestItem,
   CuraleafActivity,
   PortalPatientDirectoryRecord,
-  PortalPatientRecord,
-  PortalPendingEnquiryRecord,
   PortalOrderInput,
   PortalOrderRecord,
   ExpiryCheckState,
@@ -353,16 +348,6 @@ export function getPortalPatientDirectory(organisationId: string) {
   return apiRequest<PortalPatientDirectoryRecord>(`/v1/portal/patient-directory?organisationId=${encodeURIComponent(organisationId)}`);
 }
 
-/** @deprecated Prefer getPortalPatientDirectory */
-export function getPortalPatients(organisationId: string) {
-  return apiRequest<PortalPatientRecord[]>(`/v1/portal/patients?organisationId=${encodeURIComponent(organisationId)}`);
-}
-
-/** @deprecated Prefer getPortalPatientDirectory */
-export function getPortalEnquiries(organisationId: string) {
-  return apiRequest<PortalPendingEnquiryRecord[]>(`/v1/portal/enquiries?organisationId=${encodeURIComponent(organisationId)}`);
-}
-
 export function getPortalOrders(organisationId: string, options?: { patientId?: string; unresolvedOnly?: boolean }) {
   const params = new URLSearchParams({ organisationId });
   if (options?.patientId) params.set('patientId', options.patientId);
@@ -602,14 +587,6 @@ export function approveCuraleafPharmacy(organisationId: string) {
   );
 }
 
-export function getGoLiveReadiness(organisationId: string) {
-  return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live-readiness`);
-}
-
-export function goLiveIntakeOrganisation(organisationId: string) {
-  return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/intake-live`, { method: 'POST', body: JSON.stringify({}) });
-}
-
 export function goLiveOrganisation(organisationId: string) {
   return apiRequest<GoLiveReadiness>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/go-live`, { method: 'POST', body: JSON.stringify({}) });
 }
@@ -847,28 +824,6 @@ export async function notifyStaffMfaEnrolled(idToken: string) {
     method: 'POST',
     body: JSON.stringify({}),
     headers: { Authorization: `Bearer ${idToken}` },
-  });
-}
-
-export function getPharmacySetupStatus(organisationId: string) {
-  return apiRequest<PharmacySetupStatus>(`/v1/portal/setup?organisationId=${encodeURIComponent(organisationId)}`);
-}
-
-export function getAdminPharmacySetupStatuses() {
-  return apiRequest<{ records: PharmacySetupStatus[] }>('/v1/portal/admin/setup-status');
-}
-
-export function updateAdminPharmacySetupTask(organisationId: string, taskId: SetupTaskId, input: { completed: boolean; evidence?: string }) {
-  return apiRequest<PharmacySetupStatus>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/setup/${encodeURIComponent(taskId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  });
-}
-
-export function updatePharmacySetupTask(taskId: SetupTaskId, input: UpdatePharmacySetupTaskInput) {
-  return apiRequest<PharmacySetupStatus>(`/v1/portal/setup/${encodeURIComponent(taskId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
   });
 }
 

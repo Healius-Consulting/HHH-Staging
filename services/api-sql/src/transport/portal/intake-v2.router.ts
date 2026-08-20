@@ -9,7 +9,7 @@ import { SqlIntakeRepository } from '../../repositories/sql/intake.sql.js';
 import { SqlNotificationRepository } from '../../repositories/sql/notification.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { listPharmacyRecipients, queueEmailToRecipients } from '../../application/notifications/email-outbox.js';
-import { canReceiveReferral, pharmacyOperationalAccess } from '../../domain/organisation/access.js';
+import { canActivateReferredPatient, canReceiveReferral } from '../../domain/organisation/access.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertPlatformScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
@@ -305,7 +305,7 @@ export function createPortalIntakeV2Router(): Router {
         throw new HttpError(409, 'Required referral and data-sharing consent is not recorded.', 'CONSENT_REQUIRED');
       }
       const destination = await organisationRepo.findOrganisationById(record.assignedOrganisationId);
-      if (!pharmacyOperationalAccess(destination)) {
+      if (!canActivateReferredPatient(destination)) {
         throw new HttpError(409, 'The selected pharmacy cannot receive the patient record until it is live.', 'DESTINATION_UNAVAILABLE');
       }
       const patientId = randomUUID();
@@ -337,7 +337,7 @@ export function createPortalIntakeV2Router(): Router {
         surface: 'admin',
         details: { patientId, notePresent: Boolean(input.notes), sourceOrganisationId: record.sourceOrganisationId },
       });
-      const pharmacyRecipients = pharmacyOperationalAccess(destination)
+      const pharmacyRecipients = canActivateReferredPatient(destination)
         ? await listPharmacyRecipients(record.assignedOrganisationId, { identityRepo, organisationRepo })
         : [];
       await queueEmailToRecipients(

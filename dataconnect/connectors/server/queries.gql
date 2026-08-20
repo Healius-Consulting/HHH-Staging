@@ -1,5 +1,6 @@
-# Server-only SQL Connect queries for HHH Platform.
-# Fail-closed boundary: client operations default to NO_ACCESS.
+# Server-only Data Connect queries. Auth is fail-closed (NO_ACCESS).
+# Runtime SQL API executes matching inline GraphQL in services/api-sql repositories.
+# Do not add client-callable or seed/lookup operations that the API does not use.
 
 query GetPortalAdmission(
   $sessionHash: String!
@@ -181,63 +182,6 @@ query GetEligibilitySubmissionById($id: UUID!) @auth(level: NO_ACCESS) {
     reviewedAt
     completedAt
     updatedAt
-  }
-}
-
-query ListTenantEligibilityQueue($organisationId: UUID!, $limit: Int!) @auth(level: NO_ACCESS) {
-  eligibilitySubmissions(
-    where: {
-      assignedOrganisationId: { eq: $organisationId }
-      pharmacyAccessStatus: { eq: ACTIVATED }
-    }
-    limit: $limit
-  ) {
-    id
-    firstName
-    surname
-    dob
-    mobile
-    email
-    postcode
-    assignmentStatus
-    pharmacyReviewStatus
-    outcomeStatus
-    followUpStatus
-    submittedAt
-    updatedAt
-  }
-}
-
-query GetPatientIdentity(
-  $organisationId: UUID!
-  $emailHash: String!
-  $dob: Date!
-) @auth(level: NO_ACCESS) {
-  patientIdentities(
-    where: {
-      organisationId: { eq: $organisationId }
-      emailHash: { eq: $emailHash }
-      dob: { eq: $dob }
-    }
-    limit: 1
-  ) {
-    id
-    patientId
-    organisationId
-    emailHash
-    dob
-    patient {
-      id
-      firstName
-      surname
-      dob
-      email
-      mobile
-      address
-      postcode
-      status
-      version
-    }
   }
 }
 

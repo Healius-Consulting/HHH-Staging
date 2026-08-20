@@ -6,6 +6,7 @@ import { HttpError } from '../../domain/common/errors.js';
 import { canAcceptPublicIntake } from '../../domain/organisation/access.js';
 import {
   buildGoLiveReadinessView,
+  buildOperationalStatus,
   buildSetupStatusView,
   goLiveBlockedMessage,
   type PharmacySetupStatusView,
@@ -152,11 +153,21 @@ export function createPortalSetupRouter(): Router {
   }
 
   async function goLiveSnapshot(organisation: OrganisationRecord) {
-    const setup = await setupSnapshot(organisation);
+    const [staff, curaleaf, worldpay] = await Promise.all([
+      identityRepo.listPharmacyStaffByOrganisationId(organisation.id),
+      integrationRepo.findConnection(organisation.id, 'CURALEAF'),
+      integrationRepo.findConnection(organisation.id, 'WORLDPAY'),
+    ]);
     return buildGoLiveReadinessView({
       organisation,
-      operational: setup.operational,
-      curaleaf: await integrationRepo.findConnection(organisation.id, 'CURALEAF'),
+      operational: buildOperationalStatus({
+        organisation,
+        tasks: [],
+        staff,
+        curaleaf,
+        worldpay,
+      }),
+      curaleaf,
     });
   }
 

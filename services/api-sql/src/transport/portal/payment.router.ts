@@ -19,6 +19,7 @@ import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 import { sha256 } from '../../security/session-utils.js';
+import { requirePharmacyOperationalWrites } from './require-operational-writes.js';
 
 const manualPaymentSchema = z.object({
   organisationId: z.string().optional(),
@@ -78,6 +79,7 @@ const refundSchema = z.object({
 
 export function createPortalPaymentRouter(): Router {
   const router = Router();
+  router.use(requirePharmacyOperationalWrites);
   const paymentRepo = new SqlPaymentRepository();
   const orderRepo = new SqlOrderRepository();
   const integrationRepo = new SqlIntegrationRepository();

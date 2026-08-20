@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
-import { ORGANISATIONS, AppProvider, useApp, type PharmacyTenant, type Screen, type StaffSession, type WorkspaceMode } from './context/AppContext';
+import { ORGANISATIONS, AppProvider, useApp, type PharmacyTenant, type Screen, type StaffSession } from './context/AppContext';
 import Header from './components/Header';
 import Navigation from './components/Navigation';
 import Dashboard from './pages/Dashboard';
@@ -28,6 +28,7 @@ import {
 import { getAdminOrganisations, getPortalSession } from './shared/api';
 import type { PortalOrganisation } from './shared/contracts';
 import { isLocalPortalPreview, withLocationSearch } from './dev/localPortalPreview';
+import { resolvePharmacyWorkspaceMode } from './training/workspace';
 import LocalPortalSwitcher from './dev/LocalPortalSwitcher';
 import CommandPalette from './components/CommandPalette';
 import { serverSessionAuth } from './auth/firebase';
@@ -200,10 +201,8 @@ function StaffWorkspace() {
     ? undefined
     : state.organisations.find(org => org.id === state.currentOrganisationId);
   const tenantStyle = tenantThemeVariables(organisation?.brand.primary ?? '#0f766e') as React.CSSProperties;
-  const allocationHolding = organisation?.workspaceClassification === 'allocation_holding';
-  const workspaceMode: WorkspaceMode = allocationHolding || organisation?.status === 'live'
-    ? 'live'
-    : 'training';
+  const workspaceMode = resolvePharmacyWorkspaceMode(organisation);
+  const paused = organisation?.status === 'paused';
   const initialPathHandled = useRef(false);
 
   useEffect(() => {
@@ -255,14 +254,14 @@ function StaffWorkspace() {
 
   const renderScreen = () => {
     switch (state.screen) {
-      case 'home': return serverSessionAuth ? <PharmacyOverview /> : <Dashboard />;
+      case 'home': return state.workspaceMode === 'training' ? <Dashboard /> : serverSessionAuth ? <PharmacyOverview /> : <Dashboard />;
       case 'formulary': return <FormularyPricing />;
       case 'create': return <CreateOrder />;
       case 'orders': return <Orders />;
       case 'patients': return <Patients />;
       case 'finance': return <PharmacyFinance />;
       case 'settings': return <PharmacySettings />;
-      default: return serverSessionAuth ? <PharmacyOverview /> : <Dashboard />;
+      default: return state.workspaceMode === 'training' ? <Dashboard /> : serverSessionAuth ? <PharmacyOverview /> : <Dashboard />;
     }
   };
 
@@ -275,14 +274,14 @@ function StaffWorkspace() {
         <Header />
         {state.workspaceMode === 'training' && (
           <div className="training-mode-banner" role="status">
-            <strong>Training workspace</strong>
-            <span>The eligibility link is live — enquiries go to HHH. This workspace uses placeholder data only. Real patients appear after HHH flips you to live. Supplier writes and payments are not sent from training.</span>
+            <strong>Training</strong>
+            <span>This workspace shows training examples only. Enquiries already go to HHH. Real referred patients appear after HHH flips you to live. Supplier writes and payments are not sent from training.</span>
           </div>
         )}
-        {allocationHolding && (
-          <div className="intake-live-banner" role="status">
-            <strong>Holistic Health Hub Allocation</strong>
-            <span>This hidden workspace is for HHH allocation only. It does not appear on the public eligibility form. New dedicated-link applications stay with HHH and appear here only after HHH completes the referral.</span>
+        {paused && (
+          <div className="paused-mode-banner" role="status">
+            <strong>Paused</strong>
+            <span>Intake is off and this pharmacy cannot run live orders until HHH unpauses it.</span>
           </div>
         )}
         <div id="pharmacy-main-content" className="page-container" tabIndex={-1}>{renderScreen()}</div>

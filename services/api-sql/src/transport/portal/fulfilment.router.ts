@@ -12,6 +12,7 @@ import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
+import { requirePharmacyOperationalWrites } from './require-operational-writes.js';
 
 const entityIdSchema = z.string().regex(/^(?:[a-f\d]{32}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i);
 
@@ -38,6 +39,7 @@ function snapshotObject(value: unknown): Record<string, any> {
 
 export function createPortalFulfilmentRouter(): Router {
   const router = Router();
+  router.use(requirePharmacyOperationalWrites);
   const fulfilmentRepo = new SqlFulfilmentRepository();
   const orderRepo = new SqlOrderRepository();
 

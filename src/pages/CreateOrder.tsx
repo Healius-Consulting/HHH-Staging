@@ -21,6 +21,7 @@ import {
   type PatientOrder,
   type UnresolvedOrderReason,
 } from '../context/AppContext';
+import { TRAINING_PRESCRIBER, TRAINING_PRODUCT } from '../training/workspace';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { createOrderDraft, createPortalOrder, createWorldpaySession, deleteOrderDraft, deletePrescriptionFile, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, updateOrderDraft, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
@@ -529,7 +530,7 @@ export default function CreateOrder() {
   };
 
   const readClinicBarcode = async (rxId: number, fileId: string) => {
-    if (!activeOrder) return;
+    if (!activeOrder || isLocalPortalPreview || state.workspaceMode !== 'live') return;
     setReadingRxId(rxId);
     setScanError(null);
     try {
@@ -553,14 +554,7 @@ export default function CreateOrder() {
     if (!activeOrder) return;
     const product = state.catalogue.find(item => item.supplierState === 'ACTIVE' && item.formulaId && item.packSize && item.retail > 0)
       ?? state.catalogue.find(item => item.formulaId && item.packSize)
-      ?? {
-        id: '00000000-0000-4000-8000-000000000002',
-        formulaId: '00000000-0000-4000-8000-000000000001',
-        name: 'Synthetic Curaleaf Clinic training medicine',
-        packSize: 10,
-        retail: 50,
-        cost: 35,
-      };
+      ?? TRAINING_PRODUCT;
     const issued = new Date();
     const expiry = new Date(issued);
     expiry.setDate(expiry.getDate() + 28);
@@ -577,11 +571,11 @@ export default function CreateOrder() {
         serialNumber: serial,
         issueDate: issued.toISOString().slice(0, 10),
         expiryDate: expiry.toISOString().slice(0, 10),
-        prescriberId: `training-prescriber-${rxId}`,
-        prescriberName: 'Dr Curaleaf Training',
-        prescriberGmcNumber: '7000001',
+        prescriberId: TRAINING_PRESCRIBER.id,
+        prescriberName: TRAINING_PRESCRIBER.name,
+        prescriberGmcNumber: TRAINING_PRESCRIBER.gmcNumber,
         prescriberGphcNumber: '',
-        patientName: patient?.name ?? 'Training Patient',
+        patientName: patient?.name ?? 'Training patient',
         patientDob: patient?.dob ?? '1980-01-01',
         items: [{
           productId: product.id,
@@ -1319,13 +1313,13 @@ export default function CreateOrder() {
                             <span>{selectedRx.entryMode === 'clinic' ? 'Attach a redacted copy (redact patient details) of the prescription with a clear barcode. (TIP: Apply a blank dispensing label to cover confidential patient details).' : 'Attach a redacted copy (redact patient details) of the prescription with all other prescription details clearly visible. (TIP: Apply a blank dispensing label to cover confidential patient details).'}</span>
                           </span>
                         </div>
-                        {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
+                        {(isLocalPortalPreview || state.workspaceMode === 'training') && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
                           {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
                         </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
                           <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
                           {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading its barcode…' : selectedRx.copyFileName ?? (selectedRx.entryMode === 'manual' ? 'Attach signed prescription' : 'Attach barcode prescription')}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded and server-verified' : 'PDF, JPG or PNG · maximum 16 MB'}</small></span>
                         </label>}
-                        {selectedRx.entryMode === 'clinic' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
+                        {selectedRx.entryMode === 'clinic' && state.workspaceMode === 'live' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
                         {selectedRx.copyFileName ? (
                           <div className="rx-document-actions">
                             <span>Choose the upload control above to replace this copy.</span>
@@ -1454,13 +1448,13 @@ export default function CreateOrder() {
                           <span>{selectedRx.entryMode === 'clinic' ? 'Attach a redacted copy (redact patient details) of the prescription with a clear barcode. (TIP: Apply a blank dispensing label to cover confidential patient details).' : 'Attach a redacted copy (redact patient details) of the prescription with all other prescription details clearly visible. (TIP: Apply a blank dispensing label to cover confidential patient details).'}</span>
                         </span>
                       </div>
-                      {isLocalPortalPreview && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
+                      {(isLocalPortalPreview || state.workspaceMode === 'training') && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
                       </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
                         <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading its barcode…' : selectedRx.copyFileName ?? (selectedRx.entryMode === 'manual' ? 'Attach signed prescription' : 'Attach barcode prescription')}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded and server-verified' : 'PDF, JPG or PNG · maximum 16 MB'}</small></span>
                       </label>}
-                      {selectedRx.entryMode === 'clinic' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
+                      {selectedRx.entryMode === 'clinic' && state.workspaceMode === 'live' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
                       {selectedRx.copyFileName ? (
                         <div className="rx-document-actions">
                           <span>Choose the upload control above to replace this copy.</span>

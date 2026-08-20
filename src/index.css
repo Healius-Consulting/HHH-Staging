@@ -197,8 +197,8 @@
 .status-badge--live { color: #075b37; background: #e5f7ed; border-color: #98d7b5; }
 .status-badge--intake_live { color: #154f82; background: #eaf4ff; border-color: #afd1ef; }
 .status-badge--paused { color: #7a4011; background: #fff1dc; border-color: #edc588; }
-.status-badge--onboarding,
-.status-badge--training { color: #154f82; background: #eaf4ff; border-color: #afd1ef; }
+.status-badge--onboarding { color: #154f82; background: #eaf4ff; border-color: #afd1ef; }
+.status-badge--training { color: #7a4011; background: #fff1dc; border-color: #edc588; }
 
 .overview-advisory {
   padding: 0.75rem 1rem;
@@ -471,6 +471,27 @@ html{
   padding: 2px 7px;
   border-radius: var(--radius-sm);
   background: var(--info-500);
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.paused-mode-banner{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 24px;
+  border-bottom: 1px solid var(--red-200, #fecaca);
+  background: var(--red-50, #fef2f2);
+  color: var(--red-800, #991b1b);
+  font-size: var(--font-xs);
+}
+
+.paused-mode-banner strong{
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--red-600, #dc2626);
   color: #fff;
   text-transform: uppercase;
   letter-spacing: .04em;
@@ -2199,6 +2220,10 @@ td.font-semibold{
   line-height: 1.5;
 }
 
+.admin-golive-panel__head .btn{
+  min-height: 44px;
+}
+
 .admin-golive-facts{
   display: flex;
   flex-wrap: wrap;
@@ -2220,45 +2245,6 @@ td.font-semibold{
   font-size: 0.75rem;
 }
 
-.admin-golive-notes{
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.admin-golive-notes li{
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
-.admin-golive-notes li.is-complete{
-  background: var(--bg-elevated);
-}
-
-.admin-golive-notes strong{
-  display: block;
-  font-size: 0.8125rem;
-}
-
-.admin-golive-notes small{
-  display: block;
-  margin-top: 3px;
-  color: var(--text-tertiary);
-  font-size: 0.6875rem;
-  line-height: 1.45;
-}
-
-.admin-golive-notes .btn{
-  min-height: 44px;
-}
-
 .admin-golive-panel__hint,
 .admin-golive-panel__empty{
   margin: 12px 0 0;
@@ -2267,15 +2253,10 @@ td.font-semibold{
 }
 
 @media (max-width: 620px) {
-  .admin-golive-panel__head,
-  .admin-golive-notes li{
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
   .admin-golive-panel__head{
     display: grid;
+    align-items: stretch;
   }
-  .admin-golive-notes .btn,
   .admin-golive-panel__head .btn{
     width: 100%;
     min-height: 44px;
@@ -2845,6 +2826,8 @@ html[data-enhanced-focus='true'] :is(button, a, input, select, textarea, [tabind
 }
 
 .tenant-status--live{ color: var(--green-100); background: var(--green-50); }
+.tenant-status--training{ color: var(--amber-700); background: var(--amber-50); }
+.tenant-status--paused{ color: var(--red-100, #991b1b); background: var(--red-50, #fef2f2); }
 .tenant-status--intake_live{ color: var(--info-700); background: var(--info-50); }
 
 .header-icon-button{
@@ -3097,7 +3080,7 @@ html[data-enhanced-focus='true'] :is(button, a, input, select, textarea, [tabind
 .header-icon-button span{ display: none; }
 .header-icon-button{ width: 36px; justify-content: center; padding: 0; }
 .accessibility-panel{ position: fixed; top: 74px; right: 12px; width: calc(100vw - 24px); max-height: calc(100dvh - 88px); }
-:is(.training-mode-banner, .intake-live-banner){ align-items: flex-start; padding: 8px 14px; }
+:is(.training-mode-banner, .intake-live-banner, .paused-mode-banner){ align-items: flex-start; padding: 8px 14px; }
 }
 
 @media (max-width: 480px) {
@@ -4777,8 +4760,8 @@ html[data-theme='dark'] .accessibility-panel{
 }
 
 @media (max-width: 600px) {
-:is(.training-mode-banner, .intake-live-banner){ display: grid; gap: 6px; }
-:is(.training-mode-banner, .intake-live-banner) strong{ justify-self: start; }
+:is(.training-mode-banner, .intake-live-banner, .paused-mode-banner){ display: grid; gap: 6px; }
+:is(.training-mode-banner, .intake-live-banner, .paused-mode-banner) strong{ justify-self: start; }
 }
 
 html[data-theme='dark'] :is(.rx-draft-tab__avatar, .rx-record-evidence, .payment-ledger-row__icon){ background-color: var(--bg-elevated); }
@@ -7346,8 +7329,8 @@ html.modal-open .page-container{ overflow: hidden; }
 .app-header{ min-height: 76px; height: auto; padding: 12px 14px; }
 .app-header h1{ max-width: none; font-size: 21px; white-space: normal; }
 .app-header__eyebrow{ margin-bottom: 3px; font-size: 10px; }
-:is(.training-mode-banner, .intake-live-banner){ align-items: flex-start; gap: 8px; padding: 8px 14px; font-size: 11px; line-height: 1.4; }
-:is(.training-mode-banner, .intake-live-banner) strong{ margin-top: 1px; font-size: 9px; }
+:is(.training-mode-banner, .intake-live-banner, .paused-mode-banner){ align-items: flex-start; gap: 8px; padding: 8px 14px; font-size: 11px; line-height: 1.4; }
+:is(.training-mode-banner, .intake-live-banner, .paused-mode-banner) strong{ margin-top: 1px; font-size: 9px; }
 .provider-notice{ grid-template-columns: 30px minmax(0, 1fr); }
 .provider-notice__action{ grid-column: 2; justify-self: start; }
 .pricing-brief__copy{ align-items: flex-start; }
@@ -14784,7 +14767,7 @@ a.eligibility-brand__identity:focus-visible strong{ color: var(--green); }
 }
 
 @media print{
-  .workspace-navigation, .workspace-page-header, .training-mode-banner, .intake-live-banner, .order-crm-summary, .order-crm-controls, .order-crm-list, .order-crm-record__actions{ display: none !important; }
+  .workspace-navigation, .workspace-page-header, .training-mode-banner, .intake-live-banner, .paused-mode-banner, .order-crm-summary, .order-crm-controls, .order-crm-list, .order-crm-record__actions{ display: none !important; }
   .app-main, .page-container, .order-crm, .order-crm-workspace, .order-crm-detail{ width: 100% !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
   .order-crm-workspace, .order-crm-record__body{ display: block !important; }
 }

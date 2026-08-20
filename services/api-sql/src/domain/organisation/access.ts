@@ -21,8 +21,18 @@ export function canReceiveReferral(organisation: OrganisationRecord | null | und
   return canAcceptPublicIntake(organisation);
 }
 
-/** Pharmacy CRM, orders, and production writes. Training workspaces stay false until LIVE. */
+/** Pharmacy CRM, orders, and production writes. Training stays false until LIVE. Paused keeps existing records. */
 export function pharmacyOperationalAccess(organisation: OrganisationRecord | null | undefined): boolean {
+  return Boolean(
+    organisation
+    && !organisation.archivedAt
+    && organisation.classification !== 'TRAINING'
+    && (organisation.status === 'LIVE' || organisation.status === 'PAUSED'),
+  );
+}
+
+/** New referred patient records — live pharmacies only. Paused workspaces keep CRM but do not accept new activations. */
+export function canActivateReferredPatient(organisation: OrganisationRecord | null | undefined): boolean {
   return Boolean(
     organisation
     && !organisation.archivedAt
@@ -33,6 +43,7 @@ export function pharmacyOperationalAccess(organisation: OrganisationRecord | nul
 
 export function pharmacyWorkspaceMode(organisation: OrganisationRecord | null | undefined): PharmacyWorkspaceMode {
   if (!organisation || organisation.archivedAt || organisation.status === 'PAUSED') return 'paused';
+  if (organisation.classification === 'ALLOCATION_HOLDING') return 'live';
   if (organisation.classification === 'TRAINING') return 'training';
   if (organisation.status === 'LIVE') return 'live';
   return 'training';

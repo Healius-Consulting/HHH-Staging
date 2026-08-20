@@ -638,7 +638,7 @@ export default function Orders() {
   };
 
   const handleQuoteReviewResolve = async (order: PatientOrder, action: 'absorb' | 'continue_as_fee' | 'refresh') => {
-    if (!order.backendId || quoteReviewBusyOrderId) return;
+    if (isLocalPortalPreview || state.workspaceMode !== 'live' || !order.backendId || quoteReviewBusyOrderId) return;
     setQuoteReviewBusyOrderId(order.id);
     try {
       const result = await resolvePortalQuoteReview(order.backendId, {
@@ -819,12 +819,14 @@ export default function Orders() {
     setFulfilmentBusyRxId(prescription.id);
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live') {
-        const targetShipmentId = shipmentId ?? prescription.shipmentId ?? prescription.shipmentIds?.[0] ?? prescription.poRef ?? `rx-${prescription.id}`;
+        if (!order.backendId) throw new Error('This order has not finished saving. Refresh and try again.');
+        const targetShipmentId = shipmentId ?? prescription.shipmentId ?? prescription.shipmentIds?.[0];
+        if (!targetShipmentId) throw new Error('This consignment is not linked to the order yet. Refresh and try again.');
         await updatePortalShipmentStatus(targetShipmentId, {
           organisationId: state.currentOrganisationId,
           orderId: order.backendId,
           status: 'ready_for_collection',
-        }).catch(err => console.warn('Ready status sync warning:', err));
+        });
       }
       dispatch({ type: 'MARK_READY_FOR_COLLECTION', orderId: order.id, rxId: prescription.id });
       dispatch({ type: 'ADD_TOAST', message: 'This shipment is ready and customer message has been queued.', toastType: 'success' });
@@ -870,7 +872,7 @@ export default function Orders() {
   };
 
   const handlePaymentLinkResend = async (order: PatientOrder) => {
-    if (!order.backendId || paymentLinkBusyOrderId) return;
+    if (isLocalPortalPreview || state.workspaceMode !== 'live' || !order.backendId || paymentLinkBusyOrderId) return;
     setPaymentLinkBusyOrderId(order.id);
     try {
       const session = await resendWorldpayPaymentLink(order.backendId, { organisationId: state.currentOrganisationId });
@@ -884,7 +886,7 @@ export default function Orders() {
   };
 
   const handleRecordRejection = async (order: PatientOrder, prescription: Prescription) => {
-    if (!order.backendId || !prescription.backendId) return;
+    if (isLocalPortalPreview || state.workspaceMode !== 'live' || !order.backendId || !prescription.backendId) return;
     const reason = window.prompt('Record Curaleaf’s rejection reason exactly as supplied:')?.trim();
     if (!reason) return;
     setFulfilmentBusyRxId(prescription.id);
@@ -897,7 +899,7 @@ export default function Orders() {
   };
 
   const handleManualPlace = async (order: PatientOrder, prescription: Prescription) => {
-    if (!order.backendId || !prescription.backendId) return;
+    if (isLocalPortalPreview || state.workspaceMode !== 'live' || !order.backendId || !prescription.backendId) return;
     setFulfilmentBusyRxId(prescription.id);
     try {
       await placePrescriptionManually(order.backendId, prescription.backendId, state.currentOrganisationId);

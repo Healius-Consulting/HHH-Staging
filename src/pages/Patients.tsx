@@ -430,10 +430,6 @@ export default function Patients() {
   }, [dispatch, records, state.navigationTarget]);
 
   const handleCreateOrder = (patient: UnifiedPatient) => {
-    if (state.workspaceMode !== 'live' && state.workspaceMode !== 'training') {
-      dispatch({ type: 'ADD_TOAST', message: 'Prescription ordering remains locked until the training workspace is available.', toastType: 'warning' });
-      return;
-    }
     const crmPatient = patient.crmPatient;
     if (!canCreateOrderForPatient(crmPatient)) {
       dispatch({ type: 'ADD_TOAST', message: 'Orders stay locked until HHH completes referral.', toastType: 'warning' });

@@ -110,12 +110,6 @@ export function buildOperationalStatus(input: {
   const intakeLive = canAcceptPublicIntake(input.organisation);
   const workspaceMode = pharmacyWorkspaceMode(input.organisation);
   const missingGates: string[] = [];
-  if (!premises) missingGates.push('premises');
-  if (activeCount < 1) missingGates.push('staff');
-  if (!curaleafConnected) missingGates.push('curaleaf');
-  if (!paymentPassed) missingGates.push('payment');
-  if (!charges) missingGates.push('charges');
-  if (!walkthrough) missingGates.push('walkthrough');
   if (workspaceMode === 'paused') missingGates.push('paused');
   if (input.organisation.classification === 'TRAINING') missingGates.push('training_tenant');
 
@@ -246,18 +240,5 @@ export function goLiveBlockedMessage(operational: PharmacyOperationalStatus): st
   if (operational.missingGates.includes('paused')) {
     return 'Unpause this pharmacy before flipping the workspace to live.';
   }
-  const readable: Record<string, string> = {
-    premises: 'premises confirmation',
-    staff: 'an active staff account',
-    curaleaf: 'a verified Curaleaf connection',
-    payment: 'a confirmed payment route',
-    charges: 'a saved charges policy',
-    walkthrough: 'the sandbox call',
-  };
-  const parts = operational.missingGates
-    .map(gate => readable[gate])
-    .filter((value): value is string => Boolean(value));
-  return parts.length
-    ? `Go live requires ${parts.join(', ')}.`
-    : 'Go live requirements are not complete.';
+  return 'This pharmacy cannot be flipped to live yet.';
 }

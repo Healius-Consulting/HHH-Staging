@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
-import { canAcceptPublicIntake, canReceiveReferral, pharmacyOperationalAccess, pharmacyWorkspaceMode } from './access.js';
+import { canAcceptPublicIntake, canActivateReferredPatient, canReceiveReferral, pharmacyOperationalAccess, pharmacyWorkspaceMode } from './access.js';
 
 const organisation: OrganisationRecord = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', companyId: null, name: 'Eligible Pharmacy',
@@ -36,9 +36,14 @@ describe('pharmacy intake access', () => {
     assert.equal(pharmacyOperationalAccess({ ...organisation, status: 'INTAKE_LIVE' }), false);
     assert.equal(pharmacyOperationalAccess({ ...organisation, status: 'ONBOARDING' }), false);
     assert.equal(pharmacyOperationalAccess({ ...organisation, classification: 'TRAINING' }), false);
+    assert.equal(pharmacyOperationalAccess({ ...organisation, status: 'PAUSED' }), true);
+    assert.equal(canActivateReferredPatient(organisation), true);
+    assert.equal(canActivateReferredPatient({ ...organisation, status: 'PAUSED' }), false);
+    assert.equal(canActivateReferredPatient({ ...organisation, status: 'ONBOARDING' }), false);
     assert.equal(pharmacyWorkspaceMode({ ...organisation, status: 'ONBOARDING' }), 'training');
     assert.equal(pharmacyWorkspaceMode({ ...organisation, status: 'INTAKE_LIVE' }), 'training');
     assert.equal(pharmacyWorkspaceMode(organisation), 'live');
+    assert.equal(pharmacyWorkspaceMode({ ...organisation, classification: 'ALLOCATION_HOLDING', status: 'ONBOARDING' }), 'live');
     assert.equal(pharmacyWorkspaceMode({ ...organisation, status: 'PAUSED' }), 'paused');
   });
 });

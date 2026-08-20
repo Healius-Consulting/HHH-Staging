@@ -25,9 +25,10 @@ export default function Header() {
       onSectionClick={() => dispatch({ type: 'SET_SCREEN', screen: 'home' })}
       backAction={state.screenHistory.length ? { label: 'Return to previous workspace', onClick: () => dispatch({ type: 'GO_BACK' }) } : undefined}
       contextControl={
-        <div className="header-context" aria-label={`Current pharmacy status: ${organisation.status}`}>
-          <span>Account</span>
-          <span className={`tenant-status tenant-status--${organisation.status}`}>{organisation.status.replace('_', ' ')}</span>
+        <div className="header-context" aria-label={`Current pharmacy status: ${state.workspaceMode === 'live' ? 'Live' : 'Training'}${organisation?.status === 'paused' ? ', paused' : ''}`}>
+          <span>Workspace</span>
+          <span className={`tenant-status tenant-status--${state.workspaceMode}`}>{state.workspaceMode === 'live' ? 'Live' : 'Training'}</span>
+          {organisation?.status === 'paused' ? <span className="tenant-status tenant-status--paused">Paused</span> : null}
         </div>
       }
     />

@@ -181,8 +181,8 @@ export default function PharmacySettings() {
           <h2>{organisation.brand.portalName}</h2>
           <p>{organisation.name} · GPhC {organisation.gphcNumber}</p>
         </div>
-        <span className={`pill ${state.workspaceMode === 'live' ? 'pill-green' : organisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>
-          {state.workspaceMode === 'live' ? 'Live' : organisation.status === 'paused' ? 'Paused' : 'Training workspace'}
+        <span className={`pill ${organisation.status === 'paused' ? 'pill-red' : state.workspaceMode === 'live' ? 'pill-green' : 'pill-amber'}`}>
+          {organisation.status === 'paused' ? 'Paused' : state.workspaceMode === 'live' ? 'Live' : 'Training'}
         </span>
       </section>
 
@@ -259,7 +259,7 @@ export default function PharmacySettings() {
               </div>
             )}
 
-            <div className="settings-note"><ShieldCheck size={16} /><span>HHH explains Worldpay on the sandbox call. Connect the merchant here when you are ready. Each order permanently records the route selected when that order is created.</span></div>
+            <div className="settings-note"><ShieldCheck size={16} /><span>Worldpay is optional. Connect the merchant here when you are ready. Each order permanently records the route selected when that order is created.</span></div>
             <WorldpayConnectionPanel
               organisationId={organisation.id}
               onConnected={connection => {
@@ -311,10 +311,10 @@ export default function PharmacySettings() {
                 <CheckCircle2 size={20} className="text-green" />
               </div>
               <div className="settings-meta-grid">
-                <div><span>Workspace</span><strong>{state.workspaceMode === 'live' ? 'Live' : organisation.status === 'paused' ? 'Paused' : 'Training'}</strong></div>
+                <div><span>Workspace</span><strong>{state.workspaceMode === 'live' ? 'Live' : 'Training'}</strong></div>
                 <div><span>Intake link</span><strong>{organisation.status === 'paused' ? 'Off' : 'Live'}</strong></div>
               </div>
-              <p className="settings-copy">{state.workspaceMode === 'live' ? 'This pharmacy can see referred patients and dispense.' : 'Enquiries already go to HHH. HHH flips this workspace to live after the sandbox call.'}</p>
+              <p className="settings-copy">{state.workspaceMode === 'live' ? 'This pharmacy can see patients HHH has referred here and can dispense.' : 'Enquiries already go to HHH. This workspace shows training examples until HHH flips you to live.'}</p>
             </section>
           </div>
 

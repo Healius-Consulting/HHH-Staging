@@ -5,6 +5,8 @@ import { HttpError } from '../../domain/common/errors.js';
 import { assertPlatformScope, assertTenantScope } from '../../security/request-context.js';
 import { requireStaff } from '../../security/require-staff.js';
 import { quotedCostFromSnapshot } from '../../application/orders/finance-costing.js';
+import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
+import { SqlPatientRepository } from '../../repositories/sql/patient.sql.js';
 import { pharmacyFinanceRecognition } from './finance-recognition.js';
 
 const organisationIdSchema = z.string().regex(/^(?:[a-f\d]{32}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i);
@@ -37,53 +39,6 @@ type FeeRow = {
   patient: { firstName: string; surname: string; email: string } | null;
 };
 
-const LIST_TENANT_ORDERS_GQL = `
-  query ListTenantOrdersForFinance($organisationId: UUID!, $limit: Int!) {
-    orders(
-      where: { organisationId: { eq: $organisationId } }
-      orderBy: { createdAt: DESC }
-      limit: $limit
-    ) {
-      id
-      organisationId
-      patientId
-      draftId
-      orderNumber
-      status
-      paymentStatus
-      fulfilmentStatus
-      paymentRoute
-      currency
-      medicineTotalPence
-      dispensingFeePence
-      deliveryPence
-      taxPence
-      totalPence
-      quoteSnapshot
-      submittedAt
-      paidAt
-      collectedAt
-      cancelledAt
-      createdAt
-      updatedAt
-    }
-  }
-`;
-
-const LIST_TENANT_PATIENTS_GQL = `
-  query ListTenantPatientsForFinance($organisationId: UUID!, $limit: Int!) {
-    patients(
-      where: { organisationId: { eq: $organisationId } }
-      limit: $limit
-    ) {
-      id
-      firstName
-      surname
-      email
-    }
-  }
-`;
-
 function inDateRange(dateStr: string | null | undefined, from?: string, to?: string) {
   if (!dateStr) return false;
   const d = dateStr.slice(0, 10);
@@ -110,6 +65,8 @@ function financePeriodCounts(rows: Array<{ recognised: boolean; financialEventAt
  * payment settlement: a fee event is auditable commercial attribution, not an invoice. */
 export function createPortalFinanceRouter(): Router {
   const router = Router();
+  const orderRepo = new SqlOrderRepository();
+  const patientRepo = new SqlPatientRepository();
 
   router.get('/portal/finance/prescriptions', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -121,19 +78,11 @@ export function createPortalFinanceRouter(): Router {
         to: req.query.to,
       });
 
-      const [ordersResult, patientsResult] = await Promise.all([
-        dataConnect.executeGraphql<{ orders: any[] }, { organisationId: string; limit: number }>(
-          LIST_TENANT_ORDERS_GQL,
-          { variables: { organisationId, limit: 2000 } }
-        ),
-        dataConnect.executeGraphql<{ patients: any[] }, { organisationId: string; limit: number }>(
-          LIST_TENANT_PATIENTS_GQL,
-          { variables: { organisationId, limit: 2000 } }
-        ),
+      const [rawOrders, rawPatients] = await Promise.all([
+        orderRepo.listTenantOrders(organisationId, 2000),
+        patientRepo.listTenantPatients(organisationId, 2000),
       ]);
 
-      const rawOrders = ordersResult.data.orders ?? [];
-      const rawPatients = patientsResult.data.patients ?? [];
       const patientMap = new Map(rawPatients.map(p => [p.id, `${p.firstName} ${p.surname}`.trim() || p.email]));
 
       const datedRows = rawOrders.map(order => {

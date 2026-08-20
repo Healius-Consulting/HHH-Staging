@@ -5,6 +5,7 @@ import type { CuraleafCancellationState, CuraleafCatalogue, OrderCancellationSta
 import { activeRedoPriceResolution } from '../shared/contracts';
 import { mapPortalEnquiryRecord, mapPortalPatientRecord } from '../utils/pharmacyPatientDirectory';
 import { isLocalPortalPreview, localPortalPreview, localPreviewStaff } from '../dev/localPortalPreview';
+import { ORGANISATIONS, isTrainingSandboxPatient, resolvePharmacyWorkspaceMode, trainingWorkspace } from '../training/workspace';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
@@ -12,6 +13,8 @@ import { formatShippingAddress } from '../utils/shippingAddress';
 import { nextDraftIdAfterDeletion, preferredDraftIndex, preferredDraftPaymentRoute } from '../utils/createOrderDraft';
 import { orderRequiresCuraleafCancel } from '../utils/orderStage';
 import { LEGACY_PHARMACY_DECISION_REASON, PHARMACY_REVIEWER_DISPLAY, isNegativeEligibilityStatus } from '../utils/eligibilityPresentation';
+
+export { ORGANISATIONS };
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -380,7 +383,7 @@ export type NavigationTarget =
   | null;
 
 export type PortalMode = 'gateway' | 'admin' | 'clinician';
-export type WorkspaceMode = 'training' | 'intake' | 'live';
+export type WorkspaceMode = 'training' | 'live';
 
 export interface StaffSession {
   email: string;
@@ -425,114 +428,6 @@ export interface AppState {
   platformIntegrations: PlatformIntegration[];
   complianceItems: ComplianceItem[];
 }
-
-/* ═══════════════════════════════════════════════════════════
-   Seed Data
-   ═══════════════════════════════════════════════════════════ */
-
-export const ORGANISATIONS: PharmacyTenant[] = [
-  {
-    id: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126', slug: 'primary-branch', referralToken: 'primary-branch-7x4p9k',
-    name: 'Primary Branch', tradingName: 'Primary Branch', logoText: 'PB',
-    gphcNumber: '1099224', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'pharmacy@primarybranch.cc', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
-    address: 'Leeds, West Yorkshire, United Kingdom', websiteDomains: ['primarybranch.cc'],
-    status: 'live', staffCount: 4,
-    defaultPaymentRoute: 'worldpay',
-    brand: { primary: '#0f766e', portalName: 'Primary Branch' },
-    worldpay: { enabled: true, status: 'connected', environment: 'sandbox', merchantId: 'WP-PRIMARY-BRANCH', merchantName: 'Primary Branch', lastSyncedAt: new Date(Date.now() - 18 * 60 * 1000) },
-  },
-  {
-    id: '6d0176bb-89a0-4e32-9bce-c934c9557c42', slug: 'eastwood-health-pharmacy', referralToken: 'eastwood-3m8q2v',
-    name: 'Eastwood Health Pharmacy', tradingName: 'Eastwood Health Ltd', logoText: 'EH',
-    gphcNumber: '9012726', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'contact@eastwoodhealthpharmacy.cc', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
-    address: 'Nottinghamshire, United Kingdom', websiteDomains: ['eastwoodhealthpharmacy.cc'],
-    status: 'live', staffCount: 2,
-    defaultPaymentRoute: 'manual',
-    brand: { primary: '#1e40af', portalName: 'Eastwood Health Pharmacy' },
-    worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
-  },
-  {
-    id: '70913a30-71c3-4a41-952e-d532927af58c', slug: 'primary-branch', referralToken: 'primary-br-9k2p',
-    name: 'Primary Branch', tradingName: 'Primary Branch', logoText: 'PB',
-    gphcNumber: 'TRAINING-PHARM1', superintendent: 'Shaylen Patel', companyNumber: '1099224', mainContactName: 'Shaylen Patel', mainContactPhone: '0113 000 0000', mainContactEmail: 'spatel@healiusconsulting.com', curaleafPharmacyCode: '109c6bca-585a-4b69-b6bb-072e0731dd10',
-    address: 'Primary Training Branch, United Kingdom', websiteDomains: ['training-pharm1.cc'],
-    status: 'live', staffCount: 2,
-    testAccount: true, gdprExempt: true,
-    workspaceClassification: 'allocation_holding',
-    defaultPaymentRoute: 'manual',
-    brand: { primary: '#0f766e', portalName: 'Primary Branch' },
-    worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
-  },
-  {
-    id: 'f486a221-2236-44a5-b072-f06de399ab0e', slug: 'alternate-branch', referralToken: 'alternate-br-4b1',
-    name: 'Alternate Branch', tradingName: 'Alternate Branch', logoText: 'AB',
-    gphcNumber: 'TRAINING-PHARM2', superintendent: 'Shaylen Patel', companyNumber: '9012726', mainContactName: 'Shaylen Patel', mainContactPhone: '01522 000 000', mainContactEmail: 'shaylenpatel.locum@hotmail.com', curaleafPharmacyCode: '04568c82-b3d2-4082-9277-3313b48d10f4',
-    address: 'Alternate Training Branch, United Kingdom', websiteDomains: ['training-pharm2.cc'],
-    status: 'live', staffCount: 2,
-    testAccount: false, gdprExempt: true,
-    workspaceClassification: 'standard',
-    defaultPaymentRoute: 'manual',
-    brand: { primary: '#1e40af', portalName: 'Alternate Branch' },
-    worldpay: { enabled: false, status: 'not-connected', environment: 'sandbox', merchantId: null, merchantName: null, lastSyncedAt: null },
-  },
-];
-
-const PREVIEW_CRM_PATIENTS: CRMPatient[] = [
-  {
-    id: 'local-preview-patient-hale',
-    organisationId: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126',
-    name: 'Jordan Hale',
-    email: 'jordan.hale@example.test',
-    mobile: '07700 900 001',
-    dob: '1988-03-14',
-    postcode: 'LS1 1BA',
-    status: 'HHH approved',
-  },
-  {
-    id: 'local-preview-patient-munroe',
-    organisationId: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126',
-    name: 'Ororo Munroe',
-    email: 'ororo.munroe@example.test',
-    mobile: '07700 900 002',
-    dob: '1992-11-02',
-    postcode: 'LS6 2AA',
-    status: 'Referred',
-  },
-  {
-    id: 'local-preview-patient-reid',
-    organisationId: '3e9f74ff-4fed-497d-904d-4d3ee3e5e126',
-    name: 'Sam Reid',
-    email: 'sam.reid@example.test',
-    mobile: '07700 900 003',
-    dob: '1979-07-26',
-    postcode: 'LS2 8HD',
-    status: 'HHH approved',
-  },
-];
-
-function previewPatientsForOrganisation(organisationId: string): CRMPatient[] {
-  const tenantId = organisationId || PREVIEW_CRM_PATIENTS[0].organisationId;
-  return PREVIEW_CRM_PATIENTS.map(patient => ({ ...patient, organisationId: tenantId }));
-}
-
-function withLocalPreviewCrm(crm: CRMPatient[], organisationId: string): CRMPatient[] {
-  const seeded = previewPatientsForOrganisation(organisationId);
-  const seededIds = new Set(seeded.map(patient => patient.id));
-  const byId = new Map(
-    crm
-      .filter(patient => !patient.id.startsWith('local-preview-patient-') || seededIds.has(patient.id))
-      .map(patient => [patient.id, patient]),
-  );
-  seeded.forEach(patient => {
-    const existing = byId.get(patient.id);
-    byId.set(patient.id, existing ? { ...existing, ...patient } : patient);
-  });
-  return [...byId.values()];
-}
-
-
-
-
 
 /* ═══════════════════════════════════════════════════════════
    Helpers
@@ -1165,8 +1060,8 @@ const initialToken = urlParams?.get('token');
 const initialCachedCatalogue = loadCachedCatalogue(storedStaffSession?.organisationId);
 
 const previewOrganisationId = previewStaffSession?.organisationId ?? (isLocalPortalPreview ? ORGANISATIONS[0]?.id ?? '' : '');
-const previewDraft = isLocalPortalPreview && previewOrganisationId
-  ? blankOrder(1, null, previewOrganisationId, 'worldpay')
+const previewTraining = isLocalPortalPreview && localPortalPreview === 'pharmacy' && previewOrganisationId
+  ? trainingWorkspace(previewOrganisationId)
   : null;
 
 const initialState: AppState = {
@@ -1178,13 +1073,13 @@ const initialState: AppState = {
   catalogueLoading: initialCachedCatalogue.items.length ? false : isApiConfigured,
   catalogueError: null,
   catalogueUpdatedAt: initialCachedCatalogue.updatedAt,
-  crm: isLocalPortalPreview ? previewPatientsForOrganisation(previewOrganisationId) : [],
+  crm: previewTraining?.crm ?? [],
   submissions: [],
   enquiries: [],
-  orders: previewDraft ? [previewDraft] : [],
-  activeOrderId: previewDraft ? 1 : null,
+  orders: previewTraining?.orders ?? [],
+  activeOrderId: null,
   toasts: [],
-  nextIds: { patient: 2000, rx: previewDraft ? 2 : 1, order: previewDraft ? 2 : 7, submission: 5, invoice: 4072 },
+  nextIds: previewTraining?.nextIds ?? { patient: 2000, rx: 1, order: 7, submission: 5, invoice: 4072 },
   portalMode: initialPortalMode,
   workspaceMode: 'training',
   organisations: isLocalPortalPreview ? ORGANISATIONS : [],
@@ -1259,29 +1154,6 @@ function mapOrder(state: AppState, orderId: number, fn: (o: PatientOrder) => Pat
 
 function mapRx(order: PatientOrder, rxId: number, fn: (rx: Prescription) => Prescription): PatientOrder {
   return { ...order, prescriptions: order.prescriptions.map(r => r.id === rxId ? fn({ ...r }) : r) };
-}
-
-function buildTenantTrainingData(organisationId: string) {
-  return {
-    crm: [
-      {
-        id: `training-${organisationId}-walkthrough`,
-        organisationId,
-        name: 'Training Patient (sandbox)',
-        email: 'training.patient@invalid.example',
-        mobile: '00000 000 000',
-        dob: '1980-01-01',
-        postcode: 'XX0 0XX',
-        conditions: ['Chronic pain'],
-        primaryCondition: 'Chronic pain',
-        referralSource: 'training_sandbox',
-        status: 'Referred' as const,
-      },
-    ],
-    submissions: [],
-    orders: [],
-    nextRx: 1,
-  };
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -1364,9 +1236,9 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
     case 'SYNC_PATIENT_DIRECTORY': {
-      const retainedPatients = state.workspaceMode === 'training'
-        ? state.crm
-        : state.crm.filter(patient => patient.organisationId !== action.organisationId);
+      const retainedPatients = state.crm.filter(patient =>
+        patient.organisationId !== action.organisationId && !isTrainingSandboxPatient(patient),
+      );
       const byId = new Map(retainedPatients.map(patient => [patient.id, patient]));
       action.patients.forEach(patient => byId.set(patient.id, patient));
       const retainedEnquiries = state.enquiries.filter(enquiry => enquiry.organisationId !== action.organisationId);
@@ -1416,42 +1288,37 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_PORTAL_MODE':
       return { ...state, portalMode: action.mode, screenHistory: [], navigationTarget: null };
     case 'SET_WORKSPACE_MODE': {
-      if (isLocalPortalPreview) {
-        const organisationId = action.organisationId ?? state.currentOrganisationId;
-        return {
-          ...state,
-          workspaceMode: action.mode,
-          currentOrganisationId: organisationId || state.currentOrganisationId,
-          navigationTarget: null,
-          crm: withLocalPreviewCrm(state.crm, organisationId || state.currentOrganisationId),
-        };
-      }
+      const organisationId = action.organisationId ?? state.currentOrganisationId;
       if (action.mode === 'training') {
-        const organisationId = action.organisationId ?? state.currentOrganisationId;
-        const stayingInTraining = state.workspaceMode === 'training';
-        const hasSandbox = state.crm.some(patient => patient.organisationId === organisationId && patient.referralSource === 'training_sandbox');
-        if (stayingInTraining && hasSandbox) {
-          return { ...state, workspaceMode: 'training', enquiries: [] };
+        const stayingInTraining = state.workspaceMode === 'training'
+          && state.crm.some(patient => patient.organisationId === organisationId && isTrainingSandboxPatient(patient));
+        if (stayingInTraining) {
+          return {
+            ...state,
+            workspaceMode: 'training',
+            currentOrganisationId: organisationId || state.currentOrganisationId,
+            enquiries: [],
+          };
         }
-        const training = buildTenantTrainingData(organisationId);
+        const training = trainingWorkspace(organisationId);
         return {
           ...state,
           workspaceMode: 'training',
+          currentOrganisationId: organisationId || state.currentOrganisationId,
           navigationTarget: null,
-          catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
-          catalogueSource: state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
           crm: training.crm,
-          submissions: training.submissions,
+          submissions: [],
           enquiries: [],
-          orders: stayingInTraining ? state.orders.filter(order => order.organisationId === organisationId) : training.orders,
-          activeOrderId: stayingInTraining ? state.activeOrderId : 1,
-          nextIds: { patient: 2000, rx: training.nextRx, order: 7, submission: 5, invoice: 4072 },
+          orders: training.orders,
+          activeOrderId: null,
+          nextIds: training.nextIds,
         };
       }
       if (state.workspaceMode === action.mode) return state;
       return {
         ...state,
         workspaceMode: action.mode,
+        currentOrganisationId: organisationId || state.currentOrganisationId,
         navigationTarget: null,
         catalogue: action.mode === 'live' && state.catalogueSource === 'curaleaf' ? state.catalogue : [],
         catalogueSource: action.mode === 'live' && state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
@@ -1467,9 +1334,6 @@ function reducer(state: AppState, action: Action): AppState {
         staffSession: action.session,
         currentOrganisationId: action.session.organisationId ?? state.currentOrganisationId,
         portalMode: action.session.role === 'admin' ? 'admin' : 'clinician',
-        crm: isLocalPortalPreview
-          ? withLocalPreviewCrm(state.crm, action.session.organisationId ?? state.currentOrganisationId)
-          : state.crm,
       };
     case 'SIGN_OUT_STAFF': {
       return {
@@ -2181,8 +2045,7 @@ const AppContext = createContext<AppContextType | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const currentOrganisation = state.organisations.find(organisation => organisation.id === state.currentOrganisationId);
-  const catalogueOrganisationStatus = currentOrganisation?.status;
-  const currentOrganisationIsTest = currentOrganisation?.testAccount === true;
+  const livePharmacyWorkspace = resolvePharmacyWorkspaceMode(currentOrganisation) === 'live';
 
   useEffect(() => {
     if (!isLocalPortalPreview) return;
@@ -2191,34 +2054,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.staffSession]);
 
   useEffect(() => {
-    if (!isLocalPortalPreview || localPortalPreview !== 'pharmacy') return;
-    const organisationId = state.currentOrganisationId || PREVIEW_CRM_PATIENTS[0].organisationId;
-    const seeded = previewPatientsForOrganisation(organisationId);
-    const missing = seeded.some(patient => {
-      const existing = state.crm.find(candidate => candidate.id === patient.id);
-      return !existing || existing.organisationId !== patient.organisationId;
-    });
-    if (!missing) return;
-    dispatch({
-      type: 'SYNC_PATIENT_DIRECTORY',
-      organisationId,
-      patients: seeded,
-      enquiries: [],
-    });
-  }, [state.crm, state.currentOrganisationId]);
-
-  useEffect(() => {
     const useLocalSandbox = isLocalPortalPreview && isApiConfigured;
     const useAuthenticatedPortal = !isLocalPortalPreview
       && isApiConfigured
       && Boolean(state.staffSession)
-      && Boolean(catalogueOrganisationStatus);
+      && Boolean(currentOrganisation);
     if (!useLocalSandbox && !useAuthenticatedPortal) return;
     let cancelled = false;
     dispatch({ type: 'SET_CATALOGUE_LOADING' });
     const request = useLocalSandbox
       ? getDevCuraleafCatalogue()
-      : catalogueOrganisationStatus === 'live'
+      : livePharmacyWorkspace
         ? getCuraleafCatalogue(state.currentOrganisationId)
         : getCuraleafTrainingCatalogue(state.currentOrganisationId);
     request.then(catalogue => {
@@ -2227,10 +2073,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!cancelled) dispatch({ type: 'SET_CATALOGUE_ERROR', message: error instanceof Error ? error.message : 'Curaleaf catalogue unavailable.' });
     });
     return () => { cancelled = true; };
-  }, [catalogueOrganisationStatus, state.currentOrganisationId, state.staffSession]);
+  }, [livePharmacyWorkspace, state.currentOrganisationId, state.staffSession]);
 
   useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || state.workspaceMode !== 'live' || state.catalogueSource !== 'curaleaf') return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !livePharmacyWorkspace || state.catalogueSource !== 'curaleaf') return;
     let cancelled = false;
     getCuraleafConnectionStatus().then(status => {
       if (cancelled) return;
@@ -2242,10 +2088,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }).catch(error => console.warn('Curaleaf status check unavailable:', error));
     return () => { cancelled = true; };
-  }, [state.catalogueSource, state.staffSession, state.workspaceMode]);
+  }, [state.catalogueSource, state.staffSession, livePharmacyWorkspace]);
 
   useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || currentOrganisation?.status !== 'live' || currentOrganisationIsTest) return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || !livePharmacyWorkspace) return;
     let cancelled = false;
     const organisationId = state.currentOrganisationId;
     getPortalPatientDirectory(organisationId).then(directory => {
@@ -2258,10 +2104,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }).catch(error => console.warn('Patient directory sync unavailable:', error));
     return () => { cancelled = true; };
-  }, [currentOrganisation?.status, currentOrganisationIsTest, state.currentOrganisationId, state.staffSession]);
+  }, [livePharmacyWorkspace, state.currentOrganisationId, state.staffSession]);
 
   useEffect(() => {
-    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || state.workspaceMode !== 'live') return;
+    if (isLocalPortalPreview || !isApiConfigured || !state.staffSession || !state.currentOrganisationId || !livePharmacyWorkspace) return;
     let cancelled = false;
     let inFlight = false;
     const organisationId = state.currentOrganisationId;
@@ -2306,7 +2152,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', syncVisibleOrders);
       document.removeEventListener('visibilitychange', syncVisibleOrders);
     };
-  }, [state.currentOrganisationId, state.organisations, state.staffSession, state.workspaceMode]);
+  }, [livePharmacyWorkspace, state.currentOrganisationId, state.organisations, state.staffSession]);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

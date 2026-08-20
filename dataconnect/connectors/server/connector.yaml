@@ -1,4 +1,5 @@
 connectorId: server
+# Generated SDK is unused; services/api-sql repositories call executeGraphql with inline operations.
 generate:
   nodeAdminSdk:
     outputDir: ../../../services/api-sql/src/generated/dataconnect-admin
