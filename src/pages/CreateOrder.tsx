@@ -304,6 +304,9 @@ export default function CreateOrder() {
     : [];
   const draftBasketCount = draftBasketItems.length;
   const draftBasketTotal = activeOrder ? orderRevenue(activeOrder) : 0;
+  const draftBasketWholesalePlusDelivery = activeOrder && wholesaleKnown && quoteCurrent && quoteSummary
+    ? orderCost(activeOrder) + quoteSummary.shippingPrice
+    : null;
   const draftBasketIssues = draftBasketItems.map(item => basketItemIssue({
     productId: item.productId,
     cost: item.cost,
@@ -1590,8 +1593,10 @@ export default function CreateOrder() {
                           <li key={`${item.rxId}-${item.productId}`} className={issue ? `is-${issue.tone}` : undefined}>
                             <span className="rx-checkout-basket__product">
                               <MedicineLabel name={item.name} />
-                              <small>{item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each</small>
-                              {issue ? <span className="rx-basket-drawer__issue"><AlertTriangle size={13} aria-hidden="true" />{issue.label}</span> : null}
+                              <small>
+                                {item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each
+                                {issue ? <span className="rx-basket-drawer__issue"> · {issue.label}</span> : null}
+                              </small>
                             </span>
                             <span className="rx-checkout-basket__line">
                               <strong>{money(lineRevenue(item))}</strong>
@@ -1688,47 +1693,62 @@ export default function CreateOrder() {
             <span className="rx-basket-drawer__hint">{basketOpen ? 'Hide choices' : 'Show choices'}{basketOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</span>
           </button>
           <div hidden={!basketOpen} id="rx-basket-drawer-panel" className="rx-basket-drawer__panel">
-            {draftBasketCount === 0 ? (
-              <p className="rx-basket-drawer__empty">No medicines in this draft yet. Add them in step 3. Prices appear here.</p>
-            ) : (
-              <ul className="rx-basket-drawer__list">
-                {draftBasketItems.map((item, index) => {
-                  const margin = lineMargin(item);
-                  const issue = draftBasketIssues[index];
-                  return (
-                    <li key={`${item.rxId}-${item.productId}`} className={issue ? `is-${issue.tone}` : undefined}>
-                      <span className="rx-basket-drawer__product">
-                        <MedicineLabel name={item.name} />
-                        <small>{item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each</small>
-                        {issue ? <span className="rx-basket-drawer__issue"><AlertTriangle size={13} aria-hidden="true" />{issue.label}</span> : null}
-                      </span>
-                      <span className="rx-basket-drawer__line">
-                        <strong>{money(lineRevenue(item))}</strong>
-                        <small>{item.cost === null || margin === null ? 'Quote pending' : `${margin}% · ${money(lineCost(item))}`}</small>
-                      </span>
-                      {canEditBasketItems && item.rxId === selectedRx?.id ? (
-                        <span className="rx-basket-drawer__edit">
-                          <button type="button" className="icon-button" aria-label={`Reduce packs of ${item.name}`} disabled={item.qty <= 1} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty - 1 })}><Minus size={16} /></button>
-                          <button type="button" className="icon-button" aria-label={`Add pack of ${item.name}`} disabled={item.qty >= 100} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty + 1 })}><Plus size={16} /></button>
-                          <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId })}><Trash2 size={16} /></button>
+            <div className="rx-basket-drawer__scroll">
+              {draftBasketCount === 0 ? (
+                <p className="rx-basket-drawer__empty">No medicines in this draft yet. Add them in step 3. Prices appear here.</p>
+              ) : (
+                <ul className="rx-basket-drawer__list">
+                  {draftBasketItems.map((item, index) => {
+                    const margin = lineMargin(item);
+                    const issue = draftBasketIssues[index];
+                    return (
+                      <li key={`${item.rxId}-${item.productId}`} className={issue ? `is-${issue.tone}` : undefined}>
+                        <span className="rx-basket-drawer__product">
+                          <MedicineLabel name={item.name} />
+                          <small>
+                            {item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each
+                            {issue ? <span className="rx-basket-drawer__issue"> · {issue.label}</span> : null}
+                          </small>
                         </span>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {draftBasketBlockedCount ? (
-              <p className="rx-basket-drawer__alert" role="status">
-                <AlertTriangle size={14} aria-hidden="true" />
-                {draftBasketBlockedCount} medicine{draftBasketBlockedCount === 1 ? ' is' : 's are'} out of stock or unavailable. Payment stays locked until Curaleaf marks them available.
-              </p>
-            ) : null}
-            <dl className="rx-basket-drawer__totals">
-              <div><dt>Products</dt><dd>{money(draftBasketTotal - (activeOrder.dispensingFee || 0))}</dd></div>
-              <div><dt>Dispensing</dt><dd>{money(activeOrder.dispensingFee || 0)}</dd></div>
-              <div><dt>Patient total</dt><dd>{money(draftBasketTotal)}</dd></div>
-            </dl>
+                        <span className="rx-basket-drawer__line">
+                          <strong>{money(lineRevenue(item))}</strong>
+                          <small>{item.cost === null || margin === null ? 'Quote pending' : `${margin}% · ${money(lineCost(item))}`}</small>
+                        </span>
+                        {canEditBasketItems && item.rxId === selectedRx?.id ? (
+                          <span className="rx-basket-drawer__edit">
+                            <button type="button" className="icon-button" aria-label={`Reduce packs of ${item.name}`} disabled={item.qty <= 1} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty - 1 })}><Minus size={16} /></button>
+                            <button type="button" className="icon-button" aria-label={`Add pack of ${item.name}`} disabled={item.qty >= 100} onClick={() => dispatch({ type: 'UPDATE_ITEM_QTY', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId, qty: item.qty + 1 })}><Plus size={16} /></button>
+                            <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => dispatch({ type: 'REMOVE_ITEM_FROM_RX', orderId: activeOrder.id, rxId: item.rxId, productId: item.productId })}><Trash2 size={16} /></button>
+                          </span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+            <div className="rx-basket-drawer__footer">
+              {draftBasketBlockedCount ? (
+                <p className="rx-basket-drawer__alert" role="status">
+                  <AlertTriangle size={14} aria-hidden="true" />
+                  {draftBasketBlockedCount} medicine{draftBasketBlockedCount === 1 ? ' is' : 's are'} out of stock or unavailable. Payment stays locked until Curaleaf marks them available.
+                </p>
+              ) : null}
+              <dl className="rx-basket-drawer__totals">
+                <div>
+                  <dt>Wholesale + delivery</dt>
+                  <dd>{draftBasketWholesalePlusDelivery !== null ? money(draftBasketWholesalePlusDelivery) : state.workspaceMode === 'training' && !wholesaleKnown ? 'Not supplied' : 'Quote pending'}</dd>
+                </div>
+                <div>
+                  <dt>Dispensing</dt>
+                  <dd>{money(activeOrder.dispensingFee || 0)}</dd>
+                </div>
+                <div>
+                  <dt>Patient Price Total</dt>
+                  <dd>{money(draftBasketTotal)}</dd>
+                </div>
+              </dl>
+            </div>
           </div>
         </aside>
       </div>,
