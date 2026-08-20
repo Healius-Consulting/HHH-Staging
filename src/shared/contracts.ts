@@ -704,6 +704,21 @@ export interface GoLiveReadiness {
     };
     curaleafLive: { passed: boolean; environment?: 'test' | 'production'; validatedAt: string | null; secretStored: boolean };
   };
+  operational?: PharmacyOperationalStatus;
+}
+
+export interface PharmacyOperationalStatus {
+  intake: { live: boolean; label: 'Live' | 'Off' };
+  workspace: { mode: 'training' | 'live' | 'paused'; label: 'Training' | 'Live' | 'Paused' };
+  staff: { activeCount: number; invitedCount: number; passed: boolean; label: string };
+  curaleaf: { connected: boolean; label: 'Waiting' | 'Connected' };
+  payment: { route: 'manual' | 'worldpay'; worldpayConnected: boolean; passed: boolean; label: string };
+  walkthrough: { completed: boolean; label: 'Not started' | 'Complete'; evidence: string | null };
+  charges: { saved: boolean; label: 'Saved' | 'Missing'; evidence: string | null };
+  premises: { confirmed: boolean };
+  websitePack: { published: boolean };
+  goLiveReady: boolean;
+  missingGates: string[];
 }
 
 export interface OrderRefundState {
@@ -850,7 +865,9 @@ export interface CuraleafClinicScan {
 export interface CuraleafActivationInput {
   organisationId: string;
   customerId: string;
+  /** Single Curaleaf X-API-Key for this pharmacy. Stored as writeApiKey for existing secrets. */
   writeApiKey: string;
+  /** @deprecated Curaleaf issues one key; ignored if sent. */
   readApiKey?: string;
   /** @deprecated No longer required; ignored by the API if sent. */
   portalEmail?: string;
@@ -982,6 +999,7 @@ export interface PharmacySetupStatus {
   requiredCount: number;
   tasks: PharmacySetupTask[];
   updatedAt: string;
+  operational?: PharmacyOperationalStatus;
 }
 
 export interface UpdatePharmacySetupTaskInput {

@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Building2,
   CheckCircle2,
+  ChevronDown,
   ClipboardCheck,
   Copy,
   Download,
@@ -41,16 +42,16 @@ import { downloadContentPack, eligibilityUrl } from '../utils/pharmacyResources'
 import { brandSwatchStyle, deriveTenantTheme } from '../utils/tenantTheme';
 import { onboardingStatusLabel, onboardingStatusPillClass } from '../utils/onboardingStatus';
 import { useAuth } from '../auth/useAuth';
-import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getCuraleafConnectionStatus, getPharmacyStaff, getPlatformAdmins, getReferralLink, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, resetPharmacyStaffMfa, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
-import { workspaceClassificationLabel, type AdminReferralFinanceReport, type CuraleafConnectionStatus, type PatientRegisterExportResult, type PatientRegisterExportRow, type PharmacySetupStatus, type PharmacyStaffAccount, type PharmacyStaffInvitation, type PlatformAdminAccount, type PlatformAdminInvitation, type UpdateOrganisationInput } from '../shared/contracts';
-import { SETUP_TASKS } from '../onboarding/setup';
+import { completeReferralRecordsCheck, createOrganisation, createPharmacyStaffInvitation, createPlatformAdminInvitation, getAdminPatientRegister, getAdminPharmacySetupStatuses, getAdminReferralFinance, getPharmacyStaff, getPlatformAdmins, getReferralLink, goLiveOrganisation, queueReferralPatientEmail, recordPatientRegisterExport, recordReferralDecision, removeOrganisationLogo, removePharmacyStaff, removePlatformAdmin, resetPharmacyStaffMfa, updateAdminPharmacySetupTask, updateEligibilityPharmacyReason, updateOrganisation, uploadOrganisationLogo } from '../shared/api';
+import { type AdminReferralFinanceReport, type PatientRegisterExportResult, type PatientRegisterExportRow, type PharmacySetupStatus, type PharmacyStaffAccount, type PharmacyStaffInvitation, type PlatformAdminAccount, type PlatformAdminInvitation, type SetupTaskId, type UpdateOrganisationInput } from '../shared/contracts';
+import { SETUP_TASKS, adminSandboxEvidence, deriveOperationalStatus } from '../onboarding/setup';
+import { AdminGoLivePanel } from '../onboarding/AdminGoLivePanel';
 import { isLocalPortalPreview, withLocationSearch } from '../dev/localPortalPreview';
 import { useModalFocus } from '../accessibility/useModalFocus';
 import WorkspaceNavigation, { type WorkspaceNavGroup } from '../components/WorkspaceNavigation';
 import HhhBrandMark from '../components/HhhBrandMark';
 import WorkspacePageHeader from '../components/WorkspacePageHeader';
 import CommandPalette, { type CommandDefinition } from '../components/CommandPalette';
-import SummaryTiles from '../components/SummaryTiles';
 import CompactPatientCell from '../components/CompactPatientCell';
 import { formatPatientDob } from '../utils/patientDob';
 import { compactPatientName } from '../utils/patientName';
@@ -61,11 +62,26 @@ import { appPathPrefix } from '../auth/surface-path';
 import { surfaceRelativePath, surfaceRoutePath } from '../routing/surfaceRoute';
 import { ADMIN_VIEW_PATHS, parseAdminRelativePath, type AdminView } from '@hhh/domain/portal-route';
 import AdminIntakeV2 from '../components/AdminIntakeV2';
+import CuraleafConnectionPanel from '../components/CuraleafConnectionPanel';
 
-type PlatformTab = 'setup' | 'curaleaf' | 'access' | 'directory';
-type PharmacyDetailTab = 'access' | 'config' | 'patients';
+type OverviewManagePanel = 'summary' | 'identity' | 'staff' | 'setup' | 'curaleaf';
+type AdminDialogFocus = 'list' | 'invite';
+
+const OVERVIEW_MANAGE_PANELS: { id: OverviewManagePanel; label: string }[] = [
+  { id: 'summary', label: 'Summary' },
+  { id: 'identity', label: 'Identity' },
+  { id: 'staff', label: 'Staff' },
+  { id: 'setup', label: 'Go live' },
+  { id: 'curaleaf', label: 'Curaleaf' },
+];
 
 const MFA_RESET_REASON = 'Administrator reset authenticator after confirming the staff member identity.';
+
+function platformAdminStatusCopy(status: PlatformAdminAccount['status']) {
+  if (status === 'active') return { label: 'Active', pill: 'pill-green' };
+  if (status === 'invited') return { label: 'Invited', pill: 'pill-amber' };
+  return { label: 'Disabled', pill: 'pill-red' };
+}
 
 function adminViewFromPath(): AdminView {
   const relativePath = surfaceRelativePath(window.location.pathname, appPathPrefix);
@@ -189,7 +205,7 @@ function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
 }
 
-function AdminHeader({ view, setView, pending = 0, readiness = 0 }: { view: AdminView; setView: (view: AdminView) => void; pending?: number; readiness?: number }) {
+function AdminHeader({ view, setView, pending = 0, onViewAdmins }: { view: AdminView; setView: (view: AdminView) => void; pending?: number; onViewAdmins: () => void }) {
   const { signOutStaff } = useAuth();
   const { state } = useApp();
   const staffName = state.staffSession?.name || 'HHH Administrator';
@@ -200,9 +216,6 @@ function AdminHeader({ view, setView, pending = 0, readiness = 0 }: { view: Admi
       { key: 'patients', label: 'Patients', icon: <Users size={17} /> },
       { key: 'finance', label: 'Finance', icon: <PoundSterling size={17} /> },
     ] },
-    { label: 'Platform', items: [
-      { key: 'platform', label: 'Platform', icon: <ClipboardCheck size={17} />, count: readiness },
-    ] },
   ];
   return <WorkspaceNavigation
     ariaLabel="HHH administration"
@@ -212,6 +225,7 @@ function AdminHeader({ view, setView, pending = 0, readiness = 0 }: { view: Admi
     onNavigate={setView}
     brand={{ title: 'Holistic Health Hub', subtitle: 'Operations console', logo: <HhhBrandMark /> }}
     user={{ initials: staffName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase(), name: staffName, role: 'HHH administrator' }}
+    footerAction={{ label: 'View admins', icon: <Users size={14} />, onClick: onViewAdmins }}
     exitAction={{ label: 'Sign out', icon: <LogOut size={14} />, onClick: () => void signOutStaff() }}
     moreTitle="More administration tools"
   />;
@@ -516,7 +530,7 @@ function EditPharmacy({ organisation, onClose, onSaved }: { organisation: Pharma
   );
 }
 
-function PlatformAdminManager() {
+function PlatformAdminDialog({ onClose, focusInvite = false }: { onClose: () => void; focusInvite?: boolean }) {
   const { dispatch } = useApp();
   const { state: authState } = useAuth();
   const currentUid = authState.staff?.uid ?? null;
@@ -530,6 +544,14 @@ function PlatformAdminManager() {
   const [deletingUid, setDeletingUid] = useState<string | null>(null);
   const [resettingUid, setResettingUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useModalFocus<HTMLElement>(true, onClose);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!focusInvite) return;
+    const timer = window.setTimeout(() => nameInputRef.current?.focus(), 40);
+    return () => window.clearTimeout(timer);
+  }, [focusInvite]);
 
   useEffect(() => {
     let cancelled = false;
@@ -538,6 +560,7 @@ function PlatformAdminManager() {
     if (isLocalPortalPreview) {
       const records: PlatformAdminAccount[] = [
         { uid: 'preview-admin', email: 'admin@hhh.example', displayName: 'Jordan Lee', role: 'hhh_admin', status: 'active', createdAt: new Date().toISOString() },
+        { uid: 'preview-admin-invited', email: 'alex.patel@hhh.example', displayName: 'Alex Patel', role: 'hhh_admin', status: 'invited', createdAt: new Date().toISOString() },
       ];
       setAdmins(records);
       setLoading(false);
@@ -577,11 +600,11 @@ function PlatformAdminManager() {
           dispatch({ type: 'ADD_TOAST', message: 'Setup email queued.', toastType: 'success' });
         } else {
           setEmailDelivery('failed');
-          dispatch({ type: 'ADD_TOAST', message: 'Account created. Retry the invitation email from this screen.', toastType: 'warning' });
+          dispatch({ type: 'ADD_TOAST', message: 'Account created. Retry the invitation email from this dialog.', toastType: 'warning' });
         }
       } catch {
         setEmailDelivery('failed');
-        dispatch({ type: 'ADD_TOAST', message: 'Account created. Retry the invitation email from this screen.', toastType: 'warning' });
+        dispatch({ type: 'ADD_TOAST', message: 'Account created. Retry the invitation email from this dialog.', toastType: 'warning' });
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The admin account could not be created.');
@@ -606,7 +629,7 @@ function PlatformAdminManager() {
   };
 
   const resetMfa = async (account: PlatformAdminAccount) => {
-    if (account.status === 'disabled' || !window.confirm(`Remove ${account.displayName}'s authenticator app? They will set it up again the next time they sign in.`)) return;
+    if (account.status !== 'active' || !window.confirm(`Remove ${account.displayName}'s authenticator app? They will set it up again the next time they sign in.`)) return;
     setResettingUid(account.uid);
     setError(null);
     try {
@@ -621,37 +644,80 @@ function PlatformAdminManager() {
     }
   };
 
-  return (
-    <section className="card admin-staff-card">
-      <div className="admin-directory-head"><div><p className="section-label">Platform access</p><h2>HHH administrators</h2><p>Invite colleagues who need full admin portal access. Admin accounts are separate from pharmacy staff and are not tied to a pharmacy organisation.</p></div><span className="pill pill-info"><ShieldCheck size={13} /> {admins.length} admin{admins.length === 1 ? '' : 's'}</span></div>
-      <form className="admin-staff-invite-form" onSubmit={invite}>
-        <label>Admin name<input className="input" value={displayName} onChange={event => setDisplayName(event.target.value)} autoComplete="off" required /></label>
-        <label>Work email address<input className="input" type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="off" required /></label>
-        <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Invite admin'}</button>
-      </form>
-      {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
-      {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>Admin account created · {emailDelivery === 'sent' ? 'Setup email queued' : emailDelivery === 'failed' ? 'Email not queued' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? 'A password setup email has been queued. They will choose a password and set up two-factor authentication before entering the admin portal.' : 'A setup email could not be queued. Retry the invitation from this screen. The setup link is not shown in the browser.'}</span></div></div>}
-      <div className="admin-staff-list">
-        {loading && <div className="empty-state">Loading admin accounts…</div>}
-        {!loading && admins.length === 0 && <div className="empty-state">No HHH admin accounts yet. Invite the first administrator above.</div>}
-        {admins.map(account => {
-          const isSelf = account.uid === currentUid;
-          const isLastAdmin = admins.length <= 1;
-          return (
-            <div className="admin-staff-row" key={account.uid}>
-              <div className="staff-avatar">{account.displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()}</div>
-              <div><strong>{account.displayName}{isSelf ? ' (you)' : ''}</strong><span>{account.email}</span></div>
-              <span className="pill pill-info">Admin</span>
-              <span className={`pill ${account.status === 'active' ? 'pill-green' : account.status === 'disabled' ? 'pill-red' : 'pill-amber'}`}>{account.status}</span>
-              <div className="admin-staff-row-actions">
-                <button className="icon-btn" type="button" disabled={account.status === 'disabled' || resettingUid === account.uid} title="Remove authenticator app" aria-label={`Remove authenticator for ${account.displayName}`} onClick={() => void resetMfa(account)}><ShieldOff size={16} /></button>
-                <button className="icon-btn" type="button" disabled={isSelf || isLastAdmin || deletingUid === account.uid} title={isSelf ? 'You cannot remove your own access' : isLastAdmin ? 'At least one admin must remain' : 'Remove admin access'} aria-label={isSelf ? `${account.displayName} is your account` : `Remove ${account.displayName}`} onClick={() => void removeAdmin(account)}><UserX size={16} /></button>
-              </div>
-            </div>
-          );
-        })}
+  const activeAdmins = admins.filter(account => account.status === 'active');
+  const invitedAdmins = admins.filter(account => account.status === 'invited');
+  const disabledAdmins = admins.filter(account => account.status === 'disabled');
+
+  const renderAdminRow = (account: PlatformAdminAccount) => {
+    const isSelf = account.uid === currentUid;
+    const isLastAdmin = admins.length <= 1;
+    const statusCopy = platformAdminStatusCopy(account.status);
+    return (
+      <div className="admin-staff-row" key={account.uid}>
+        <div className="staff-avatar">{account.displayName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()}</div>
+        <div><strong>{account.displayName}{isSelf ? ' (you)' : ''}</strong><span>{account.email}</span></div>
+        <span className={`pill ${statusCopy.pill}`}>{statusCopy.label}</span>
+        <div className="admin-staff-row-actions">
+          <button className="icon-btn" type="button" disabled={account.status !== 'active' || resettingUid === account.uid} title="Remove authenticator app" aria-label={`Remove authenticator for ${account.displayName}`} onClick={() => void resetMfa(account)}><ShieldOff size={16} /></button>
+          <button className="icon-btn" type="button" disabled={isSelf || isLastAdmin || deletingUid === account.uid} title={isSelf ? 'You cannot remove your own access' : isLastAdmin ? 'At least one admin must remain' : 'Remove admin access'} aria-label={isSelf ? `${account.displayName} is your account` : `Remove ${account.displayName}`} onClick={() => void removeAdmin(account)}><UserX size={16} /></button>
+        </div>
       </div>
-    </section>
+    );
+  };
+
+  return (
+    <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
+      <aside ref={dialogRef} className="drawer admin-onboarding-drawer admin-admins-drawer" role="dialog" aria-modal="true" aria-labelledby="admins-dialog-title" tabIndex={-1}>
+        <div className="drawer-header">
+          <div>
+            <p className="section-label">Platform access</p>
+            <h2 id="admins-dialog-title">HHH administrators</h2>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close administrators dialog"><X size={18} /></button>
+        </div>
+        <div className="drawer-body onboarding-form admin-admins-drawer__body">
+          <p>Invite colleagues who need full admin portal access. Admin accounts are separate from pharmacy staff and are not tied to a pharmacy organisation.</p>
+          <form className="admin-staff-invite-form" onSubmit={invite}>
+            <label htmlFor="admin-invite-name">Admin name<input id="admin-invite-name" ref={nameInputRef} className="input" value={displayName} onChange={event => setDisplayName(event.target.value)} autoComplete="off" required /></label>
+            <label htmlFor="admin-invite-email">Work email address<input id="admin-invite-email" className="input" type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="off" required /></label>
+            <button className="btn btn-primary" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? 'Creating account…' : 'Invite admin'}</button>
+          </form>
+          {error && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {error}</div>}
+          {invitation && <div className="staff-invitation-result"><ShieldCheck size={17} /><div><strong>Admin account created · {emailDelivery === 'sent' ? 'Setup email queued' : emailDelivery === 'failed' ? 'Email not queued' : 'Preparing email'}</strong><span>{emailDelivery === 'sent' ? 'A password setup email has been queued. They will choose a password and set up two-factor authentication before entering the admin portal.' : 'A setup email could not be queued. Retry the invitation from this dialog. The setup link is not shown in the browser.'}</span></div></div>}
+          <div className="admin-admins-groups">
+            {loading ? (
+              <div className="empty-state">Loading admin accounts…</div>
+            ) : (
+              <>
+                <section className="admin-admins-group" aria-labelledby="admins-active-heading">
+                  <header>
+                    <h3 id="admins-active-heading">Active</h3>
+                    <span className="pill pill-green">{activeAdmins.length}</span>
+                  </header>
+                  {activeAdmins.length === 0 ? <p className="admin-admins-group__empty">No active administrators.</p> : activeAdmins.map(renderAdminRow)}
+                </section>
+                <section className="admin-admins-group" aria-labelledby="admins-invited-heading">
+                  <header>
+                    <h3 id="admins-invited-heading">Invited</h3>
+                    <span className="pill pill-amber">{invitedAdmins.length}</span>
+                  </header>
+                  {invitedAdmins.length === 0 ? <p className="admin-admins-group__empty">No outstanding invitations.</p> : invitedAdmins.map(renderAdminRow)}
+                </section>
+                {disabledAdmins.length > 0 ? (
+                  <section className="admin-admins-group" aria-labelledby="admins-disabled-heading">
+                    <header>
+                      <h3 id="admins-disabled-heading">Disabled</h3>
+                      <span className="pill pill-red">{disabledAdmins.length}</span>
+                    </header>
+                    {disabledAdmins.map(renderAdminRow)}
+                  </section>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -791,8 +857,6 @@ function PharmacyStaffManager({ organisation, onCountChange }: { organisation: P
 export default function AdminPortal() {
   const { state, dispatch } = useApp();
   const [view, setView] = useState<AdminView>(adminViewFromPath);
-  const [platformTab, setPlatformTab] = useState<PlatformTab>('setup');
-  const [pharmacyDetailTab, setPharmacyDetailTab] = useState<PharmacyDetailTab>('access');
   const [query, setQuery] = useState('');
   const [patientOrganisationId, setPatientOrganisationId] = useState('all');
   const [patientStatus, setPatientStatus] = useState('all');
@@ -804,22 +868,26 @@ export default function AdminPortal() {
   const [patientRegisterLoading, setPatientRegisterLoading] = useState(false);
   const [selectedRegisterPatient, setSelectedRegisterPatient] = useState<PatientRegisterExportRow | null>(null);
   const [pendingRegisterKey, setPendingRegisterKey] = useState<string | null>(null);
-  const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(organisationIdFromPath);
   const [referralLink, setReferralLink] = useState('');
   const [referralLinkLoading, setReferralLinkLoading] = useState(false);
   const [referralLinkError, setReferralLinkError] = useState<string | null>(null);
   const [referralLinkRefresh, setReferralLinkRefresh] = useState(0);
-  const [overviewPharmacyId, setOverviewPharmacyId] = useState<string | null>(null);
+  const [overviewPharmacyId, setOverviewPharmacyId] = useState<string | null>(organisationIdFromPath);
+  const [overviewManagePanel, setOverviewManagePanel] = useState<OverviewManagePanel>('summary');
+  const [overviewManageOpen, setOverviewManageOpen] = useState(false);
   const [overviewFilter, setOverviewFilter] = useState<'all' | 'live' | 'setup'>('all');
+  const overviewManageRef = useRef<HTMLDivElement>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const [showPharmacyEditor, setShowPharmacyEditor] = useState(false);
+  const [showAdminDialog, setShowAdminDialog] = useState(false);
+  const [adminDialogFocus, setAdminDialogFocus] = useState<AdminDialogFocus>('list');
   const [setupByOrganisation, setSetupByOrganisation] = useState<Record<string, PharmacySetupStatus>>({});
   const [setupError, setSetupError] = useState<string | null>(null);
-  const [curaleafOrganisationId, setCuraleafOrganisationId] = useState(state.organisations[0]?.id ?? '');
-  const [curaleafError, setCuraleafError] = useState<string | null>(null);
-  const [curaleafResult, setCuraleafResult] = useState<CuraleafConnectionStatus | null>(null);
-  const [showCuraleafDrawer, setShowCuraleafDrawer] = useState(false);
+  const [setupRefresh, setSetupRefresh] = useState(0);
+  const [goLiveBusy, setGoLiveBusy] = useState(false);
+  const [goLiveError, setGoLiveError] = useState<string | null>(null);
+  const [recordingTask, setRecordingTask] = useState<SetupTaskId | null>(null);
   const [financeOrganisationId, setFinanceOrganisationId] = useState('all');
   const [financePatientKey, setFinancePatientKey] = useState('all');
   const [financePeriod, setFinancePeriod] = useState<'all' | 'month' | 'year'>('all');
@@ -843,14 +911,13 @@ export default function AdminPortal() {
   const goLiveByOrganisation = useMemo(() => Object.fromEntries(state.organisations.map(organisation => [organisation.id, {
     allocationHolding: organisation.workspaceClassification === 'allocation_holding',
     testAccount: organisation.testAccount === true,
-    gates: { curaleafLive: { passed: false, environment: 'production' as const, validatedAt: null, secretStored: false } },
   }])), [state.organisations]);
 
-  const selectedOrganisation = state.organisations.find(org => org.id === selectedOrganisationId);
+  const overviewPharmacy = state.organisations.find(org => org.id === overviewPharmacyId) ?? null;
 
   useEffect(() => {
     let cancelled = false;
-    if (!selectedOrganisation || pharmacyDetailTab !== 'config') {
+    if (!overviewPharmacy || overviewManagePanel !== 'identity') {
       setReferralLink('');
       setReferralLinkError(null);
       setReferralLinkLoading(false);
@@ -860,14 +927,14 @@ export default function AdminPortal() {
     setReferralLinkError(null);
     setReferralLinkLoading(true);
     const request = isLocalPortalPreview
-      ? Promise.resolve({ url: eligibilityUrl(selectedOrganisation.referralToken) })
-      : getReferralLink(selectedOrganisation.id);
+      ? Promise.resolve({ url: eligibilityUrl(overviewPharmacy.referralToken) })
+      : getReferralLink(overviewPharmacy.id);
     void request
       .then(result => { if (!cancelled) setReferralLink(result.url); })
       .catch(error => { if (!cancelled) setReferralLinkError(error instanceof Error ? error.message : 'The eligibility link could not be loaded.'); })
       .finally(() => { if (!cancelled) setReferralLinkLoading(false); });
     return () => { cancelled = true; };
-  }, [pharmacyDetailTab, selectedOrganisation?.id, selectedOrganisation?.referralToken, referralLinkRefresh]);
+  }, [overviewManagePanel, overviewPharmacy?.id, overviewPharmacy?.referralToken, referralLinkRefresh]);
 
   const runReferralAction = async (redactPharmacyReason = false) => {
     if (!referralDialog) return;
@@ -944,35 +1011,66 @@ export default function AdminPortal() {
     }
   };
   const updateSelectedStaffCount = useCallback((count: number) => {
-    if (selectedOrganisationId) dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisationId, updates: { staffCount: count } });
-  }, [dispatch, selectedOrganisationId]);
+    if (overviewPharmacyId) dispatch({ type: 'UPDATE_ORGANISATION', organisationId: overviewPharmacyId, updates: { staffCount: count } });
+  }, [dispatch, overviewPharmacyId]);
+
+  const openPharmacyOnOverview = useCallback((organisationId: string, panel: OverviewManagePanel = 'summary') => {
+    setView('overview');
+    setOverviewPharmacyId(organisationId);
+    setOverviewManagePanel(panel);
+    setOverviewManageOpen(false);
+    setOverviewFilter('all');
+    setQuery('');
+    setShowPharmacyEditor(false);
+  }, []);
 
   useEffect(() => {
     document.getElementById('admin-main-content')?.scrollTo({ top: 0 });
-  }, [view, selectedOrganisationId, platformTab, pharmacyDetailTab]);
+  }, [view, overviewPharmacyId, overviewManagePanel]);
 
   useEffect(() => {
     const onPopState = () => {
+      const organisationId = organisationIdFromPath();
       setView(adminViewFromPath());
-      setSelectedOrganisationId(organisationIdFromPath());
+      if (organisationId) {
+        setOverviewPharmacyId(organisationId);
+        setOverviewManagePanel('summary');
+        setOverviewManageOpen(false);
+      }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   useEffect(() => {
-    const path = selectedOrganisationId ? adminPathForOrganisation(selectedOrganisationId) : adminPathForView(view);
+    const path = view === 'overview' && overviewPharmacyId
+      ? adminPathForOrganisation(overviewPharmacyId)
+      : adminPathForView(view);
     if (window.location.pathname !== path) window.history.pushState(null, '', withLocationSearch(path));
-  }, [selectedOrganisationId, view]);
+  }, [overviewPharmacyId, view]);
 
   useEffect(() => {
-    const requestedOrganisationId = organisationIdFromPath();
-    if (requestedOrganisationId && requestedOrganisationId !== selectedOrganisationId) setSelectedOrganisationId(requestedOrganisationId);
-  }, [selectedOrganisationId]);
+    if (!overviewManageOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!overviewManageRef.current?.contains(event.target as Node)) setOverviewManageOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOverviewManageOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [overviewManageOpen]);
 
   useEffect(() => {
-    if (selectedOrganisationId) setPharmacyDetailTab('access');
-  }, [selectedOrganisationId]);
+    if (view !== 'overview') {
+      setOverviewManageOpen(false);
+      setShowPharmacyEditor(false);
+    }
+  }, [view]);
 
   useEffect(() => {
     if (!state.organisations.length) {
@@ -984,13 +1082,29 @@ export default function AdminPortal() {
     if (isLocalPortalPreview) {
       const statuses = state.organisations.map((organisation, organisationIndex): PharmacySetupStatus => {
         const completedCount = organisationIndex === 0 ? 4 : 2;
+        const tasks = SETUP_TASKS.map((task, taskIndex) => ({
+          id: task.id,
+          completed: taskIndex < completedCount,
+          completedAt: taskIndex < completedCount ? new Date().toISOString() : null,
+          completedBy: taskIndex < completedCount ? 'Preview admin' : null,
+          evidence: taskIndex < completedCount ? (task.id === 'pharmacy_profile' ? `Confirmed GPhC ${organisation.gphcNumber}` : 'Recorded') : null,
+        }));
         return {
           organisationId: organisation.id,
           completed: completedCount === SETUP_TASKS.length,
           completedCount,
           requiredCount: SETUP_TASKS.length,
           updatedAt: new Date().toISOString(),
-          tasks: SETUP_TASKS.map((task, taskIndex) => ({ id: task.id, completed: taskIndex < completedCount, completedAt: taskIndex < completedCount ? new Date().toISOString() : null, completedBy: taskIndex < completedCount ? 'Preview staff' : null, evidence: taskIndex < completedCount ? 'Preview evidence recorded' : null })),
+          tasks,
+          operational: deriveOperationalStatus({
+            workspaceMode: organisation.status === 'live' ? 'live' : organisation.status === 'paused' ? 'paused' : 'training',
+            paused: organisation.status === 'paused',
+            staffCount: organisation.staffCount,
+            defaultPaymentRoute: organisation.defaultPaymentRoute,
+            worldpayConnected: organisation.worldpay.status === 'connected',
+            curaleafConnected: Boolean(organisation.curaleafPharmacyCode),
+            tasks,
+          }),
         };
       });
       setSetupByOrganisation(Object.fromEntries(statuses.map(status => [status.organisationId, status])));
@@ -1006,14 +1120,8 @@ export default function AdminPortal() {
         if (!cancelled) setSetupError(error instanceof Error ? error.message : 'Pharmacy readiness could not be loaded.');
       });
     return () => { cancelled = true; };
-  }, [state.organisations]);
+  }, [state.organisations, setupRefresh]);
 
-
-  useEffect(() => {
-    if (!curaleafOrganisationId || !state.organisations.some(org => org.id === curaleafOrganisationId)) {
-      setCuraleafOrganisationId(state.organisations[0]?.id ?? '');
-    }
-  }, [curaleafOrganisationId, state.organisations]);
   const submissionsByOrganisation = useMemo(
     () => new Map(state.organisations.map(org => [org.id, state.submissions.filter(sub => sub.organisationId === org.id)])),
     [state.organisations, state.submissions],
@@ -1329,19 +1437,86 @@ export default function AdminPortal() {
       setPatientExportBusy(false);
     }
   };
+
+  const flipPharmacyLive = async (organisationId: string) => {
+    setGoLiveBusy(true);
+    setGoLiveError(null);
+    try {
+      if (isLocalPortalPreview) {
+        dispatch({ type: 'UPDATE_ORGANISATION', organisationId, updates: { status: 'live' } });
+        setSetupRefresh(value => value + 1);
+        dispatch({ type: 'ADD_TOAST', message: 'Preview workspace marked live.', toastType: 'success' });
+        return;
+      }
+      const readiness = await goLiveOrganisation(organisationId);
+      dispatch({ type: 'UPDATE_ORGANISATION', organisationId, updates: { status: readiness.status } });
+      setSetupRefresh(value => value + 1);
+      dispatch({ type: 'ADD_TOAST', message: 'Pharmacy workspace is live.', toastType: 'success' });
+    } catch (error) {
+      setGoLiveError(error instanceof Error ? error.message : 'The pharmacy could not be flipped to live.');
+    } finally {
+      setGoLiveBusy(false);
+    }
+  };
+
+  const recordSandboxTask = async (organisation: PharmacyTenant, taskId: SetupTaskId, completed: boolean) => {
+    setRecordingTask(taskId);
+    setGoLiveError(null);
+    const evidence = completed ? adminSandboxEvidence(taskId, organisation) : '';
+    try {
+      if (isLocalPortalPreview) {
+        setSetupByOrganisation(current => {
+          const status = current[organisation.id];
+          if (!status) return current;
+          const tasks = status.tasks.map(task => task.id === taskId ? {
+            ...task,
+            completed,
+            evidence: completed ? evidence : null,
+            completedAt: completed ? new Date().toISOString() : null,
+            completedBy: completed ? 'Preview admin' : null,
+          } : task);
+          const completedCount = tasks.filter(task => task.completed).length;
+          return {
+            ...current,
+            [organisation.id]: {
+              ...status,
+              tasks,
+              completedCount,
+              completed: completedCount === tasks.length,
+              operational: deriveOperationalStatus({
+                workspaceMode: organisation.status === 'live' ? 'live' : organisation.status === 'paused' ? 'paused' : 'training',
+                paused: organisation.status === 'paused',
+                staffCount: organisation.staffCount,
+                defaultPaymentRoute: organisation.defaultPaymentRoute,
+                worldpayConnected: organisation.worldpay.status === 'connected',
+                curaleafConnected: Boolean(organisation.curaleafPharmacyCode || status.operational?.curaleaf.connected),
+                tasks,
+              }),
+            },
+          };
+        });
+        return;
+      }
+      const next = await updateAdminPharmacySetupTask(organisation.id, taskId, { completed, evidence });
+      setSetupByOrganisation(current => ({ ...current, [organisation.id]: next }));
+    } catch (error) {
+      setGoLiveError(error instanceof Error ? error.message : 'The sandbox note could not be saved.');
+    } finally {
+      setRecordingTask(null);
+    }
+  };
   const liveCount = state.organisations.filter(org => org.status === 'live').length;
-  const intakeLiveCount = state.organisations.filter(org => org.status === 'intake_live').length;
+  const trainingCount = state.organisations.filter(org => org.status === 'onboarding' || org.status === 'intake_live').length;
   const remainingSetupSteps = Object.values(setupByOrganisation).reduce((total, status) => total + status.requiredCount - status.completedCount, 0);
   const pendingAdminDecisions = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review').length;
   const adminCommands = useMemo<CommandDefinition[]>(() => [
-    { label: 'Pharmacies', detail: 'Manage pharmacy organisations', group: 'Navigate', icon: <LayoutDashboard size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); } },
-    { label: 'Patient onboarding', detail: 'Record patient calls and decisions', group: 'Navigate', icon: <UserCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('referrals'); } },
-    { label: 'Patient register', detail: 'Cross-pharmacy patient ownership', group: 'Navigate', icon: <Users size={16} />, run: () => { setSelectedOrganisationId(null); setView('patients'); } },
-    { label: 'Referral finance', detail: '£50 first dispenses and £40 annual fees', group: 'Navigate', icon: <PoundSterling size={16} />, run: () => { setSelectedOrganisationId(null); setView('finance'); } },
-    { label: 'Platform readiness', detail: 'Setup progress and Curaleaf activation', group: 'Navigate', icon: <ClipboardCheck size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('setup'); } },
-    { label: 'Activate Curaleaf', detail: 'Connect a pharmacy Curaleaf API account', group: 'Actions', icon: <LockKeyhole size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('curaleaf'); } },
-    { label: 'Invite admin', detail: 'Add another HHH administrator account', group: 'Actions', icon: <UserPlus size={16} />, run: () => { setSelectedOrganisationId(null); setView('platform'); setPlatformTab('access'); } },
-    { label: 'Onboard pharmacy', detail: 'Create a new pharmacy workspace', group: 'Actions', icon: <Plus size={16} />, run: () => { setSelectedOrganisationId(null); setView('overview'); setShowOnboarding(true); } },
+    { label: 'Pharmacies', detail: 'Manage pharmacy organisations', group: 'Navigate', icon: <LayoutDashboard size={16} />, run: () => { setView('overview'); } },
+    { label: 'Patient onboarding', detail: 'Record patient calls and decisions', group: 'Navigate', icon: <UserCheck size={16} />, run: () => { setView('referrals'); } },
+    { label: 'Patient register', detail: 'Cross-pharmacy patient ownership', group: 'Navigate', icon: <Users size={16} />, run: () => { setView('patients'); } },
+    { label: 'Referral finance', detail: '£50 first dispenses and £40 annual fees', group: 'Navigate', icon: <PoundSterling size={16} />, run: () => { setView('finance'); } },
+    { label: 'Invite admin', detail: 'Add another HHH administrator account', group: 'Actions', icon: <UserPlus size={16} />, run: () => { setAdminDialogFocus('invite'); setShowAdminDialog(true); } },
+    { label: 'View admins', detail: 'HHH administrator accounts', group: 'Navigate', icon: <Users size={16} />, run: () => { setAdminDialogFocus('list'); setShowAdminDialog(true); } },
+    { label: 'Onboard pharmacy', detail: 'Create a new pharmacy workspace', group: 'Actions', icon: <Plus size={16} />, run: () => { setView('overview'); setShowOnboarding(true); } },
     ...state.organisations.map((organisation): CommandDefinition => ({
       label: organisation.tradingName,
       detail: `${organisation.name} · GPhC ${organisation.gphcNumber}`,
@@ -1349,7 +1524,7 @@ export default function AdminPortal() {
       group: 'Pharmacies',
       searchOnly: true,
       icon: <Building2 size={16} />,
-      run: () => { setQuery(''); setSelectedOrganisationId(organisation.id); },
+      run: () => openPharmacyOnOverview(organisation.id),
     })),
     ...allPatients.map((patient): CommandDefinition => {
       const organisation = state.organisations.find(item => item.id === patient.organisationId);
@@ -1360,10 +1535,10 @@ export default function AdminPortal() {
         group: 'Patients',
         searchOnly: true,
         icon: <Users size={16} />,
-        run: () => { setSelectedOrganisationId(null); setView('patients'); setQuery(patient.email); },
+        run: () => { setView('patients'); setQuery(patient.email); },
       };
     }),
-  ], [allPatients, state.organisations]);
+  ], [allPatients, openPharmacyOnOverview, state.organisations]);
 
   const tenantReadiness = (organisationId: string) => {
     const status = setupByOrganisation[organisationId];
@@ -1375,154 +1550,31 @@ export default function AdminPortal() {
   const overviewPharmacies = state.organisations.filter(org => {
     const matchesQuery = `${org.name} ${org.tradingName} ${org.gphcNumber}`.toLowerCase().includes(query.toLowerCase());
     if (!matchesQuery) return false;
-    if (overviewFilter === 'live') return org.status === 'live' || org.status === 'intake_live';
+    if (overviewFilter === 'live') return org.status === 'live';
     if (overviewFilter === 'setup') return tenantReadiness(org.id).ready < tenantReadiness(org.id).total;
     return true;
   });
 
   useEffect(() => {
     if (view !== 'overview') return;
-    if (overviewPharmacyId && overviewPharmacies.some(organisation => organisation.id === overviewPharmacyId)) return;
+    if (overviewPharmacyId) {
+      if (!state.organisations.length) return;
+      if (state.organisations.some(organisation => organisation.id === overviewPharmacyId)) return;
+    }
     setOverviewPharmacyId(overviewPharmacies[0]?.id ?? null);
-  }, [overviewPharmacies, overviewPharmacyId, view]);
+    setOverviewManagePanel('summary');
+    setOverviewManageOpen(false);
+  }, [overviewPharmacies, overviewPharmacyId, state.organisations, view]);
 
   const statusLabel = (status: PharmacyTenant['status']) => status.replace('_', ' ');
   const statusPill = (status: PharmacyTenant['status']) => status === 'live' ? 'pill-green' : status === 'intake_live' ? 'pill-info' : status === 'paused' ? 'pill-red' : 'pill-amber';
   const pharmacyTone = (status: PharmacyTenant['status']) => status === 'live' ? 'paid' : status === 'intake_live' ? 'info' : status === 'paused' ? 'danger' : 'warning';
-  useEffect(() => {
-    if (!showCuraleafDrawer || !curaleafOrganisationId) return;
-    let cancelled = false;
-    void getCuraleafConnectionStatus(curaleafOrganisationId)
-      .then(status => {
-        if (!cancelled) setCuraleafResult(status);
-      })
-      .catch(() => {
-        if (!cancelled) setCuraleafResult(null);
-      });
-    return () => { cancelled = true; };
-  }, [curaleafOrganisationId, showCuraleafDrawer]);
-
-  if (selectedOrganisation) {
-    const submissions = submissionsByOrganisation.get(selectedOrganisation.id) ?? [];
-    const patients = crmByOrganisation.get(selectedOrganisation.id) ?? [];
-    const setupStatus = setupByOrganisation[selectedOrganisation.id];
-    const readiness = tenantReadiness(selectedOrganisation.id);
-    const formUrl = referralLink;
-    const tenantTheme = deriveTenantTheme(selectedOrganisation.brand.primary);
-
-    return (
-      <div className="app-shell admin-shell unified-admin-shell admin-view-detail">
-        <a className="skip-link" href="#admin-main-content">Skip to main content</a>
-        <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setSelectedOrganisationId(null); setView(next); }} />
-        <div className="app-main">
-          <WorkspacePageHeader section="Administration" context={selectedOrganisation.tradingName} title={selectedOrganisation.tradingName} commandLabel="Find anything" onSectionClick={() => { setSelectedOrganisationId(null); setView('overview'); }} backAction={{ label: 'Return to previous admin page', onClick: () => setSelectedOrganisationId(null) }} contextControl={!setupStatus?.completed ? <div className="header-context"><span>Setup</span><span className={`tenant-status tenant-status--${selectedOrganisation.status}`}>{readiness.percent}%</span></div> : undefined} />
-          <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
-          <section className="admin-client-heading">
-            <div className="admin-org-brand"><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><div><p className="section-label">Pharmacy account</p><h1>{selectedOrganisation.name}</h1><span>{selectedOrganisation.tradingName} · GPhC {selectedOrganisation.gphcNumber}</span></div></div>
-            <div className="admin-client-status"><span className={`pill ${statusPill(selectedOrganisation.status)}`}>{statusLabel(selectedOrganisation.status)}</span><button className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button></div>
-          </section>
-
-          <SummaryTiles className="summary-tiles--compact admin-detail-summary" label="Pharmacy account summary" items={[
-            { label: 'Patients', value: new Set([...patients.map(p => p.email), ...submissions.map(s => s.email)]).size, detail: 'attributed records' },
-            { label: 'Access', value: selectedOrganisation.staffCount, detail: 'staff accounts' },
-            { label: 'Intake route', value: ['live', 'intake_live'].includes(selectedOrganisation.status) ? 'Active' : 'Off', detail: 'HHH-managed enquiries' },
-          ]} />
-
-          <div className="filter-grid admin-detail-tabs admin-segment-tabs" role="tablist" aria-label="Pharmacy detail sections">
-            <button type="button" role="tab" aria-selected={pharmacyDetailTab === 'access'} className={`filter-card${pharmacyDetailTab === 'access' ? ' active' : ''}`} onClick={() => setPharmacyDetailTab('access')}>
-              <div className="filter-card__head"><span>Access</span></div>
-              <span className="filter-card__value filter-card__value--text">Staff accounts</span>
-            </button>
-            <button type="button" role="tab" aria-selected={pharmacyDetailTab === 'config'} className={`filter-card${pharmacyDetailTab === 'config' ? ' active' : ''}`} onClick={() => setPharmacyDetailTab('config')}>
-              <div className="filter-card__head"><span>Config</span></div>
-              <span className="filter-card__value filter-card__value--text">Identity and assets</span>
-            </button>
-            <button type="button" role="tab" aria-selected={pharmacyDetailTab === 'patients'} className={`filter-card${pharmacyDetailTab === 'patients' ? ' active' : ''}`} onClick={() => setPharmacyDetailTab('patients')}>
-              <div className="filter-card__head"><span>Patients</span></div>
-              <span className="filter-card__value filter-card__value--text">Attribution and setup</span>
-            </button>
-          </div>
-
-          {pharmacyDetailTab === 'access' && (
-            <PharmacyStaffManager key={selectedOrganisation.id} organisation={selectedOrganisation} onCountChange={updateSelectedStaffCount} />
-          )}
-
-          {pharmacyDetailTab === 'config' && (
-            <>
-              <div className="admin-detail-grid admin-config-grid">
-                <section className="card admin-detail-card">
-                  <div className="admin-detail-card-title"><Building2 size={18} /><h2>Registered details</h2></div>
-                  <div className="admin-detail-list">
-                    <div><span>Pharmacy name</span><strong>{selectedOrganisation.name}</strong></div>
-                    <div><span>Curaleaf ID (PHAR code)</span><strong>{selectedOrganisation.curaleafPharmacyCode ?? (setupStatus?.tasks.find(task => task.id === 'curaleaf_account')?.completed ? 'Connected securely' : 'Not connected')}</strong></div>
-                    <div><span>Company name</span><strong>{selectedOrganisation.tradingName}</strong></div>
-                    <div><span>Company registration number</span><strong>{selectedOrganisation.companyNumber || 'Not supplied'}</strong></div>
-                    <div><span>GPhC number</span><strong>{selectedOrganisation.gphcNumber}</strong></div>
-                    <div><span>Main contact name</span><strong>{selectedOrganisation.mainContactName || selectedOrganisation.superintendent}</strong></div>
-                    <div><span>Main contact number</span><strong>{selectedOrganisation.mainContactPhone || 'Not supplied'}</strong></div>
-                    <div><span>Main contact email</span><strong>{selectedOrganisation.mainContactEmail || 'Not supplied'}</strong></div>
-                    <div><span>Registered office address</span><strong><MapPin size={13} /> {selectedOrganisation.address}</strong></div>
-                    <div><span>Approved domains</span><strong><Globe2 size={13} /> {selectedOrganisation.websiteDomains.join(', ') || 'Not supplied'}</strong></div>
-                    <div><span>Eligibility handling</span><strong>Managed by HHH admin</strong></div>
-                  </div>
-                </section>
-
-                <section className="card admin-detail-card tenant-brand-editor">
-                  <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Brand Customisation</h2></div>
-                  <label>Pharmacy name<input className="input" value={selectedOrganisation.name} readOnly /></label>
-                  <div className="brand-editor-row">
-                    <label>Primary colour<span><input type="color" value={selectedOrganisation.brand.primary} disabled /><code>{selectedOrganisation.brand.primary}</code></span></label>
-                    <label>Automatic secondary<span className="derived-colour"><i style={{ background: tenantTheme.secondary }} /><code>{tenantTheme.secondary}</code><small>Derived from primary</small></span></label>
-                  </div>
-                  <div className="generated-palette" aria-label="Automatically generated pharmacy palette"><span style={{ background: tenantTheme.primary }} title="Primary" /><span style={{ background: tenantTheme.secondary }} title="Secondary" /><span style={{ background: tenantTheme.primaryMuted }} title="Muted brand" /><span style={{ background: tenantTheme.primarySoft }} title="Soft surface" /><span style={{ background: tenantTheme.sidebar }} title="Navigation" /></div>
-                  <p className="theme-help">This palette is applied in the pharmacy staff portal only. HHH admin keeps the Holistic Health Hub forest, cream and rust colours while you scroll this account.</p>
-                  <div className="tenant-brand-preview" style={{ borderTopColor: tenantTheme.primary, background: tenantTheme.surfaceTint }}><div className="tenant-mark" style={brandSwatchStyle(selectedOrganisation.brand.primary)}>{selectedOrganisation.logoText}</div><span><strong>{selectedOrganisation.brand.portalName}</strong><small>Patient and pharmacy workspace preview</small></span><button style={{ background: tenantTheme.primary, color: tenantTheme.onPrimary }}>Primary action</button><button className="preview-secondary" style={{ background: tenantTheme.secondary, color: tenantTheme.onSecondary }}>Secondary</button></div>
-                </section>
-              </div>
-
-              <div className="admin-detail-grid admin-config-grid">
-                <section className="card admin-detail-card admin-detail-assets">
-                  <div className="admin-detail-card-title"><Link2 size={18} /><h2>Eligibility form and content assets</h2></div>
-                  <p>Every submission through this hosted URL is permanently attributed to this pharmacy token.</p>
-                  {referralLinkError ? <div className="banner banner-red" role="alert"><AlertCircle size={15} /><span>{referralLinkError}</span><button className="btn btn-sm" type="button" onClick={() => setReferralLinkRefresh(value => value + 1)}><RefreshCw size={13} /> Retry</button></div> : null}
-                  <div className="resource-url" aria-live="polite">{referralLinkLoading ? 'Loading the protected pharmacy link…' : formUrl || 'Link unavailable'}</div>
-                  <div className="flex gap-sm flex-wrap"><button className="btn btn-primary btn-sm" disabled={!formUrl} onClick={async () => { if (!formUrl) return; await navigator.clipboard.writeText(formUrl); dispatch({ type: 'ADD_TOAST', message: 'Eligibility link copied.', toastType: 'success' }); }}><Copy size={13} /> Copy link</button>{formUrl ? <a className="btn btn-sm" href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Preview form</a> : <button className="btn btn-sm" type="button" disabled><ExternalLink size={13} /> Preview form</button>}<button className="btn btn-sm" disabled={!formUrl} onClick={() => void downloadContentPack(selectedOrganisation, formUrl)}><FileArchive size={13} /> Content pack</button></div>
-                </section>
-              </div>
-            </>
-          )}
-
-          {pharmacyDetailTab === 'patients' && (
-            <>
-              {!setupStatus?.completed && <section className="card admin-patient-table admin-client-compliance">
-                <div className="admin-directory-head"><div><p className="section-label">Go-live checklist</p><h2>Pharmacy setup</h2><p>The pharmacy completes its operational steps in Settings; HHH completes Curaleaf activation.</p></div></div>
-                {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
-                <div className="compliance-table table-wrap"><table><thead><tr><th>Setup step</th><th>Owner</th><th>Evidence</th><th>Status</th></tr></thead><tbody>{SETUP_TASKS.map(definition => { const task = setupStatus?.tasks.find(item => item.id === definition.id); return <tr key={definition.id}><td><strong>{definition.title}</strong><small>{definition.description}</small></td><td><span className={`setup-owner-tag${definition.owner === 'hhh_admin' ? ' setup-owner-tag--admin' : ''}`}>{definition.owner === 'hhh_admin' ? 'HHH admin' : 'Pharmacy'}</span></td><td>{task?.evidence || 'Not supplied yet'}</td><td><span className={`pill ${task?.completed ? 'pill-green' : 'pill-amber'}`}>{task?.completed ? 'Complete' : 'Waiting'}</span></td></tr>; })}</tbody></table></div>
-              </section>}
-
-              <section className="card admin-patient-table admin-attributed-patients">
-                <div className="admin-directory-head"><div><h2>Patients attributed to this pharmacy</h2><p>Attribution is derived from the pharmacy token and retained on the patient record.</p></div></div>
-                {submissions.length === 0 ? <div className="empty-state">No attributed eligibility submissions yet.</div> : <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Submitted</th><th>Conditions</th><th>Source</th><th>Status</th></tr></thead><tbody>{submissions.map(sub => <tr key={sub.id}><td><CompactPatientCell name={sub.name} email={sub.email} dob={sub.dob} /></td><td>{new Date(sub.submittedAt).toLocaleDateString('en-GB')}</td><td><ConditionList conditions={sub.conditions} primaryCondition={sub.primaryCondition} /></td><td>{sub.source}</td><td><span className={`pill onboarding-status-pill ${onboardingStatusPillClass(sub.status)}`}>{onboardingStatusLabel(sub.status)}</span></td></tr>)}</tbody></table></div>}
-              </section>
-            </>
-          )}
-
-          {showPharmacyEditor && <EditPharmacy key={selectedOrganisation.id} organisation={selectedOrganisation} onClose={() => setShowPharmacyEditor(false)} onSaved={updates => {
-            dispatch({ type: 'UPDATE_ORGANISATION', organisationId: selectedOrganisation.id, updates });
-            dispatch({ type: 'ADD_TOAST', message: `${updates.tradingName ?? selectedOrganisation.tradingName} details saved to Firebase.`, toastType: 'success' });
-          }} />}
-          </div>
-        </div>
-        <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a pharmacy, patient or platform action…" />
-      </div>
-    );
-  }
 
   const renderOverview = () => {
     const portfolioAccrued = referralFeeEvents.reduce((total, event) => total + event.amount, 0);
     const firstDispenseCount = referralFeeEvents.filter(event => event.kind === 'new-referral').length;
     const financeReady = isLocalPortalPreview || Boolean(adminFinanceReport) || !adminFinanceLoading;
-    const selectedPharmacy = state.organisations.find(organisation => organisation.id === overviewPharmacyId) ?? null;
+    const selectedPharmacy = overviewPharmacy;
     const selectedFees = selectedPharmacy ? feesByOrganisation.get(selectedPharmacy.id) : null;
     const selectedPatients = selectedPharmacy ? new Set([
       ...(crmByOrganisation.get(selectedPharmacy.id) ?? []).map(patient => patient.email),
@@ -1530,20 +1582,28 @@ export default function AdminPortal() {
     ]).size : 0;
     const selectedReadiness = selectedPharmacy ? tenantReadiness(selectedPharmacy.id) : null;
     const selectedGoLive = selectedPharmacy ? goLiveByOrganisation[selectedPharmacy.id] : null;
-    const liveFilterCount = state.organisations.filter(organisation => organisation.status === 'live' || organisation.status === 'intake_live').length;
+    const setupStatus = selectedPharmacy ? setupByOrganisation[selectedPharmacy.id] : undefined;
+    const liveFilterCount = state.organisations.filter(organisation => organisation.status === 'live').length;
     const setupFilterCount = state.organisations.filter(organisation => tenantReadiness(organisation.id).ready < tenantReadiness(organisation.id).total).length;
     const workspaceLabel = selectedGoLive?.allocationHolding
       ? 'Holistic Health Hub Allocation'
       : selectedGoLive?.testAccount
         ? 'Test workspace'
-        : 'Standard workspace';
+        : setupStatus?.operational?.workspace.label === 'Live'
+          ? 'Standard workspace · live'
+          : setupStatus?.operational?.workspace.label === 'Paused'
+            ? 'Standard workspace · paused'
+            : 'Standard workspace · training';
+    const managePanelLabel = OVERVIEW_MANAGE_PANELS.find(panel => panel.id === overviewManagePanel)?.label ?? 'Summary';
+    const tenantTheme = selectedPharmacy ? deriveTenantTheme(selectedPharmacy.brand.primary) : null;
+    const formUrl = referralLink;
 
     return (
       <div className="page-body order-crm patient-crm admin-overview-crm">
         <section className="order-crm-summary" aria-label="Pharmacy portfolio summary">
           <article className="order-crm-metric">
             <span className="order-crm-metric__icon"><Building2 size={16} /></span>
-            <span><small>Pharmacies</small><strong>{state.organisations.length}</strong><em>{liveCount} live · {intakeLiveCount} intake-only</em></span>
+            <span><small>Pharmacies</small><strong>{state.organisations.length}</strong><em>{liveCount} live · {trainingCount} training</em></span>
           </article>
           <article className="order-crm-metric">
             <span className="order-crm-metric__icon"><Users size={16} /></span>
@@ -1557,9 +1617,9 @@ export default function AdminPortal() {
               <em>{adminFinanceError ? 'Ledger unavailable' : `${firstDispenseCount} first dispenses · £50 + £40 annual`}</em>
             </span>
           </article>
-          <article className={`order-crm-metric${remainingSetupSteps ? ' order-crm-metric--warning' : ' order-crm-metric--success'}`}>
-            <span className="order-crm-metric__icon">{remainingSetupSteps ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}</span>
-            <span><small>Readiness</small><strong>{remainingSetupSteps}</strong><em>{remainingSetupSteps ? 'Setup steps still outstanding' : 'All recorded setup steps complete'}</em></span>
+          <article className="order-crm-metric">
+            <span className="order-crm-metric__icon"><ClipboardCheck size={16} /></span>
+            <span><small>Sandbox notes</small><strong>{remainingSetupSteps}</strong><em>{remainingSetupSteps ? 'HHH call notes still to record' : 'Call notes recorded'}</em></span>
           </article>
         </section>
 
@@ -1578,7 +1638,7 @@ export default function AdminPortal() {
             {([
               { key: 'all' as const, label: 'All', count: state.organisations.length },
               { key: 'live' as const, label: 'Live', count: liveFilterCount },
-              { key: 'setup' as const, label: 'Needs setup', count: setupFilterCount },
+              { key: 'setup' as const, label: 'Sandbox pending', count: setupFilterCount },
             ]).map(filter => (
               <button
                 type="button"
@@ -1605,13 +1665,17 @@ export default function AdminPortal() {
         ) : null}
 
         {remainingSetupSteps > 0 ? (
-          <section className="order-crm-alert order-crm-alert--warning admin-overview-crm__alert" role="status">
-            <AlertTriangle size={16} aria-hidden="true" />
+          <section className="order-crm-alert admin-overview-crm__alert" role="status">
+            <ClipboardCheck size={16} aria-hidden="true" />
             <span>
-              <strong>Some pharmacy setup is still incomplete</strong>
-              <small>{remainingSetupSteps} step{remainingSetupSteps === 1 ? '' : 's'} remain. Setup does not block live intake on its own.</small>
+              <strong>Sandbox call notes are still open</strong>
+              <small>{remainingSetupSteps} note{remainingSetupSteps === 1 ? '' : 's'} for HHH to record. This does not turn intake off.</small>
             </span>
-            <button type="button" className="btn btn-sm" onClick={() => { setView('platform'); setPlatformTab('setup'); }}>Open platform</button>
+            <button type="button" className="btn btn-sm" onClick={() => {
+              const incomplete = state.organisations.find(organisation => tenantReadiness(organisation.id).ready < tenantReadiness(organisation.id).total);
+              const target = incomplete ?? state.organisations[0];
+              if (target) openPharmacyOnOverview(target.id, 'setup');
+            }}>Open go live</button>
           </section>
         ) : null}
 
@@ -1638,7 +1702,14 @@ export default function AdminPortal() {
                       className={`order-crm-row order-crm-row--${tone}${overviewPharmacyId === organisation.id ? ' selected' : ''}`}
                       aria-pressed={overviewPharmacyId === organisation.id}
                       aria-label={`${organisation.tradingName}, ${statusLabel(organisation.status)}`}
-                      onClick={() => setOverviewPharmacyId(organisation.id)}
+                      onClick={() => {
+                        if (organisation.id !== overviewPharmacyId) {
+                          setOverviewManagePanel('summary');
+                          setShowPharmacyEditor(false);
+                        }
+                        setOverviewPharmacyId(organisation.id);
+                        setOverviewManageOpen(false);
+                      }}
                     >
                       <span className={`order-crm-row__stage order-tone--${tone}`} aria-hidden="true">{organisation.logoText}</span>
                       <span className="order-crm-row__identity">
@@ -1661,7 +1732,7 @@ export default function AdminPortal() {
               <div className="order-crm-empty order-crm-empty--detail">
                 <Building2 size={38} />
                 <strong>Select a pharmacy</strong>
-                <span>Account status, setup and referral fees appear here. Open the full account to edit staff, branding or Curaleaf.</span>
+                <span>Account status, setup and referral fees appear here. Use Manage on a selected pharmacy to review identity, staff, setup or Curaleaf.</span>
               </div>
             ) : (
               <article className={`order-crm-record order-crm-record--${pharmacyTone(selectedPharmacy.status)}`}>
@@ -1684,35 +1755,168 @@ export default function AdminPortal() {
                       <span className="order-crm-record__opened">{selectedFees ? `${selectedFees.patients} earning patient${selectedFees.patients === 1 ? '' : 's'}` : 'No fee events yet'}</span>
                     </div>
                     <div className="order-crm-record__actions" role="group" aria-label="Pharmacy actions">
-                      <button type="button" className="btn btn-sm" onClick={() => { setFinanceOrganisationId(selectedPharmacy.id); setSelectedOrganisationId(null); setView('finance'); }}>Open ledger</button>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setSelectedOrganisationId(selectedPharmacy.id)}>Manage pharmacy</button>
+                      <button type="button" className="btn btn-sm" onClick={() => { setFinanceOrganisationId(selectedPharmacy.id); setView('finance'); }}>Open ledger</button>
+                      <div
+                        className={`order-filter-menu admin-overview-manage${overviewManageOpen ? ' is-open' : ''}`}
+                        ref={overviewManageRef}
+                      >
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          aria-haspopup="menu"
+                          aria-expanded={overviewManageOpen}
+                          aria-controls="overview-manage-menu"
+                          aria-label={`Manage ${selectedPharmacy.tradingName}, ${managePanelLabel} panel`}
+                          onClick={() => setOverviewManageOpen(open => !open)}
+                        >
+                          <span>Manage · {managePanelLabel}</span>
+                          <ChevronDown size={14} aria-hidden="true" />
+                        </button>
+                        {overviewManageOpen ? (
+                          <div id="overview-manage-menu" role="menu" aria-label="Pharmacy manage sections">
+                            <div role="group" className="order-filter-menu__group">
+                              {OVERVIEW_MANAGE_PANELS.map(panel => (
+                                <button
+                                  type="button"
+                                  role="menuitemradio"
+                                  key={panel.id}
+                                  aria-checked={overviewManagePanel === panel.id}
+                                  className={overviewManagePanel === panel.id ? 'active' : ''}
+                                  onClick={() => {
+                                    setOverviewManagePanel(panel.id);
+                                    setOverviewManageOpen(false);
+                                  }}
+                                >
+                                  {panel.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </header>
 
                 <div className="patient-crm-detail__body">
-                  <div className="admin-overview-crm__facts">
-                    <article>
-                      <small>Attributed patients</small>
-                      <strong>{selectedPatients}</strong>
-                    </article>
-                    <article>
-                      <small>Setup</small>
-                      <strong>{selectedReadiness.percent}%</strong>
-                      <em>{selectedReadiness.ready}/{selectedReadiness.total} UAT checks</em>
-                    </article>
-                    <article>
-                      <small>First dispenses</small>
-                      <strong>{financeReady ? referralFeeFormatter.format(selectedFees?.firstAmount ?? 0) : '—'}</strong>
-                      <em>{selectedFees?.firstCount ?? 0} × £50</em>
-                    </article>
-                    <article>
-                      <small>Annual fees</small>
-                      <strong>{financeReady ? referralFeeFormatter.format(selectedFees?.annualAmount ?? 0) : '—'}</strong>
-                      <em>{selectedFees?.annualCount ?? 0} × £40</em>
-                    </article>
-                  </div>
-                  <p className="admin-overview-crm__note">Referral fees accrue on the first collected dispense (£50) and each active anniversary (£40). This is an operational ledger, not an invoice register.</p>
+                  {overviewManagePanel === 'summary' ? (
+                    <>
+                      <div className="admin-overview-crm__facts">
+                        <article>
+                          <small>Attributed patients</small>
+                          <strong>{selectedPatients}</strong>
+                        </article>
+                        <article>
+                          <small>Setup</small>
+                          <strong>{selectedReadiness.percent}%</strong>
+                          <em>{selectedReadiness.ready}/{selectedReadiness.total} UAT checks</em>
+                        </article>
+                        <article>
+                          <small>First dispenses</small>
+                          <strong>{financeReady ? referralFeeFormatter.format(selectedFees?.firstAmount ?? 0) : '—'}</strong>
+                          <em>{selectedFees?.firstCount ?? 0} × £50</em>
+                        </article>
+                        <article>
+                          <small>Annual fees</small>
+                          <strong>{financeReady ? referralFeeFormatter.format(selectedFees?.annualAmount ?? 0) : '—'}</strong>
+                          <em>{selectedFees?.annualCount ?? 0} × £40</em>
+                        </article>
+                      </div>
+                      <p className="admin-overview-crm__note">Referral fees accrue on the first collected dispense (£50) and each active anniversary (£40). This is an operational ledger, not an invoice register. Open Patients to view the attributed register for this pharmacy.</p>
+                    </>
+                  ) : null}
+
+                  {overviewManagePanel === 'identity' && tenantTheme ? (
+                    <div className="admin-overview-manage-panel">
+                      <div className="admin-detail-grid admin-config-grid">
+                        <section className="card admin-detail-card">
+                          <div className="admin-detail-card-title">
+                            <Building2 size={18} />
+                            <h2>Registered details</h2>
+                            <button type="button" className="btn btn-sm" onClick={() => setShowPharmacyEditor(true)}><Pencil size={13} /> Edit details</button>
+                          </div>
+                          <div className="admin-detail-list">
+                            <div><span>Pharmacy name</span><strong>{selectedPharmacy.name}</strong></div>
+                            <div><span>Curaleaf ID (PHAR code)</span><strong>{selectedPharmacy.curaleafPharmacyCode ?? (setupStatus?.tasks.find(task => task.id === 'curaleaf_account')?.completed ? 'Connected securely' : 'Not connected')}</strong></div>
+                            <div><span>Company name</span><strong>{selectedPharmacy.tradingName}</strong></div>
+                            <div><span>Company registration number</span><strong>{selectedPharmacy.companyNumber || 'Not supplied'}</strong></div>
+                            <div><span>GPhC number</span><strong>{selectedPharmacy.gphcNumber}</strong></div>
+                            <div><span>Main contact name</span><strong>{selectedPharmacy.mainContactName || selectedPharmacy.superintendent}</strong></div>
+                            <div><span>Main contact number</span><strong>{selectedPharmacy.mainContactPhone || 'Not supplied'}</strong></div>
+                            <div><span>Main contact email</span><strong>{selectedPharmacy.mainContactEmail || 'Not supplied'}</strong></div>
+                            <div><span>Registered office address</span><strong><MapPin size={13} /> {selectedPharmacy.address}</strong></div>
+                            <div><span>Approved domains</span><strong><Globe2 size={13} /> {selectedPharmacy.websiteDomains.join(', ') || 'Not supplied'}</strong></div>
+                            <div><span>Eligibility handling</span><strong>Managed by HHH admin</strong></div>
+                          </div>
+                        </section>
+
+                        <section className="card admin-detail-card tenant-brand-editor">
+                          <div className="admin-detail-card-title"><Settings2 size={18} /><h2>Brand preview</h2></div>
+                          <label>Pharmacy name<input className="input" value={selectedPharmacy.name} readOnly /></label>
+                          <div className="brand-editor-row">
+                            <label>Primary colour<span><input type="color" value={selectedPharmacy.brand.primary} disabled /><code>{selectedPharmacy.brand.primary}</code></span></label>
+                            <label>Automatic secondary<span className="derived-colour"><i style={{ background: tenantTheme.secondary }} /><code>{tenantTheme.secondary}</code><small>Derived from primary</small></span></label>
+                          </div>
+                          <div className="generated-palette" aria-label="Automatically generated pharmacy palette"><span style={{ background: tenantTheme.primary }} title="Primary" /><span style={{ background: tenantTheme.secondary }} title="Secondary" /><span style={{ background: tenantTheme.primaryMuted }} title="Muted brand" /><span style={{ background: tenantTheme.primarySoft }} title="Soft surface" /><span style={{ background: tenantTheme.sidebar }} title="Navigation" /></div>
+                          <p className="theme-help">This palette is applied in the pharmacy staff portal only. HHH admin keeps the Holistic Health Hub forest, cream and rust colours.</p>
+                          <div className="tenant-brand-preview" aria-hidden="true" style={{ borderTopColor: tenantTheme.primary, background: tenantTheme.surfaceTint }}>
+                            <div className="tenant-mark" style={brandSwatchStyle(selectedPharmacy.brand.primary)}>{selectedPharmacy.logoText}</div>
+                            <span><strong>{selectedPharmacy.brand.portalName}</strong><small>Patient and pharmacy workspace preview</small></span>
+                            <span className="brand-preview-button" style={{ background: tenantTheme.primary, color: tenantTheme.onPrimary }}>Primary action</span>
+                            <span className="preview-secondary" style={{ background: tenantTheme.secondary, color: tenantTheme.onSecondary }}>Secondary</span>
+                          </div>
+                        </section>
+                      </div>
+
+                      <section className="card admin-detail-card admin-detail-assets">
+                        <div className="admin-detail-card-title"><Link2 size={18} /><h2>Eligibility form and content assets</h2></div>
+                        <p>Every submission through this hosted URL is permanently attributed to this pharmacy token.</p>
+                        {referralLinkError ? <div className="banner banner-red" role="alert"><AlertCircle size={15} /><span>{referralLinkError}</span><button className="btn btn-sm" type="button" onClick={() => setReferralLinkRefresh(value => value + 1)}><RefreshCw size={13} /> Retry</button></div> : null}
+                        <div className="resource-url" aria-live="polite">{referralLinkLoading ? 'Loading the protected pharmacy link…' : formUrl || 'Link unavailable'}</div>
+                        <div className="flex gap-sm flex-wrap">
+                          <button className="btn btn-primary btn-sm" disabled={!formUrl} onClick={async () => { if (!formUrl) return; await navigator.clipboard.writeText(formUrl); dispatch({ type: 'ADD_TOAST', message: 'Eligibility link copied.', toastType: 'success' }); }}><Copy size={13} /> Copy link</button>
+                          {formUrl ? <a className="btn btn-sm" href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Preview form</a> : <button className="btn btn-sm" type="button" disabled><ExternalLink size={13} /> Preview form</button>}
+                          <button className="btn btn-sm" disabled={!formUrl} onClick={() => void downloadContentPack(selectedPharmacy, formUrl)}><FileArchive size={13} /> Content pack</button>
+                        </div>
+                      </section>
+                    </div>
+                  ) : null}
+
+                  {overviewManagePanel === 'staff' ? (
+                    <div className="admin-overview-manage-panel">
+                      <PharmacyStaffManager key={selectedPharmacy.id} organisation={selectedPharmacy} onCountChange={updateSelectedStaffCount} />
+                    </div>
+                  ) : null}
+
+                  {overviewManagePanel === 'setup' ? (
+                    <div className="admin-overview-manage-panel">
+                      <AdminGoLivePanel
+                        pharmacyName={selectedPharmacy.tradingName}
+                        liveWorkspace={selectedPharmacy.status === 'live'}
+                        setupStatus={setupStatus}
+                        setupError={setupError}
+                        goLiveError={goLiveError}
+                        goLiveBusy={goLiveBusy}
+                        recordingTask={recordingTask}
+                        onRecordTask={(taskId, completed) => void recordSandboxTask(selectedPharmacy, taskId, completed)}
+                        onFlipLive={() => void flipPharmacyLive(selectedPharmacy.id)}
+                      />
+                    </div>
+                  ) : null}
+
+                  {overviewManagePanel === 'curaleaf' ? (
+                    <div className="admin-overview-manage-panel">
+                      <section className="card admin-detail-card">
+                        <div className="admin-detail-card-title"><LockKeyhole size={18} /><h2>Curaleaf connection</h2></div>
+                        <p>Credentials are protected server-side and never returned to the portal. Rotate the API key or refresh the live connection for this pharmacy here.</p>
+                        <CuraleafConnectionPanel
+                          key={selectedPharmacy.id}
+                          organisationId={selectedPharmacy.id}
+                          customerIdHint={selectedPharmacy.curaleafPharmacyCode}
+                        />
+                      </section>
+                    </div>
+                  ) : null}
                 </div>
               </article>
             )}
@@ -1721,7 +1925,6 @@ export default function AdminPortal() {
       </div>
     );
   };
-
 
   const renderLegacyReferrals = () => {
     const pending = state.submissions.filter(submission => submission.status === 'New' || submission.status === 'Under HHH review');
@@ -1993,13 +2196,12 @@ export default function AdminPortal() {
                           setFinanceOrganisationId(selectedRegisterPatient.organisationId);
                           setFinancePatientKey(feeMatch?.patientKey ?? 'all');
                           setFinancePeriod('all');
-                          setSelectedOrganisationId(null);
                           setView('finance');
                         }}
                       >
                         Open ledger
                       </button>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setSelectedOrganisationId(selectedRegisterPatient.organisationId)}>Manage pharmacy</button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => openPharmacyOnOverview(selectedRegisterPatient.organisationId, 'identity')}>Manage pharmacy</button>
                     </div>
                   </div>
                 </header>
@@ -2307,13 +2509,12 @@ export default function AdminPortal() {
                           setPatientFrom('');
                           setPatientTo('');
                           setPendingRegisterKey(registerPatientKey(selectedFinancePatient));
-                          setSelectedOrganisationId(null);
                           setView('patients');
                         }}
                       >
                         Open register
                       </button>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setSelectedOrganisationId(selectedFinancePatient.organisationId)}>Manage pharmacy</button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => openPharmacyOnOverview(selectedFinancePatient.organisationId, 'identity')}>Manage pharmacy</button>
                     </div>
                   </div>
                 </header>
@@ -2375,119 +2576,17 @@ export default function AdminPortal() {
     );
   };
 
-  const openCuraleafDrawer = (organisationId: string) => {
-    setCuraleafOrganisationId(organisationId);
-    setCuraleafResult(null);
-    setCuraleafError(null);
-    setShowCuraleafDrawer(true);
-  };
-
-  const closeCuraleafDrawer = () => {
-    setShowCuraleafDrawer(false);
-    setCuraleafError(null);
-  };
-
-  const curaleafPharmacy = state.organisations.find(org => org.id === curaleafOrganisationId);
-
-  const renderPlatform = () => (
-    <>
-      <div className="filter-grid directory-view-toggle admin-platform-tabs admin-segment-tabs" role="tablist" aria-label="Platform sections">
-        <button type="button" role="tab" aria-selected={platformTab === 'setup'} className={`filter-card${platformTab === 'setup' ? ' active' : ''}`} onClick={() => setPlatformTab('setup')}>
-          <div className="filter-card__head"><span>Setup</span></div>
-          <span className="filter-card__value">{remainingSetupSteps}</span>
-        </button>
-        <button type="button" role="tab" aria-selected={platformTab === 'curaleaf'} className={`filter-card${platformTab === 'curaleaf' ? ' active' : ''}`} onClick={() => setPlatformTab('curaleaf')}>
-          <div className="filter-card__head"><span>Curaleaf</span></div>
-          <span className="filter-card__value filter-card__value--text">Connections</span>
-        </button>
-        <button type="button" role="tab" aria-selected={platformTab === 'access'} className={`filter-card${platformTab === 'access' ? ' active' : ''}`} onClick={() => setPlatformTab('access')}>
-          <div className="filter-card__head"><span>Access</span></div>
-          <span className="filter-card__value filter-card__value--text">Admins</span>
-        </button>
-      </div>
-
-      {platformTab === 'setup' && (
-        <>
-          <SummaryTiles className="admin-platform-summary" label="Readiness summary" items={[
-            { label: 'Pharmacies', value: state.organisations.length, detail: 'pharmacy accounts' },
-            { label: 'Fully ready', value: Object.values(setupByOrganisation).filter(status => status.completed).length, detail: 'all steps complete' },
-            { label: 'Completed', value: Object.values(setupByOrganisation).reduce((total, status) => total + status.completedCount, 0), detail: 'steps recorded' },
-            { label: 'Waiting', value: remainingSetupSteps, detail: 'actions remaining' },
-          ]} />
-          <section className="card admin-patient-table compliance-register">
-            <div className="admin-directory-head"><div><h2>Pharmacy setup progress</h2><p>Setup tasks are an operational checklist only. Live intake is controlled by each pharmacy's current status and is not blocked by off-platform evidence.</p></div></div>
-            {setupError && <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {setupError}</div>}
-            {state.organisations.length === 0 ? <div className="empty-state">No pharmacies have been onboarded yet.</div> : <div className="table-wrap"><table><thead><tr><th>Pharmacy</th><th>Operational checklist</th><th>Workspace</th><th>Status</th><th /></tr></thead><tbody>{state.organisations.map(organisation => { const readiness = tenantReadiness(organisation.id); return <tr key={organisation.id}><td><strong>{organisation.tradingName}</strong><small>GPhC {organisation.gphcNumber}</small></td><td><strong>{readiness.ready} of {readiness.total} complete</strong><small>For the pharmacy's own operational handover</small></td><td><span className="pill pill-info">{workspaceClassificationLabel(organisation.workspaceClassification)}</span></td><td><span className={`pill ${statusPill(organisation.status)}`}>{statusLabel(organisation.status)}</span></td><td><button className="btn btn-sm" onClick={() => setSelectedOrganisationId(organisation.id)}>Review</button></td></tr>; })}</tbody></table></div>}
-          </section>
-        </>
-      )}
-
-      {platformTab === 'curaleaf' && (
-        <>
-          <section className="integration-boundary card">
-            <ShieldCheck size={20} />
-            <div>
-              <strong>Curaleaf connection management</strong>
-              <p>Credentials remain server-side. Open a pharmacy connection to review its technical status without exposing a secret.</p>
-            </div>
-          </section>
-
-          <section className="card admin-patient-table admin-curaleaf-status" aria-label="Curaleaf connection status">
-            <div className="admin-directory-head">
-              <div>
-                <p className="section-label">Per pharmacy</p>
-                <h2>Curaleaf connection status</h2>
-              <p>Each pharmacy has its own securely stored connection and non-secret customer ID.</p>
-              </div>
-            </div>
-            {state.organisations.length === 0 ? (
-              <div className="empty-state">Onboard a pharmacy before connecting Curaleaf.</div>
-            ) : (
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Pharmacy</th><th>Connection</th><th /></tr></thead>
-                  <tbody>
-                    {state.organisations.map(organisation => {
-                      return (
-                        <tr key={organisation.id}>
-                          <td><strong>{organisation.tradingName}</strong><small>{organisation.name}</small></td>
-                          <td><span className="pill pill-neutral">Open to view</span></td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-sm"
-                              onClick={() => openCuraleafDrawer(organisation.id)}
-                            >
-                              View connection
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-
-      {platformTab === 'access' && <PlatformAdminManager />}
-    </>
-  );
-
   const pageMeta: Record<AdminView, { title: string }> = {
     overview: { title: 'Portfolio overview' },
     referrals: { title: 'HHH patient intake and referral' },
     patients: { title: 'Patients and pharmacy attribution' },
     finance: { title: 'HHH referral finance' },
-    platform: { title: 'Platform' },
   };
 
   return (
     <div className={`app-shell admin-shell unified-admin-shell admin-view-${view}`}>
       <a className="skip-link" href="#admin-main-content">Skip to main content</a>
-      <AdminHeader view={view} pending={pendingAdminDecisions} readiness={remainingSetupSteps} setView={next => { setView(next); setQuery(''); }} />
+      <AdminHeader view={view} pending={pendingAdminDecisions} setView={next => { setView(next); setQuery(''); }} onViewAdmins={() => { setAdminDialogFocus('list'); setShowAdminDialog(true); }} />
       <div className="app-main">
         <WorkspacePageHeader section="HHH operations" context={pageMeta[view].title} title={pageMeta[view].title} commandLabel="Find anything" onSectionClick={() => { setView('overview'); setQuery(''); }} backAction={view !== 'overview' ? { label: 'Return to pharmacies', onClick: () => { setView('overview'); setQuery(''); } } : undefined} contextControl={<div className="header-context"><span>Access</span><span className="tenant-status tenant-status--live">Admin</span></div>} />
         <div id="admin-main-content" className="page-container admin-content" tabIndex={-1}>
@@ -2495,10 +2594,21 @@ export default function AdminPortal() {
           {view === 'referrals' && renderReferrals()}
           {view === 'patients' && renderPatients()}
           {view === 'finance' && renderFinance()}
-          {view === 'platform' && renderPlatform()}
         </div>
       </div>
-      {showOnboarding && <OnboardPharmacy onClose={() => setShowOnboarding(false)} onCreated={id => { setShowOnboarding(false); setSelectedOrganisationId(id); }} />}
+      {showOnboarding && <OnboardPharmacy onClose={() => setShowOnboarding(false)} onCreated={id => { setShowOnboarding(false); openPharmacyOnOverview(id, 'identity'); }} />}
+      {showAdminDialog ? <PlatformAdminDialog onClose={() => setShowAdminDialog(false)} focusInvite={adminDialogFocus === 'invite'} /> : null}
+      {showPharmacyEditor && overviewPharmacy ? (
+        <EditPharmacy
+          key={overviewPharmacy.id}
+          organisation={overviewPharmacy}
+          onClose={() => setShowPharmacyEditor(false)}
+          onSaved={updates => {
+            dispatch({ type: 'UPDATE_ORGANISATION', organisationId: overviewPharmacy.id, updates });
+            dispatch({ type: 'ADD_TOAST', message: `${updates.tradingName ?? overviewPharmacy.tradingName} details saved to Firebase.`, toastType: 'success' });
+          }}
+        />
+      ) : null}
       {referralDialog && (
         <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation">
           <aside className="drawer admin-referral-drawer" role="dialog" aria-modal="true" aria-labelledby="referral-action-title">
@@ -2517,39 +2627,7 @@ export default function AdminPortal() {
           </aside>
         </div>
       )}
-      {showCuraleafDrawer && (
-        <div className="drawer-backdrop admin-onboarding-backdrop" role="presentation" onClick={closeCuraleafDrawer}>
-          <aside
-            className="drawer admin-referral-drawer secure-integration-form"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="curaleaf-drawer-title"
-            onClick={event => event.stopPropagation()}
-          >
-            <div className="drawer-header">
-              <div>
-                <p className="section-label">HHH administrator only</p>
-                <h2 id="curaleaf-drawer-title">Curaleaf connection</h2>
-              </div>
-              <button className="icon-btn" onClick={closeCuraleafDrawer} aria-label="Close"><X size={18} /></button>
-            </div>
-            <div className="drawer-body onboarding-form">
-              <div className="integration-boundary">
-                <LockKeyhole size={17} />
-                <div>
-                  <strong>{curaleafPharmacy?.tradingName ?? 'Pharmacy'}</strong>
-                  <p>Credentials are protected server-side and never returned to the portal.</p>
-                </div>
-              </div>
-              {curaleafError ? <div className="banner banner-red" role="alert"><AlertCircle size={16} /> {curaleafError}</div> : curaleafResult ? <div className="settings-meta-grid"><div><span>Connection</span><strong>{curaleafResult.connected ? 'Connected' : curaleafResult.status?.replaceAll('_', ' ') ?? 'Not configured'}</strong></div><div><span>Environment</span><strong>{curaleafResult.environment}</strong></div><div><span>Customer ID</span><strong>{curaleafResult.customerId ?? 'Not recorded'}</strong></div><div><span>Last checked</span><strong>{new Date(curaleafResult.checkedAt).toLocaleString('en-GB')}</strong></div></div> : <div className="empty-state">Loading the connection status…</div>}
-              <div className="drawer-actions">
-                <button type="button" className="btn btn-primary" onClick={closeCuraleafDrawer}>Close</button>
-              </div>
-            </div>
-          </aside>
-        </div>
-      )}
-      <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a pharmacy, patient or platform action…" />
+      <CommandPalette commands={adminCommands} contextLabel="HHH administration" placeholder="Find a pharmacy, patient or admin action…" />
     </div>
   );
 }

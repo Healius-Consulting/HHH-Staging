@@ -233,7 +233,7 @@ export default function PharmacyOverview() {
                       Start prescription <ArrowRight size={14} aria-hidden="true" />
                     </button>
                   ) : (
-                    <span className="overview-muted">Orders unlock after pharmacy activation</span>
+                    <span className="overview-muted">Orders unlock after HHH goes live</span>
                   )}
                 </li>
               ))}

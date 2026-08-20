@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   Building2,
   CheckCircle2,
-  ClipboardCheck,
   Copy,
   CreditCard,
   Download,
@@ -23,17 +22,12 @@ import { getCuraleafConnectionStatus, getReferralLink, isApiConfigured, updatePa
 import type { CuraleafConnectionStatus } from '../shared/contracts';
 import WorldpayConnectionPanel from '../components/WorldpayConnectionPanel';
 import { downloadContentPack, downloadDataUrl, eligibilityUrl, qrDataUrl } from '../utils/pharmacyResources';
-import { PharmacySetupWizard } from '../onboarding/PharmacySetupWizard';
-import type { usePharmacySetup } from '../onboarding/usePharmacySetup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 
-interface PharmacySettingsProps {
-  setup: ReturnType<typeof usePharmacySetup>;
-}
-
-export default function PharmacySettings({ setup }: PharmacySettingsProps) {
+export default function PharmacySettings() {
   const { state, dispatch } = useApp();
-  const [activeTab, setActiveTab] = useState<'settings' | 'assets' | 'activation'>('settings');
+  const organisation = useMemo(() => state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0], [state]);
+  const [activeTab, setActiveTab] = useState<'settings' | 'assets'>('settings');
   const [savingRoute, setSavingRoute] = useState(false);
   const [qr, setQr] = useState('');
   const [formUrl, setFormUrl] = useState('');
@@ -56,7 +50,6 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
     mainContactPhone: '',
     mainContactEmail: '',
   });
-  const organisation = useMemo(() => state.organisations.find(org => org.id === state.currentOrganisationId) ?? state.organisations[0], [state]);
 
   useEffect(() => {
     const address = organisationAddressFields(organisation);
@@ -188,35 +181,24 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
           <h2>{organisation.brand.portalName}</h2>
           <p>{organisation.name} · GPhC {organisation.gphcNumber}</p>
         </div>
-        <span className={`pill ${organisation.status === 'live' ? 'pill-green' : organisation.status === 'intake_live' ? 'pill-info' : 'pill-amber'}`}>{organisation.status.replace('_', ' ')}</span>
+        <span className={`pill ${state.workspaceMode === 'live' ? 'pill-green' : organisation.status === 'paused' ? 'pill-red' : 'pill-amber'}`}>
+          {state.workspaceMode === 'live' ? 'Live' : organisation.status === 'paused' ? 'Paused' : 'Training workspace'}
+        </span>
       </section>
 
       <div className="filter-grid settings-tabs" role="group" aria-label="Settings views">
         <button type="button" aria-pressed={activeTab === 'settings'} className={`filter-card ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
           <div className="filter-card__head"><span>Organisation</span><Building2 size={14} className={activeTab === 'settings' ? 'text-primary' : 'text-muted'} /></div>
-          <span className="filter-card__value filter-card__value--text">Payments & readiness</span>
+          <span className="filter-card__value filter-card__value--text">Profile & payments</span>
         </button>
         <button type="button" aria-pressed={activeTab === 'assets'} className={`filter-card ${activeTab === 'assets' ? 'active' : ''}`} onClick={() => setActiveTab('assets')}>
           <div className="filter-card__head"><span>Assets</span><QrCode size={14} className={activeTab === 'assets' ? 'text-primary' : 'text-muted'} /></div>
           <span className="filter-card__value filter-card__value--text">Intake link, QR & content pack</span>
         </button>
-        <button type="button" aria-pressed={activeTab === 'activation'} className={`filter-card ${activeTab === 'activation' ? 'active' : ''}`} onClick={() => setActiveTab('activation')}>
-          <div className="filter-card__head"><span>Activation</span><ClipboardCheck size={14} className={activeTab === 'activation' ? 'text-primary' : 'text-muted'} /></div>
-          <span className="filter-card__value filter-card__value--text">
-            {setup.loading ? 'Loading readiness…' : `${setup.status?.completedCount ?? 0} of ${setup.status?.requiredCount ?? 0} steps complete`}
-          </span>
-        </button>
       </div>
 
       {activeTab === 'settings' ? (
         <div className="settings-stack">
-          {!setup.loading && !setup.status?.completed ? (
-            <div className="banner banner-amber" role="status">
-              <ClipboardCheck size={16} />
-              <span><strong>Pharmacy activation is incomplete.</strong> Organisation settings remain available. Review the activation tab before requesting go-live.</span>
-              <button type="button" className="btn btn-sm" onClick={() => setActiveTab('activation')}>Review activation</button>
-            </div>
-          ) : null}
           <section className="card settings-panel settings-panel--profile">
             <div className="section-heading">
               <div>
@@ -277,7 +259,7 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
               </div>
             )}
 
-            <div className="settings-note"><ShieldCheck size={16} /><span>Each order permanently records the route selected when that order is created. Later changes apply only to future orders.</span></div>
+            <div className="settings-note"><ShieldCheck size={16} /><span>HHH explains Worldpay on the sandbox call. Connect the merchant here when you are ready. Each order permanently records the route selected when that order is created.</span></div>
             <WorldpayConnectionPanel
               organisationId={organisation.id}
               onConnected={connection => {
@@ -329,14 +311,15 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
                 <CheckCircle2 size={20} className="text-green" />
               </div>
               <div className="settings-meta-grid">
-                <div><span>Account status</span><strong className="text-capitalize">{organisation.status.replace('_', ' ')}</strong></div>
+                <div><span>Workspace</span><strong>{state.workspaceMode === 'live' ? 'Live' : organisation.status === 'paused' ? 'Paused' : 'Training'}</strong></div>
+                <div><span>Intake link</span><strong>{organisation.status === 'paused' ? 'Off' : 'Live'}</strong></div>
               </div>
-              <p className="settings-copy">HHH administrators can review connection status and go-live evidence from the pharmacy readiness screen.</p>
+              <p className="settings-copy">{state.workspaceMode === 'live' ? 'This pharmacy can see referred patients and dispense.' : 'Enquiries already go to HHH. HHH flips this workspace to live after the sandbox call.'}</p>
             </section>
           </div>
 
         </div>
-      ) : activeTab === 'assets' ? (
+      ) : (
         <div className="settings-stack">
           {linkError ? <div className="banner banner-red" role="alert"><AlertTriangle size={16} /><span>{linkError}</span><button className="btn btn-sm" type="button" onClick={() => setLinkRefresh(value => value + 1)}><RefreshCw size={14} /> Retry</button></div> : null}
           <div className="alert-success settings-assets-banner">
@@ -405,8 +388,6 @@ export default function PharmacySettings({ setup }: PharmacySettingsProps) {
             </button>
           </section>
         </div>
-      ) : (
-        <PharmacySetupWizard organisation={organisation} setup={setup} embedded />
       )}
     </div>
   );

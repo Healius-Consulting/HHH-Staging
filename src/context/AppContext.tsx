@@ -1263,7 +1263,21 @@ function mapRx(order: PatientOrder, rxId: number, fn: (rx: Prescription) => Pres
 
 function buildTenantTrainingData(organisationId: string) {
   return {
-    crm: [],
+    crm: [
+      {
+        id: `training-${organisationId}-walkthrough`,
+        organisationId,
+        name: 'Training Patient (sandbox)',
+        email: 'training.patient@invalid.example',
+        mobile: '00000 000 000',
+        dob: '1980-01-01',
+        postcode: 'XX0 0XX',
+        conditions: ['Chronic pain'],
+        primaryCondition: 'Chronic pain',
+        referralSource: 'training_sandbox',
+        status: 'Referred' as const,
+      },
+    ],
     submissions: [],
     orders: [],
     nextRx: 1,
@@ -1414,23 +1428,24 @@ function reducer(state: AppState, action: Action): AppState {
       }
       if (action.mode === 'training') {
         const organisationId = action.organisationId ?? state.currentOrganisationId;
-        if (state.workspaceMode === 'training' && state.orders.length > 0 && state.orders.every(order => order.organisationId === organisationId)) return state;
+        const stayingInTraining = state.workspaceMode === 'training';
+        const hasSandbox = state.crm.some(patient => patient.organisationId === organisationId && patient.referralSource === 'training_sandbox');
+        if (stayingInTraining && hasSandbox) {
+          return { ...state, workspaceMode: 'training', enquiries: [] };
+        }
         const training = buildTenantTrainingData(organisationId);
-        const patients = new Map(training.crm.map(patient => [patient.id, patient]));
-        state.crm
-          .filter(patient => patient.organisationId === organisationId)
-          .forEach(patient => patients.set(patient.id, patient));
         return {
           ...state,
           workspaceMode: 'training',
           navigationTarget: null,
           catalogue: state.catalogueSource === 'curaleaf' ? state.catalogue : [],
           catalogueSource: state.catalogueSource === 'curaleaf' ? 'curaleaf' : 'unavailable',
-          crm: [...patients.values()],
+          crm: training.crm,
           submissions: training.submissions,
-          orders: training.orders,
-          activeOrderId: 1,
-        nextIds: { patient: 2000, rx: training.nextRx, order: 7, submission: 5, invoice: 4072 },
+          enquiries: [],
+          orders: stayingInTraining ? state.orders.filter(order => order.organisationId === organisationId) : training.orders,
+          activeOrderId: stayingInTraining ? state.activeOrderId : 1,
+          nextIds: { patient: 2000, rx: training.nextRx, order: 7, submission: 5, invoice: 4072 },
         };
       }
       if (state.workspaceMode === action.mode) return state;
@@ -2198,7 +2213,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       && isApiConfigured
       && Boolean(state.staffSession)
       && Boolean(catalogueOrganisationStatus);
-    if (!useLocalSandbox && !useAuthenticatedPortal || catalogueOrganisationStatus === 'intake_live') return;
+    if (!useLocalSandbox && !useAuthenticatedPortal) return;
     let cancelled = false;
     dispatch({ type: 'SET_CATALOGUE_LOADING' });
     const request = useLocalSandbox

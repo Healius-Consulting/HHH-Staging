@@ -31,9 +31,11 @@ export function isAllocationHoldingAccount(organisation: RecordLike) {
 
 export function canAcceptPublicIntake(organisation: RecordLike) {
   const status = String(organisation.status ?? '');
+  if (organisation.intakeEnabled === false) return false;
+  if (status === 'paused') return false;
   return isExplicitCuraleafTestAccount(organisation)
     ? status === 'live'
-    : status === 'intake_live' || status === 'live';
+    : status === 'onboarding' || status === 'intake_live' || status === 'live';
 }
 
 export function canAutoActivateIntake(organisation: RecordLike) {

@@ -120,6 +120,9 @@ export interface OrganisationRepositoryPort {
   listOrganisations(): Promise<OrganisationRecord[]>;
   updateOrganisationProfile(id: string, input: UpdateOrganisationProfileInput): Promise<void>;
   updateOrganisationClassification(id: string, classification: OrganisationRecord['classification']): Promise<void>;
+  updateOrganisationStatus(id: string, status: OrganisationRecord['status']): Promise<void>;
+  updateOrganisationPaymentRoute(id: string, defaultPaymentRoute: OrganisationRecord['defaultPaymentRoute'], worldpayEnabled: boolean): Promise<void>;
+  updateOrganisationIntakeEnabled(id: string, intakeEnabled: boolean): Promise<void>;
   findDirectoryByTokenHash(tokenHash: string): Promise<PublicPharmacyResolution | null>;
   findReferralTokenByHash(tokenHash: string): Promise<ReferralTokenRecord | null>;
   createReferralToken(params: {

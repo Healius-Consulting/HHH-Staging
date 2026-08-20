@@ -9,6 +9,8 @@ test('admin routes are explicit and pharmacy details are identifier-scoped', () 
   }
   assert.deepEqual(parseAdminRelativePath('/pharmacy/branch_01-test'), { kind: 'organisation', organisationId: 'branch_01-test' });
   assert.equal(isSupportedPortalRelativePath('admin', '/pharmacy/branch_01-test'), true);
+  assert.deepEqual(parseAdminRelativePath('/platform'), { kind: 'view', view: 'overview' });
+  assert.equal(isSupportedPortalRelativePath('admin', '/platform'), true);
 });
 
 test('unknown, malformed, and cross-surface routes fail closed', () => {

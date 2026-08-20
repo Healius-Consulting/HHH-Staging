@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
-import { fetchCuraleafCatalogue, fetchCuraleafQuote, fetchCuraleafActivity, curaleafApiRequest } from '../../application/integrations/curaleaf.service.js';
+import { fetchCuraleafCatalogue, fetchCuraleafQuote, fetchCuraleafActivity, curaleafApiRequest, maskCuraleafIdentifier, probeCuraleafConnection, validateCuraleafCredentials, writeCuraleafCredential } from '../../application/integrations/curaleaf.service.js';
 import {
   mergeQuoteBankIntoCatalogue,
   upsertCuraleafQuoteBankFromQuote,
@@ -56,6 +56,15 @@ const worldpayCredentialSchema = z.object({
   entityId: z.string().trim().min(1).max(200),
   customisationId: customisationIdSchema.optional(),
 });
+const curaleafCredentialSchema = z.object({
+  organisationId: z.string().optional(),
+  customerId: z.string().trim().min(1).max(128),
+  apiKey: z.string().trim().min(16).max(500).optional(),
+  writeApiKey: z.string().trim().min(16).max(500).optional(),
+}).refine(value => Boolean(value.apiKey || value.writeApiKey), { message: 'API key is required.', path: ['apiKey'] });
+const curaleafOrganisationSchema = z.object({
+  organisationId: z.string().optional(),
+});
 const worldpayBrandingSchema = z.object({
   organisationId: z.string().optional(),
   customisationId: customisationIdSchema.optional(),
@@ -63,6 +72,32 @@ const worldpayBrandingSchema = z.object({
 
 function worldpayEnvironmentFromValidation(environment: 'try' | 'live'): 'TEST' | 'PRODUCTION' {
   return environment === 'live' ? 'PRODUCTION' : 'TEST';
+}
+
+function curaleafStatusPayload(
+  connection: IntegrationConnectionRecord | null,
+  extras?: { message?: string; checkedAt?: string; sampleAvailable?: boolean },
+) {
+  const configured = Boolean(connection?.secretResourceName);
+  const connected = connection?.status === 'ACTIVE';
+  return {
+    configured,
+    connected,
+    writeConfigured: configured,
+    approved: connected,
+    status: !configured ? 'not_configured' as const : connected ? 'connected' as const : connection?.status === 'PENDING_VALIDATION' ? 'validated' as const : 'attention' as const,
+    environment: connection?.environment === 'PRODUCTION' ? 'production' as const : 'test' as const,
+    checkedAt: extras?.checkedAt ?? new Date().toISOString(),
+    message: extras?.message ?? (!configured
+      ? 'Curaleaf is not connected for this pharmacy.'
+      : connected
+        ? 'The existing Curaleaf credential is securely linked.'
+        : 'The existing Curaleaf credential is securely linked and awaiting re-validation.'),
+    activated: connected,
+    maskedIdentifier: connection?.maskedCredential ?? undefined,
+    customerId: connection?.externalCustomerId ?? undefined,
+    sampleAvailable: extras?.sampleAvailable,
+  };
 }
 
 async function worldpayConnectionStatus(
@@ -101,27 +136,7 @@ export function createPortalIntegrationRouter(): Router {
       const connection = await integrationRepo.findConnection(organisationId, integration);
       res.setHeader('Cache-Control', 'no-store');
       if (integration === 'CURALEAF') {
-        const configured = Boolean(connection?.secretResourceName);
-        const connected = connection?.status === 'ACTIVE';
-        res.status(200).json({
-          configured,
-          connected,
-          writeConfigured: configured,
-          approved: connected,
-          status: !configured ? 'not_configured' : connected ? 'connected' : connection?.status === 'PENDING_VALIDATION' ? 'validated' : 'attention',
-          environment: connection?.environment === 'PRODUCTION' ? 'production' : 'test',
-          checkedAt: new Date().toISOString(),
-          message: !configured
-            ? 'Curaleaf is not connected for this pharmacy.'
-            : connected
-              ? 'The existing Curaleaf credential is securely linked.'
-              : 'The existing Curaleaf credential is securely linked and awaiting re-validation.',
-          activated: connected,
-          maskedIdentifier: connection?.maskedCredential ?? undefined,
-          // This identifier is operational metadata, not a credential. It is
-          // returned only after the tenant/admin scope check above.
-          customerId: connection?.externalCustomerId ?? undefined,
-        });
+        res.status(200).json(curaleafStatusPayload(connection));
         return;
       }
       res.status(200).json(await worldpayConnectionStatus(connection, organisationId));
@@ -130,6 +145,64 @@ export function createPortalIntegrationRouter(): Router {
 
   router.get('/portal/integrations/curaleaf/status', requireStaff('any'), status('CURALEAF'));
   router.get('/portal/integrations/worldpay/status', requireStaff('any'), status('WORLDPAY'));
+
+  router.put('/portal/integrations/curaleaf/credentials', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = curaleafCredentialSchema.parse(req.body);
+      const organisationId = await authorisedOrganisationId(req.context, input.organisationId, organisationRepo);
+      const apiKey = (input.apiKey ?? input.writeApiKey)!;
+      const credential = {
+        customerId: input.customerId,
+        writeApiKey: apiKey,
+      };
+      const validation = await validateCuraleafCredentials(credential);
+      const existing = await integrationRepo.findConnection(organisationId, 'CURALEAF');
+      const secretResourceName = await writeCuraleafCredential(organisationId, credential, existing?.secretResourceName);
+      const restored = await integrationRepo.restoreConnection({
+        organisationId,
+        integration: 'CURALEAF',
+        environment: validation.environment === 'production' ? 'PRODUCTION' : 'TEST',
+        status: 'ACTIVE',
+        secretResourceName,
+        externalCustomerId: credential.customerId,
+        maskedCredential: maskCuraleafIdentifier(credential.customerId),
+      });
+      res.status(200).json(curaleafStatusPayload(restored, {
+        message: validation.message,
+        checkedAt: validation.checkedAt,
+        sampleAvailable: true,
+      }));
+    } catch (error) { next(error); }
+  });
+
+  router.post('/portal/integrations/curaleaf/refresh', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = curaleafOrganisationSchema.parse(req.body ?? {});
+      const organisationId = await authorisedOrganisationId(req.context, input.organisationId, organisationRepo);
+      const connection = await integrationRepo.findConnection(organisationId, 'CURALEAF');
+      if (!connection?.secretResourceName) {
+        res.status(200).json(curaleafStatusPayload(connection, {
+          message: 'Curaleaf is not connected for this pharmacy.',
+        }));
+        return;
+      }
+      const probe = await probeCuraleafConnection(connection);
+      const restored = await integrationRepo.restoreConnection({
+        organisationId,
+        integration: 'CURALEAF',
+        environment: probe.environment === 'production' ? 'PRODUCTION' : 'TEST',
+        status: 'ACTIVE',
+        secretResourceName: connection.secretResourceName,
+        externalCustomerId: connection.externalCustomerId,
+        maskedCredential: connection.maskedCredential,
+      });
+      res.status(200).json(curaleafStatusPayload(restored, {
+        message: probe.message,
+        checkedAt: probe.checkedAt,
+        sampleAvailable: true,
+      }));
+    } catch (error) { next(error); }
+  });
 
   router.put('/portal/integrations/worldpay/credentials', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
     try {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { OrganisationRecord } from '../../repositories/ports/organisation.port.js';
-import { canReceiveReferral, pharmacyOperationalAccess } from './access.js';
+import { canAcceptPublicIntake, canReceiveReferral, pharmacyOperationalAccess, pharmacyWorkspaceMode } from './access.js';
 
 const organisation: OrganisationRecord = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', companyId: null, name: 'Eligible Pharmacy',
@@ -16,20 +16,29 @@ const organisation: OrganisationRecord = {
 };
 
 describe('pharmacy intake access', () => {
-  it('lets HHH assign to live and intake-live destinations, including hidden allocation pharmacies', () => {
+  it('lets public tokens and HHH assignment work from Day-0 onboarding', () => {
+    assert.equal(canAcceptPublicIntake({ ...organisation, status: 'ONBOARDING' }), true);
+    assert.equal(canReceiveReferral({ ...organisation, status: 'ONBOARDING' }), true);
+    assert.equal(canAcceptPublicIntake(organisation), true);
     assert.equal(canReceiveReferral(organisation), true);
     assert.equal(canReceiveReferral({ ...organisation, status: 'INTAKE_LIVE' }), true);
     assert.equal(canReceiveReferral({ ...organisation, classification: 'ALLOCATION_HOLDING' }), true);
     assert.equal(canReceiveReferral({ ...organisation, classification: 'TRAINING' }), false);
-    assert.equal(canReceiveReferral({ ...organisation, status: 'ONBOARDING' }), false);
     assert.equal(canReceiveReferral({ ...organisation, status: 'PAUSED' }), false);
+    assert.equal(canAcceptPublicIntake({ ...organisation, status: 'ONBOARDING', intakeEnabled: false }), false);
+    assert.equal(canAcceptPublicIntake({ ...organisation, gphcNumber: 'TRAINING-PHARM1', status: 'ONBOARDING' }), false);
+    assert.equal(canAcceptPublicIntake({ ...organisation, gphcNumber: 'TRAINING-PHARM1', status: 'LIVE' }), true);
   });
 
-  it('withholds pharmacy workspace data and referral email until go-live', () => {
+  it('withholds pharmacy workspace data until go-live', () => {
     assert.equal(pharmacyOperationalAccess(organisation), true);
     assert.equal(pharmacyOperationalAccess({ ...organisation, classification: 'ALLOCATION_HOLDING' }), true);
     assert.equal(pharmacyOperationalAccess({ ...organisation, status: 'INTAKE_LIVE' }), false);
     assert.equal(pharmacyOperationalAccess({ ...organisation, status: 'ONBOARDING' }), false);
     assert.equal(pharmacyOperationalAccess({ ...organisation, classification: 'TRAINING' }), false);
+    assert.equal(pharmacyWorkspaceMode({ ...organisation, status: 'ONBOARDING' }), 'training');
+    assert.equal(pharmacyWorkspaceMode({ ...organisation, status: 'INTAKE_LIVE' }), 'training');
+    assert.equal(pharmacyWorkspaceMode(organisation), 'live');
+    assert.equal(pharmacyWorkspaceMode({ ...organisation, status: 'PAUSED' }), 'paused');
   });
 });

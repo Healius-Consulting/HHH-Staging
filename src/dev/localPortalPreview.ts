@@ -2,7 +2,7 @@ import type { AuthenticatedStaff } from '../auth/types';
 
 function readLocalPortalPreview(): 'admin' | 'pharmacy' | null {
   if (typeof window === 'undefined') return null;
-  if (!['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)) return null;
+  if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(window.location.hostname)) return null;
   const params = new URLSearchParams(window.location.search);
   const requestedPortal = params.get('devPortal') ?? params.get('dev');
   return requestedPortal === 'admin' || requestedPortal === 'pharmacy' ? requestedPortal : null;

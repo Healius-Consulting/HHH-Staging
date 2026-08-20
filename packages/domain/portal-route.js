@@ -3,7 +3,6 @@ export const ADMIN_VIEW_PATHS = Object.freeze({
   referrals: '/referrals',
   patients: '/patients',
   finance: '/finance',
-  platform: '/platform',
 });
 
 export const PHARMACY_VIEW_PATHS = Object.freeze([
@@ -23,6 +22,7 @@ const organisationRoute = /^\/pharmacy\/([A-Za-z0-9_-]{1,128})$/;
 export function parseAdminRelativePath(relativePath) {
   const view = adminPaths.get(relativePath);
   if (view) return { kind: 'view', view };
+  if (relativePath === '/platform') return { kind: 'view', view: 'overview' };
   const organisationMatch = organisationRoute.exec(relativePath);
   return organisationMatch ? { kind: 'organisation', organisationId: organisationMatch[1] } : null;
 }

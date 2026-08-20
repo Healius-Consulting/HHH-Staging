@@ -24,6 +24,7 @@ interface WorkspaceNavigationProps<Key extends string> {
   brand: { title: string; subtitle: string; partner?: string; logoText?: string; logoSrc?: string; logo?: ReactNode };
   user: { initials: string; name: string; role: string };
   exitAction: { label: string; icon: ReactNode; onClick: () => void };
+  footerAction?: { label: string; icon: ReactNode; onClick: () => void };
   moreTitle?: string;
 }
 
@@ -36,6 +37,7 @@ export default function WorkspaceNavigation<Key extends string>({
   brand,
   user,
   exitAction,
+  footerAction,
   moreTitle = 'More workspace tools',
 }: WorkspaceNavigationProps<Key>) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -101,6 +103,11 @@ export default function WorkspaceNavigation<Key extends string>({
           ))}
         </nav>
         <div className="sidebar-footer">
+          {footerAction ? (
+            <button type="button" className="btn btn-sm sidebar-footer-action" onClick={footerAction.onClick}>
+              {footerAction.icon}<span>{footerAction.label}</span>
+            </button>
+          ) : null}
           <div className="user-profile-card">
             <div className="user-profile-avatar" aria-hidden="true">{user.initials}</div>
             <div className="user-profile-info"><span className="user-profile-name">{user.name}</span><span className="user-profile-role">{user.role}</span></div>
@@ -129,7 +136,17 @@ export default function WorkspaceNavigation<Key extends string>({
             <div className="mobile-more-grid">
               {mobileMore.map(item => <button type="button" key={item.key} className={activeKey === item.key ? 'active' : ''} aria-current={activeKey === item.key ? 'page' : undefined} onClick={() => navigate(item.key)}><span>{item.icon}</span><strong>{item.label}</strong><small>{item.count ? `${item.count} waiting` : 'Open workspace'}</small></button>)}
             </div>
-            <footer><span><strong>{user.name}</strong><small>{user.role}</small></span><button type="button" className="btn btn-sm" onClick={() => { setMobileMenuOpen(false); exitAction.onClick(); }}>{exitAction.icon}{exitAction.label}</button></footer>
+            <footer>
+              {footerAction ? (
+                <button type="button" className="btn btn-sm mobile-more-admins" onClick={() => { setMobileMenuOpen(false); footerAction.onClick(); }}>
+                  {footerAction.icon}{footerAction.label}
+                </button>
+              ) : null}
+              <div className="mobile-more-session">
+                <span><strong>{user.name}</strong><small>{user.role}</small></span>
+                <button type="button" className="btn btn-sm" onClick={() => { setMobileMenuOpen(false); exitAction.onClick(); }}>{exitAction.icon}{exitAction.label}</button>
+              </div>
+            </footer>
           </section>
         </div>
       )}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getPharmacySetupStatus, isApiConfigured, updatePharmacySetupTask } from '../shared/api';
 import type { PharmacySetupStatus, SetupTaskId } from '../shared/contracts';
-import { SETUP_TASKS } from './setup';
+import { SETUP_TASKS, emptyOperationalStatus } from './setup';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 
 function emptyStatus(organisationId: string): PharmacySetupStatus {
@@ -18,6 +18,7 @@ function emptyStatus(organisationId: string): PharmacySetupStatus {
       evidence: null,
     })),
     updatedAt: new Date(0).toISOString(),
+    operational: emptyOperationalStatus(),
   };
 }
 
@@ -37,6 +38,7 @@ function normaliseStatus(status: PharmacySetupStatus): PharmacySetupStatus {
     completedCount,
     requiredCount: tasks.length,
     completed: completedCount === tasks.length,
+    operational: status.operational ?? emptyOperationalStatus(),
   };
 }
 

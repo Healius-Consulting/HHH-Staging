@@ -10,6 +10,7 @@ import type {
   UpdateOrganisationProfileInput,
 } from '../ports/organisation.port.js';
 import { organisationAddressSummary } from '../ports/directory.port.js';
+import { canAcceptPublicIntake } from '../../domain/organisation/access.js';
 
 const GET_ORGANISATION_BY_ID_GQL = `
   query GetOrganisationById($id: UUID!) {
@@ -123,6 +124,7 @@ const GET_PHARMACY_DIRECTORY_BY_TOKEN_GQL = `
         primaryColour
         logoText
         status
+        classification
         intakeEnabled
         archivedAt
       }
@@ -304,6 +306,50 @@ const UPDATE_ORGANISATION_CLASSIFICATION_GQL = `
   }
 `;
 
+const UPDATE_ORGANISATION_STATUS_GQL = `
+  mutation UpdateOrganisationStatus(
+    $id: UUID!
+    $status: OrganisationStatus!
+  ) {
+    organisation_update(
+      key: { id: $id }
+      data: {
+        status: $status
+      }
+    )
+  }
+`;
+
+const UPDATE_ORGANISATION_PAYMENT_ROUTE_GQL = `
+  mutation UpdateOrganisationPaymentRoute(
+    $id: UUID!
+    $defaultPaymentRoute: PaymentRoute!
+    $worldpayEnabled: Boolean!
+  ) {
+    organisation_update(
+      key: { id: $id }
+      data: {
+        defaultPaymentRoute: $defaultPaymentRoute
+        worldpayEnabled: $worldpayEnabled
+      }
+    )
+  }
+`;
+
+const UPDATE_ORGANISATION_INTAKE_ENABLED_GQL = `
+  mutation UpdateOrganisationIntakeEnabled(
+    $id: UUID!
+    $intakeEnabled: Boolean!
+  ) {
+    organisation_update(
+      key: { id: $id }
+      data: {
+        intakeEnabled: $intakeEnabled
+      }
+    )
+  }
+`;
+
 const UPDATE_STAFF_PREFERENCES_GQL = `
   mutation UpdateStaffPreferences(
     $uid: String!
@@ -363,6 +409,28 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
     });
   }
 
+  async updateOrganisationStatus(id: string, status: OrganisationRecord['status']): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(UPDATE_ORGANISATION_STATUS_GQL, {
+      variables: { id: asUuid(id), status },
+    });
+  }
+
+  async updateOrganisationPaymentRoute(
+    id: string,
+    defaultPaymentRoute: OrganisationRecord['defaultPaymentRoute'],
+    worldpayEnabled: boolean,
+  ): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(UPDATE_ORGANISATION_PAYMENT_ROUTE_GQL, {
+      variables: { id: asUuid(id), defaultPaymentRoute, worldpayEnabled },
+    });
+  }
+
+  async updateOrganisationIntakeEnabled(id: string, intakeEnabled: boolean): Promise<void> {
+    await dataConnect.executeGraphql<any, any>(UPDATE_ORGANISATION_INTAKE_ENABLED_GQL, {
+      variables: { id: asUuid(id), intakeEnabled },
+    });
+  }
+
   async findDirectoryByTokenHash(tokenHash: string): Promise<PublicPharmacyResolution | null> {
     const result = await dataConnect.executeGraphql<{
       referralTokens: Array<{
@@ -385,7 +453,8 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
           longitude: number | null;
           primaryColour: string;
           logoText: string;
-          status: string;
+          status: OrganisationRecord['status'];
+          classification: OrganisationRecord['classification'];
           intakeEnabled: boolean;
           archivedAt: string | null;
         };
@@ -396,7 +465,26 @@ export class SqlOrganisationRepository implements OrganisationRepositoryPort {
     if (!match || !match.organisation) return null;
 
     const org = match.organisation;
-    if (org.archivedAt || !['INTAKE_LIVE', 'LIVE'].includes(org.status)) return null;
+    if (!canAcceptPublicIntake({
+      ...org,
+      companyId: null,
+      mainContactName: null,
+      mainContactPhone: null,
+      mainContactEmail: null,
+      portalName: org.name,
+      prescriptionEnabled: true,
+      paymentsEnabled: true,
+      supplierOrdersEnabled: true,
+      patientsEnabled: true,
+      resourcesEnabled: true,
+      worldpayEnabled: false,
+      defaultPaymentRoute: 'MANUAL',
+      autoPlacementEnabled: false,
+      gdprComplianceFlag: true,
+      pausedReason: null,
+      pausedAt: null,
+      version: 1,
+    })) return null;
     return {
       type: match.intakeVersion === 'v1' ? 'legacy_pharmacy_qr' : 'future_pharmacy_qr',
       intakeVersion: match.intakeVersion === 'v1' ? 'v1' : 'v2',

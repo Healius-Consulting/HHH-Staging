@@ -35,12 +35,31 @@ const secretClient = new SecretManagerServiceClient();
 const REQUEST_TIMEOUT_MS = 12_000;
 const PAGE_SIZE = 200;
 const MAX_PAGES = 5;
+const SECRET_REGION = 'europe-west2';
+const KEY_PROBE_GAP_MS = 1_100;
 
-type CuraleafCredential = { customerId: string; writeApiKey: string; readApiKey?: string };
+export type CuraleafCredential = { customerId: string; writeApiKey: string; readApiKey?: string };
+
+export function maskCuraleafIdentifier(value: string) {
+  const tail = value.slice(-4);
+  return `${'•'.repeat(Math.min(8, Math.max(4, value.length - tail.length)))}${tail}`;
+}
 
 function allowedSecretResource(name: string) {
   return name.startsWith(`projects/${config.FIREBASE_PROJECT_ID}/secrets/hhh-curaleaf-`)
     && name.endsWith('-europe-west2');
+}
+
+function defaultCuraleafSecretResource(organisationId: string) {
+  return `projects/${config.FIREBASE_PROJECT_ID}/secrets/hhh-curaleaf-${organisationId}-${SECRET_REGION}`;
+}
+
+function secretIdFromResource(resourceName: string) {
+  return resourceName.split('/secrets/')[1] ?? '';
+}
+
+export function curaleafEnvironment(): 'test' | 'production' {
+  return config.CURALEAF_BASE_URL.includes('.dev') ? 'test' : 'production';
 }
 
 async function credentialFor(connection: IntegrationConnectionRecord): Promise<CuraleafCredential> {
@@ -98,6 +117,105 @@ async function requestPage(path: string, apiKey: string) {
     throw new HttpError(502, 'Curaleaf could not be reached.', 'CURALEAF_UNAVAILABLE');
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function probeCuraleafApiKey(apiKey: string, expectedCustomerId: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(new URL('v1/formulas/?pageNumber=0&pageSize=1', `${config.CURALEAF_BASE_URL}/`), {
+      method: 'GET',
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'X-API-Key': apiKey },
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new HttpError(401, 'Curaleaf rejected these API keys.', 'CURALEAF_CREDENTIALS_REJECTED');
+    }
+    if (!response.ok) {
+      throw new HttpError(response.status === 429 ? 429 : 502, `Curaleaf could not validate the connection (${response.status}).`, 'CURALEAF_VALIDATION_FAILED');
+    }
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new HttpError(502, 'Curaleaf returned an invalid validation response.', 'CURALEAF_VALIDATION_FAILED');
+    }
+    const unexpectedCustomer = customerIds(body).find(id => id !== expectedCustomerId);
+    if (unexpectedCustomer) {
+      throw new HttpError(502, 'Curaleaf returned data for a different pharmacy.', 'CURALEAF_TENANT_MISMATCH');
+    }
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new HttpError(504, 'Curaleaf did not respond in time.', 'CURALEAF_TIMEOUT');
+    }
+    throw new HttpError(502, 'Curaleaf could not be reached.', 'CURALEAF_UNAVAILABLE');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function validateCuraleafCredentials(credential: CuraleafCredential) {
+  await probeCuraleafApiKey(credential.writeApiKey, credential.customerId);
+  if (credential.readApiKey && credential.readApiKey !== credential.writeApiKey) {
+    await new Promise(resolve => setTimeout(resolve, KEY_PROBE_GAP_MS));
+    await probeCuraleafApiKey(credential.readApiKey, credential.customerId);
+  }
+  return {
+    passed: true as const,
+    checkedAt: new Date().toISOString(),
+    observedCustomerId: credential.customerId,
+    environment: curaleafEnvironment(),
+    message: 'Curaleaf API keys were verified against the supplier.',
+  };
+}
+
+export async function writeCuraleafCredential(
+  organisationId: string,
+  credential: CuraleafCredential,
+  existingResourceName?: string | null,
+): Promise<string> {
+  const resourceName = existingResourceName && allowedSecretResource(existingResourceName)
+    ? existingResourceName
+    : defaultCuraleafSecretResource(organisationId);
+  if (!allowedSecretResource(resourceName)) {
+    throw new HttpError(503, 'Curaleaf credentials could not be stored securely.', 'SECRET_STORE_FAILED');
+  }
+
+  const parent = `projects/${config.FIREBASE_PROJECT_ID}`;
+  const payload: Record<string, string> = {
+    customerId: credential.customerId,
+    writeApiKey: credential.writeApiKey,
+    ...(credential.readApiKey ? { readApiKey: credential.readApiKey } : {}),
+  };
+  try {
+    try {
+      await secretClient.getSecret({ name: resourceName });
+    } catch (error) {
+      if ((error as { code?: number }).code !== 5) throw error;
+      await secretClient.createSecret({
+        parent,
+        secretId: secretIdFromResource(resourceName),
+        secret: {
+          replication: { userManaged: { replicas: [{ location: SECRET_REGION }] } },
+          labels: { application: 'hhh', integration: 'curaleaf', region: SECRET_REGION },
+        },
+      });
+    }
+    await secretClient.addSecretVersion({
+      parent: resourceName,
+      payload: { data: Buffer.from(JSON.stringify(payload), 'utf8') },
+    });
+    return resourceName;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    const code = (error as { code?: number }).code;
+    const details = String((error as { details?: string }).details ?? (error as Error).message ?? '');
+    if (code === 7 || /PERMISSION_DENIED|secretmanager/i.test(details)) {
+      throw new HttpError(503, 'Curaleaf credentials could not be stored: Secret Manager permission is missing on the API runtime.', 'SECRET_MANAGER_DENIED');
+    }
+    throw new HttpError(503, 'Curaleaf credentials could not be stored securely.', 'SECRET_STORE_FAILED');
   }
 }
 
@@ -222,6 +340,16 @@ export async function curaleafApiRequest<T = any>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function probeCuraleafConnection(connection: IntegrationConnectionRecord) {
+  await curaleafApiRequest(connection, '/v1/formulas/?pageNumber=0&pageSize=1');
+  return {
+    passed: true as const,
+    checkedAt: new Date().toISOString(),
+    environment: curaleafEnvironment(),
+    message: 'The stored Curaleaf credential responded successfully.',
+  };
 }
 
 export async function fetchCuraleafQuote(

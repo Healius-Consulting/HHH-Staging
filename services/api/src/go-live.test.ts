@@ -15,12 +15,13 @@ test('only explicitly flagged TRAINING organisations receive the test exemption'
   assert.equal(isExplicitCuraleafTestAccount({ ...trainingOrganisation, gphcNumber: '1099224' }), false);
 });
 
-test('public intake accepts explicit live training tenants and GDPR-cleared intake tenants', () => {
+test('public intake accepts Day-0 onboarding, explicit live training tenants, and intake/live pharmacies', () => {
   assert.equal(canAcceptPublicIntake({ ...trainingOrganisation, status: 'live' }), true);
   assert.equal(canAcceptPublicIntake({ ...trainingOrganisation, status: 'paused' }), false);
   assert.equal(canAcceptPublicIntake({ status: 'intake_live', gphcNumber: '1099224' }), true);
   assert.equal(canAcceptPublicIntake({ status: 'live', gphcNumber: '1099224' }), true);
-  assert.equal(canAcceptPublicIntake({ status: 'onboarding', gphcNumber: '1099224' }), false);
+  assert.equal(canAcceptPublicIntake({ status: 'onboarding', gphcNumber: '1099224' }), true);
+  assert.equal(canAcceptPublicIntake({ status: 'onboarding', gphcNumber: '1099224', intakeEnabled: false }), false);
 });
 
 test('GDPR completion auto-activates onboarding and GDPR-paused real pharmacies only', () => {

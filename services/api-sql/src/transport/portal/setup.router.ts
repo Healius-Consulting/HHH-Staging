@@ -3,7 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ReferralLinkService } from '../../application/referrals/referral-link.service.js';
 import { HttpError } from '../../domain/common/errors.js';
+import { canAcceptPublicIntake } from '../../domain/organisation/access.js';
+import {
+  buildGoLiveReadinessView,
+  buildSetupStatusView,
+  goLiveBlockedMessage,
+  type PharmacySetupStatusView,
+} from '../../domain/organisation/operational-readiness.js';
+import type { OrganisationRecord, SetupTaskRecord } from '../../repositories/ports/organisation.port.js';
 import { SqlIdentityRepository } from '../../repositories/sql/identity.sql.js';
+import { SqlIntegrationRepository } from '../../repositories/sql/integration.sql.js';
 import { SqlOrganisationRepository } from '../../repositories/sql/organisation.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
 import { assertPlatformScope, assertTenantScope, type RequestContext } from '../../security/request-context.js';
@@ -89,44 +98,67 @@ function authenticatedStaff(context: RequestContext | undefined) {
   return context;
 }
 
-function setupStatus(
-  organisationId: string,
-  records: Awaited<ReturnType<SqlOrganisationRepository['listSetupTasks']>>,
-  legacyLiveFallback: boolean,
+function evidenceOf(input: { evidence?: string | null }): string {
+  return (input.evidence ?? '').trim();
+}
+
+function assertPharmacyTaskEvidence(
+  taskId: typeof setupDefinitions[number]['id'],
+  completed: boolean,
+  evidence: string,
+  organisation: OrganisationRecord,
+  worldpayConnected: boolean,
 ) {
-  const byCode = new Map(records.map(record => [record.taskCode, record]));
-  const tasks = setupDefinitions.map(definition => {
-    const record = byCode.get(definition.id);
-    const completed = record?.completed === true || (legacyLiveFallback && !record);
-    return {
-      id: definition.id,
-      completed,
-      completedAt: record?.completedAt ?? null,
-      completedBy: record?.completedByUid ?? null,
-      evidence: record?.evidence ?? null,
-    };
-  });
-  const completedCount = tasks.filter(task => task.completed).length;
-  const updatedAt = records
-    .map(record => record.updatedAt)
-    .filter(Boolean)
-    .sort()
-    .at(-1) ?? new Date().toISOString();
-  return {
-    organisationId,
-    completed: completedCount === setupDefinitions.length,
-    completedCount,
-    requiredCount: setupDefinitions.length,
-    tasks,
-    updatedAt,
-  };
+  if (!completed) return;
+  if (taskId === 'pharmacy_profile' && !evidence.includes(organisation.gphcNumber)) {
+    throw new HttpError(400, 'Confirm the live GPhC number, superintendent and address before completing this step.', 'PREMISES_CONFIRMATION_REQUIRED');
+  }
+  if (taskId === 'pricing' && !/acknowledged/i.test(evidence)) {
+    throw new HttpError(400, 'Acknowledge Curaleaf-supplied patient prices and save a dispensing-fee policy.', 'CHARGES_POLICY_REQUIRED');
+  }
+  if (taskId === 'notifications' && !/published/i.test(evidence)) {
+    throw new HttpError(400, 'Download the content pack, then mark the eligibility link as published.', 'WEBSITE_PACK_REQUIRED');
+  }
+  if (taskId === 'operational_readiness' && evidence.length < 20) {
+    throw new HttpError(400, 'Record the named staff who completed the sandbox walkthrough.', 'WALKTHROUGH_EVIDENCE_REQUIRED');
+  }
+  if (taskId === 'payment_route' && organisation.defaultPaymentRoute === 'WORLDPAY' && !worldpayConnected) {
+    throw new HttpError(409, 'Verify the Worldpay merchant connection before making it the default payment route.', 'WORLDPAY_VERIFICATION_REQUIRED');
+  }
 }
 
 export function createPortalSetupRouter(): Router {
   const router = Router();
   const organisationRepo = new SqlOrganisationRepository();
   const identityRepo = new SqlIdentityRepository();
+  const integrationRepo = new SqlIntegrationRepository();
   const referralLinks = new ReferralLinkService(organisationRepo);
+
+  async function setupSnapshot(organisation: OrganisationRecord, records?: SetupTaskRecord[]): Promise<PharmacySetupStatusView> {
+    const [taskRecords, staff, curaleaf, worldpay] = await Promise.all([
+      records ? Promise.resolve(records) : organisationRepo.listSetupTasks(organisation.id),
+      identityRepo.listPharmacyStaffByOrganisationId(organisation.id),
+      integrationRepo.findConnection(organisation.id, 'CURALEAF'),
+      integrationRepo.findConnection(organisation.id, 'WORLDPAY'),
+    ]);
+    return buildSetupStatusView({
+      organisation,
+      tasks: taskRecords,
+      staff,
+      curaleaf,
+      worldpay,
+      legacyLiveFallback: organisation.status === 'LIVE' && taskRecords.length === 0,
+    });
+  }
+
+  async function goLiveSnapshot(organisation: OrganisationRecord) {
+    const setup = await setupSnapshot(organisation);
+    return buildGoLiveReadinessView({
+      organisation,
+      operational: setup.operational,
+      curaleaf: await integrationRepo.findConnection(organisation.id, 'CURALEAF'),
+    });
+  }
 
   // Legacy-compatible setup status used by the current pharmacy shell. A
   // pre-cutover LIVE organisation with no migrated task rows remains live;
@@ -134,13 +166,9 @@ export function createPortalSetupRouter(): Router {
   router.get('/portal/setup', requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const scope = assertTenantScope(req.context!);
-      const [records, organisation] = await Promise.all([
-        organisationRepo.listSetupTasks(scope.organisationId),
-        organisationRepo.findOrganisationById(scope.organisationId),
-      ]);
+      const organisation = await organisationRepo.findOrganisationById(scope.organisationId);
       if (!organisation) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
-      const legacyLiveFallback = organisation.status === 'LIVE' && records.length === 0;
-      res.status(200).json(setupStatus(scope.organisationId, records, legacyLiveFallback));
+      res.status(200).json(await setupSnapshot(organisation));
     } catch (error) {
       next(error);
     }
@@ -152,12 +180,47 @@ export function createPortalSetupRouter(): Router {
     try {
       assertPlatformScope(req.context!);
       const organisations = await organisationRepo.listOrganisations();
-      const statuses = await Promise.all(organisations.map(async organisation => {
-        const records = await organisationRepo.listSetupTasks(organisation.id);
-        return setupStatus(organisation.id, records, organisation.status === 'LIVE' && records.length === 0);
-      }));
+      const statuses = await Promise.all(organisations.map(organisation => setupSnapshot(organisation)));
       res.setHeader('Cache-Control', 'no-store');
       res.status(200).json({ records: statuses });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch('/portal/admin/organisations/:id/setup/:taskId', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const organisationId = organisationIdSchema.parse(req.params.id);
+      const taskId = setupTaskIdSchema.parse(req.params.taskId);
+      if (taskId === 'curaleaf_account') {
+        throw new HttpError(403, 'Record Curaleaf from the connection panel. The pharmacy never types credentials.', 'FORBIDDEN');
+      }
+      const input = z.object({
+        completed: z.boolean(),
+        evidence: z.string().trim().max(1000).nullable().optional(),
+      }).parse(req.body);
+      const [organisation, worldpay] = await Promise.all([
+        organisationRepo.findOrganisationById(organisationId),
+        integrationRepo.findConnection(organisationId, 'WORLDPAY'),
+      ]);
+      if (!organisation) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      assertPharmacyTaskEvidence(
+        taskId,
+        input.completed,
+        evidenceOf(input),
+        organisation,
+        Boolean(worldpay && worldpay.status === 'ACTIVE' && worldpay.secretResourceName),
+      );
+      await organisationRepo.upsertSetupTask({
+        organisationId,
+        taskCode: taskId,
+        completed: input.completed,
+        evidence: input.evidence,
+        completedByUid: scope.uid,
+      });
+      const records = await organisationRepo.listSetupTasks(organisationId);
+      res.status(200).json(await setupSnapshot(organisation, records));
     } catch (error) {
       next(error);
     }
@@ -174,6 +237,18 @@ export function createPortalSetupRouter(): Router {
         completed: z.boolean(),
         evidence: z.string().trim().max(1000).nullable().optional(),
       }).parse(req.body);
+      const [organisation, worldpay] = await Promise.all([
+        organisationRepo.findOrganisationById(scope.organisationId),
+        integrationRepo.findConnection(scope.organisationId, 'WORLDPAY'),
+      ]);
+      if (!organisation) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      assertPharmacyTaskEvidence(
+        taskId,
+        input.completed,
+        evidenceOf(input),
+        organisation,
+        Boolean(worldpay && worldpay.status === 'ACTIVE' && worldpay.secretResourceName),
+      );
       await organisationRepo.upsertSetupTask({
         organisationId: scope.organisationId,
         taskCode: taskId,
@@ -182,7 +257,7 @@ export function createPortalSetupRouter(): Router {
         completedByUid: scope.uid,
       });
       const records = await organisationRepo.listSetupTasks(scope.organisationId);
-      res.status(200).json(setupStatus(scope.organisationId, records, false));
+      res.status(200).json(await setupSnapshot(organisation, records));
     } catch (error) {
       next(error);
     }
@@ -204,16 +279,32 @@ export function createPortalSetupRouter(): Router {
     try {
       const scope = assertTenantScope(req.context!);
       const input = setupTaskInputSchema.parse(req.body);
+      const taskId = setupTaskIdSchema.parse(input.taskId);
+      if (taskId === 'curaleaf_account') {
+        throw new HttpError(403, 'Curaleaf activation is managed only by HHH administrators.', 'FORBIDDEN');
+      }
+      const [organisation, worldpay] = await Promise.all([
+        organisationRepo.findOrganisationById(scope.organisationId),
+        integrationRepo.findConnection(scope.organisationId, 'WORLDPAY'),
+      ]);
+      if (!organisation) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      assertPharmacyTaskEvidence(
+        taskId,
+        input.completed,
+        evidenceOf(input),
+        organisation,
+        Boolean(worldpay && worldpay.status === 'ACTIVE' && worldpay.secretResourceName),
+      );
 
       await organisationRepo.upsertSetupTask({
         organisationId: scope.organisationId,
-        taskCode: input.taskId,
+        taskCode: taskId,
         completed: input.completed,
         evidence: input.evidence,
         completedByUid: scope.uid,
       });
 
-      res.status(200).json({ status: 'ok', taskId: input.taskId, completed: input.completed });
+      res.status(200).json({ status: 'ok', taskId, completed: input.completed });
     } catch (error) {
       next(error);
     }
@@ -251,6 +342,137 @@ export function createPortalSetupRouter(): Router {
       assertPlatformScope(req.context!);
       const organisations = await organisationRepo.listOrganisations();
       res.status(200).json(organisations.map(toPortalOrganisation));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put('/portal/payment-settings', requireCsrf, requireStaff('pharmacy'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertTenantScope(req.context!);
+      const input = z.object({
+        organisationId: organisationIdSchema.optional(),
+        defaultPaymentRoute: z.enum(['manual', 'worldpay']).optional(),
+        worldpayEnabled: z.boolean().optional(),
+      }).refine(value => value.defaultPaymentRoute !== undefined || value.worldpayEnabled !== undefined, {
+        message: 'Choose a default payment route.',
+      }).parse(req.body);
+      if (input.organisationId && input.organisationId.replaceAll('-', '').toLowerCase() !== scope.organisationId.replaceAll('-', '').toLowerCase()) {
+        throw new HttpError(403, 'A pharmacy may only update its own payment settings.', 'TENANT_SCOPE_VIOLATION');
+      }
+      const defaultPaymentRoute = input.defaultPaymentRoute ?? (input.worldpayEnabled ? 'worldpay' : 'manual');
+      if (defaultPaymentRoute === 'worldpay') {
+        const worldpay = await integrationRepo.findConnection(scope.organisationId, 'WORLDPAY');
+        if (!worldpay || worldpay.status !== 'ACTIVE' || !worldpay.secretResourceName) {
+          throw new HttpError(409, 'Verify this pharmacy’s Worldpay connection before making it the default payment route.', 'WORLDPAY_VERIFICATION_REQUIRED');
+        }
+      }
+      const route = defaultPaymentRoute === 'worldpay' ? 'WORLDPAY' as const : 'MANUAL' as const;
+      await organisationRepo.updateOrganisationPaymentRoute(scope.organisationId, route, defaultPaymentRoute === 'worldpay');
+      await identityRepo.appendAudit({
+        organisationId: scope.organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'payment.settings_updated',
+        recordType: 'Organisation',
+        recordId: scope.organisationId,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+        details: { defaultPaymentRoute },
+      });
+      res.status(200).json({
+        organisationId: scope.organisationId,
+        defaultPaymentRoute,
+        worldpayEnabled: defaultPaymentRoute === 'worldpay',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/portal/admin/organisations/:id/go-live-readiness', requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      assertPlatformScope(req.context!);
+      const organisationId = organisationIdSchema.parse(req.params.id);
+      const organisation = await organisationRepo.findOrganisationById(organisationId);
+      if (!organisation) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json(await goLiveSnapshot(organisation));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/portal/admin/organisations/:id/intake-live', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const organisationId = organisationIdSchema.parse(req.params.id);
+      const organisation = await organisationRepo.findOrganisationById(organisationId);
+      if (!organisation) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      if (organisation.classification === 'TRAINING') {
+        throw new HttpError(409, 'Training accounts cannot accept public patient intake.', 'INTAKE_LIVE_GATE_INCOMPLETE');
+      }
+      if (organisation.status === 'PAUSED' || organisation.archivedAt) {
+        throw new HttpError(409, 'Unpause this pharmacy before turning the eligibility link on.', 'INTAKE_LIVE_GATE_INCOMPLETE');
+      }
+      if (!organisation.intakeEnabled) {
+        await organisationRepo.updateOrganisationIntakeEnabled(organisationId, true);
+      }
+      const updated = await organisationRepo.findOrganisationById(organisationId);
+      if (!updated || !canAcceptPublicIntake(updated)) {
+        throw new HttpError(409, 'Public intake is not available for this pharmacy.', 'INTAKE_LIVE_GATE_INCOMPLETE');
+      }
+      await identityRepo.appendAudit({
+        organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'organisation.intake_went_live',
+        recordType: 'Organisation',
+        recordId: organisationId,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+      });
+      res.status(200).json(await goLiveSnapshot(updated));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/portal/admin/organisations/:id/go-live', requireCsrf, requireStaff('admin'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const scope = assertPlatformScope(req.context!);
+      const organisationId = organisationIdSchema.parse(req.params.id);
+      const organisation = await organisationRepo.findOrganisationById(organisationId);
+      if (!organisation) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      const readiness = await goLiveSnapshot(organisation);
+      if (organisation.status === 'LIVE' && readiness.ready) {
+        res.status(200).json(readiness);
+        return;
+      }
+      if (!readiness.ready) {
+        throw new HttpError(409, goLiveBlockedMessage(readiness.operational), 'GO_LIVE_GATES_INCOMPLETE', {
+          missingGates: readiness.operational.missingGates,
+        });
+      }
+      await organisationRepo.updateOrganisationStatus(organisationId, 'LIVE');
+      await identityRepo.appendAudit({
+        organisationId,
+        actorUid: scope.uid,
+        actorRole: scope.role,
+        event: 'organisation.went_live',
+        recordType: 'Organisation',
+        recordId: organisationId,
+        requestId: scope.requestId,
+        sessionHashPrefix: scope.sessionHash.slice(0, 12),
+        surface: scope.surface,
+        details: { missingGates: readiness.operational.missingGates },
+      });
+      const updated = await organisationRepo.findOrganisationById(organisationId);
+      if (!updated) throw new HttpError(404, 'Pharmacy record not found.', 'NOT_FOUND');
+      res.status(200).json(await goLiveSnapshot(updated));
     } catch (error) {
       next(error);
     }

@@ -218,7 +218,7 @@ function enquiryStatus(enquiry: PendingEnquiry): ReturnType<typeof deriveStatus>
 }
 
 function newOrderGateMessage(workspaceLive: boolean, patient: UnifiedPatient): string | null {
-  if (!workspaceLive) return 'Full pharmacy activation is required before creating an order.';
+  if (!workspaceLive) return 'HHH must flip this workspace live before creating an order.';
   if (!canCreateOrderForPatient(patient.crmPatient)) {
     return 'Orders unlock once HHH marks the patient Referred or Active. Enquiry and review stages must complete first.';
   }
@@ -288,21 +288,14 @@ export default function Patients() {
         orders: state.orders.filter(o => o.patientId === crm.id),
       });
     }
-    if (state.workspaceMode === 'training') {
-      for (const sub of state.submissions.filter(item => item.organisationId === state.currentOrganisationId)) {
-        const existing = map.get(sub.email.toLowerCase());
-        if (existing) {
-          existing.submission = sub;
-          if (!existing.dob) existing.dob = sub.dob;
-        }
-      }
-    }
     return Array.from(map.values());
-  }, [state.crm, state.submissions, state.orders, state.currentOrganisationId, state.workspaceMode]);
+  }, [state.crm, state.orders, state.currentOrganisationId]);
 
   const enquiries = useMemo(() => (
-    state.enquiries.filter(enquiry => enquiry.organisationId === state.currentOrganisationId)
-  ), [state.enquiries, state.currentOrganisationId]);
+    state.workspaceMode === 'training'
+      ? []
+      : state.enquiries.filter(enquiry => enquiry.organisationId === state.currentOrganisationId)
+  ), [state.enquiries, state.currentOrganisationId, state.workspaceMode]);
 
   const records = useMemo<CrmRecord[]>(() => {
     const patientEmails = new Set(patients.map(patient => patient.email.toLowerCase()));
@@ -437,8 +430,8 @@ export default function Patients() {
   }, [dispatch, records, state.navigationTarget]);
 
   const handleCreateOrder = (patient: UnifiedPatient) => {
-    if (state.workspaceMode !== 'live') {
-      dispatch({ type: 'ADD_TOAST', message: 'Prescription ordering remains locked until full pharmacy activation.', toastType: 'warning' });
+    if (state.workspaceMode !== 'live' && state.workspaceMode !== 'training') {
+      dispatch({ type: 'ADD_TOAST', message: 'Prescription ordering remains locked until the training workspace is available.', toastType: 'warning' });
       return;
     }
     const crmPatient = patient.crmPatient;
@@ -562,7 +555,7 @@ export default function Patients() {
           {selected?.patient ? (
             <PatientCrmDetail
               record={selected}
-              workspaceLive={state.workspaceMode === 'live'}
+              workspaceLive={state.workspaceMode === 'live' || state.workspaceMode === 'training'}
               onCreateOrder={() => handleCreateOrder(selected.patient!)}
               onOpenOrder={order => {
                 dispatch({ type: 'SET_NAVIGATION_TARGET', target: { kind: 'order', key: String(order.id) } });

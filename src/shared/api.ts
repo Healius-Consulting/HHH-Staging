@@ -588,6 +588,13 @@ export function activateCuraleafPharmacy(input: CuraleafActivationInput) {
   });
 }
 
+export function refreshCuraleafConnection(organisationId: string) {
+  return apiRequest<CuraleafConnectionStatus>('/v1/portal/integrations/curaleaf/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ organisationId }),
+  });
+}
+
 export function approveCuraleafPharmacy(organisationId: string) {
   return apiRequest<CuraleafConnectionStatus & { setup?: import('./contracts').PharmacySetupStatus }>(
     `/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/approve-curaleaf`,
@@ -849,6 +856,13 @@ export function getPharmacySetupStatus(organisationId: string) {
 
 export function getAdminPharmacySetupStatuses() {
   return apiRequest<{ records: PharmacySetupStatus[] }>('/v1/portal/admin/setup-status');
+}
+
+export function updateAdminPharmacySetupTask(organisationId: string, taskId: SetupTaskId, input: { completed: boolean; evidence?: string }) {
+  return apiRequest<PharmacySetupStatus>(`/v1/portal/admin/organisations/${encodeURIComponent(organisationId)}/setup/${encodeURIComponent(taskId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
 }
 
 export function updatePharmacySetupTask(taskId: SetupTaskId, input: UpdatePharmacySetupTaskInput) {

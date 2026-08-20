@@ -1,5 +1,5 @@
 export type PortalSurface = 'pharmacy' | 'admin';
-export type AdminView = 'overview' | 'referrals' | 'patients' | 'finance' | 'platform';
+export type AdminView = 'overview' | 'referrals' | 'patients' | 'finance';
 
 export const ADMIN_VIEW_PATHS: Readonly<Record<AdminView, string>>;
 export const PHARMACY_VIEW_PATHS: readonly string[];
