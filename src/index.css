@@ -15301,14 +15301,24 @@ body:has(.local-preview-switcher) .rx-guided__chrome{
   border-radius: 10px;
 }
 
+.rx-basket-drawer__product,
 .rx-basket-drawer__list strong,
-.rx-basket-drawer__list small{
+.rx-basket-drawer__list small,
+.rx-basket-drawer__strength{
   display: block;
 }
 
 .rx-basket-drawer__list strong{
   color: var(--text-primary);
   font-size: 14px;
+  line-height: 1.35;
+}
+
+.rx-basket-drawer__strength{
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
   line-height: 1.35;
 }
 
