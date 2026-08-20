@@ -1652,8 +1652,17 @@ export default function CreateOrder() {
                     </div>
                   )}
                 <footer className="rx-checkout-panel__submit">
-                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : paidRedo ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? 'send payment link' : 'Continue with manual payment'}</button>
-                  {!readyForPayment ? <p className="rx-checkout-blocker"><AlertTriangle size={13} /><span><strong>Payment remains locked</strong>{outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}{outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}</span></p> : null}
+                  {!readyForPayment ? (
+                    <p id="rx-checkout-lock-tip" className="rx-checkout-blocker" role="status">
+                      <AlertTriangle size={14} aria-hidden="true" />
+                      <span>
+                        <strong>Payment remains locked</strong>
+                        {outstandingPaymentGates.slice(0, 2).map(item => item.label).join(' · ')}
+                        {outstandingPaymentGates.length > 2 ? ` · +${outstandingPaymentGates.length - 2} more` : ''}
+                      </span>
+                    </p>
+                  ) : null}
+                  <button type="button" className="btn btn-primary rx-create-payment" disabled={checkoutBusy || !readyForPayment || (selectedPaymentRoute === 'worldpay' && !canUseWorldpay)} aria-describedby={!readyForPayment ? 'rx-checkout-lock-tip' : undefined} onClick={() => void createPaymentRequest()}><Send size={15} />{checkoutBusy ? 'Saving order…' : paidRedo ? 'Save replacement order' : selectedPaymentRoute === 'worldpay' ? 'send payment link' : 'Continue with manual payment'}</button>
                 </footer>
                 </div>
                 </div>
