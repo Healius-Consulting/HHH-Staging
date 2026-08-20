@@ -83,24 +83,6 @@ mutation AppendAuditLog(
   })
 }
 
-mutation UpsertSetupTask(
-  $organisationId: UUID!
-  $taskCode: String!
-  $completed: Boolean!
-  $evidence: String
-  $completedByUid: String
-  $completedAt: Timestamp
-) @auth(level: NO_ACCESS) {
-  setupTask_upsert(data: {
-    organisationId: $organisationId
-    taskCode: $taskCode
-    completed: $completed
-    evidence: $evidence
-    completedByUid: $completedByUid
-    completedAt: $completedAt
-  })
-}
-
 mutation UpdateStaffPreferences(
   $uid: String!
   $preferences: Any!
