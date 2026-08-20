@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, CircleDollarSign, Package, Search, ShieldCheck, Tags } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
+import MedicineLabel from '../components/MedicineLabel';
 import { money, TYPE_LABELS, useApp } from '../context/AppContext';
 
 const TYPE_FILTERS = ['All', 'oil', 'flos', 'capsule', 'lozenge', 'vape', 'other'] as const;
@@ -125,7 +126,7 @@ export default function FormularyPricing() {
           ) : pageProducts.map((product, index) => (
             <div className="pricing-row pricing-row--readonly" role="row" key={product.id} style={{ '--stagger-index': index } as CSSProperties}>
               <span className="pricing-product" role="cell">
-                <strong>{product.name}</strong>
+                <MedicineLabel name={product.name} />
                 <small><Tags size={12} /> {TYPE_LABELS[product.type] || product.type}</small>
               </span>
               <span className="pricing-pack" role="cell">

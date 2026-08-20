@@ -4,6 +4,7 @@ import { prescriptionDateIsCurrent } from '@hhh/domain/prescription-date';
 import { AlertTriangle, ArrowRight, Banknote, CheckCircle, ChevronDown, ChevronUp, CreditCard, FileScan, FileText, Minus, Pencil, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import ProviderStatusNotice from '../components/ProviderStatusNotice';
 import ManualPrescriptionEditor from '../components/ManualPrescriptionEditor';
+import MedicineLabel from '../components/MedicineLabel';
 import {
   useApp,
   money,
@@ -28,14 +29,6 @@ import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 type GuidedRxPhase = 'route' | 'upload' | 'details';
 
 const rxPhaseRank = (phase: GuidedRxPhase) => (phase === 'route' ? 1 : phase === 'upload' ? 2 : 3);
-
-function splitMedicineLabel(name: string) {
-  const separator = name.lastIndexOf(', ');
-  if (separator <= 0) return { title: name, strength: null as string | null };
-  const strength = name.slice(separator + 2).trim();
-  if (!/(THC|CBD|mg\b|%)/i.test(strength)) return { title: name, strength: null as string | null };
-  return { title: name.slice(0, separator).trim(), strength };
-}
 const maxRxPhase = (current: GuidedRxPhase, next: GuidedRxPhase) => (rxPhaseRank(next) > rxPhaseRank(current) ? next : current);
 
 export default function CreateOrder() {
@@ -1511,7 +1504,7 @@ export default function CreateOrder() {
                             <article className="rx-prescribed-item" key={item.productId}>
                               <header className="rx-prescribed-item__header">
                                 <span className="rx-prescribed-item__index">Medicine {String(index + 1).padStart(2, '0')}</span>
-                                <span className="rx-prescribed-item__identity"><strong>{item.name}</strong><small>Matched from the Curaleaf prescription · {item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {item.unitsNeededCount ?? '—'} {product?.unit ?? 'units'}</small></span>
+                                <span className="rx-prescribed-item__identity"><MedicineLabel name={item.name} /><small>Matched from the Curaleaf prescription · {item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {item.unitsNeededCount ?? '—'} {product?.unit ?? 'units'}</small></span>
                                 <span className={`pill ${stockPill}`}>{stockLabel}</span>
                               </header>
                             </article>
@@ -1635,12 +1628,10 @@ export default function CreateOrder() {
               <ul className="rx-basket-drawer__list">
                 {draftBasketItems.map(item => {
                   const margin = lineMargin(item);
-                  const { title, strength } = splitMedicineLabel(item.name);
                   return (
                     <li key={`${item.rxId}-${item.productId}`}>
                       <span className="rx-basket-drawer__product">
-                        <strong>{title}</strong>
-                        {strength ? <span className="rx-basket-drawer__strength">{strength}</span> : null}
+                        <MedicineLabel name={item.name} />
                         <small>{item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each</small>
                       </span>
                       <span className="rx-basket-drawer__line">

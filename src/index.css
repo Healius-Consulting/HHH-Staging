@@ -4553,6 +4553,21 @@ html[data-reduced-motion='true'] :is(.payment-ledger-row, .payment-detail){ anim
 
 .pricing-product > small{ display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--text-tertiary); font-size: 8px; }
 
+.medicine-label__strength{
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.pricing-product .medicine-label__strength{
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
 .pricing-product em{ padding: 2px 5px; border-radius: 999px; color: var(--tenant-primary-strong); background: var(--tenant-primary-soft); font-size: 7px; font-style: normal; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 
 .pricing-stock{ display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 8px; }
@@ -4956,11 +4971,15 @@ html[data-reduced-motion='true'] .mobile-more-sheet { animation: none; }
 .rx-prescribed-item__identity strong, .rx-prescribed-item__identity small, .rx-prescribed-item__margin strong, .rx-prescribed-item__margin small, .rx-prescribed-item__quantity > small, .rx-price-node > small, .rx-price-node > strong, .rx-price-node > em, .rx-prescribed-item__contribution > small, .rx-prescribed-item__contribution > strong, .rx-prescribed-item__contribution > em{ display: block; }
 
 .rx-prescribed-item__identity strong{
-  overflow: hidden;
+  overflow: visible;
   color: var(--text-primary);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.rx-prescribed-item__identity .medicine-label__strength{
+  overflow: visible;
+  font-size: 11px;
 }
 
 .rx-prescribed-item__identity small{ margin-top: 3px; color: var(--text-tertiary); font-size: 8px; }
@@ -6787,7 +6806,9 @@ html.modal-open .page-container{ overflow: hidden; }
   grid-template-columns: minmax(280px, 1.65fr) minmax(130px, .7fr) minmax(120px, .55fr) minmax(145px, .65fr) minmax(150px, .7fr);
 }
 
-.pricing-table--readonly .pricing-product > strong{ font-size: 12px; }
+.pricing-table--readonly .pricing-product > strong{ overflow: visible; font-size: 13px; white-space: normal; }
+
+.pricing-table--readonly .pricing-product .medicine-label__strength{ overflow: visible; font-size: 12px; }
 
 .pricing-table--readonly .pricing-product > small, .pricing-table--readonly .pricing-stock, .pricing-table--readonly .pricing-cost small{ font-size: 11px; }
 
@@ -15132,7 +15153,8 @@ html[data-theme='dark'] .auth-loading-page{
 }
 
 .rx-workbench--guided .manual-rx-picker__results button{
-  grid-template-columns: minmax(0, 1.4fr) auto auto 96px;
+  grid-template-columns: minmax(0, 1.4fr) auto auto 88px;
+  align-items: center;
   gap: 10px 12px;
   min-height: 76px;
   padding: 12px 14px;
@@ -15150,10 +15172,14 @@ html[data-theme='dark'] .auth-loading-page{
 }
 
 .rx-workbench--guided .manual-rx-picker__product strong{
-  overflow: hidden;
+  overflow: visible;
   font-size: 13px;
   line-height: 1.35;
   white-space: normal;
+}
+
+.rx-workbench--guided .manual-rx-picker__product .medicine-label__strength{
+  font-size: 12px;
 }
 
 .rx-workbench--guided .manual-rx-picker__pack strong,
@@ -15162,7 +15188,10 @@ html[data-theme='dark'] .auth-loading-page{
 }
 
 .rx-workbench--guided .manual-rx-picker__add{
+  align-self: center;
+  width: 88px;
   min-width: 88px;
+  height: 44px;
   min-height: 44px;
   border-radius: 8px;
   font-size: 12px;
@@ -15304,7 +15333,7 @@ body:has(.local-preview-switcher) .rx-guided__chrome{
 .rx-basket-drawer__product,
 .rx-basket-drawer__list strong,
 .rx-basket-drawer__list small,
-.rx-basket-drawer__strength{
+.rx-basket-drawer__product .medicine-label__strength{
   display: block;
 }
 
@@ -15314,12 +15343,8 @@ body:has(.local-preview-switcher) .rx-guided__chrome{
   line-height: 1.35;
 }
 
-.rx-basket-drawer__strength{
-  margin-top: 2px;
-  color: var(--text-secondary);
+.rx-basket-drawer__product .medicine-label__strength{
   font-size: 13px;
-  font-weight: 500;
-  line-height: 1.35;
 }
 
 .rx-basket-drawer__list small{
