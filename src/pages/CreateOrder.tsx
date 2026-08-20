@@ -102,6 +102,7 @@ export default function CreateOrder() {
   const [guidedRxReveal, setGuidedRxReveal] = useState<GuidedRxPhase>('route');
   const [confirmingRouteSwitch, setConfirmingRouteSwitch] = useState<'clinic' | 'manual' | null>(null);
   const [basketOpen, setBasketOpen] = useState(false);
+  const [showReturnToTop, setShowReturnToTop] = useState(false);
   const [basketHost, setBasketHost] = useState<HTMLElement | null>(null);
   const [guidedLockNotice, setGuidedLockNotice] = useState<string | null>(null);
   const guidedStageHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -455,6 +456,16 @@ export default function CreateOrder() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [basketOpen]);
+
+  useEffect(() => {
+    if (!guidedLayout) return;
+    const scroller = document.getElementById('pharmacy-main-content');
+    if (!scroller) return;
+    const update = () => setShowReturnToTop(scroller.scrollTop > 120);
+    update();
+    scroller.addEventListener('scroll', update, { passive: true });
+    return () => scroller.removeEventListener('scroll', update);
+  }, [guidedLayout]);
 
   useEffect(() => {
     setBasketHost(document.querySelector('.app-main'));
@@ -1680,10 +1691,12 @@ export default function CreateOrder() {
     </div>
     {guidedLayout && activeOrder && basketHost ? createPortal(
       <div className="rx-guided__chrome">
-        <button type="button" className="rx-guided__top" onClick={returnToTop}>
-          <ChevronUp size={16} aria-hidden="true" />
-          Return to top
-        </button>
+        {showReturnToTop ? (
+          <button type="button" className="rx-guided__top" onClick={returnToTop}>
+            <ChevronUp size={16} aria-hidden="true" />
+            Return to top
+          </button>
+        ) : null}
         <aside className={`rx-basket-drawer${basketOpen ? ' is-open' : ''}`} aria-label="Draft medicines and cost">
           <button
             type="button"

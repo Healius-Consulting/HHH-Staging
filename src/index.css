@@ -14728,27 +14728,32 @@ html[data-theme='dark'] .auth-loading-page{
   z-index: 45;
   right: 16px;
   bottom: 16px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
   width: min(600px, calc(100% - 32px));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg-surface);
-  box-shadow: 0 16px 40px rgba(13, 29, 26, .16);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.rx-guided__chrome > *{
+  pointer-events: auto;
 }
 
 .rx-guided__top{
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  width: 100%;
+  width: auto;
   min-height: 44px;
   padding: 10px 16px;
-  border: 0;
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--tenant-primary-strong);
-  background: transparent;
+  background: var(--bg-surface);
+  box-shadow: 0 8px 20px rgba(13, 29, 26, .12);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
@@ -14761,7 +14766,7 @@ html[data-theme='dark'] .auth-loading-page{
 
 .rx-guided__top:focus-visible{
   outline: 2px solid var(--tenant-primary);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
 .rx-guided__stage{
@@ -15431,9 +15436,10 @@ html[data-theme='dark'] .auth-loading-page{
 .rx-basket-drawer{
   width: 100%;
   overflow: hidden;
-  border: 0;
-  border-radius: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
   background: var(--bg-surface);
+  box-shadow: 0 16px 40px rgba(13, 29, 26, .16);
 }
 
 body:has(.local-preview-switcher) .rx-guided__chrome{
@@ -15497,6 +15503,10 @@ body:has(.local-preview-switcher) .rx-guided__chrome{
   max-height: min(56vh, 560px);
   overflow: hidden;
   border-top: 1px solid var(--border);
+}
+
+.rx-basket-drawer__panel[hidden]{
+  display: none !important;
 }
 
 .rx-basket-drawer__scroll{
@@ -15682,7 +15692,7 @@ body:has(.local-preview-switcher) .rx-guided__chrome{
 }
 
 @media (prefers-reduced-motion: reduce){
-  .rx-guided__chrome{
+  .rx-basket-drawer{
     box-shadow: 0 1px 0 var(--border);
   }
 }
