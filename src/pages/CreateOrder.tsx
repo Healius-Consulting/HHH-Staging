@@ -16,6 +16,7 @@ import {
   marginPct,
   getUnresolvedReason,
   orderReference,
+  type CatalogueItem,
   type LineItem,
   type PatientOrder,
   type UnresolvedOrderReason,
@@ -30,6 +31,32 @@ type GuidedRxPhase = 'route' | 'upload' | 'details';
 
 const rxPhaseRank = (phase: GuidedRxPhase) => (phase === 'route' ? 1 : phase === 'upload' ? 2 : 3);
 const maxRxPhase = (current: GuidedRxPhase, next: GuidedRxPhase) => (rxPhaseRank(next) > rxPhaseRank(current) ? next : current);
+
+function basketItemIssue(input: {
+  productId: string;
+  cost: number | null;
+  catalogue?: CatalogueItem;
+  unavailableProductIds: string[];
+  quoteError: boolean;
+}): { tone: 'blocked' | 'warning'; label: string } | null {
+  const { catalogue, unavailableProductIds, productId, cost, quoteError } = input;
+  if (unavailableProductIds.includes(productId) || catalogue?.availability === 'out') {
+    return { tone: 'blocked', label: 'Out of stock' };
+  }
+  if (catalogue?.supplierState && catalogue.supplierState !== 'ACTIVE') {
+    return { tone: 'blocked', label: 'Unavailable' };
+  }
+  if (cost === null && quoteError) {
+    return { tone: 'blocked', label: 'Quote needs attention' };
+  }
+  if (catalogue?.availability === 'low') {
+    return { tone: 'warning', label: 'Low stock' };
+  }
+  if (catalogue?.availability === 'unknown' && cost !== null) {
+    return { tone: 'warning', label: 'Stock check required' };
+  }
+  return null;
+}
 
 export default function CreateOrder() {
   const { state, dispatch } = useApp();
@@ -277,6 +304,15 @@ export default function CreateOrder() {
     : [];
   const draftBasketCount = draftBasketItems.length;
   const draftBasketTotal = activeOrder ? orderRevenue(activeOrder) : 0;
+  const draftBasketIssues = draftBasketItems.map(item => basketItemIssue({
+    productId: item.productId,
+    cost: item.cost,
+    catalogue: state.catalogue.find(product => product.id === item.productId),
+    unavailableProductIds: currentUnavailableProductIds,
+    quoteError: Boolean(quoteError),
+  }));
+  const draftBasketBlockedCount = draftBasketIssues.filter(issue => issue?.tone === 'blocked').length;
+  const draftBasketWarningCount = draftBasketIssues.filter(issue => issue?.tone === 'warning').length;
   const canEditBasketItems = Boolean(selectedRx && (selectedRx.entryMode === 'manual' || editingClinicFormularyRxId === selectedRx.id));
   const guidedRxPhaseForProgress = !guidedRouteChosen ? 'route' as const : !prescriptionUploaded ? 'upload' as const : 'details' as const;
   const returnToTop = () => {
@@ -1540,6 +1576,33 @@ export default function CreateOrder() {
                     <button type="button" className="btn btn-secondary btn-sm" disabled={quoteBusy || !currentQuoteItems.length} onClick={() => void refreshQuote()}><RefreshCw size={13} className={quoteBusy ? 'spin' : ''} /> {quoteBusy ? 'Retrying quote…' : 'Retry quote now'}</button>
                   </> : null}
                 </div>
+                {draftBasketCount ? (
+                  <section className="rx-checkout-basket" aria-label="Draft medicines in this order">
+                    <header className="rx-checkout-basket__head">
+                      <span className="section-label">Draft basket</span>
+                      <strong>{draftBasketCount} medicine{draftBasketCount === 1 ? '' : 's'} · {money(draftBasketTotal)}</strong>
+                    </header>
+                    <ul className="rx-checkout-basket__list">
+                      {draftBasketItems.map((item, index) => {
+                        const margin = lineMargin(item);
+                        const issue = draftBasketIssues[index];
+                        return (
+                          <li key={`${item.rxId}-${item.productId}`} className={issue ? `is-${issue.tone}` : undefined}>
+                            <span className="rx-checkout-basket__product">
+                              <MedicineLabel name={item.name} />
+                              <small>{item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each</small>
+                              {issue ? <span className="rx-basket-drawer__issue"><AlertTriangle size={13} aria-hidden="true" />{issue.label}</span> : null}
+                            </span>
+                            <span className="rx-checkout-basket__line">
+                              <strong>{money(lineRevenue(item))}</strong>
+                              <small>{item.cost === null || margin === null ? 'Quote pending' : `${margin}% · ${money(lineCost(item))}`}</small>
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                ) : null}
                 <div className="rx-checkout-panel__settle">
                 <div className="rx-checkout-panel__review">
                 <div className="rx-dispensing-charge">
@@ -1617,7 +1680,10 @@ export default function CreateOrder() {
           >
             <span>
               <small>Draft basket</small>
-              <strong>{draftBasketCount} medicine{draftBasketCount === 1 ? '' : 's'} · {money(draftBasketTotal)}</strong>
+              <strong>
+                {draftBasketCount} medicine{draftBasketCount === 1 ? '' : 's'} · {money(draftBasketTotal)}
+                {draftBasketBlockedCount ? ` · ${draftBasketBlockedCount} need attention` : draftBasketWarningCount ? ` · ${draftBasketWarningCount} stock warning${draftBasketWarningCount === 1 ? '' : 's'}` : ''}
+              </strong>
             </span>
             <span className="rx-basket-drawer__hint">{basketOpen ? 'Hide choices' : 'Show choices'}{basketOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</span>
           </button>
@@ -1626,13 +1692,15 @@ export default function CreateOrder() {
               <p className="rx-basket-drawer__empty">No medicines in this draft yet. Add them in step 3. Prices appear here.</p>
             ) : (
               <ul className="rx-basket-drawer__list">
-                {draftBasketItems.map(item => {
+                {draftBasketItems.map((item, index) => {
                   const margin = lineMargin(item);
+                  const issue = draftBasketIssues[index];
                   return (
-                    <li key={`${item.rxId}-${item.productId}`}>
+                    <li key={`${item.rxId}-${item.productId}`} className={issue ? `is-${issue.tone}` : undefined}>
                       <span className="rx-basket-drawer__product">
                         <MedicineLabel name={item.name} />
                         <small>{item.qty} {item.qty === 1 ? 'pack' : 'packs'} · {money(item.retail)} each</small>
+                        {issue ? <span className="rx-basket-drawer__issue"><AlertTriangle size={13} aria-hidden="true" />{issue.label}</span> : null}
                       </span>
                       <span className="rx-basket-drawer__line">
                         <strong>{money(lineRevenue(item))}</strong>
@@ -1650,6 +1718,12 @@ export default function CreateOrder() {
                 })}
               </ul>
             )}
+            {draftBasketBlockedCount ? (
+              <p className="rx-basket-drawer__alert" role="status">
+                <AlertTriangle size={14} aria-hidden="true" />
+                {draftBasketBlockedCount} medicine{draftBasketBlockedCount === 1 ? ' is' : 's are'} out of stock or unavailable. Payment stays locked until Curaleaf marks them available.
+              </p>
+            ) : null}
             <dl className="rx-basket-drawer__totals">
               <div><dt>Products</dt><dd>{money(draftBasketTotal - (activeOrder.dispensingFee || 0))}</dd></div>
               <div><dt>Dispensing</dt><dd>{money(activeOrder.dispensingFee || 0)}</dd></div>

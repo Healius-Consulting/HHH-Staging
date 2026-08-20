@@ -55,8 +55,8 @@
 .manual-rx-medicines__number { align-self: center; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--tenant-primary-soft); color: var(--tenant-primary); font-size: 11px; font-weight: 800; }
 .manual-rx-medicines__identity { align-self: center; min-width: 0; }
 .manual-rx-medicines__identity strong, .manual-rx-medicines__identity small { display: block; }
-.manual-rx-medicines__identity strong { overflow: visible; margin-top: 3px; color: var(--text-primary); white-space: normal; font-size: 13px; }
-.manual-rx-medicines__identity .medicine-label__strength { overflow: visible; font-size: 12px; }
+.manual-rx-medicines__identity strong { overflow: hidden; margin-top: 3px; color: var(--text-primary); white-space: nowrap; font-size: 13px; }
+.manual-rx-medicines__identity .medicine-label__strength { overflow: hidden; font-size: 12px; }
 .manual-rx-medicines__identity small { color: var(--tenant-primary-strong); font-size: 8px; font-weight: 750; letter-spacing: .065em; text-transform: uppercase; }
 .manual-pack-card__body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--bg-elevated) 55%, var(--bg-surface)); }
 .manual-pack-fact, .manual-pack-quantity { display: grid; min-width: 0; align-content: center; padding: 10px 12px; border-right: 1px solid var(--border); }
@@ -104,16 +104,18 @@
 .manual-rx-picker__results strong, .manual-rx-picker__results small { display: block; }
 .manual-rx-picker__results small { color: var(--text-tertiary); font-size: 8px; }
 .manual-rx-picker__results strong { margin-top: 3px; color: var(--text-primary); font-size: 10px; }
-.manual-rx-picker__product { min-width: 0; }
+.manual-rx-picker__product { min-width: 0; overflow: hidden; }
 .manual-rx-picker__product small { color: var(--tenant-primary-strong); font-weight: 700; text-transform: capitalize; }
-.manual-rx-picker__product strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.manual-rx-picker__product .medicine-label__strength { overflow: hidden; font-size: 10px; text-overflow: ellipsis; }
+.manual-rx-picker__product strong { display: block; min-width: 0; overflow: hidden; font-size: 11px; }
+.manual-rx-picker__product .medicine-label__strength { overflow: hidden; font-size: 10px; }
 .manual-rx-picker__pack strong, .manual-rx-picker__price strong { font-size: 12px; font-variant-numeric: tabular-nums; }
 .manual-rx-picker__price { text-align: right; }
 .manual-rx-picker__add { display: flex; align-self: center; align-items: center; justify-content: center; gap: 4px; width: 88px; min-width: 88px; height: 44px; min-height: 44px; border: 1px solid color-mix(in srgb, var(--tenant-primary) 34%, var(--border)); border-radius: 6px; color: var(--tenant-primary-strong); background: var(--tenant-primary-soft); font-size: 9px; font-weight: 700; box-sizing: border-box; }
 .manual-rx-picker__results button.is-selected .manual-rx-picker__add { border-color: transparent; color: var(--text-secondary); background: transparent; }
 .manual-rx-picker__empty { display: block; padding: 18px; color: var(--text-tertiary); font-size: 10px; text-align: center; }
-.manual-rx-picker__more { display: block; padding: 8px 12px; border-top: 1px solid var(--border); color: var(--text-tertiary); background: var(--bg-elevated); font-size: 8px; text-align: center; }
+.manual-rx-picker__pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; border-top: 1px solid var(--border); color: var(--text-secondary); background: var(--bg-elevated); font-size: 11px; }
+.manual-rx-picker__pager .btn { min-height: 44px; }
+.manual-rx-picker__pager span { flex: 1 1 140px; text-align: center; }
 @media (max-width: 760px) {
   .rx-entry-mode { grid-template-columns: 1fr; }
   .manual-rx-details__header { align-items: flex-start; flex-direction: column; gap: 3px; }

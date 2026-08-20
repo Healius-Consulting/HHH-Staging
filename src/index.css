@@ -4549,7 +4549,7 @@ html[data-reduced-motion='true'] :is(.payment-ledger-row, .payment-detail){ anim
 
 .pricing-product{ min-width: 0; }
 
-.pricing-product > strong{ display: block; overflow: hidden; color: var(--text-primary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.pricing-product > strong{ display: block; min-width: 0; overflow: hidden; color: var(--text-primary); font-size: 11px; }
 
 .pricing-product > small{ display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--text-tertiary); font-size: 8px; }
 
@@ -4560,6 +4560,45 @@ html[data-reduced-motion='true'] :is(.payment-ledger-row, .payment-detail){ anim
   font-size: 13px;
   font-weight: 500;
   line-height: 1.35;
+  min-width: 0;
+}
+
+.pendulum-text{
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pendulum-text__inner{
+  display: inline-block;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.pendulum-text[data-overflow='true'] .pendulum-text__inner{
+  animation: pendulum-text 9s ease-in-out infinite;
+}
+
+@keyframes pendulum-text{
+  0%, 14%{ transform: translateX(0); }
+  46%, 58%{ transform: translateX(var(--pendulum-shift, 0px)); }
+  88%, 100%{ transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce){
+  .pendulum-text[data-overflow='true'] .pendulum-text__inner{
+    animation: none;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+html[data-reduced-motion='true'] .pendulum-text[data-overflow='true'] .pendulum-text__inner{
+  animation: none;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pricing-product .medicine-label__strength{
@@ -4971,14 +5010,14 @@ html[data-reduced-motion='true'] .mobile-more-sheet { animation: none; }
 .rx-prescribed-item__identity strong, .rx-prescribed-item__identity small, .rx-prescribed-item__margin strong, .rx-prescribed-item__margin small, .rx-prescribed-item__quantity > small, .rx-price-node > small, .rx-price-node > strong, .rx-price-node > em, .rx-prescribed-item__contribution > small, .rx-prescribed-item__contribution > strong, .rx-prescribed-item__contribution > em{ display: block; }
 
 .rx-prescribed-item__identity strong{
-  overflow: visible;
+  overflow: hidden;
   color: var(--text-primary);
   font-size: 12px;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .rx-prescribed-item__identity .medicine-label__strength{
-  overflow: visible;
+  overflow: hidden;
   font-size: 11px;
 }
 
@@ -6806,9 +6845,9 @@ html.modal-open .page-container{ overflow: hidden; }
   grid-template-columns: minmax(280px, 1.65fr) minmax(130px, .7fr) minmax(120px, .55fr) minmax(145px, .65fr) minmax(150px, .7fr);
 }
 
-.pricing-table--readonly .pricing-product > strong{ overflow: visible; font-size: 13px; white-space: normal; }
+.pricing-table--readonly .pricing-product > strong{ overflow: hidden; font-size: 13px; white-space: nowrap; }
 
-.pricing-table--readonly .pricing-product .medicine-label__strength{ overflow: visible; font-size: 12px; }
+.pricing-table--readonly .pricing-product .medicine-label__strength{ overflow: hidden; font-size: 12px; }
 
 .pricing-table--readonly .pricing-product > small, .pricing-table--readonly .pricing-stock, .pricing-table--readonly .pricing-cost small{ font-size: 11px; }
 
@@ -6875,7 +6914,7 @@ html.modal-open .page-container{ overflow: hidden; }
 .pricing-table--readonly .pricing-row > :nth-child(2){ display: flex; }
 .pricing-table--readonly .pricing-pack, .pricing-table--readonly .pricing-stock, .pricing-table--readonly .pricing-patient-price, .pricing-table--readonly .pricing-cost{ grid-column: auto; grid-row: auto; }
 .pricing-table--readonly .pricing-cost{ display: block; }
-.pricing-table--readonly .pricing-product > strong{ overflow: visible; font-size: 13px; white-space: normal; }
+.pricing-table--readonly .pricing-product > strong{ overflow: hidden; font-size: 13px; white-space: nowrap; }
 .rx-mobile-review-bar{
     position: fixed;
     z-index: 1120;
@@ -14865,6 +14904,110 @@ html[data-theme='dark'] .auth-loading-page{
   border-bottom: 1px solid var(--border);
 }
 
+.rx-checkout-basket{
+  display: grid;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rx-checkout-basket__head{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.rx-checkout-basket__head strong{
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.rx-checkout-basket__list{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rx-checkout-basket__list > li{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 12px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+
+.rx-checkout-basket__list > li.is-blocked{
+  border-color: color-mix(in srgb, var(--color-danger) 42%, var(--border));
+  background: color-mix(in srgb, var(--color-danger) 7%, var(--bg-surface));
+}
+
+.rx-checkout-basket__list > li.is-warning{
+  border-color: color-mix(in srgb, var(--color-warning) 42%, var(--border));
+  background: color-mix(in srgb, var(--color-warning) 8%, var(--bg-surface));
+}
+
+.rx-checkout-basket__product,
+.rx-checkout-basket__product strong,
+.rx-checkout-basket__product small,
+.rx-checkout-basket__product .medicine-label__strength{
+  display: block;
+  min-width: 0;
+}
+
+.rx-checkout-basket__product{
+  overflow: hidden;
+}
+
+.rx-checkout-basket__product strong{
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.rx-checkout-basket__product .medicine-label__strength{
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.rx-checkout-basket__product small{
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.rx-checkout-basket__line{
+  text-align: right;
+}
+
+.rx-checkout-basket__line strong,
+.rx-checkout-basket__line small{
+  display: block;
+}
+
+.rx-checkout-basket__line strong{
+  color: var(--text-primary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rx-checkout-basket__line small{
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .rx-workbench--guided .rx-checkout-panel__settle{
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -15077,6 +15220,10 @@ html[data-theme='dark'] .auth-loading-page{
     border-bottom: 1px solid var(--border);
   }
 
+  .rx-checkout-basket__list{
+    grid-template-columns: 1fr;
+  }
+
   .rx-workbench--guided .rx-checkout-panel--guided .rx-dispensing-charge .rx-patient-total{
     margin: auto 0 16px;
   }
@@ -15171,11 +15318,16 @@ html[data-theme='dark'] .auth-loading-page{
   font-size: 11px;
 }
 
+.rx-workbench--guided .manual-rx-picker__product{
+  min-width: 0;
+  overflow: hidden;
+}
+
 .rx-workbench--guided .manual-rx-picker__product strong{
-  overflow: visible;
+  overflow: hidden;
   font-size: 13px;
   line-height: 1.35;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .rx-workbench--guided .manual-rx-picker__product .medicine-label__strength{
@@ -15198,9 +15350,13 @@ html[data-theme='dark'] .auth-loading-page{
 }
 
 .rx-workbench--guided .manual-rx-picker__empty,
-.rx-workbench--guided .manual-rx-picker__more{
+.rx-workbench--guided .manual-rx-picker__pager{
   grid-column: 1 / -1;
   font-size: 13px;
+}
+
+.rx-workbench--guided .manual-rx-picker__pager{
+  padding: 10px 16px;
 }
 
 @media (max-width: 900px){
@@ -15319,18 +15475,55 @@ body:has(.local-preview-switcher) .rx-guided__chrome{
   list-style: none;
 }
 
-.rx-basket-drawer__list > li{
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 12px;
-  min-height: 72px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+.rx-basket-drawer__list > li.is-blocked{
+  border-color: color-mix(in srgb, var(--color-danger) 42%, var(--border));
+  background: color-mix(in srgb, var(--color-danger) 7%, var(--bg-surface));
 }
 
-.rx-basket-drawer__product,
+.rx-basket-drawer__list > li.is-warning{
+  border-color: color-mix(in srgb, var(--color-warning) 42%, var(--border));
+  background: color-mix(in srgb, var(--color-warning) 8%, var(--bg-surface));
+}
+
+.rx-basket-drawer__issue{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--color-danger);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.rx-basket-drawer__list > li.is-warning .rx-basket-drawer__issue{
+  color: var(--color-warning);
+}
+
+.rx-basket-drawer__alert{
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 32%, var(--border));
+  border-radius: 8px;
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 7%, var(--bg-surface));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.rx-basket-drawer__alert svg{
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.rx-basket-drawer__product{
+  min-width: 0;
+  overflow: hidden;
+}
+
 .rx-basket-drawer__list strong,
 .rx-basket-drawer__list small,
 .rx-basket-drawer__product .medicine-label__strength{
@@ -15338,12 +15531,15 @@ body:has(.local-preview-switcher) .rx-guided__chrome{
 }
 
 .rx-basket-drawer__list strong{
+  overflow: hidden;
   color: var(--text-primary);
   font-size: 14px;
   line-height: 1.35;
+  white-space: nowrap;
 }
 
 .rx-basket-drawer__product .medicine-label__strength{
+  overflow: hidden;
   font-size: 13px;
 }
 

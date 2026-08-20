@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { normalisePrescriptionDateParts, prescriptionDateWindowStatus, prescriptionExpiryDisplay } from '@hhh/domain/prescription-date';
-import { Check, Minus, Package, Plus, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Minus, Package, Plus, Search, Trash2 } from 'lucide-react';
 import MedicineLabel from './MedicineLabel';
 import type { CatalogueItem, LineItem, Prescription } from '../context/AppContext';
 import { money, useApp } from '../context/AppContext';
@@ -22,6 +22,9 @@ const catalogueTypeLabels: Record<CatalogueItem['type'], string> = {
   vape: 'Vape',
   other: 'Other',
 };
+
+const GUIDED_PAGE_SIZE = 24;
+const COMPACT_PAGE_SIZE = 16;
 
 const dateParts = (value?: string) => {
   const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -141,6 +144,8 @@ export default function ManualPrescriptionEditor({
   const { state } = useApp();
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<CatalogueTypeFilter>('all');
+  const [page, setPage] = useState(1);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [prescriberQuery, setPrescriberQuery] = useState(prescription.prescriber);
   const [prescribers, setPrescribers] = useState<PrescriberDirectoryRecord[]>([]);
   const [prescriberBusy, setPrescriberBusy] = useState(false);
@@ -161,7 +166,16 @@ export default function ManualPrescriptionEditor({
       .filter(product => typeFilter === 'all' || product.type === typeFilter)
       .filter(product => !needle || `${product.name} ${product.type} ${product.unit ?? ''}`.toLocaleLowerCase('en-GB').includes(needle));
   }, [activeProducts, query, typeFilter]);
-  const visibleProducts = filteredProducts.slice(0, hideSelectedList ? 24 : 16);
+  const pageSize = hideSelectedList ? GUIDED_PAGE_SIZE : COMPACT_PAGE_SIZE;
+  const pageCount = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const rangeStart = filteredProducts.length === 0 ? 0 : (currentPage - 1) * pageSize;
+  const rangeEnd = Math.min(rangeStart + pageSize, filteredProducts.length);
+  const visibleProducts = filteredProducts.slice(rangeStart, rangeEnd);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, typeFilter]);
 
   useEffect(() => {
     setPrescriberQuery(prescription.prescriber);
@@ -355,7 +369,7 @@ export default function ManualPrescriptionEditor({
               <button type="button" key={type} aria-pressed={typeFilter === type} onClick={() => setTypeFilter(type)}>{catalogueTypeLabels[type]} <small>{activeProducts.filter(product => product.type === type).length}</small></button>
             ))}
           </div>
-          <div className="manual-rx-picker__results" aria-live="polite">
+          <div className="manual-rx-picker__results" aria-live="polite" ref={resultsRef}>
             {visibleProducts.length ? visibleProducts.map(product => {
               const selected = selectedProductIds.has(product.id);
               return (
@@ -368,7 +382,33 @@ export default function ManualPrescriptionEditor({
               );
             }) : <span className="manual-rx-picker__empty">No active Curaleaf packs match this search and medicine type.</span>}
           </div>
-          {filteredProducts.length > visibleProducts.length ? <small className="manual-rx-picker__more">Showing the first {visibleProducts.length} results. Refine the search to find a specific medicine.</small> : null}
+          {filteredProducts.length > pageSize ? (
+            <nav className="manual-rx-picker__pager" aria-label="Catalogue pages">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={currentPage <= 1}
+                onClick={() => {
+                  setPage(currentPage - 1);
+                  resultsRef.current?.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+                }}
+              >
+                <ChevronLeft size={14} aria-hidden="true" /> Previous
+              </button>
+              <span>Showing {rangeStart + 1}–{rangeEnd} of {filteredProducts.length} · Page {currentPage} of {pageCount}</span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={currentPage >= pageCount}
+                onClick={() => {
+                  setPage(currentPage + 1);
+                  resultsRef.current?.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+                }}
+              >
+                Next <ChevronRight size={14} aria-hidden="true" />
+              </button>
+            </nav>
+          ) : null}
         </section>
       </section> : null}
     </div>

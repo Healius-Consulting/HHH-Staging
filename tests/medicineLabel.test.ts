@@ -17,6 +17,25 @@ test('splits flower names after the last comma before THC/CBD percentages', () =
   );
 });
 
+test('does not treat trailing flower pack mass as the strength', () => {
+  assert.deepEqual(
+    splitMedicineLabel('4C Labs DGZ T25 Dawgzilla, 25% THC <1% CBD, 10g'),
+    { title: '4C Labs DGZ T25 Dawgzilla', strength: '25% THC <1% CBD' },
+  );
+  assert.deepEqual(
+    splitMedicineLabel('4C Labs GMO-AC T26 Animal Cookies, 26% THC <1% CBD, 10g'),
+    { title: '4C Labs GMO-AC T26 Animal Cookies', strength: '26% THC <1% CBD' },
+  );
+  assert.deepEqual(
+    splitMedicineLabel('4C Labs GSP T28 Gastro Pop, 28% THC <1% CBD, 10g'),
+    { title: '4C Labs GSP T28 Gastro Pop', strength: '28% THC <1% CBD' },
+  );
+  assert.deepEqual(
+    splitMedicineLabel('4C Labs ATD T29 Alaskan Thunder, 29% THC <1% CBD'),
+    { title: '4C Labs ATD T29 Alaskan Thunder', strength: '29% THC <1% CBD' },
+  );
+});
+
 test('splits oil and capsule names on mg or mg/ml concentration', () => {
   assert.deepEqual(
     splitMedicineLabel('Adven EMT 20:1 CBM Oil, 20mg/ml THC : 1mg/ml CBD'),
