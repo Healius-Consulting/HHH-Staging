@@ -85,6 +85,9 @@ export function createPortalPrescriptionRouter(): Router {
         contentType: input.contentType,
         sizeBytes: input.sizeBytes,
         uploadedByUid: scope.uid,
+      }).catch(error => {
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(503, 'The prescription file record could not be saved.', 'PRESCRIPTION_FILE_CREATE_FAILED');
       });
 
       res.status(200).json(target);

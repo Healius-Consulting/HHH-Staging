@@ -2,6 +2,17 @@ import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { config } from '../../bootstrap/config.js';
 import { HttpError } from '../../domain/common/errors.js';
 import {
+  SCAN_PRESCRIPTION_ID_META,
+  SCAN_STATUS_META,
+  asClinicScanProducts,
+  clinicScanId,
+  curaleafHttpStatus,
+  matchClinicPrescriptionPacks,
+  parseClinicPrescriber,
+  parseClinicPrescription,
+  prescriptionIdFromUpload,
+} from './curaleaf-clinic-scan.js';
+import {
   existingCuraleafPurchaseOrder,
   matchPurchaseOrder,
 } from '../orders/curaleaf-fulfilment.js';
@@ -27,12 +38,14 @@ import {
   supplierPurchaseOrderCancelled,
 } from '../orders/quote-review.js';
 import { StorageProvider } from '../../providers/storage/storage.provider.js';
+import { MAX_PRESCRIPTION_UPLOAD_BYTES } from '../../providers/storage/upload-constraints.js';
 import type { IntegrationConnectionRecord } from '../../repositories/ports/integration.port.js';
 import { SqlOrderRepository } from '../../repositories/sql/order.sql.js';
 import { SqlPrescriptionRepository } from '../../repositories/sql/prescription.sql.js';
 
 const secretClient = new SecretManagerServiceClient();
 const REQUEST_TIMEOUT_MS = 12_000;
+const CLINIC_SCAN_TIMEOUT_MS = 30_000;
 const PAGE_SIZE = 200;
 const MAX_PAGES = 5;
 const SECRET_REGION = 'europe-west2';
@@ -374,6 +387,109 @@ async function uploadCuraleafPrescriptionFile(
     body: form,
     timeoutMs: 30_000,
   });
+}
+
+async function rememberScanState(storage: StorageProvider, storagePath: string, patch: Record<string, string>) {
+  await storage.patchCustomMetadata(storagePath, patch);
+}
+
+export async function scanClinicPrescriptionFromStoredFile(
+  connection: IntegrationConnectionRecord,
+  organisationId: string,
+  fileId: string,
+) {
+  const scanId = clinicScanId(organisationId, fileId);
+  const prescriptionRepo = new SqlPrescriptionRepository();
+  const storage = new StorageProvider();
+  const record = await prescriptionRepo.findFileById(fileId, organisationId);
+  if (!record?.storagePath || record.status === 'DELETED' || record.deletedAt) {
+    throw new HttpError(404, 'Prescription file not found.', 'NOT_FOUND');
+  }
+  if (record.status !== 'UPLOADED') {
+    throw new HttpError(409, 'Complete and verify the prescription file upload first.', 'UPLOAD_INCOMPLETE');
+  }
+
+  const existingMeta = await storage.readCustomMetadata(record.storagePath);
+  const existingStatus = existingMeta[SCAN_STATUS_META];
+  if (existingStatus === 'reconciliation_required') {
+    throw new HttpError(409, 'Curaleaf may have received this barcode but did not return a reference. Contact your HHH administrator before scanning it again.', 'CURALEAF_SCAN_RECONCILIATION_REQUIRED');
+  }
+  if (existingStatus === 'failed') {
+    throw new HttpError(409, 'This barcode scan could not be completed. Reattach a clear prescription copy to start a new scan.', 'CURALEAF_SCAN_FAILED');
+  }
+
+  let prescriptionId = existingMeta[SCAN_PRESCRIPTION_ID_META]?.trim() || undefined;
+  if (!prescriptionId) {
+    const downloaded = await storage.downloadFile(record.storagePath);
+    if (downloaded.bytes.length < 1 || downloaded.bytes.length > MAX_PRESCRIPTION_UPLOAD_BYTES) {
+      throw new HttpError(400, 'Prescription files must be 16 MB or smaller.', 'FILE_TOO_LARGE');
+    }
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([new Uint8Array(downloaded.bytes)], { type: downloaded.contentType || record.contentType || 'application/pdf' }),
+      record.originalFilename || 'prescription.pdf',
+    );
+    try {
+      const upload = await curaleafApiRequest<unknown>(connection, '/v1/prescription-from-image/', {
+        method: 'POST',
+        body: form,
+        timeoutMs: CLINIC_SCAN_TIMEOUT_MS,
+      });
+      prescriptionId = prescriptionIdFromUpload(upload);
+      if (!prescriptionId) {
+        await rememberScanState(storage, record.storagePath, { [SCAN_STATUS_META]: 'reconciliation_required' });
+        throw new HttpError(502, 'Curaleaf did not return a prescription reference for this barcode image.', 'CURALEAF_SCAN_REFERENCE_MISSING');
+      }
+      await rememberScanState(storage, record.storagePath, {
+        [SCAN_PRESCRIPTION_ID_META]: prescriptionId,
+        [SCAN_STATUS_META]: 'processing',
+      });
+    } catch (error) {
+      if (error instanceof HttpError && (error.code === 'CURALEAF_TIMEOUT' || error.code === 'CURALEAF_UNAVAILABLE')) {
+        await rememberScanState(storage, record.storagePath, { [SCAN_STATUS_META]: 'reconciliation_required' });
+        throw new HttpError(409, 'Curaleaf may have received this barcode but did not return a reference. Contact your HHH administrator before scanning it again.', 'CURALEAF_SCAN_RECONCILIATION_REQUIRED');
+      }
+      if (error instanceof HttpError && error.code === 'CURALEAF_SCAN_REFERENCE_MISSING') throw error;
+      await rememberScanState(storage, record.storagePath, { [SCAN_STATUS_META]: 'failed' });
+      throw error;
+    }
+  }
+
+  let prescriptionBody: unknown;
+  try {
+    prescriptionBody = await curaleafApiRequest(connection, `/v1/prescriptions/${encodeURIComponent(prescriptionId)}/`);
+  } catch (error) {
+    if (curaleafHttpStatus(error) === 404) {
+      return { scanId, status: 'processing' as const, prescriptionId };
+    }
+    throw error;
+  }
+
+  const prescription = parseClinicPrescription(prescriptionBody);
+  const prescriberBody = await curaleafApiRequest(connection, `/v1/prescribers/${encodeURIComponent(prescription.prescriberId)}/`);
+  const prescriber = parseClinicPrescriber(prescriberBody);
+  const credential = await credentialFor(connection);
+  const products = asClinicScanProducts((await listAll('/v1/products/', 'products', credential)).records);
+  const matchedItems = matchClinicPrescriptionPacks(prescription.items, products);
+  await rememberScanState(storage, record.storagePath, {
+    [SCAN_PRESCRIPTION_ID_META]: prescription.id,
+    [SCAN_STATUS_META]: 'ready',
+  });
+
+  return {
+    scanId,
+    status: 'ready' as const,
+    prescription,
+    prescriber: {
+      id: prescriber.id,
+      name: prescriber.name,
+      initials: prescriber.initials,
+      gmcNumber: prescriber.gmcNumber,
+      gphcNumber: prescriber.gphcNumber,
+    },
+    matchedItems,
+  };
 }
 
 async function uploadLocalPrescriptionCopyToCuraleaf(

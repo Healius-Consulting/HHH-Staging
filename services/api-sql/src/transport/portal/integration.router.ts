@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
-import { fetchCuraleafCatalogue, fetchCuraleafQuote, fetchCuraleafActivity, curaleafApiRequest, maskCuraleafIdentifier, probeCuraleafConnection, validateCuraleafCredentials, writeCuraleafCredential } from '../../application/integrations/curaleaf.service.js';
+import { fetchCuraleafCatalogue, fetchCuraleafQuote, fetchCuraleafActivity, curaleafApiRequest, maskCuraleafIdentifier, probeCuraleafConnection, scanClinicPrescriptionFromStoredFile, validateCuraleafCredentials, writeCuraleafCredential } from '../../application/integrations/curaleaf.service.js';
 import {
   mergeQuoteBankIntoCatalogue,
   upsertCuraleafQuoteBankFromQuote,
@@ -65,6 +65,10 @@ const curaleafCredentialSchema = z.object({
 const curaleafOrganisationSchema = z.object({
   organisationId: z.string().optional(),
 });
+const curaleafScanSchema = z.object({
+  organisationId: z.string().optional(),
+  fileId: organisationIdSchema,
+}).strict();
 const worldpayBrandingSchema = z.object({
   organisationId: z.string().optional(),
   customisationId: customisationIdSchema.optional(),
@@ -375,17 +379,16 @@ export function createPortalIntegrationRouter(): Router {
 
   router.post('/portal/integrations/curaleaf/prescriptions/scan', requireCsrf, requireStaff('any'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const organisationId = await authorisedOrganisationId(req.context, req.body?.organisationId, organisationRepo);
+      const input = curaleafScanSchema.parse(req.body);
+      const organisationId = await authorisedOrganisationId(req.context, input.organisationId, organisationRepo);
       const connection = await integrationRepo.findConnection(organisationId, 'CURALEAF');
       if (!connection?.secretResourceName) {
         throw new HttpError(503, 'Curaleaf is not connected for this pharmacy.', 'INTEGRATION_NOT_CONNECTED');
       }
 
-      const result = await curaleafApiRequest(connection, '/v1/prescription-from-image/', {
-        method: 'POST',
-        body: JSON.stringify(req.body),
-      });
-      res.status(200).json(result);
+      const result = await scanClinicPrescriptionFromStoredFile(connection, organisationId, input.fileId);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(result.status === 'processing' ? 202 : 200).json(result);
     } catch (error) { next(error); }
   });
 
