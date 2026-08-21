@@ -27,6 +27,7 @@ import { createOrderDraft, createPortalOrder, createWorldpaySession, deleteOrder
 import { formatPatientDob } from '../utils/patientDob';
 import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
+import { MAX_PRESCRIPTION_FILE_BYTES, PRESCRIPTION_FILE_ACCEPT, resolvePrescriptionContentType } from '../utils/prescriptionFile';
 
 type GuidedRxPhase = 'route' | 'upload' | 'details';
 
@@ -739,9 +740,8 @@ export default function CreateOrder() {
     }
     setUploadingRxId(rxId);
     try {
-      const contentType = file.type as 'application/pdf' | 'image/jpeg' | 'image/png';
-      if (!['application/pdf', 'image/jpeg', 'image/png'].includes(contentType)) throw new Error('Use a PDF, JPG or PNG prescription file.');
-      if (file.size > 16_000_000) throw new Error('Prescription files must be 16 MB or smaller.');
+      if (file.size > MAX_PRESCRIPTION_FILE_BYTES) throw new Error('Prescription files must be 16 MB or smaller.');
+      const contentType = await resolvePrescriptionContentType(file);
       const draftId = await ensureDurableDraft(activeOrder, durableDraftPayload ?? {});
       const uploaded = await uploadPrescriptionFile({ organisationId: state.currentOrganisationId, filename: file.name, contentType, sizeBytes: file.size }, file);
       const prescriptions = activeOrder.prescriptions.map(candidate => candidate.id === rxId
@@ -1316,7 +1316,7 @@ export default function CreateOrder() {
                         {(isLocalPortalPreview || state.workspaceMode === 'training') && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
                           {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
                         </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
-                          <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
+                          <input className="sr-only" type="file" accept={PRESCRIPTION_FILE_ACCEPT} disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
                           {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading its barcode…' : selectedRx.copyFileName ?? (selectedRx.entryMode === 'manual' ? 'Attach signed prescription' : 'Attach barcode prescription')}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded and server-verified' : 'PDF, JPG or PNG · maximum 16 MB'}</small></span>
                         </label>}
                         {selectedRx.entryMode === 'clinic' && state.workspaceMode === 'live' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}
@@ -1451,7 +1451,7 @@ export default function CreateOrder() {
                       {(isLocalPortalPreview || state.workspaceMode === 'training') && selectedRx.entryMode === 'clinic' ? <button type="button" className={`rx-document-control${selectedRx.clinicScanId ? ' uploaded' : ''}`} onClick={() => applySyntheticClinicScan(selectedRx.id)}>
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : <FileScan size={18} />}<span><strong>{selectedRx.clinicScanId ? 'Synthetic Clinic barcode verified' : 'Use synthetic Clinic barcode'}</strong><small>Isolated local training fixture · nothing is uploaded or sent</small></span>
                       </button> : <label className={`rx-document-control${selectedRx.copyFileName ? ' uploaded' : ''}${readingRxId === selectedRx.id ? ' scanning' : ''}`}>
-                        <input className="sr-only" type="file" accept=".pdf,image/jpeg,image/png" disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
+                        <input className="sr-only" type="file" accept={PRESCRIPTION_FILE_ACCEPT} disabled={uploadingRxId !== null} onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void attachPrescriptionFile(selectedRx.id, file); }} />
                         {selectedRx.clinicScanId ? <CheckCircle size={18} /> : readingRxId === selectedRx.id ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}<span><strong>{uploadingRxId === selectedRx.id ? 'Uploading securely…' : readingRxId === selectedRx.id ? 'Curaleaf is reading its barcode…' : selectedRx.copyFileName ?? (selectedRx.entryMode === 'manual' ? 'Attach signed prescription' : 'Attach barcode prescription')}</strong><small>{selectedRx.clinicScanId ? 'Barcode verified and linked to this prescription' : selectedRx.fileId ? 'Uploaded and server-verified' : 'PDF, JPG or PNG · maximum 16 MB'}</small></span>
                       </label>}
                       {selectedRx.entryMode === 'clinic' && state.workspaceMode === 'live' && !isLocalPortalPreview && selectedRx.fileId && !selectedRx.clinicScanId && readingRxId !== selectedRx.id ? <button type="button" className="btn btn-sm rx-scan-retry" onClick={() => void readClinicBarcode(selectedRx.id, selectedRx.fileId!)}><RefreshCw size={13} /> Check barcode again</button> : null}

@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import { HttpError } from '../../domain/common/errors.js';
 import { StorageProvider } from '../../providers/storage/storage.provider.js';
-import { MAX_PRESCRIPTION_UPLOAD_BYTES, matchesDeclaredFileSignature, uploadedObjectMatchesDeclaration } from '../../providers/storage/upload-constraints.js';
+import { MAX_PRESCRIPTION_UPLOAD_BYTES, PRESCRIPTION_SIGNATURE_PREFIX_BYTES, matchesDeclaredFileSignature, uploadedObjectMatchesDeclaration } from '../../providers/storage/upload-constraints.js';
 import type { PrescriberRecord } from '../../repositories/ports/prescription.port.js';
 import { SqlPrescriptionRepository } from '../../repositories/sql/prescription.sql.js';
 import { requireCsrf } from '../../security/csrf.js';
@@ -122,7 +122,7 @@ export function createPortalPrescriptionRouter(): Router {
         await prescriptionRepo.rejectFile(fileId, scope.organisationId);
         throw new HttpError(400, match.message, match.code);
       }
-      const prefix = await storageProvider.readPrefix(fileRecord.storagePath, 16);
+      const prefix = await storageProvider.readPrefix(fileRecord.storagePath, PRESCRIPTION_SIGNATURE_PREFIX_BYTES);
       if (!matchesDeclaredFileSignature(prefix, fileRecord.contentType)) {
         await storageProvider.deleteFile(fileRecord.storagePath);
         await prescriptionRepo.rejectFile(fileId, scope.organisationId);
