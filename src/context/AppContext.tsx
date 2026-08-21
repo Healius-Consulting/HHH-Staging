@@ -6,7 +6,6 @@ import { activeRedoPriceResolution } from '../shared/contracts';
 import { mapPortalEnquiryRecord, mapPortalPatientRecord } from '../utils/pharmacyPatientDirectory';
 import { isLocalPortalPreview, localPortalPreview, localPreviewStaff } from '../dev/localPortalPreview';
 import { ORGANISATIONS, isTrainingSandboxPatient, resolvePharmacyWorkspaceMode, trainingWorkspace } from '../training/workspace';
-import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { portalPrescriptionStatus } from '../utils/portalPrescriptionStatus';
 import { formatShippingAddress } from '../utils/shippingAddress';
@@ -445,7 +444,7 @@ export const lineMargin = (item: LineItem) => {
   return rev > 0 ? Math.round((rev - lineCost(item)) / rev * 100) : 0;
 };
 
-function prescriptionIsPaymentReady(prescription: Prescription, patient: CRMPatient) {
+function prescriptionIsPaymentReady(prescription: Prescription) {
   const sourceVerified = prescription.entryMode === 'manual'
     ? Boolean(prescription.serialNumber?.trim())
     : Boolean(prescription.clinicScanId && prescription.curaleafPrescriptionId);
@@ -464,13 +463,7 @@ function prescriptionIsPaymentReady(prescription: Prescription, patient: CRMPati
     && sourceVerified
     && prescriberComplete
     && prescriptionDateIsCurrent(prescription.issueDate, prescription.expiryDate)
-    && medicinesComplete
-    && checkPatientIdentity({
-      selectedName: patient.name,
-      selectedDob: patient.dob,
-      prescriptionName: prescription.curaleafPatientName,
-      prescriptionDob: prescription.curaleafPatientDob,
-    }).status === 'match';
+    && medicinesComplete;
 }
 
 export const rxRevenue = (rx: Prescription) => rx.items.reduce((t, i) => t + lineRevenue(i), 0);
@@ -646,8 +639,6 @@ export type Action =
         prescriberName: string;
         prescriberGmcNumber: string;
         prescriberGphcNumber: string;
-        patientName?: string;
-        patientDob?: string;
         items: LineItem[];
       };
     }
@@ -1627,8 +1618,6 @@ function reducer(state: AppState, action: Action): AppState {
         curaleafPrescriptionId: action.scan.prescriptionId,
         curaleafPrescriptionState: action.scan.state,
         entryMode: 'clinic',
-        curaleafPatientName: action.scan.patientName,
-        curaleafPatientDob: action.scan.patientDob,
         serialNumber: action.scan.serialNumber,
         issueDate: action.scan.issueDate,
         expiryDate: action.scan.expiryDate,
@@ -1698,7 +1687,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SEND_PAYMENT_LINK': {
       const order = findOrder(state, action.orderId);
       const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && canCreateOrderForPatient(candidate));
-      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
+      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx)));
       if (!order || !patient || !prescriptionReady) return state;
       const amount = orderRevenue(order);
       const nextState = mapOrder(state, action.orderId, o => ({
@@ -1713,7 +1702,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'START_MANUAL_PAYMENT': {
       const order = findOrder(state, action.orderId);
       const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && canCreateOrderForPatient(candidate));
-      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
+      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx)));
       if (!order || !patient || !prescriptionReady) return state;
       const amount = orderRevenue(order);
       const nextState = mapOrder(state, action.orderId, o => ({
@@ -1879,7 +1868,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'PLACE_ORDER': {
       const order = findOrder(state, action.orderId);
       const patient = state.crm.find(candidate => candidate.id === order?.patientId && candidate.organisationId === order?.organisationId && canCreateOrderForPatient(candidate));
-      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx, patient)));
+      const prescriptionReady = Boolean(patient && order?.prescriptions.length && order.prescriptions.every(rx => prescriptionIsPaymentReady(rx)));
       if (!order || order.payment.status !== 'paid' || !patient || !prescriptionReady) return state;
       return {
         ...mapOrder(state, action.orderId, o => ({

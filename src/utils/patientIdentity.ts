@@ -23,6 +23,11 @@ export function normaliseIsoDate(value: string | undefined) {
   return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
+/**
+ * Compare two patient identities when both sides are available.
+ * Curaleaf Clinic barcode scans do not return name or date of birth —
+ * those stay on the HHH patient record selected for the order.
+ */
 export function checkPatientIdentity(input: {
   selectedName: string;
   selectedDob?: string;

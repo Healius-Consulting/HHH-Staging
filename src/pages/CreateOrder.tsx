@@ -25,7 +25,6 @@ import { TRAINING_PRESCRIBER, TRAINING_PRODUCT } from '../training/workspace';
 import { isLocalPortalPreview } from '../dev/localPortalPreview';
 import { createOrderDraft, createPortalOrder, createWorldpaySession, deleteOrderDraft, deletePrescriptionFile, getCuraleafQuote, getCuraleafTrainingQuote, getDevCuraleafQuote, isApiConfigured, scanCuraleafClinicPrescription, updateOrderDraft, uploadPrescriptionFile } from '../shared/api';
 import { formatPatientDob } from '../utils/patientDob';
-import { checkPatientIdentity } from '../utils/patientIdentity';
 import { canCreateOrderForPatient } from '../utils/patientOrderEligibility';
 import { MAX_PRESCRIPTION_FILE_BYTES, PRESCRIPTION_FILE_ACCEPT, resolvePrescriptionContentType } from '../utils/prescriptionFile';
 
@@ -233,12 +232,6 @@ export default function CreateOrder() {
   const selectedRx = activeOrder?.prescriptions.find(rx => rx.id === selectedRxId) ?? null;
   const selectedRxIndex = activeOrder && selectedRx ? activeOrder.prescriptions.findIndex(rx => rx.id === selectedRx.id) : -1;
   const requiresLiveCuraleafEvidence = state.workspaceMode === 'live' && !isLocalPortalPreview;
-  const identityCheck = selectedRx && patient ? checkPatientIdentity({
-    selectedName: patient.name,
-    selectedDob: patient.dob,
-    prescriptionName: selectedRx.curaleafPatientName,
-    prescriptionDob: selectedRx.curaleafPatientDob,
-  }) : null;
   const hasPrescriptionRecords = Boolean(activeOrder?.prescriptions.length);
   const readiness = activeOrder ? [
     { label: 'Approved referral or active patient linked', complete: canCreateOrderForPatient(patient) },
@@ -246,7 +239,6 @@ export default function CreateOrder() {
     { label: 'Serial number / Clinic source verified', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => rx.entryMode === 'manual' ? Boolean(rx.serialNumber?.trim()) : Boolean(rx.clinicScanId && rx.curaleafPrescriptionId)) },
     { label: 'Prescription inside its 28-day window', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => prescriptionDateIsCurrent(rx.issueDate, rx.expiryDate)) },
     { label: 'Prescriber details complete', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => Boolean(rx.issueDate && rx.prescriber.trim() && (rx.entryMode === 'manual' ? rx.prescriberPin?.trim() : rx.prescriberId))) },
-    { label: 'Prescription identity matches patient', complete: Boolean(patient) && hasPrescriptionRecords && activeOrder.prescriptions.every(rx => checkPatientIdentity({ selectedName: patient!.name, selectedDob: patient!.dob, prescriptionName: rx.curaleafPatientName, prescriptionDob: rx.curaleafPatientDob }).status === 'match') },
     { label: 'Priced medicines and quantities complete', complete: hasPrescriptionRecords && activeOrder.prescriptions.every(rx => rx.items.length > 0 && rx.items.every(item => Boolean(item.productId && item.formulaId) && Number.isInteger(item.qty) && item.qty > 0 && Number.isInteger(item.unitsNeededCount) && item.unitsNeededCount! > 0 && Number.isFinite(item.retail) && item.retail > 0)) },
   ] : [];
   const prescriptionReady = readiness.every(item => item.complete);
@@ -518,8 +510,6 @@ export default function CreateOrder() {
         prescriberName: scan.prescriber.name,
         prescriberGmcNumber: scan.prescriber.gmcNumber?.toString() ?? '',
         prescriberGphcNumber: scan.prescriber.gphcNumber ?? '',
-        patientName: scan.prescription.patient?.name,
-        patientDob: scan.prescription.patient?.dob,
         items,
       },
     });
@@ -576,8 +566,6 @@ export default function CreateOrder() {
         prescriberName: TRAINING_PRESCRIBER.name,
         prescriberGmcNumber: TRAINING_PRESCRIBER.gmcNumber,
         prescriberGphcNumber: '',
-        patientName: patient?.name ?? 'Training patient',
-        patientDob: patient?.dob ?? '1980-01-01',
         items: [{
           productId: product.id,
           formulaId: product.formulaId,
@@ -593,7 +581,7 @@ export default function CreateOrder() {
   };
 
   const createPaymentRequest = async () => {
-    if (!activeOrder || !readyForPayment) return;
+    if (!activeOrder || !patient || !readyForPayment) return;
     setCheckoutBusy(true);
     try {
       if (!isLocalPortalPreview && state.workspaceMode === 'live') {
@@ -651,8 +639,8 @@ export default function CreateOrder() {
             issueDate: rx.issueDate!,
             expiryDate: rx.expiryDate,
             patient: {
-              name: rx.curaleafPatientName!,
-              dob: rx.curaleafPatientDob!,
+              name: patient.name,
+              dob: patient.dob ?? '',
             },
             prescriber: {
               id: rx.prescriberId,
@@ -1373,7 +1361,6 @@ export default function CreateOrder() {
                             </dl>
                           </div>
                         ) : <p className="rx-scan-waiting">No prescription fields need completing. They appear here after Curaleaf verifies the barcode.</p>}
-                        {identityCheck && (selectedRx.clinicScanId || selectedRx.entryMode === 'manual' && (selectedRx.curaleafPatientName || selectedRx.curaleafPatientDob)) && identityCheck.status !== 'match' ? <ProviderStatusNotice title={identityCheck.status === 'mismatch' ? 'Patient details do not match' : 'Patient details unavailable'} detail={`${identityCheck.reason} Payment and Curaleaf submission remain blocked until the prescription and patient record match.`} /> : null}
                       </div>
                     </section>
                   ) : null}
@@ -1499,7 +1486,6 @@ export default function CreateOrder() {
                           </dl>
                         </div>
                       ) : <p className="rx-scan-waiting">No prescription fields need completing. They appear here after Curaleaf verifies the barcode.</p>}
-                      {identityCheck && (selectedRx.clinicScanId || selectedRx.entryMode === 'manual' && (selectedRx.curaleafPatientName || selectedRx.curaleafPatientDob)) && identityCheck.status !== 'match' ? <ProviderStatusNotice title={identityCheck.status === 'mismatch' ? 'Patient details do not match' : 'Patient details unavailable'} detail={`${identityCheck.reason} Payment and Curaleaf submission remain blocked until the prescription and patient record match.`} /> : null}
                     </div>
                     ) : null}
                   </div>
